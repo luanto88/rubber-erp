@@ -447,6 +447,7 @@ export type ExtraSignPlacement = {
   nameHeight?: number
   showChucVu?: boolean
   chucVuText?: string
+  chucVuKey?: "chinh_quyen" | "kiem_nhiem" | string | null
   chucVuX?: number
   chucVuY?: number
   chucVuWidth?: number

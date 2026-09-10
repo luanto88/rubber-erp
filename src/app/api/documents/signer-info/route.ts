@@ -16,7 +16,12 @@ export const dynamic = "force-dynamic"
 // `profile_id` — KHÔNG tự nghĩ cách tra mới.
 
 type ProfileRow = { id: string; full_name: string | null; username: string | null }
-type StaffRow = { profile_id: string | null; chuc_vu: string | null; chuc_vu_chinh_quyen: string | null }
+type StaffRow = {
+  profile_id: string | null
+  chuc_vu: string | null
+  chuc_vu_chinh_quyen: string | null
+  chuc_vu_kim_nhiem: string | null
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -48,7 +53,7 @@ export async function GET(req: NextRequest) {
 
     const { data: staffRows } = await supabaseAdmin
       .from("maintenance_staff")
-      .select("profile_id, chuc_vu, chuc_vu_chinh_quyen")
+      .select("profile_id, chuc_vu, chuc_vu_chinh_quyen, chuc_vu_kim_nhiem")
       .eq("factory_id", factoryId)
       .eq("active", true)
       .in("profile_id", userIds)
@@ -61,7 +66,9 @@ export async function GET(req: NextRequest) {
     const result = await Promise.all(
       rows.map(async (p) => {
         const staff = staffByProfileId.get(p.id)
-        const chuc_vu = staff?.chuc_vu_chinh_quyen || staff?.chuc_vu || ""
+        const cq = staff?.chuc_vu_chinh_quyen || staff?.chuc_vu || ""
+        const kn = staff?.chuc_vu_kim_nhiem || ""
+        const chuc_vu = cq || kn || ""
         let has_signature = false
         try {
           const { data: listData } = await storage.list(`signatures/${factoryId}/${p.id}`, {
@@ -75,6 +82,12 @@ export async function GET(req: NextRequest) {
           id: p.id,
           full_name: p.full_name || p.username || "",
           chuc_vu,
+          chuc_vu_chinh_quyen: cq,
+          chuc_vu_kim_nhiem: kn,
+          chuc_vu_by_key: {
+            chinh_quyen: cq,
+            kiem_nhiem: kn,
+          },
           has_signature,
         }
       }),

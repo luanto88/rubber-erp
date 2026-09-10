@@ -84,6 +84,7 @@ type ExtraSignPlacement = {
   nameHeight?: number
   showChucVu?: boolean
   chucVuText?: string
+  chucVuKey?: "chinh_quyen" | "kiem_nhiem" | string | null
   chucVuX?: number
   chucVuY?: number
   chucVuWidth?: number
@@ -283,17 +284,24 @@ function toTitleCase(str: string): string {
     .replace(/(?:^|\s)\S/g, (char) => char.toUpperCase())
 }
 
-async function getStaffChucVu(factoryId: string, userId: string | null): Promise<string> {
+async function getStaffChucVu(
+  factoryId: string,
+  userId: string | null,
+  chucVuKey?: string | null,
+): Promise<string> {
   if (!userId) return ""
   try {
     const { data } = await supabaseAdmin
       .from("maintenance_staff")
-      .select("chuc_vu, chuc_vu_chinh_quyen")
+      .select("chuc_vu, chuc_vu_chinh_quyen, chuc_vu_kim_nhiem")
       .eq("factory_id", factoryId)
       .eq("profile_id", userId)
       .eq("active", true)
       .maybeSingle()
-    return data?.chuc_vu_chinh_quyen || data?.chuc_vu || ""
+    if (chucVuKey === "kiem_nhiem") {
+      return data?.chuc_vu_kim_nhiem || data?.chuc_vu_chinh_quyen || data?.chuc_vu || ""
+    }
+    return data?.chuc_vu_chinh_quyen || data?.chuc_vu || data?.chuc_vu_kim_nhiem || ""
   } catch {
     return ""
   }
@@ -1572,7 +1580,7 @@ export async function POST(req: NextRequest) {
                 }
 
                 if (placement.showChucVu === true) {
-                  const chucVuText = placement.chucVuText || await getStaffChucVu(factoryId, signerUserId)
+                  const chucVuText = placement.chucVuText || await getStaffChucVu(factoryId, signerUserId, placement.chucVuKey)
                   if (chucVuText && chucVuText.trim()) {
                     const cvFontSize = 13
                     const cvWidth = signerNameFont.widthOfTextAtSize(chucVuText.trim(), cvFontSize)
@@ -1639,7 +1647,7 @@ export async function POST(req: NextRequest) {
                     })
                   }
                   if (extraP.showChucVu === true) {
-                    const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, userId)
+                    const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, userId, extraP.chucVuKey)
                     if (extraCvText && extraCvText.trim()) {
                       const cvFontSize = 13
                       const cvWidth = signerNameFont.widthOfTextAtSize(extraCvText.trim(), cvFontSize)
@@ -1798,7 +1806,7 @@ export async function POST(req: NextRequest) {
           }
 
           if (placement.showChucVu === true) {
-            const chucVuText = placement.chucVuText || await getStaffChucVu(factoryId, signerUserId)
+            const chucVuText = placement.chucVuText || await getStaffChucVu(factoryId, signerUserId, placement.chucVuKey)
             if (chucVuText && chucVuText.trim()) {
               const cvFontSize = 13
               const cvWidth = signerNameFont.widthOfTextAtSize(chucVuText.trim(), cvFontSize)
@@ -1859,7 +1867,7 @@ export async function POST(req: NextRequest) {
                   })
                 }
                 if (extraP.showChucVu === true) {
-                  const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, signerUserId)
+                  const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, signerUserId, extraP.chucVuKey)
                   if (extraCvText && extraCvText.trim()) {
                     const cvFontSize = 13
                     const cvWidth = signerNameFont.widthOfTextAtSize(extraCvText.trim(), cvFontSize)

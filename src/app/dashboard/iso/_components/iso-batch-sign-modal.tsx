@@ -11,7 +11,9 @@ import {
   Eye,
   EyeOff,
   FileCheck,
+  FileText,
   KeyRound,
+  Layers,
   Loader2,
   Lock,
   X,
@@ -63,6 +65,7 @@ export type BatchBox = {
   hPct: number
   showName: boolean
   showChucVu: boolean
+  chucVuKey?: "chinh_quyen" | "kiem_nhiem" | string | null
   signAs?: SignAsType
   sigInnerX?: number
   sigInnerY?: number
@@ -89,6 +92,7 @@ function BatchInteractiveSignBox({
   sigImgUrl,
   signerName,
   signerChucVu,
+  signerChucVuByKey,
   isPheDuyet,
   onSelect,
   onUpdate,
@@ -101,6 +105,7 @@ function BatchInteractiveSignBox({
   sigImgUrl: string | null
   signerName: string
   signerChucVu: string
+  signerChucVuByKey?: { chinh_quyen: string; kiem_nhiem: string }
   isPheDuyet: boolean
   onSelect: () => void
   onUpdate: (updates: Partial<BatchBox>) => void
@@ -139,15 +144,20 @@ function BatchInteractiveSignBox({
   const sigInnerX = Math.max(0, Math.min(bw - sigInnerW, box.sigInnerX ?? Math.max(0, (bw - sigInnerW) / 2)))
   const sigInnerY = Math.max(0, Math.min(bh - sigInnerH, box.sigInnerY ?? 4))
 
-  const nameInnerW = Math.min(bw, Math.max(40, box.nameInnerW || Math.min(bw - 8, 105)))
-  const nameInnerH = box.nameInnerH || 20
+  const nameInnerW = Math.min(bw, Math.max(30, box.nameInnerW || Math.min(bw - 8, 105)))
+  const nameInnerH = Math.min(bh, Math.max(12, box.nameInnerH || 20))
   const nameInnerX = Math.max(0, Math.min(bw - nameInnerW, box.nameInnerX ?? Math.max(0, (bw - nameInnerW) / 2)))
   const nameInnerY = Math.max(0, Math.min(bh - nameInnerH, box.nameInnerY ?? Math.max(4, bh - (box.showChucVu ? 42 : 22))))
 
-  const cvInnerW = Math.min(bw, Math.max(40, box.cvInnerW || Math.min(bw - 8, 105)))
-  const cvInnerH = box.cvInnerH || 18
+  const cvInnerW = Math.min(bw, Math.max(30, box.cvInnerW || Math.min(bw - 8, 105)))
+  const cvInnerH = Math.min(bh, Math.max(12, box.cvInnerH || 18))
   const cvInnerX = Math.max(0, Math.min(bw - cvInnerW, box.cvInnerX ?? Math.max(0, (bw - cvInnerW) / 2)))
   const cvInnerY = Math.max(0, Math.min(bh - cvInnerH, box.cvInnerY ?? Math.max(18, bh - 20)))
+
+  const effectiveCvText =
+    (box.chucVuKey === "kiem_nhiem" ? signerChucVuByKey?.kiem_nhiem : signerChucVuByKey?.chinh_quyen) ||
+    signerChucVu ||
+    (isPheDuyet ? "Người phê duyệt" : "Người xem xét")
 
   return (
     <div
@@ -192,7 +202,7 @@ function BatchInteractiveSignBox({
             cursor: "move",
             userSelect: "none",
           }}
-          className="relative group border border-dashed border-amber-400/80 bg-amber-50/30 rounded p-1 flex items-center justify-center hover:border-amber-600"
+          className="relative group border border-dashed border-amber-400/80 bg-amber-50/30 rounded p-1 flex items-center justify-center hover:border-amber-600 touch-none"
         >
           {sigImgUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -209,7 +219,7 @@ function BatchInteractiveSignBox({
           )}
 
           <div
-            className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-125 transition-transform"
+            className="resize-handle absolute -bottom-2 -right-2 w-7 h-7 sm:w-5 sm:h-5 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-md cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
             title="Kéo để co giãn kích thước chữ ký trong khung"
             onPointerDown={(e) => {
               e.stopPropagation()
@@ -236,7 +246,7 @@ function BatchInteractiveSignBox({
               window.addEventListener("pointerup", onUp)
             }}
           >
-            <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 sm:w-2.5 sm:h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 3 3 3 3 9" />
               <polyline points="15 21 21 21 21 15" />
               <line x1="3" y1="3" x2="10" y2="10" />
@@ -264,7 +274,7 @@ function BatchInteractiveSignBox({
             userSelect: "none",
             fontFamily: "'Times New Roman', Times, serif",
           }}
-          className={`border py-0.5 rounded pl-1.5 pr-5 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all ${
+          className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all touch-none ${
             box.showName
               ? "border-sky-400 bg-sky-50/95 text-sky-950 text-xs hover:border-sky-600"
               : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
@@ -277,16 +287,19 @@ function BatchInteractiveSignBox({
           <button
             type="button"
             onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
               onUpdate({ showName: !box.showName })
             }}
-            className={`absolute top-0.5 right-0.5 p-0.5 rounded hover:bg-white/80 transition-colors ${
+            className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
               box.showName ? "text-sky-600 hover:text-sky-900" : "text-slate-400 hover:text-slate-700"
             }`}
             title={box.showName ? "Ẩn họ tên" : "Hiện lại họ tên"}
           >
-            {box.showName ? <Eye size={11} /> : <EyeOff size={11} />}
+            {box.showName ? <Eye size={12} /> : <EyeOff size={12} />}
           </button>
         </div>
       </Draggable>
@@ -309,7 +322,7 @@ function BatchInteractiveSignBox({
             userSelect: "none",
             fontFamily: "'Times New Roman', Times, serif",
           }}
-          className={`border py-0.5 rounded pl-1.5 pr-5 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all ${
+          className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all touch-none ${
             box.showChucVu
               ? "border-violet-400 bg-violet-50/95 text-violet-950 text-xs hover:border-violet-600"
               : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
@@ -317,21 +330,24 @@ function BatchInteractiveSignBox({
           title={box.showChucVu ? "Kéo để di chuyển vị trí chức vụ trong khung" : "Chức vụ đang ẩn — Bấm icon mắt để hiện lại"}
         >
           <span className={`truncate w-full ${box.showChucVu ? "" : "line-through"}`}>
-            {signerChucVu || (isPheDuyet ? "Người phê duyệt" : "Người xem xét")}
+            {effectiveCvText}
           </span>
           <button
             type="button"
             onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()
               onUpdate({ showChucVu: !box.showChucVu })
             }}
-            className={`absolute top-0.5 right-0.5 p-0.5 rounded hover:bg-white/80 transition-colors ${
+            className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
               box.showChucVu ? "text-violet-600 hover:text-violet-900" : "text-slate-400 hover:text-slate-700"
             }`}
             title={box.showChucVu ? "Ẩn chức vụ" : "Hiện lại chức vụ"}
           >
-            {box.showChucVu ? <Eye size={11} /> : <EyeOff size={11} />}
+            {box.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
           </button>
         </div>
       </Draggable>
@@ -417,6 +433,10 @@ export function IsoBatchSignModal({
   // Thông tin Tên thật & Chức vụ thật của người ký
   const [signerName, setSignerName] = useState(currentUser.full_name || currentUser.username || "Người ký")
   const [signerChucVu, setSignerChucVu] = useState("")
+  const [signerChucVuByKey, setSignerChucVuByKey] = useState<{ chinh_quyen: string; kiem_nhiem: string }>({ chinh_quyen: "", kiem_nhiem: "" })
+
+  // Drawer danh sách tài liệu/trang trên mobile (< 768px)
+  const [showMobileDocsDrawer, setShowMobileDocsDrawer] = useState(false)
 
   // Canvas render
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -457,11 +477,26 @@ export function IsoBatchSignModal({
           { headers: { Authorization: `Bearer ${token}` } },
         )
         if (!res.ok) return
-        const rows = (await res.json()) as Array<{ id: string; full_name: string; chuc_vu: string }>
+        const rows = (await res.json()) as Array<{
+          id: string
+          full_name: string
+          chuc_vu: string
+          chuc_vu_chinh_quyen?: string
+          chuc_vu_kim_nhiem?: string
+          chuc_vu_by_key?: { chinh_quyen: string; kiem_nhiem: string }
+        }>
         const info = rows.find((r) => r.id === currentUser.id)
         if (info && !cancelled) {
           if (info.full_name) setSignerName(info.full_name)
           if (info.chuc_vu) setSignerChucVu(info.chuc_vu)
+          if (info.chuc_vu_by_key) {
+            setSignerChucVuByKey(info.chuc_vu_by_key)
+          } else {
+            setSignerChucVuByKey({
+              chinh_quyen: info.chuc_vu_chinh_quyen || info.chuc_vu || "",
+              kiem_nhiem: info.chuc_vu_kim_nhiem || "",
+            })
+          }
         }
       } catch {
         // bỏ qua nếu lỗi mạng
@@ -643,6 +678,7 @@ export function IsoBatchSignModal({
                   hPct: (hPt / pageDim.h) * 100,
                   showName: !!k.show_name,
                   showChucVu: !!k.show_chuc_vu,
+                  chucVuKey: (k.chuc_vu_key as "chinh_quyen" | "kiem_nhiem") || "chinh_quyen",
                   signAs: (k.sign_as as SignAsType) || "none",
                 })
               }
@@ -1030,6 +1066,7 @@ export function IsoBatchSignModal({
         }
 
         const mainPl = calcBoxPlacement(mainBox, dim)
+        const mainCvText = (mainBox.chucVuKey === "kiem_nhiem" ? signerChucVuByKey.kiem_nhiem : signerChucVuByKey.chinh_quyen) || signerChucVu
 
         const placement: SignPlacement = {
           page: mainBox.page,
@@ -1044,7 +1081,8 @@ export function IsoBatchSignModal({
           nameWidth: mainPl.nameWidth,
           nameHeight: mainPl.nameHeight,
           showChucVu: mainBox.showChucVu,
-          chucVuText: signerChucVu,
+          chucVuText: mainCvText,
+          chucVuKey: mainBox.chucVuKey || "chinh_quyen",
           chucVuX: mainPl.chucVuX,
           chucVuY: mainPl.chucVuY,
           chucVuWidth: mainPl.chucVuWidth,
@@ -1059,6 +1097,7 @@ export function IsoBatchSignModal({
               ? cloneBoxes.map((c) => {
                   const cDim = item.pageDims[c.page] || dim
                   const cPl = calcBoxPlacement(c, cDim)
+                  const cCvText = (c.chucVuKey === "kiem_nhiem" ? signerChucVuByKey.kiem_nhiem : signerChucVuByKey.chinh_quyen) || signerChucVu
                   return {
                     page: c.page,
                     x: cPl.x,
@@ -1072,7 +1111,8 @@ export function IsoBatchSignModal({
                     nameWidth: cPl.nameWidth,
                     nameHeight: cPl.nameHeight,
                     showChucVu: c.showChucVu,
-                    chucVuText: signerChucVu,
+                    chucVuText: cCvText,
+                    chucVuKey: c.chucVuKey || "chinh_quyen",
                     chucVuX: cPl.chucVuX,
                     chucVuY: cPl.chucVuY,
                     chucVuWidth: cPl.chucVuWidth,
@@ -1154,42 +1194,42 @@ export function IsoBatchSignModal({
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/90 backdrop-blur-xs select-none">
       {/* ── TOP HEADER ── */}
       <div
-        className="flex h-14 shrink-0 items-center justify-between px-5 text-white shadow-md border-b border-white/10"
+        className="flex h-13 sm:h-14 shrink-0 items-center justify-between px-3 sm:px-5 text-white shadow-md border-b border-white/10"
         style={{ background: theme.headerBg }}
       >
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 backdrop-blur-xs font-black text-sm">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg bg-white/15 backdrop-blur-xs font-black text-xs sm:text-sm">
             ISO
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-sm">Ký duyệt tập trung</span>
-              <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${theme.badgeBg}`}>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="font-bold text-xs sm:text-sm truncate">Ký duyệt</span>
+              <span className={`rounded-full px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-[11px] font-bold shrink-0 ${theme.badgeBg}`}>
                 {theme.name}
               </span>
               {doc.cap_tl && (
-                <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold">
+                <span className="hidden sm:inline rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold shrink-0">
                   {doc.cap_tl}
                 </span>
               )}
             </div>
-            <div className="text-[11px] text-white/80 line-clamp-1 max-w-md">
+            <div className="text-[10px] sm:text-[11px] text-white/80 line-clamp-1 max-w-[150px] sm:max-w-md">
               {doc.ma_tai_lieu} · {doc.ten_tai_lieu}
             </div>
           </div>
         </div>
 
         {/* Action bên phải Header */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {isPheDuyet && (
-            <div className="flex items-center gap-1.5 text-xs bg-black/20 px-3 py-1.5 rounded-lg border border-white/10">
-              <span className="text-white/80">Ký thay:</span>
+            <div className="flex items-center gap-1 text-[11px] sm:text-xs bg-black/20 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-white/10">
+              <span className="hidden sm:inline text-white/80">Ký thay:</span>
               <select
                 value={signAs}
                 onChange={(e) => setSignAs(e.target.value as SignAsType)}
-                className="bg-transparent text-white font-bold outline-hidden cursor-pointer"
+                className="bg-transparent text-white font-bold outline-hidden cursor-pointer text-[11px] sm:text-xs"
               >
-                <option value="none" className="bg-slate-800 text-white">Trực tiếp (Không tiền tố)</option>
+                <option value="none" className="bg-slate-800 text-white">Trực tiếp</option>
                 <option value="KT" className="bg-slate-800 text-white">{SIGN_AS_LABEL.KT}</option>
                 <option value="TM" className="bg-slate-800 text-white">{SIGN_AS_LABEL.TM}</option>
                 <option value="TL" className="bg-slate-800 text-white">{SIGN_AS_LABEL.TL}</option>
@@ -1228,8 +1268,8 @@ export function IsoBatchSignModal({
           </div>
         ) : (
           <>
-            {/* ── LEFT THUMBNAIL RAIL (Đồng bộ chuẩn Soạn thảo: w-28, 1 cột) ── */}
-            <div className="w-28 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-2 space-y-3 select-none flex flex-col">
+            {/* ── LEFT THUMBNAIL RAIL (Ẩn trên Mobile để nhường 100% không gian cho PDF) ── */}
+            <div className="hidden md:flex w-28 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-2 space-y-3 select-none flex-col">
               <div className="text-[10px] uppercase font-bold text-slate-400 text-center tracking-wider mb-0.5">
                 {docItems.length} tài liệu
               </div>
@@ -1329,23 +1369,31 @@ export function IsoBatchSignModal({
             {/* ── CENTER CANVAS PREVIEW ── */}
             <div className="flex flex-1 flex-col overflow-hidden">
               {/* Thanh điều hướng trang bên trên Canvas */}
-              <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 text-xs text-slate-600">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-slate-800">{activeDoc?.label}</span>
-                  <span className="text-slate-400">·</span>
-                  <span>
+              <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3 sm:px-5 text-xs text-slate-600">
+                <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileDocsDrawer(true)}
+                    className="md:hidden flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 font-bold text-[11px] shrink-0"
+                    title="Mở danh sách tài liệu và trang"
+                  >
+                    <Layers size={13} /> {activeDoc?.code || "Tài liệu"} ({activePage}/{activeDoc?.numPages || 1})
+                  </button>
+                  <span className="hidden md:inline font-bold text-slate-800 truncate">{activeDoc?.label}</span>
+                  <span className="hidden md:inline text-slate-400">·</span>
+                  <span className="hidden md:inline shrink-0">
                     Trang {activePage} / {activeDoc?.numPages || 1}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={handleNextFrame}
-                    className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-all mr-1"
+                    className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-all mr-0.5 sm:mr-1"
                     title="Chuyển đến khung ký tiếp theo"
                   >
-                    <ArrowRight size={13} /> Khung tiếp
+                    <ArrowRight size={13} /> <span className="hidden sm:inline">Khung tiếp</span>
                   </button>
                   <button
                     onClick={() => setActivePage((p) => Math.max(1, p - 1))}
@@ -1365,7 +1413,7 @@ export function IsoBatchSignModal({
               </div>
 
               {/* Khu vực hiển thị trang tài liệu & Khung chữ ký chuẩn màn Soạn thảo */}
-              <div className="relative flex-1 overflow-auto bg-slate-200/70 p-4 flex items-start justify-center">
+              <div className="relative flex-1 overflow-auto bg-slate-200/70 p-2 sm:p-4 flex items-start justify-center">
                 <div
                   className="relative inline-block rounded-lg bg-white shadow-2xl my-auto select-none"
                   style={{
@@ -1424,6 +1472,7 @@ export function IsoBatchSignModal({
                           sigImgUrl={sigImgUrl}
                           signerName={signerName}
                           signerChucVu={signerChucVu}
+                          signerChucVuByKey={signerChucVuByKey}
                           isPheDuyet={isPheDuyet}
                           onSelect={() => setSelectedBoxId(box.id)}
                           onUpdate={(updates) => updateBoxConfig(box.id, updates)}
@@ -1440,32 +1489,32 @@ export function IsoBatchSignModal({
       </div>
 
       {/* ── BOTTOM ACTION FOOTER ── */}
-      <div className="flex h-16 shrink-0 items-center justify-between border-t border-slate-200 bg-white px-6 shadow-xs">
-        <div className="flex items-center gap-3 text-xs text-slate-600">
-          <div className="flex items-center gap-1.5 font-bold text-slate-800">
-            <FileCheck size={16} className="text-emerald-600" />
-            Bộ hồ sơ: {docItems.length} tài liệu ({docItems.reduce((acc, d) => acc + d.numPages, 0)} trang)
+      <div className="flex flex-col sm:flex-row min-h-[56px] sm:h-16 shrink-0 sm:items-center justify-between border-t border-slate-200 bg-white px-3 sm:px-6 py-2 sm:py-0 shadow-xs gap-2">
+        <div className="flex items-center justify-between sm:justify-start gap-2 text-xs text-slate-600">
+          <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px] sm:text-xs">
+            <FileCheck size={15} className="text-emerald-600 shrink-0" />
+            <span className="hidden sm:inline">Bộ hồ sơ:</span> {docItems.length} tài liệu ({docItems.reduce((acc, d) => acc + d.numPages, 0)} tr)
           </div>
           <span className="text-slate-300">|</span>
-          <div>
-            Số vị trí ký của bạn:{" "}
+          <div className="text-[11px] sm:text-xs">
+            <span className="hidden sm:inline">Số vị trí ký: </span>
             <span className="font-extrabold text-amber-700">
               {docItems.reduce((sum, d) => sum + (d.requiresSign ? d.boxes.length : 0), 0)} vị trí
             </span>
           </div>
           {!validationResult.valid && (
-            <div className="flex items-center gap-1 text-red-600 font-semibold text-xs ml-3">
-              <AlertTriangle size={14} />
-              {validationResult.reason}
+            <div className="flex items-center gap-1 text-red-600 font-semibold text-[11px] sm:text-xs ml-1 sm:ml-3">
+              <AlertTriangle size={13} className="shrink-0" />
+              <span className="truncate max-w-[120px] sm:max-w-none">{validationResult.reason}</span>
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all"
+            className="rounded-xl border border-slate-200 bg-white px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all"
           >
             Hủy
           </button>
@@ -1474,13 +1523,99 @@ export function IsoBatchSignModal({
             type="button"
             onClick={handleStartSign}
             disabled={!validationResult.valid || loading}
-            className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-xs font-extrabold text-white shadow-md transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-extrabold text-white shadow-md transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: theme.headerBg }}
           >
             <CheckCircle2 size={15} /> {theme.actionLabel}
           </button>
         </div>
       </div>
+
+      {/* ── MOBILE DOCS & PAGES DRAWER ── */}
+      {showMobileDocsDrawer && (
+        <div className="fixed inset-0 z-60 flex flex-col justify-end bg-black/60 backdrop-blur-xs md:hidden animate-in fade-in">
+          <div className="bg-white rounded-t-2xl max-h-[75vh] flex flex-col shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200">
+            <div className="flex items-center justify-between p-3.5 border-b border-slate-200">
+              <div className="flex items-center gap-2 font-bold text-slate-800 text-sm">
+                <Layers size={16} className="text-amber-600" />
+                Danh sách tài liệu & trang ({docItems.length})
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileDocsDrawer(false)}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-3 space-y-3 flex-1">
+              {docItems.map((item, dIdx) => {
+                const isItemActive = dIdx === activeDocIndex
+                const hasBoxes = item.boxes.length > 0
+                return (
+                  <div
+                    key={item.docId + item.kind}
+                    className={`rounded-xl border p-2.5 transition-all ${
+                      isItemActive ? "border-amber-400 bg-amber-50/40" : "border-slate-200 bg-slate-50/50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="font-bold text-xs text-slate-800 truncate">
+                        {item.code ? `${item.code} · ` : ""}{item.label}
+                      </div>
+                      {item.requiresSign && hasBoxes && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800 shrink-0">
+                          ✓ Có vị trí ký
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      {Array.from({ length: item.numPages }, (_, i) => i + 1).map((p) => {
+                        const isPageSelected = isItemActive && p === activePage
+                        const hasRequiredBox = item.boxes.some((b) => b.page === p)
+                        return (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => {
+                              handleSelectDoc(dIdx, p)
+                              setShowMobileDocsDrawer(false)
+                            }}
+                            className={`relative rounded-lg border-2 p-1 flex flex-col items-center bg-white text-center transition-all ${
+                              isPageSelected
+                                ? "border-amber-500 ring-2 ring-amber-200"
+                                : hasRequiredBox
+                                  ? "border-amber-300"
+                                  : "border-slate-200"
+                            }`}
+                          >
+                            {item.pageThumbs[p] ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={item.pageThumbs[p]} alt={`Trang ${p}`} className="w-full aspect-[1/1.4] object-contain rounded-xs" />
+                            ) : (
+                              <div className="w-full aspect-[1/1.4] bg-slate-100 rounded-xs flex items-center justify-center text-[10px] text-slate-400 font-bold">
+                                {p}
+                              </div>
+                            )}
+                            {hasRequiredBox && (
+                              <span className="absolute -top-1 -right-1 bg-amber-500 text-white rounded-full px-1 text-[8px] font-bold">
+                                ✍
+                              </span>
+                            )}
+                            <span className={`text-[10px] font-bold mt-1 ${isPageSelected ? "text-amber-700" : "text-slate-600"}`}>
+                              Trang {p}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL NHẬP MÃ PIN 1 LẦN ── */}
       {showPinModal && (

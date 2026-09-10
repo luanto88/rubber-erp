@@ -116,6 +116,7 @@ type ExtraSignPlacement = {
   nameHeight?: number
   showChucVu?: boolean
   chucVuText?: string
+  chucVuKey?: "chinh_quyen" | "kiem_nhiem" | string | null
   chucVuX?: number
   chucVuY?: number
   chucVuWidth?: number
@@ -427,6 +428,8 @@ export default function IsoDocumentDetailPage() {
     previewSignatures: PreviewSignature[]
     signerName: string
     signerChucVu?: string
+    chucVuKey?: string | null
+    chucVuByKey?: { chinh_quyen: string; kiem_nhiem: string }
     showSignature: boolean
     showSignerName: boolean
     showChucVu?: boolean
@@ -2259,12 +2262,17 @@ export default function IsoDocumentDetailPage() {
 
     let realName = user.full_name || user.username || ""
     let realChucVu = ""
+    let chucVuByKey: { chinh_quyen: string; kiem_nhiem: string } = { chinh_quyen: "", kiem_nhiem: "" }
     try {
       const infoRes = await fetch(`/api/documents/signer-info?factoryId=${factoryId}&userIds=${user.id}`)
       if (infoRes.ok) {
         const infoData = await infoRes.json()
         if (Array.isArray(infoData) && infoData.length > 0) {
           realName = infoData[0].full_name || infoData[0].username || realName
+          chucVuByKey = infoData[0].chuc_vu_by_key || {
+            chinh_quyen: infoData[0].chuc_vu_chinh_quyen || infoData[0].chuc_vu || "",
+            kiem_nhiem: infoData[0].chuc_vu_kim_nhiem || "",
+          }
           realChucVu = infoData[0].chuc_vu || infoData[0].chuc_vu_chinh_quyen || ""
         }
       }
@@ -2275,13 +2283,17 @@ export default function IsoDocumentDetailPage() {
       try {
         const { data: staffData } = await supabase
           .from("maintenance_staff")
-          .select("chuc_vu, chuc_vu_chinh_quyen")
+          .select("chuc_vu, chuc_vu_chinh_quyen, chuc_vu_kim_nhiem")
           .eq("factory_id", factoryId)
           .eq("profile_id", user.id)
           .eq("active", true)
           .maybeSingle()
         if (staffData) {
-          realChucVu = staffData.chuc_vu_chinh_quyen || staffData.chuc_vu || ""
+          chucVuByKey = {
+            chinh_quyen: staffData.chuc_vu_chinh_quyen || staffData.chuc_vu || "",
+            kiem_nhiem: staffData.chuc_vu_kim_nhiem || "",
+          }
+          realChucVu = staffData.chuc_vu_chinh_quyen || staffData.chuc_vu || staffData.chuc_vu_kim_nhiem || ""
         }
       } catch {
         // ignore
@@ -2379,6 +2391,13 @@ export default function IsoDocumentDetailPage() {
       }
     }
 
+    const soanThaoCvKey = rawTemplate.soanThao?.chuc_vu_key || "chinh_quyen"
+    if (soanThaoCvKey === "kiem_nhiem" && chucVuByKey.kiem_nhiem) {
+      realChucVu = chucVuByKey.kiem_nhiem
+    } else if (chucVuByKey.chinh_quyen) {
+      realChucVu = chucVuByKey.chinh_quyen
+    }
+
     setPlacementModal({
       show: true,
       sourcePdfUrl: task.url,
@@ -2413,6 +2432,8 @@ export default function IsoDocumentDetailPage() {
       previewSignatures: useSignedPdfAsBackground || task.kind !== "main" ? [] : buildPreviewSignatures(action),
       signerName: realName,
       signerChucVu: realChucVu,
+      chucVuKey: soanThaoCvKey,
+      chucVuByKey,
       showSignature: rawTemplate.hasTemplate ? !!rawTemplate.soanThao : true,
       showSignerName: initialShowName,
       showChucVu: initialShowChucVu,
@@ -2612,6 +2633,7 @@ export default function IsoDocumentDetailPage() {
       nameHeight,
       showChucVu: placementModal.showChucVu,
       chucVuText: placementModal.signerChucVu,
+      chucVuKey: placementModal.chucVuKey,
       chucVuX,
       chucVuY,
       chucVuWidth,
@@ -5039,7 +5061,7 @@ export default function IsoDocumentDetailPage() {
 
                               {/* Handle co giãn 2 chiều ở góc dưới bên phải (chuẩn mũi tên Tây Bắc - Đông Nam ↖ ↘) */}
                               <div
-                                className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-125 transition-transform"
+                                className="resize-handle absolute -bottom-2 -right-2 w-7 h-7 sm:w-5 sm:h-5 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-md cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
                                 title="Kéo để co giãn kích thước chữ ký trong khung"
                                 onPointerDown={(e) => {
                                   e.stopPropagation()
@@ -5066,7 +5088,7 @@ export default function IsoDocumentDetailPage() {
                                   window.addEventListener("pointerup", onUp)
                                 }}
                               >
-                                <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 sm:w-2.5 sm:h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
                                   <polyline points="9 3 3 3 3 9" />
                                   <polyline points="15 21 21 21 21 15" />
                                   <line x1="3" y1="3" x2="10" y2="10" />
@@ -5095,7 +5117,7 @@ export default function IsoDocumentDetailPage() {
                                 userSelect: "none",
                                 fontFamily: "'Times New Roman', Times, serif",
                               }}
-                              className={`border py-0.5 rounded pl-1.5 pr-5 select-none shadow-xs text-center leading-tight font-normal flex items-center justify-center relative transition-all ${
+                              className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-tight font-normal flex items-center justify-center relative transition-all touch-none ${
                                 placementModal.showSignerName
                                   ? "border-sky-400 bg-sky-50/90 text-sky-950 text-[13px] hover:border-sky-600"
                                   : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-[13px] opacity-60"
@@ -5108,16 +5130,19 @@ export default function IsoDocumentDetailPage() {
                               <button
                                 type="button"
                                 onMouseDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onTouchEnd={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null)
                                 }}
-                                className={`absolute top-0.5 right-0.5 p-0.5 rounded hover:bg-white/80 transition-colors ${
+                                className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
                                   placementModal.showSignerName ? "text-sky-600 hover:text-sky-900" : "text-slate-400 hover:text-slate-700"
                                 }`}
                                 title={placementModal.showSignerName ? "Ẩn họ tên" : "Hiện lại họ tên"}
                               >
-                                {placementModal.showSignerName ? <Eye size={11} /> : <EyeOff size={11} />}
+                                {placementModal.showSignerName ? <Eye size={12} /> : <EyeOff size={12} />}
                               </button>
                             </div>
                           </Draggable>
@@ -5141,7 +5166,7 @@ export default function IsoDocumentDetailPage() {
                                 userSelect: "none",
                                 fontFamily: "'Times New Roman', Times, serif",
                               }}
-                              className={`border py-0.5 rounded pl-1.5 pr-5 select-none shadow-xs text-center leading-tight font-normal flex items-center justify-center relative transition-all ${
+                              className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-tight font-normal flex items-center justify-center relative transition-all touch-none ${
                                 placementModal.showChucVu
                                   ? "border-violet-400 bg-violet-50/90 text-violet-950 text-[13px] hover:border-violet-600"
                                   : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-[13px] opacity-60"
@@ -5154,16 +5179,19 @@ export default function IsoDocumentDetailPage() {
                               <button
                                 type="button"
                                 onMouseDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onTouchEnd={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   setPlacementModal((p) => p ? { ...p, showChucVu: !p.showChucVu } : null)
                                 }}
-                                className={`absolute top-0.5 right-0.5 p-0.5 rounded hover:bg-white/80 transition-colors ${
+                                className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
                                   placementModal.showChucVu ? "text-violet-600 hover:text-violet-900" : "text-slate-400 hover:text-slate-700"
                                 }`}
                                 title={placementModal.showChucVu ? "Ẩn chức vụ" : "Hiện lại chức vụ"}
                               >
-                                {placementModal.showChucVu ? <Eye size={11} /> : <EyeOff size={11} />}
+                                {placementModal.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
                               </button>
                             </div>
                           </Draggable>

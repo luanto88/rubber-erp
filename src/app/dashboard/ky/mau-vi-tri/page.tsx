@@ -23,14 +23,17 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Copy,
   Eye,
   EyeOff,
   Grid3x3,
   Loader2,
   Send,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react"
@@ -188,6 +191,7 @@ type DocSignerInfo =
       userId: string
       fullName: string
       chucVu: string
+      chucVuByKey?: { chinh_quyen?: string; kiem_nhiem?: string }
       hasSignature: boolean
       /** Mã phòng ban của bước (nếu có) — vẫn được in dưới chữ ký trên chứng từ thật. */
       deptLabel?: string
@@ -216,7 +220,7 @@ function docStepSignerId(step?: DocStepLite | null): string | null {
 // Lưới căn chỉnh dùng đơn vị PIXEL cố định (không phải % theo mỗi trục) — trang PDF không phải
 // hình vuông (tỉ lệ khổ giấy thật), nên % ngang/dọc ứng với số px khác nhau; chỉ px cố định mới
 // cho ra ô lưới vuông thật trên màn hình bất kể tỉ lệ khổ giấy.
-const GRID_STEP_PX = 16
+const GRID_STEP_PX = 8
 const SIDEBAR_MIN_WIDTH = 260
 const MIN_BOX_PCT = 4
 
@@ -443,6 +447,8 @@ export default function SignTemplateEditorPage() {
   const [templateLoaded, setTemplateLoaded] = useState(false)
   const [pendingAnchorByRole, setPendingAnchorByRole] = useState<Record<string, SignTemplateAnchor>>({})
   const [sidebarWidth, setSidebarWidth] = useState(320)
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false)
+  const [showMobilePagePicker, setShowMobilePagePicker] = useState(false)
 
   // ── Đồng bộ dữ liệu người ký thật của văn bản đang mở (chỉ khi có docId) ──
   const [docLoaded, setDocLoaded] = useState(!docId)
@@ -450,7 +456,7 @@ export default function SignTemplateEditorPage() {
   const [docSteps, setDocSteps] = useState<DocStepLite[]>([])
   const [docPheDuyetUserId, setDocPheDuyetUserId] = useState<string | null>(null)
   const [signerInfoById, setSignerInfoById] = useState<
-    Record<string, { fullName: string; chucVu: string; hasSignature: boolean }>
+    Record<string, { fullName: string; chucVu: string; hasSignature: boolean; chucVuByKey?: { chinh_quyen?: string; kiem_nhiem?: string } }>
   >({})
   const reconciledRef = useRef(false)
 
@@ -462,6 +468,22 @@ export default function SignTemplateEditorPage() {
   const dragRef = useRef<{ id: string; startX: number; startY: number; startLeft: number; startTop: number; rectW: number; rectH: number } | null>(null)
   const resizeRef = useRef<{ id: string; startX: number; startY: number; startW: number; startH: number; left: number; top: number; rectW: number; rectH: number } | null>(null)
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+
+  const nudgeRole = (roleId: string, dxSteps: number, dySteps: number) => {
+    const wrap = pageWrapRef.current
+    const rect = wrap?.getBoundingClientRect()
+    const stepXPct = rect && rect.width > 0 ? (GRID_STEP_PX / rect.width) * 100 : 1
+    const stepYPct = rect && rect.height > 0 ? (GRID_STEP_PX / rect.height) * 100 : 1
+    setRoles((prev) => {
+      const next = prev.map((r) => {
+        if (r.id !== roleId) return r
+        const newX = Math.max(-20, Math.min(120 - r.box.wPct, r.box.xPct + dxSteps * stepXPct))
+        const newY = Math.max(-20, Math.min(120 - r.box.hPct, r.box.yPct + dySteps * stepYPct))
+        return { ...r, box: { ...r.box, xPct: newX, yPct: newY } }
+      })
+      return recomputeBounds(next)
+    })
+  }
 
   // ── Bootstrap phiên + tham số bắt buộc ──
   useEffect(() => {
@@ -810,10 +832,26 @@ export default function SignTemplateEditorPage() {
         )
         if (cancelled || !res.ok) return
         const json = (await res.json()) as Array<{
-          id: string; full_name: string; chuc_vu: string; has_signature: boolean
+          id: string
+          full_name: string
+          chuc_vu: string
+          has_signature: boolean
+          chuc_vu_by_key?: { chinh_quyen?: string; kiem_nhiem?: string }
         }>
-        const map: Record<string, { fullName: string; chucVu: string; hasSignature: boolean }> = {}
-        for (const r of json) map[r.id] = { fullName: r.full_name, chucVu: r.chuc_vu, hasSignature: r.has_signature }
+        const map: Record<string, {
+          fullName: string
+          chucVu: string
+          hasSignature: boolean
+          chucVuByKey?: { chinh_quyen?: string; kiem_nhiem?: string }
+        }> = {}
+        for (const r of json) {
+          map[r.id] = {
+            fullName: r.full_name,
+            chucVu: r.chuc_vu,
+            hasSignature: r.has_signature,
+            chucVuByKey: r.chuc_vu_by_key,
+          }
+        }
         if (!cancelled) setSignerInfoById(map)
       } catch {
         // Lỗi tra chức vụ/ảnh chữ ký không chặn luồng — preview chỉ đơn giản thiếu dữ liệu
@@ -921,6 +959,7 @@ export default function SignTemplateEditorPage() {
           userId: isoDocData.soan_thao_user_id,
           fullName: info?.fullName || isoDocData.soan_thao || "",
           chucVu: info?.chucVu || "",
+          chucVuByKey: info?.chucVuByKey,
           hasSignature: info?.hasSignature ?? true,
         }
       }
@@ -931,6 +970,7 @@ export default function SignTemplateEditorPage() {
           userId: isoDocData.xem_xet_user_id,
           fullName: info?.fullName || isoDocData.xem_xet || "",
           chucVu: info?.chucVu || "",
+          chucVuByKey: info?.chucVuByKey,
           hasSignature: info?.hasSignature ?? true,
         }
       }
@@ -941,6 +981,7 @@ export default function SignTemplateEditorPage() {
           userId: isoDocData.phe_duyet_user_id,
           fullName: info?.fullName || isoDocData.phe_duyet || "",
           chucVu: info?.chucVu || "",
+          chucVuByKey: info?.chucVuByKey,
           hasSignature: info?.hasSignature ?? true,
         }
       }
@@ -962,6 +1003,7 @@ export default function SignTemplateEditorPage() {
           userId: signerId,
           fullName: info?.fullName || step.ten || "",
           chucVu: info?.chucVu || "",
+          chucVuByKey: info?.chucVuByKey,
           hasSignature: info?.hasSignature || false,
           deptLabel: step.phong_ban_name || step.phong_ban_code || undefined,
         }
@@ -978,6 +1020,7 @@ export default function SignTemplateEditorPage() {
         userId: docPheDuyetUserId,
         fullName: info?.fullName || "",
         chucVu: info?.chucVu || "",
+        chucVuByKey: info?.chucVuByKey,
         hasSignature: info?.hasSignature || false,
       }
     }
@@ -1144,11 +1187,24 @@ export default function SignTemplateEditorPage() {
     if (!st || st.id !== role.id) return
     const dxPct = ((e.clientX - st.startX) / st.rectW) * 100
     const dyPct = ((e.clientY - st.startY) / st.rectH) * 100
-    const xPct = snap(Math.min(Math.max(st.startLeft + dxPct, -20), 120 - role.box.wPct), gridVisible, pctStepFor(st.rectW))
-    const yPct = snap(Math.min(Math.max(st.startTop + dyPct, -20), 120 - role.box.hPct), gridVisible, pctStepFor(st.rectH))
+    // Di chuyển mượt mà 60/120fps (không snap gián đoạn lúc đang di chuyển)
+    const xPct = Math.min(Math.max(st.startLeft + dxPct, -20), 120 - role.box.wPct)
+    const yPct = Math.min(Math.max(st.startTop + dyPct, -20), 120 - role.box.hPct)
     setRoles((prev) => prev.map((r) => (r.id === role.id ? { ...r, box: { ...r.box, xPct, yPct } } : r)))
   }
   const onDragEnd = () => {
+    const st = dragRef.current
+    if (st && gridVisible) {
+      // Chỉ snap to grid khi nhả chuột/ngón tay
+      setRoles((prev) =>
+        prev.map((r) => {
+          if (r.id !== st.id) return r
+          const xPct = snap(r.box.xPct, true, pctStepFor(st.rectW))
+          const yPct = snap(r.box.yPct, true, pctStepFor(st.rectH))
+          return { ...r, box: { ...r.box, xPct, yPct } }
+        }),
+      )
+    }
     dragRef.current = null
     setRoles((prev) => recomputeBounds(prev))
   }
@@ -1169,11 +1225,23 @@ export default function SignTemplateEditorPage() {
     if (!st || st.id !== role.id) return
     const dwPct = ((e.clientX - st.startX) / st.rectW) * 100
     const dhPct = ((e.clientY - st.startY) / st.rectH) * 100
-    const wPct = snap(Math.max(MIN_BOX_PCT, st.startW + dwPct), gridVisible, pctStepFor(st.rectW))
-    const hPct = snap(Math.max(MIN_BOX_PCT, st.startH + dhPct), gridVisible, pctStepFor(st.rectH))
+    // Kéo giãn mượt mà
+    const wPct = Math.max(MIN_BOX_PCT, st.startW + dwPct)
+    const hPct = Math.max(MIN_BOX_PCT, st.startH + dhPct)
     setRoles((prev) => prev.map((r) => (r.id === role.id ? { ...r, box: { ...r.box, wPct, hPct } } : r)))
   }
   const onResizeEnd = () => {
+    const st = resizeRef.current
+    if (st && gridVisible) {
+      setRoles((prev) =>
+        prev.map((r) => {
+          if (r.id !== st.id) return r
+          const wPct = snap(r.box.wPct, true, pctStepFor(st.rectW))
+          const hPct = snap(r.box.hPct, true, pctStepFor(st.rectH))
+          return { ...r, box: { ...r.box, wPct, hPct } }
+        }),
+      )
+    }
     resizeRef.current = null
     setRoles((prev) => recomputeBounds(prev))
   }
@@ -1331,35 +1399,225 @@ export default function SignTemplateEditorPage() {
     )
   }
 
+  const renderSidebarContent = (isMobile = false) => (
+    <div className="flex flex-col h-full">
+      <div className="p-4 border-b border-slate-100">
+        <h3 className="text-[11px] font-extrabold uppercase tracking-wide text-slate-400 mb-1">Vai trò cần đặt khung</h3>
+        {isExemptIsoDoc ? (
+          <div className="mb-3 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] leading-snug">
+            ℹ️ <strong>Biểu mẫu / Phụ lục</strong>: Không áp dụng quy tắc ký đủ 3 khung. Bạn có thể đặt số khung ký tùy ý (hoặc không đặt khung nếu biểu mẫu không yêu cầu ký).
+          </div>
+        ) : (
+          <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+            Vai trò đã đặt có thể <strong>&quot;Nhân bản&quot;</strong> nếu tài liệu có thêm bước ký khác (vd nhiều phòng ban ký nối tiếp). Chỉ khung chữ ký mới có tuỳ chọn hiện tên/chức vụ.
+          </p>
+        )}
+        <div className="space-y-1.5">
+          {roles.filter((r) => !r.hiddenForDoc).map((role) => {
+            const color = getRoleColor(role, isIso)
+            const anchorLabel = role.anchor === "moi_trang" ? "Mọi trang" : role.anchor === "cuoi" ? "Trang cuối cùng" : `Trang ${role.page}`
+            const signer = docSignerByRoleId[role.id]
+            return (
+              <div
+                key={role.id}
+                onClick={() => {
+                  if (role.placed) {
+                    goToPage(role.anchor === "moi_trang" ? currentPage : role.page)
+                    setSelectedRoleId(role.id)
+                    if (isMobile) setShowMobileSidebar(false)
+                  }
+                }}
+                className="rounded-xl p-2.5 border cursor-pointer transition-colors"
+                style={{ borderColor: role.id === selectedRoleId ? color.fg : "transparent", background: role.id === selectedRoleId ? color.bg : "transparent" }}
+              >
+                <div className="flex items-center gap-2.5">
+                  {role.placed ? (
+                    <div className="w-3 h-3 rounded shrink-0" style={{ background: color.fg }} />
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        armRole(role.id, pendingAnchorByRole[role.id] ?? "dau")
+                        if (isMobile) setShowMobileSidebar(false)
+                      }}
+                      title="Đặt khung tại vị trí này trong văn bản"
+                      className="p-1 rounded text-white shrink-0 active:scale-95"
+                      style={{ background: color.fg }}
+                    >
+                      <ArrowLeft size={12} />
+                    </button>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
+                      {role.label} {role.batBuoc && !isExemptIsoDoc && <span className="text-red-500 text-[10px]">• bắt buộc</span>}
+                    </div>
+                    <div className="text-[11px] text-slate-500">
+                      {role.placed ? <span className="text-teal-700 font-semibold">Đã đặt · {anchorLabel}</span> : <span className="italic text-slate-400">Chưa đặt</span>}
+                    </div>
+                    {signer && (
+                      <div className="text-[10.5px] text-slate-500 mt-0.5 truncate">
+                        {signer.kind === "ca_nhan"
+                          ? `→ ${signer.fullName || "(chưa rõ tên)"}${signer.chucVu ? " · " + signer.chucVu : ""}${
+                              signer.deptLabel ? " · " + signer.deptLabel : ""
+                            }`
+                          : `→ Phòng ${signer.label} (chưa xác định người ký)`}
+                      </div>
+                    )}
+                  </div>
+                  {/* Dropdown neo trang */}
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <select
+                      value={role.placed ? role.anchor : pendingAnchorByRole[role.id] ?? "dau"}
+                      onChange={(e) => {
+                        const anchor = e.target.value as SignTemplateAnchor
+                        if (role.placed) changeRoleAnchor(role.id, anchor)
+                        else setPendingAnchorByRole((prev) => ({ ...prev, [role.id]: anchor }))
+                      }}
+                      title="Neo trang áp dụng khung này"
+                      className="text-[10px] border border-slate-200 rounded px-1 py-1 text-slate-600 bg-white"
+                    >
+                      <option value="dau">Trang này</option>
+                      <option value="cuoi">Trang cuối</option>
+                      <option value="moi_trang">Mọi trang</option>
+                    </select>
+                    {role.placed && (
+                      <>
+                        <button onClick={() => duplicateRole(role.id)} title="Nhân bản" className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600">
+                          <Copy size={12} />
+                        </button>
+                        <button onClick={() => removeRole(role.id)} title="Bỏ" className="p-1.5 rounded text-slate-400 hover:text-red-600">
+                          <Trash2 size={12} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {role.placed && role.loai === "chu_ky" && (
+                  <div className="mt-2 pt-2 border-t border-dashed border-slate-200" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-600">Hiện tên</span>
+                      <button
+                        onClick={() => toggleShowName(role.id)}
+                        className={`w-7 h-4 rounded-full relative transition-colors ${role.showName ? "bg-emerald-600" : "bg-slate-300"}`}
+                      >
+                        <span
+                          className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
+                          style={{ left: role.showName ? 14 : 2 }}
+                        />
+                      </button>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-600">Hiện chức vụ</span>
+                      <button
+                        onClick={() => toggleShowChucVu(role.id)}
+                        className={`w-7 h-4 rounded-full relative transition-colors ${role.showChucVu ? "bg-emerald-600" : "bg-slate-300"}`}
+                      >
+                        <span
+                          className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
+                          style={{ left: role.showChucVu ? 14 : 2 }}
+                        />
+                      </button>
+                    </div>
+                    {!role.showName && !role.showChucVu && (
+                      <p className="mt-1.5 text-[10px] text-slate-400 italic leading-snug">
+                        Chỉ đóng ảnh chữ ký lên khung — dùng khi file gốc đã in sẵn tên và chức vụ.
+                      </p>
+                    )}
+                    {role.showChucVu && (
+                      <div className="mt-1.5">
+                        <label className="text-[10px] text-slate-400 block mb-1">Ưu tiên hiển thị loại chức vụ</label>
+                        <select
+                          value={role.chucVuKey || "chinh_quyen"}
+                          onChange={(e) => setChucVu(role.id, e.target.value as ChucVuKey)}
+                          className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 text-slate-700 bg-white"
+                        >
+                          {(Object.keys(CHUC_VU_LABELS) as ChucVuKey[]).map((k) => (
+                            <option key={k} value={k}>{CHUC_VU_LABELS[k]}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div className="mt-2">
+                      <label className="text-[10px] text-slate-400 block mb-1">
+                        Tiền tố ký thay
+                        {role.baseId === "ky_buoc" && " (chỉ áp dụng khi bước này là ký theo phòng ban)"}
+                      </label>
+                      <select
+                        value={role.signAs || "none"}
+                        onChange={(e) =>
+                          setSignAs(role.id, e.target.value === "none" ? null : (e.target.value as SignTemplateSignAsKey))
+                        }
+                        className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 text-slate-700 bg-white"
+                      >
+                        <option value="none">Ký trực tiếp (không tiền tố)</option>
+                        {SIGN_TEMPLATE_SIGN_AS_OPTIONS.map((k) => (
+                          <option key={k} value={k}>{SIGN_TEMPLATE_SIGN_AS_LABEL[k]}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="p-4 border-b border-slate-100">
+        <h3 className="text-[11px] font-extrabold uppercase tracking-wide text-slate-400 mb-2">Cảnh báo</h3>
+        {outOfBoundsRoles.length > 0 ? (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 text-[11px] text-red-800 leading-relaxed">
+            <div className="font-bold mb-1">⚠ Khung nằm ngoài khổ giấy</div>
+            {outOfBoundsRoles.map((r) => <div key={r.id}>{r.label}</div>)}
+          </div>
+        ) : (
+          <p className="text-[11px] text-slate-500">Không có cảnh báo nào — mọi khung đều nằm trong khổ giấy.</p>
+        )}
+      </div>
+
+      <div className="p-4 mt-auto">
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          {isIso ? (
+            <>Mẫu vị trí ISO lưu <strong>vai trò</strong> (Soạn thảo, Xem xét, Phê duyệt, QR) theo loại tài liệu hoặc mã biểu mẫu. Khi quy trình chuyển bước, hệ thống sẽ căn cứ vào người ký thật đã chỉ định để đóng dấu.</>
+          ) : (
+            <>Mẫu vị trí lưu <strong>vai trò</strong>, không lưu người cụ thể — khi áp dụng cho 1 hồ sơ thật, hệ thống sẽ ánh xạ sang đúng người ký theo cấu hình định tuyến (chưa tích hợp ở phiên này).</>
+          )}
+        </p>
+      </div>
+    </div>
+  )
+
   return (
     <div className="flex flex-col h-screen bg-[#f2f8f5]">
       {/* Top bar */}
-      <div className="text-white px-5 py-3 flex flex-wrap items-center justify-between gap-3" style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}>
-        <div className="flex flex-col gap-1 min-w-[240px]">
-          <div className="text-[11px] opacity-75">
+      <div className="text-white px-3 sm:px-5 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3" style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}>
+        <div className="flex flex-col gap-0.5 sm:gap-1 min-w-0 max-w-[50%] sm:max-w-none">
+          <div className="text-[10px] sm:text-[11px] opacity-75 truncate">
             {isIso ? "Cài đặt vị trí ký ISO" : "Cài đặt vị trí ký"} · {activeLoai}
           </div>
-          <div className="text-base font-bold flex items-center gap-2">
-            <span className="font-mono text-xs bg-white/15 px-2 py-0.5 rounded">{activeLoai}</span>
-            <span className="truncate max-w-[380px]">{activeDocLabel}</span>
+          <div className="text-sm sm:text-base font-bold flex items-center gap-1.5 sm:gap-2 truncate">
+            <span className="font-mono text-[11px] sm:text-xs bg-white/15 px-1.5 sm:px-2 py-0.5 rounded shrink-0">{activeLoai}</span>
+            <span className="truncate">{activeDocLabel}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={handleCancel} className="px-3 py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <button onClick={handleCancel} className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
             Huỷ
           </button>
           {templateExisted && (
-            <button onClick={resetToSaved} className="px-3 py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
-              Đặt lại mẫu đã lưu
+            <button onClick={resetToSaved} className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
+              <span className="hidden sm:inline">Đặt lại mẫu đã lưu</span>
+              <span className="sm:hidden">Đặt lại</span>
             </button>
           )}
           <button
             onClick={() => void handleConfirmAndSend()}
             disabled={saving}
-            className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-white text-[#1c3a32] hover:bg-emerald-50 disabled:opacity-50"
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white text-[#1c3a32] hover:bg-emerald-50 disabled:opacity-50 shadow-xs"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            {returnTo ? "Xác nhận vị trí & Gửi đi" : "Lưu mẫu vị trí"}
+            <span className="hidden sm:inline">{returnTo ? "Xác nhận vị trí & Gửi đi" : "Lưu mẫu vị trí"}</span>
+            <span className="sm:hidden">{returnTo ? "Gửi đi" : "Lưu"}</span>
           </button>
         </div>
       </div>
@@ -1430,9 +1688,9 @@ export default function SignTemplateEditorPage() {
       )}
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Page thumbnails with indicator dots */}
+        {/* Page thumbnails with indicator dots - ẩn trên mobile để canvas chiếm trọn 100% */}
         {numPages > 1 && (
-          <div className="w-24 bg-white border-r border-slate-200 overflow-y-auto py-3 px-2 flex flex-col items-center gap-4">
+          <div className="hidden md:flex w-24 bg-white border-r border-slate-200 overflow-y-auto py-3 px-2 flex-col items-center gap-4 shrink-0">
             <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">{numPages} trang</div>
             {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => {
               const rolesOnThisThumb = roles.filter((r) => {
@@ -1496,33 +1754,47 @@ export default function SignTemplateEditorPage() {
         )}
 
         {/* Canvas */}
-        <div className="flex-1 overflow-auto flex flex-col items-center py-6 px-4">
-          <div className="w-full max-w-[640px] flex items-center justify-between mb-3 text-xs">
+        <div className="flex-1 overflow-auto flex flex-col items-center py-4 sm:py-6 px-2 sm:px-4">
+          <div className="w-full max-w-[640px] flex items-center justify-between mb-3 text-xs flex-wrap gap-2">
             <div className="text-slate-500 font-semibold flex items-center gap-2">
               {numPages > 1 && (
                 <>
                   <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1} className="p-1 rounded hover:bg-slate-200 disabled:opacity-30">
                     <ChevronLeft size={14} />
                   </button>
-                  <span>Trang {currentPage} / {numPages}</span>
+                  <button
+                    onClick={() => setShowMobilePagePicker(true)}
+                    className="hover:underline flex items-center gap-1 font-bold text-slate-700"
+                    title="Nhấp để đổi trang nhanh"
+                  >
+                    <span>Trang {currentPage} / {numPages}</span>
+                    <ChevronDown size={12} className="opacity-60 md:hidden" />
+                  </button>
                   <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= numPages} className="p-1 rounded hover:bg-slate-200 disabled:opacity-30">
                     <ChevronRight size={14} />
                   </button>
                 </>
               )}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <button
+                onClick={() => setShowMobileSidebar(true)}
+                className="md:hidden flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-emerald-300 bg-emerald-50 text-emerald-800 text-[11px] font-bold shadow-2xs active:bg-emerald-100"
+              >
+                <SlidersHorizontal size={13} />
+                <span>Vai trò ({roles.filter((r) => r.placed).length}/{roles.filter((r) => !r.hiddenForDoc).length})</span>
+              </button>
               <button
                 onClick={() => setGridVisible((v) => !v)}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-[11px] font-semibold ${gridVisible ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-white border-slate-200 text-slate-600"}`}
               >
-                <Grid3x3 size={13} /> Lưới căn chỉnh
+                <Grid3x3 size={13} /> <span className="hidden sm:inline">Lưới căn chỉnh</span>
               </button>
               <button
                 onClick={() => setPreviewMode((v) => !v)}
                 className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-[11px] font-semibold ${previewMode ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-white border-slate-200 text-slate-600"}`}
               >
-                {previewMode ? <Eye size={13} /> : <EyeOff size={13} />} Xem trước
+                {previewMode ? <Eye size={13} /> : <EyeOff size={13} />} <span className="hidden sm:inline">Xem trước</span>
               </button>
             </div>
           </div>
@@ -1567,7 +1839,7 @@ export default function SignTemplateEditorPage() {
                   onPointerDown={(e) => startDrag(e, role)}
                   onPointerMove={(e) => onDragMove(e, role)}
                   onPointerUp={onDragEnd}
-                  className="absolute flex flex-col items-center justify-center rounded-lg select-none"
+                  className="absolute flex flex-col items-center justify-center rounded-lg select-none touch-none"
                   style={{
                     left: `${role.box.xPct}%`,
                     top: `${role.box.yPct}%`,
@@ -1596,8 +1868,8 @@ export default function SignTemplateEditorPage() {
                       onPointerDown={(e) => startResize(e, role)}
                       onPointerMove={(e) => onResizeMove(e, role)}
                       onPointerUp={onResizeEnd}
-                      className="absolute w-3 h-3 border-2 border-white rounded-sm"
-                      style={{ right: -6, bottom: -6, background: color.fg, cursor: "nwse-resize" }}
+                      className="absolute w-6 h-6 sm:w-3 sm:h-3 border-2 border-white rounded-sm shadow-xs"
+                      style={{ right: -8, bottom: -8, background: color.fg, cursor: "nwse-resize", touchAction: "none" }}
                     />
                   )}
                 </div>
@@ -1606,201 +1878,156 @@ export default function SignTemplateEditorPage() {
           </div>
         </div>
 
-        {/* Thanh chia — kéo để giãn/thu hẹp sidebar */}
+        {/* Thanh chia — kéo để giãn/thu hẹp sidebar (chỉ hiện trên desktop) */}
         <div
           onPointerDown={startSidebarDrag}
           onPointerMove={onSidebarDragMove}
           onPointerUp={onSidebarDragEnd}
-          className="w-1.5 shrink-0 cursor-col-resize bg-slate-100 hover:bg-slate-300 relative"
+          className="hidden md:block w-1.5 shrink-0 cursor-col-resize bg-slate-100 hover:bg-slate-300 relative"
           title="Kéo để đổi độ rộng"
         >
           <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-slate-300" />
         </div>
 
-        {/* Sidebar */}
-        <div className="bg-white border-l border-slate-200 overflow-y-auto flex flex-col shrink-0" style={{ width: sidebarWidth }}>
-          <div className="p-4 border-b border-slate-100">
-            <h3 className="text-[11px] font-extrabold uppercase tracking-wide text-slate-400 mb-1">Vai trò cần đặt khung</h3>
-            {isExemptIsoDoc ? (
-              <div className="mb-3 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] leading-snug">
-                ℹ️ <strong>Biểu mẫu / Phụ lục</strong>: Không áp dụng quy tắc ký đủ 3 khung. Bạn có thể đặt số khung ký tùy ý (hoặc không đặt khung nếu biểu mẫu không yêu cầu ký).
+        {/* Sidebar Desktop */}
+        <div className="hidden md:flex bg-white border-l border-slate-200 overflow-y-auto flex-col shrink-0" style={{ width: sidebarWidth }}>
+          {renderSidebarContent(false)}
+        </div>
+      </div>
+
+      {/* Mobile Drawer Cấu hình Vai trò */}
+      {showMobileSidebar && (
+        <div className="fixed inset-0 z-50 md:hidden bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in duration-200">
+          <div className="bg-white rounded-t-2xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200">
+            <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal size={15} className="text-emerald-700" />
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Cấu hình vai trò & Khung ký</h4>
               </div>
-            ) : (
-              <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
-                Vai trò đã đặt có thể <strong>&quot;Nhân bản&quot;</strong> nếu tài liệu có thêm bước ký khác (vd nhiều phòng ban ký nối tiếp). Chỉ khung chữ ký mới có tuỳ chọn hiện tên/chức vụ.
-              </p>
-            )}
-            <div className="space-y-1.5">
-              {roles.filter((r) => !r.hiddenForDoc).map((role) => {
-                const color = getRoleColor(role, isIso)
-                const anchorLabel = role.anchor === "moi_trang" ? "Mọi trang" : role.anchor === "cuoi" ? "Trang cuối cùng" : `Trang ${role.page}`
-                const signer = docSignerByRoleId[role.id]
+              <button
+                onClick={() => setShowMobileSidebar(false)}
+                className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 active:bg-slate-200"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {renderSidebarContent(true)}
+            </div>
+            <div className="p-3 bg-slate-50 border-t border-slate-200">
+              <button
+                onClick={() => setShowMobileSidebar(false)}
+                className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs"
+              >
+                Xong & Quay lại Canvas
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Page Picker */}
+      {showMobilePagePicker && numPages > 1 && (
+        <div className="fixed inset-0 z-50 md:hidden bg-black/60 backdrop-blur-xs flex flex-col justify-end animate-in fade-in duration-200">
+          <div className="bg-white rounded-t-2xl max-h-[75vh] flex flex-col shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-200">
+            <div className="p-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide">Chọn trang ({numPages} trang)</h4>
+              <button onClick={() => setShowMobilePagePicker(false)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 active:bg-slate-200">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto grid grid-cols-3 gap-3">
+              {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => {
+                const rolesOnThisThumb = roles.filter((r) => {
+                  if (!r.placed || r.hiddenForDoc) return false
+                  if (r.anchor === "moi_trang") return true
+                  if (r.anchor === "cuoi") return p === numPages
+                  return r.page === p
+                })
+                const dim = pageDims[p]
+                const aspect = dim && dim.w > 0 && dim.h > 0 ? `${dim.w} / ${dim.h}` : "1 / 1.414"
                 return (
-                  <div
-                    key={role.id}
-                    onClick={() => role.placed && (goToPage(role.anchor === "moi_trang" ? currentPage : role.page), setSelectedRoleId(role.id))}
-                    className="rounded-xl p-2.5 border cursor-pointer"
-                    style={{ borderColor: role.id === selectedRoleId ? color.fg : "transparent", background: role.id === selectedRoleId ? color.bg : "transparent" }}
+                  <button
+                    key={p}
+                    onClick={() => {
+                      goToPage(p)
+                      setShowMobilePagePicker(false)
+                    }}
+                    className={`rounded-lg border-2 relative overflow-hidden flex flex-col items-center justify-center text-[10px] font-bold transition-all ${
+                      p === currentPage ? "border-emerald-600 ring-2 ring-emerald-500/50" : "border-slate-200 hover:border-slate-300"
+                    }`}
+                    style={{ aspectRatio: aspect }}
                   >
-                    <div className="flex items-center gap-2.5">
-                      {role.placed ? (
-                        <div className="w-3 h-3 rounded shrink-0" style={{ background: color.fg }} />
-                      ) : (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            armRole(role.id, pendingAnchorByRole[role.id] ?? "dau")
-                          }}
-                          title="Đặt khung tại vị trí này trong văn bản"
-                          className="p-1 rounded text-white shrink-0"
-                          style={{ background: color.fg }}
-                        >
-                          <ArrowLeft size={12} />
-                        </button>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
-                          {role.label} {role.batBuoc && !isExemptIsoDoc && <span className="text-red-500 text-[10px]">• bắt buộc</span>}
-                        </div>
-                        <div className="text-[11px] text-slate-500">
-                          {role.placed ? <span className="text-teal-700 font-semibold">Đã đặt · {anchorLabel}</span> : <span className="italic text-slate-400">Chưa đặt</span>}
-                        </div>
-                        {signer && (
-                          <div className="text-[10.5px] text-slate-500 mt-0.5 truncate">
-                            {signer.kind === "ca_nhan"
-                              ? `→ ${signer.fullName || "(chưa rõ tên)"}${signer.chucVu ? " · " + signer.chucVu : ""}${
-                                  signer.deptLabel ? " · " + signer.deptLabel : ""
-                                }`
-                              : `→ Phòng ${signer.label} (chưa xác định người ký)`}
-                          </div>
-                        )}
-                      </div>
-                      {/* Dropdown neo trang hiện ở CẢ 2 trạng thái: chưa đặt thì ghi nhớ lựa chọn
-                          để dùng khi bấm đặt khung, đã đặt thì đổi trực tiếp neo của khung đó
-                          (không phải xoá khung rồi đặt lại). Áp dụng cho mọi vai trò. */}
-                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        <select
-                          value={role.placed ? role.anchor : pendingAnchorByRole[role.id] ?? "dau"}
-                          onChange={(e) => {
-                            const anchor = e.target.value as SignTemplateAnchor
-                            if (role.placed) changeRoleAnchor(role.id, anchor)
-                            else setPendingAnchorByRole((prev) => ({ ...prev, [role.id]: anchor }))
-                          }}
-                          title="Neo trang áp dụng khung này"
-                          className="text-[10px] border border-slate-200 rounded px-1 py-1 text-slate-600"
-                        >
-                          <option value="dau">Trang này</option>
-                          <option value="cuoi">Trang cuối</option>
-                          <option value="moi_trang">Mọi trang</option>
-                        </select>
-                        {role.placed && (
-                          <>
-                            <button onClick={() => duplicateRole(role.id)} title="Nhân bản" className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600">
-                              <Copy size={12} />
-                            </button>
-                            <button onClick={() => removeRole(role.id)} title="Bỏ" className="p-1.5 rounded text-slate-400 hover:text-red-600">
-                              <Trash2 size={12} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    {role.placed && role.loai === "chu_ky" && (
-                      <div className="mt-2 pt-2 border-t border-dashed border-slate-200" onClick={(e) => e.stopPropagation()}>
-                        {/* 2 công tắc ĐỘC LẬP — file PDF gốc có thể đã in sẵn tên và/hoặc chức vụ,
-                            tắt cái nào thì hệ thống không đóng dấu đè lên chỗ đó. */}
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-semibold text-slate-600">Hiện tên</span>
-                          <button
-                            onClick={() => toggleShowName(role.id)}
-                            className={`w-7 h-4 rounded-full relative transition-colors ${role.showName ? "bg-emerald-600" : "bg-slate-300"}`}
-                          >
-                            <span
-                              className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
-                              style={{ left: role.showName ? 14 : 2 }}
-                            />
-                          </button>
-                        </div>
-                        <div className="mt-1.5 flex items-center justify-between">
-                          <span className="text-[11px] font-semibold text-slate-600">Hiện chức vụ</span>
-                          <button
-                            onClick={() => toggleShowChucVu(role.id)}
-                            className={`w-7 h-4 rounded-full relative transition-colors ${role.showChucVu ? "bg-emerald-600" : "bg-slate-300"}`}
-                          >
-                            <span
-                              className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
-                              style={{ left: role.showChucVu ? 14 : 2 }}
-                            />
-                          </button>
-                        </div>
-                        {!role.showName && !role.showChucVu && (
-                          <p className="mt-1.5 text-[10px] text-slate-400 italic leading-snug">
-                            Chỉ đóng ảnh chữ ký lên khung — dùng khi file gốc đã in sẵn tên và chức vụ.
-                          </p>
-                        )}
-                        {role.showChucVu && (
-                          <div className="mt-1.5">
-                            <label className="text-[10px] text-slate-400 block mb-1">Ưu tiên hiển thị loại chức vụ</label>
-                            <select
-                              value={role.chucVuKey || "chinh_quyen"}
-                              onChange={(e) => setChucVu(role.id, e.target.value as ChucVuKey)}
-                              className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 text-slate-700"
-                            >
-                              {(Object.keys(CHUC_VU_LABELS) as ChucVuKey[]).map((k) => (
-                                <option key={k} value={k}>{CHUC_VU_LABELS[k]}</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                        <div className="mt-2">
-                          <label className="text-[10px] text-slate-400 block mb-1">
-                            Tiền tố ký thay
-                            {role.baseId === "ky_buoc" && " (chỉ áp dụng khi bước này là ký theo phòng ban)"}
-                          </label>
-                          <select
-                            value={role.signAs || "none"}
-                            onChange={(e) =>
-                              setSignAs(role.id, e.target.value === "none" ? null : (e.target.value as SignTemplateSignAsKey))
-                            }
-                            className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 text-slate-700"
-                          >
-                            <option value="none">Ký trực tiếp (không tiền tố)</option>
-                            {SIGN_TEMPLATE_SIGN_AS_OPTIONS.map((k) => (
-                              <option key={k} value={k}>{SIGN_TEMPLATE_SIGN_AS_LABEL[k]}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
+                    {pageImages[p] ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={pageImages[p]} alt={`Trang ${p}`} className="w-full h-full object-fill block select-none pointer-events-none" />
+                    ) : (
+                      <span className="text-slate-400">Trang {p}</span>
                     )}
-                  </div>
+                    {rolesOnThisThumb.map((r) => {
+                      const color = getRoleColor(r, isIso)
+                      return (
+                        <span
+                          key={r.id}
+                          className="absolute pointer-events-none rounded-[1px]"
+                          style={{
+                            left: `${Math.max(0, Math.min(100, r.box.xPct))}%`,
+                            top: `${Math.max(0, Math.min(100, r.box.yPct))}%`,
+                            width: `${Math.max(4, Math.min(100, r.box.wPct))}%`,
+                            height: `${Math.max(3, Math.min(100, r.box.hPct))}%`,
+                            border: `1.5px solid ${color.fg}`,
+                            backgroundColor: color.bg,
+                          }}
+                        />
+                      )
+                    })}
+                    <span className="absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded text-[8px] font-bold bg-slate-900/70 text-white">
+                      {p}
+                    </span>
+                  </button>
                 )
               })}
             </div>
           </div>
-
-          <div className="p-4 border-b border-slate-100">
-            <h3 className="text-[11px] font-extrabold uppercase tracking-wide text-slate-400 mb-2">Cảnh báo</h3>
-            {outOfBoundsRoles.length > 0 ? (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 text-[11px] text-red-800 leading-relaxed">
-                <div className="font-bold mb-1">⚠ Khung nằm ngoài khổ giấy</div>
-                {outOfBoundsRoles.map((r) => <div key={r.id}>{r.label}</div>)}
-              </div>
-            ) : (
-              <p className="text-[11px] text-slate-500">Không có cảnh báo nào — mọi khung đều nằm trong khổ giấy.</p>
-            )}
-          </div>
-
-          <div className="p-4 mt-auto">
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              {isIso ? (
-                <>Mẫu vị trí ISO lưu <strong>vai trò</strong> (Soạn thảo, Xem xét, Phê duyệt, QR) theo loại tài liệu hoặc mã biểu mẫu. Khi quy trình chuyển bước, hệ thống sẽ căn cứ vào người ký thật đã chỉ định để đóng dấu.</>
-              ) : (
-                <>Mẫu vị trí lưu <strong>vai trò</strong>, không lưu người cụ thể — khi áp dụng cho 1 hồ sơ thật, hệ thống sẽ ánh xạ sang đúng người ký theo cấu hình định tuyến (chưa tích hợp ở phiên này).</>
-              )}
-            </p>
-          </div>
         </div>
-      </div>
+      )}
+
+      {/* Mobile Precision Nudge D-Pad (hiện trên mobile khi đang chọn 1 khung đã đặt) */}
+      {selectedRoleId && (
+        <div className="md:hidden fixed bottom-5 right-4 z-40 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 p-2 flex flex-col items-center gap-1">
+          <div className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Vi chỉnh</div>
+          <button
+            onClick={() => nudgeRole(selectedRoleId, 0, -1)}
+            className="w-8 h-8 rounded-lg bg-slate-100 active:bg-slate-200 flex items-center justify-center text-slate-700 active:scale-95 shadow-2xs"
+            title="Lên 1 nấc"
+          >
+            <ChevronUp size={16} />
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => nudgeRole(selectedRoleId, -1, 0)}
+              className="w-8 h-8 rounded-lg bg-slate-100 active:bg-slate-200 flex items-center justify-center text-slate-700 active:scale-95 shadow-2xs"
+              title="Sang trái 1 nấc"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              onClick={() => nudgeRole(selectedRoleId, 1, 0)}
+              className="w-8 h-8 rounded-lg bg-slate-100 active:bg-slate-200 flex items-center justify-center text-slate-700 active:scale-95 shadow-2xs"
+              title="Sang phải 1 nấc"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <button
+            onClick={() => nudgeRole(selectedRoleId, 0, 1)}
+            className="w-8 h-8 rounded-lg bg-slate-100 active:bg-slate-200 flex items-center justify-center text-slate-700 active:scale-95 shadow-2xs"
+            title="Xuống 1 nấc"
+          >
+            <ChevronDown size={16} />
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white text-sm font-semibold px-4 py-2 rounded-xl shadow-lg flex items-center gap-2">
@@ -1859,7 +2086,14 @@ function PreviewContent({
     )
   }
   if (signer?.kind === "ca_nhan") {
-    const chucVuText = signer.chucVu || (role.chucVuKey ? CHUC_VU_LABELS[role.chucVuKey] : "")
+    let chucVuText = ""
+    if (role.chucVuKey === "kiem_nhiem") {
+      chucVuText = signer.chucVuByKey?.kiem_nhiem || signer.chucVu || CHUC_VU_LABELS.kiem_nhiem
+    } else if (role.chucVuKey === "chinh_quyen") {
+      chucVuText = signer.chucVuByKey?.chinh_quyen || signer.chucVu || CHUC_VU_LABELS.chinh_quyen
+    } else {
+      chucVuText = signer.chucVu || (role.chucVuKey ? CHUC_VU_LABELS[role.chucVuKey] : "")
+    }
     return (
       <div className="flex flex-col items-center gap-0.5">
         {signer.hasSignature && factoryId ? (
