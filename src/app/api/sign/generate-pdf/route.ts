@@ -1571,7 +1571,7 @@ export async function POST(req: NextRequest) {
                   }
                 }
 
-                if (placement.showChucVu !== false) {
+                if (placement.showChucVu === true) {
                   const chucVuText = placement.chucVuText || await getStaffChucVu(factoryId, signerUserId)
                   if (chucVuText && chucVuText.trim()) {
                     const cvFontSize = 13
@@ -1638,7 +1638,7 @@ export async function POST(req: NextRequest) {
                       color: rgb(0, 0, 0),
                     })
                   }
-                  if (extraP.showChucVu !== false) {
+                  if (extraP.showChucVu === true) {
                     const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, userId)
                     if (extraCvText && extraCvText.trim()) {
                       const cvFontSize = 13
@@ -1797,7 +1797,7 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          if (placement.showChucVu !== false) {
+          if (placement.showChucVu === true) {
             const chucVuText = placement.chucVuText || await getStaffChucVu(factoryId, signerUserId)
             if (chucVuText && chucVuText.trim()) {
               const cvFontSize = 13
@@ -1858,7 +1858,7 @@ export async function POST(req: NextRequest) {
                     color: rgb(0, 0, 0),
                   })
                 }
-                if (extraP.showChucVu !== false) {
+                if (extraP.showChucVu === true) {
                   const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, signerUserId)
                   if (extraCvText && extraCvText.trim()) {
                     const cvFontSize = 13

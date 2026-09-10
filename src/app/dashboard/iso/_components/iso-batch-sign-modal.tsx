@@ -11,11 +11,9 @@ import {
   Eye,
   EyeOff,
   FileCheck,
-  FileText,
   KeyRound,
   Loader2,
   Lock,
-  Sparkles,
   X,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -141,15 +139,15 @@ function BatchInteractiveSignBox({
   const sigInnerX = Math.max(0, Math.min(bw - sigInnerW, box.sigInnerX ?? Math.max(0, (bw - sigInnerW) / 2)))
   const sigInnerY = Math.max(0, Math.min(bh - sigInnerH, box.sigInnerY ?? 4))
 
-  const nameInnerW = Math.min(bw, Math.max(40, box.nameInnerW || Math.min(bw - 8, 110)))
-  const nameInnerH = box.nameInnerH || 22
+  const nameInnerW = Math.min(bw, Math.max(40, box.nameInnerW || Math.min(bw - 8, 105)))
+  const nameInnerH = box.nameInnerH || 20
   const nameInnerX = Math.max(0, Math.min(bw - nameInnerW, box.nameInnerX ?? Math.max(0, (bw - nameInnerW) / 2)))
-  const nameInnerY = Math.max(0, Math.min(bh - nameInnerH, box.nameInnerY ?? Math.max(6, bh - (box.showChucVu ? 46 : 24))))
+  const nameInnerY = Math.max(0, Math.min(bh - nameInnerH, box.nameInnerY ?? Math.max(4, bh - (box.showChucVu ? 42 : 22))))
 
-  const cvInnerW = Math.min(bw, Math.max(40, box.cvInnerW || Math.min(bw - 8, 110)))
-  const cvInnerH = box.cvInnerH || 20
+  const cvInnerW = Math.min(bw, Math.max(40, box.cvInnerW || Math.min(bw - 8, 105)))
+  const cvInnerH = box.cvInnerH || 18
   const cvInnerX = Math.max(0, Math.min(bw - cvInnerW, box.cvInnerX ?? Math.max(0, (bw - cvInnerW) / 2)))
-  const cvInnerY = Math.max(0, Math.min(bh - cvInnerH, box.cvInnerY ?? Math.max(24, bh - 22)))
+  const cvInnerY = Math.max(0, Math.min(bh - cvInnerH, box.cvInnerY ?? Math.max(18, bh - 20)))
 
   return (
     <div
@@ -248,96 +246,95 @@ function BatchInteractiveSignBox({
         </div>
       </Draggable>
 
-      {box.showName && (
-        <Draggable
-          nodeRef={nameNodeRef as RefObject<HTMLElement>}
-          position={{ x: nameInnerX, y: nameInnerY }}
-          bounds="parent"
-          onStop={(_, d) => onUpdate({ nameInnerX: d.x, nameInnerY: d.y, boxDomW: bw, boxDomH: bh })}
-        >
-          <div
-            ref={nameNodeRef}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: nameInnerW,
-              height: nameInnerH,
-              cursor: "move",
-              userSelect: "none",
-              fontFamily: "'Times New Roman', Times, serif",
-            }}
-            className="border border-sky-400 bg-sky-50/90 text-sky-950 text-[13px] py-0.5 rounded px-1.5 select-none shadow-xs text-center truncate leading-tight font-normal hover:border-sky-600"
-            title="Kéo để di chuyển vị trí tên trong khung"
-          >
-            {toTitleCase(signerName || "Người ký")}
-          </div>
-        </Draggable>
-      )}
-
-      {box.showChucVu && (
-        <Draggable
-          nodeRef={cvNodeRef as RefObject<HTMLElement>}
-          position={{ x: cvInnerX, y: cvInnerY }}
-          bounds="parent"
-          onStop={(_, d) => onUpdate({ cvInnerX: d.x, cvInnerY: d.y, boxDomW: bw, boxDomH: bh })}
-        >
-          <div
-            ref={cvNodeRef}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: cvInnerW,
-              height: cvInnerH,
-              cursor: "move",
-              userSelect: "none",
-              fontFamily: "'Times New Roman', Times, serif",
-            }}
-            className="border border-violet-400 bg-violet-50/90 text-violet-950 text-[13px] py-0.5 rounded px-1.5 select-none shadow-xs text-center truncate leading-tight font-normal hover:border-violet-600"
-            title="Kéo để di chuyển vị trí chức vụ trong khung"
-          >
-            {signerChucVu || (isPheDuyet ? "Người phê duyệt" : "Người xem xét")}
-          </div>
-        </Draggable>
-      )}
-
-      <div
-        className="absolute -bottom-7 left-0 flex items-center gap-2 whitespace-nowrap z-30 pointer-events-auto"
-        onMouseDown={(e) => e.stopPropagation()}
+      <Draggable
+        nodeRef={nameNodeRef as RefObject<HTMLElement>}
+        position={{ x: nameInnerX, y: nameInnerY }}
+        bounds="parent"
+        onStop={(_, d) => onUpdate({ nameInnerX: d.x, nameInnerY: d.y, boxDomW: bw, boxDomH: bh })}
       >
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onUpdate({ showName: !box.showName })
+        <div
+          ref={nameNodeRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: nameInnerW,
+            height: nameInnerH,
+            cursor: "move",
+            userSelect: "none",
+            fontFamily: "'Times New Roman', Times, serif",
           }}
-          className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
+          className={`border py-0.5 rounded pl-1.5 pr-5 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all ${
             box.showName
-              ? "bg-sky-50 border-sky-300 text-sky-700"
-              : "bg-slate-100 border-slate-300 text-slate-400"
+              ? "border-sky-400 bg-sky-50/95 text-sky-950 text-xs hover:border-sky-600"
+              : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
           }`}
-          title={box.showName ? "Ẩn họ tên" : "Hiện họ tên"}
+          title={box.showName ? "Kéo để di chuyển vị trí tên trong khung" : "Tên đang ẩn — Bấm icon mắt để hiện lại"}
         >
-          <Eye size={12} /> Tên
-        </button>
+          <span className={`truncate w-full ${box.showName ? "" : "line-through"}`}>
+            {toTitleCase(signerName || "Người ký")}
+          </span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onUpdate({ showName: !box.showName })
+            }}
+            className={`absolute top-0.5 right-0.5 p-0.5 rounded hover:bg-white/80 transition-colors ${
+              box.showName ? "text-sky-600 hover:text-sky-900" : "text-slate-400 hover:text-slate-700"
+            }`}
+            title={box.showName ? "Ẩn họ tên" : "Hiện lại họ tên"}
+          >
+            {box.showName ? <Eye size={11} /> : <EyeOff size={11} />}
+          </button>
+        </div>
+      </Draggable>
 
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onUpdate({ showChucVu: !box.showChucVu })
+      <Draggable
+        nodeRef={cvNodeRef as RefObject<HTMLElement>}
+        position={{ x: cvInnerX, y: cvInnerY }}
+        bounds="parent"
+        onStop={(_, d) => onUpdate({ cvInnerX: d.x, cvInnerY: d.y, boxDomW: bw, boxDomH: bh })}
+      >
+        <div
+          ref={cvNodeRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: cvInnerW,
+            height: cvInnerH,
+            cursor: "move",
+            userSelect: "none",
+            fontFamily: "'Times New Roman', Times, serif",
           }}
-          className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
+          className={`border py-0.5 rounded pl-1.5 pr-5 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all ${
             box.showChucVu
-              ? "bg-violet-50 border-violet-300 text-violet-700"
-              : "bg-slate-100 border-slate-300 text-slate-400"
+              ? "border-violet-400 bg-violet-50/95 text-violet-950 text-xs hover:border-violet-600"
+              : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
           }`}
-          title={box.showChucVu ? "Ẩn chức vụ" : "Hiện chức vụ"}
+          title={box.showChucVu ? "Kéo để di chuyển vị trí chức vụ trong khung" : "Chức vụ đang ẩn — Bấm icon mắt để hiện lại"}
         >
-          <Eye size={12} /> Chức vụ
-        </button>
-      </div>
+          <span className={`truncate w-full ${box.showChucVu ? "" : "line-through"}`}>
+            {signerChucVu || (isPheDuyet ? "Người phê duyệt" : "Người xem xét")}
+          </span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onUpdate({ showChucVu: !box.showChucVu })
+            }}
+            className={`absolute top-0.5 right-0.5 p-0.5 rounded hover:bg-white/80 transition-colors ${
+              box.showChucVu ? "text-violet-600 hover:text-violet-900" : "text-slate-400 hover:text-slate-700"
+            }`}
+            title={box.showChucVu ? "Ẩn chức vụ" : "Hiện lại chức vụ"}
+          >
+            {box.showChucVu ? <Eye size={11} /> : <EyeOff size={11} />}
+          </button>
+        </div>
+      </Draggable>
     </div>
   )
 }
@@ -425,6 +422,7 @@ export function IsoBatchSignModal({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null)
   const pdfDocsCache = useRef<Record<string, unknown>>({})
+  const [canvasDims, setCanvasDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
 
   // Modal PIN
   const [showPinModal, setShowPinModal] = useState(false)
@@ -781,12 +779,15 @@ export function IsoBatchSignModal({
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const page: any = await pdf.getPage(activePage)
-      // Render độ nét cao: scale = 1.3
-      const renderScale = 1.3
+      // Render độ nét cao: scale = 1.35
+      const renderScale = 1.35
       const vp = page.getViewport({ scale: renderScale })
 
-      canvas.width = Math.floor(vp.width)
-      canvas.height = Math.floor(vp.height)
+      const w = Math.floor(vp.width)
+      const h = Math.floor(vp.height)
+      canvas.width = w
+      canvas.height = h
+      setCanvasDims({ w, h })
 
       const ctx = canvas.getContext("2d")
       if (ctx) {
@@ -983,15 +984,15 @@ export function IsoBatchSignModal({
           const sY_pt = byPtBottom + Math.max(0, Math.min(bhPt - sH_pt, (1 - (sInnerY + sInnerH) / bDomH) * bhPt))
 
           // Tên
-          const nInnerW = b.nameInnerW || Math.min(bDomW - 8, 110)
-          const nInnerH = b.nameInnerH || 22
+          const nInnerW = b.nameInnerW || Math.min(bDomW - 8, 105)
+          const nInnerH = b.nameInnerH || 20
           const nInnerX = b.nameInnerX ?? Math.max(0, (bDomW - nInnerW) / 2)
-          const nInnerY = b.nameInnerY ?? Math.max(6, bDomH - (b.showChucVu ? 46 : 24))
+          const nInnerY = b.nameInnerY ?? Math.max(4, bDomH - (b.showChucVu ? 42 : 22))
 
           const nW_pt = Math.min(bwPt, Math.max(20, (nInnerW / bDomW) * bwPt))
           const nH_pt = Math.min(bhPt, Math.max(10, (nInnerH / bDomH) * bhPt))
           const nX_pt = bxPt + Math.max(0, Math.min(bwPt - nW_pt, (nInnerX / bDomW) * bwPt))
-          const nY_pt = byPtBottom + Math.max(0, Math.min(bhPt - nH_pt, (1 - (nInnerY + nInnerH) / bDomH) * bhPt))
+          const nY_pt = byPtBottom + Math.max(0, Math.min(bhPt - nH_pt, (1 - (nInnerY + nInnerH) / bDomH) * bhPt + 2))
 
           // Chức vụ
           let cvX_pt: number | undefined
@@ -1000,15 +1001,16 @@ export function IsoBatchSignModal({
           let cvH_pt: number | undefined
 
           if (b.showChucVu) {
-            const cvInnerW = b.cvInnerW || Math.min(bDomW - 8, 110)
-            const cvInnerH = b.cvInnerH || 20
+            const cvInnerW = b.cvInnerW || Math.min(bDomW - 8, 105)
+            const cvInnerH = b.cvInnerH || 18
             const cvInnerX = b.cvInnerX ?? Math.max(0, (bDomW - cvInnerW) / 2)
-            const cvInnerY = b.cvInnerY ?? Math.max(24, bDomH - 22)
+            const cvInnerY = b.cvInnerY ?? Math.max(18, bDomH - 20)
 
             cvW_pt = Math.min(bwPt, Math.max(20, (cvInnerW / bDomW) * bwPt))
             cvH_pt = Math.min(bhPt, Math.max(10, (cvInnerH / bDomH) * bhPt))
             cvX_pt = bxPt + Math.max(0, Math.min(bwPt - cvW_pt, (cvInnerX / bDomW) * bwPt))
-            cvY_pt = byPtBottom + Math.max(0, Math.min(bhPt - cvH_pt, (1 - (cvInnerY + cvInnerH) / bDomH) * bhPt))
+            // Tính toạ độ Y độc lập theo vị trí kéo thả thực tế của Chức vụ, đảm bảo dù Chức vụ ở trên hay ở dưới Tên đều in chuẩn xác
+            cvY_pt = byPtBottom + Math.max(0, Math.min(bhPt - cvH_pt, (1 - (cvInnerY + cvInnerH) / bDomH) * bhPt + 2))
           }
 
           return {
@@ -1141,6 +1143,11 @@ export function IsoBatchSignModal({
     return list
   }, [doc, activeDoc, isPheDuyet])
 
+  const defaultCanvasW = (activeDoc?.pageDims[activePage]?.w || 595.28) * 1.35
+  const defaultCanvasH = (activeDoc?.pageDims[activePage]?.h || 841.89) * 1.35
+  const currentCanvasW = canvasDims.w > 0 ? canvasDims.w : defaultCanvasW
+  const currentCanvasH = canvasDims.h > 0 ? canvasDims.h : defaultCanvasH
+
   if (!open) return null
 
   return (
@@ -1221,10 +1228,10 @@ export function IsoBatchSignModal({
           </div>
         ) : (
           <>
-            {/* ── LEFT THUMBNAIL RAIL (Nhóm theo tài liệu + thumbnail chuẩn vị trí thật) ── */}
-            <div className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-3 space-y-4">
-              <div className="text-[11px] font-extrabold uppercase tracking-wide text-slate-400">
-                Danh mục hồ sơ ({docItems.length} tài liệu)
+            {/* ── LEFT THUMBNAIL RAIL (Đồng bộ chuẩn Soạn thảo: w-28, 1 cột) ── */}
+            <div className="w-28 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-2 space-y-3 select-none flex flex-col">
+              <div className="text-[10px] uppercase font-bold text-slate-400 text-center tracking-wider mb-0.5">
+                {docItems.length} tài liệu
               </div>
 
               {docItems.map((item, dIdx) => {
@@ -1234,51 +1241,40 @@ export function IsoBatchSignModal({
                 return (
                   <div
                     key={item.docId + item.kind}
-                    className={`rounded-xl border p-2 transition-all ${
+                    className={`rounded-lg border p-1.5 transition-all ${
                       isItemActive
-                        ? "border-slate-300 bg-slate-50 shadow-xs"
-                        : "border-slate-200/80 hover:border-slate-300 bg-white"
+                        ? "border-amber-400 bg-amber-50/40 shadow-xs"
+                        : "border-slate-200 hover:border-slate-300 bg-white"
                     }`}
                   >
-                    {/* Header tài liệu */}
-                    <div
+                    {/* Header tài liệu gọn gàng */}
+                    <button
+                      type="button"
                       onClick={() => handleSelectDoc(dIdx, 1)}
-                      className="cursor-pointer mb-2 flex items-start justify-between gap-1.5"
+                      className="w-full text-left mb-1.5 focus:outline-hidden cursor-pointer"
+                      title={item.label}
                     >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1">
-                          <FileText size={13} className={item.isParent ? "text-emerald-600" : "text-slate-500"} />
-                          <span className="font-bold text-xs text-slate-800 truncate" title={item.label}>
-                            {item.label}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-slate-400">
-                          {item.numPages} trang
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-bold text-[10px] text-slate-800 truncate block" title={item.code || item.label}>
+                          {item.code || (item.isParent ? "Quy trình" : "Biểu mẫu")}
                         </span>
+                        {item.requiresSign && hasBoxes && (
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="Sẵn sàng ký" />
+                        )}
                       </div>
-
-                      {item.requiresSign ? (
-                        hasBoxes ? (
-                          <span className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 border border-emerald-200">
-                            <CheckCircle2 size={10} /> Sẵn sàng
-                          </span>
+                      <div className="flex items-center justify-between text-[9px] text-slate-400">
+                        <span>{item.numPages} trang</span>
+                        {item.requiresSign ? (
+                          <span className="font-semibold text-amber-600">✍</span>
                         ) : (
-                          <span className="shrink-0 inline-flex items-center gap-0.5 rounded-md bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 border border-amber-200">
-                            Cần ký
-                          </span>
-                        )
-                      ) : (
-                        <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">
-                          Chỉ đọc
-                        </span>
-                      )}
-                    </div>
+                          <span className="text-slate-400">Đọc</span>
+                        )}
+                      </div>
+                    </button>
 
-                    {/* Danh sách Thumbnail các trang của tài liệu này: hiển thị 1 cột (1 trang/hàng) to rõ */}
-                    <div className="flex flex-col gap-3">
+                    {/* Danh sách Thumbnail 1 cột chuẩn màn Soạn thảo */}
+                    <div className="flex flex-col gap-2">
                       {Array.from({ length: item.numPages }, (_, i) => i + 1).map((p) => {
-                        const dim = item.pageDims[p]
-                        const aspect = dim && dim.w > 0 && dim.h > 0 ? `${dim.w} / ${dim.h}` : "1 / 1.414"
                         const isPageSelected = isItemActive && p === activePage
                         const boxesOnPage = item.boxes.filter((b) => b.page === p)
                         const hasRequiredBox = boxesOnPage.length > 0
@@ -1286,59 +1282,41 @@ export function IsoBatchSignModal({
                         return (
                           <button
                             key={p}
+                            type="button"
                             onClick={() => handleSelectDoc(dIdx, p)}
-                            className={`group relative w-full overflow-hidden rounded-lg border-2 text-center transition-all bg-white shadow-xs ${
+                            className={`group relative w-full overflow-hidden rounded-md border-2 text-center transition-all bg-white p-0.5 flex flex-col items-center shadow-2xs cursor-pointer ${
                               isPageSelected
-                                ? "border-emerald-600 ring-2 ring-emerald-500/40 shadow-md"
+                                ? "border-amber-500 shadow-sm ring-2 ring-amber-200"
                                 : hasRequiredBox
-                                  ? `border-amber-400 hover:border-amber-500`
+                                  ? "border-amber-300 hover:border-amber-400"
                                   : "border-slate-200 hover:border-slate-300"
                             }`}
-                            style={{ aspectRatio: aspect }}
-                            title={`Trang ${p}${hasRequiredBox ? ` (Có ${boxesOnPage.length} vị trí ký)` : ""}`}
                           >
                             {item.pageThumbs[p] ? (
                               // eslint-disable-next-line @next/next/no-img-element
                               <img
                                 src={item.pageThumbs[p]}
                                 alt={`Trang ${p}`}
-                                className="w-full h-full object-contain block select-none pointer-events-none"
+                                className="w-full h-auto object-contain rounded-xs block select-none pointer-events-none"
                               />
                             ) : (
-                              <div className="flex h-full w-full items-center justify-center bg-slate-100 text-[10px] font-bold text-slate-400">
-                                Trang {p}
+                              <div className="w-full aspect-[1/1.4] bg-slate-50 rounded-xs flex items-center justify-center text-[10px] font-bold text-slate-400">
+                                {p}
                               </div>
                             )}
 
-                            {/* Khung mini thể hiện vị trí THẬT của chữ ký trên trang */}
-                            {boxesOnPage.map((b) => (
-                              <span
-                                key={b.id}
-                                className="absolute pointer-events-none rounded-[1.5px] transition-all"
-                                style={{
-                                  left: `${Math.max(0, Math.min(100, b.xPct))}%`,
-                                  top: `${Math.max(0, Math.min(100, b.yPct))}%`,
-                                  width: `${Math.max(6, Math.min(100, b.wPct))}%`,
-                                  height: `${Math.max(4, Math.min(100, b.hPct))}%`,
-                                  border: `1.5px solid ${theme.accentFg}`,
-                                  backgroundColor: theme.accentBg,
-                                  boxShadow: `0 0 2px ${theme.accentFg}99`,
-                                  zIndex: 5,
-                                }}
-                              />
-                            ))}
-
-                            {/* Huy hiệu ký & Số trang góc dưới */}
-                            <div className="absolute bottom-1 left-1 flex items-center gap-1 pointer-events-none">
-                              <span className="rounded bg-slate-900/80 px-1.5 py-0.5 text-[9px] font-extrabold text-white">
-                                P.{p}
-                              </span>
-                              {hasRequiredBox && (
-                                <span className="rounded bg-amber-600 px-1 py-0.5 text-[8px] font-bold text-white shadow-xs">
-                                  ✍ {boxesOnPage.length}
+                            {/* Huy hiệu ký ở góc trên */}
+                            {hasRequiredBox && (
+                              <div className="absolute -top-1 -right-1 flex gap-0.5 z-10 pointer-events-none">
+                                <span className="bg-amber-500 text-white rounded-full px-1 py-0.2 text-[8px] font-bold shadow-xs">
+                                  ✍
                                 </span>
-                              )}
-                            </div>
+                              </div>
+                            )}
+
+                            <span className={`text-[10px] font-bold mt-0.5 ${isPageSelected ? "text-amber-700" : "text-slate-500"}`}>
+                              Trang {p}
+                            </span>
                           </button>
                         )
                       })}
@@ -1362,6 +1340,14 @@ export function IsoBatchSignModal({
 
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
+                    onClick={handleNextFrame}
+                    className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-all mr-1"
+                    title="Chuyển đến khung ký tiếp theo"
+                  >
+                    <ArrowRight size={13} /> Khung tiếp
+                  </button>
+                  <button
                     onClick={() => setActivePage((p) => Math.max(1, p - 1))}
                     disabled={activePage <= 1}
                     className="flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 disabled:opacity-40"
@@ -1378,20 +1364,16 @@ export function IsoBatchSignModal({
                 </div>
               </div>
 
-              {/* Khu vực hiển thị trang tài liệu & Khung chữ ký */}
-              <div className="relative flex-1 overflow-auto bg-slate-200/80 p-6 flex items-center justify-center">
+              {/* Khu vực hiển thị trang tài liệu & Khung chữ ký chuẩn màn Soạn thảo */}
+              <div className="relative flex-1 overflow-auto bg-slate-200/70 p-4 flex items-start justify-center">
                 <div
-                  className="relative rounded-lg bg-white shadow-xl overflow-hidden"
+                  className="relative inline-block rounded-lg bg-white shadow-2xl my-auto select-none"
                   style={{
-                    aspectRatio:
-                      activeDoc?.pageDims[activePage] && activeDoc.pageDims[activePage].w > 0
-                        ? `${activeDoc.pageDims[activePage].w} / ${activeDoc.pageDims[activePage].h}`
-                        : "1 / 1.414",
-                    maxHeight: "calc(100vh - 180px)",
-                    maxWidth: "100%",
+                    width: currentCanvasW,
+                    height: currentCanvasH,
                   }}
                 >
-                  <canvas ref={canvasRef} className="block w-full h-full object-contain pointer-events-none" />
+                  <canvas ref={canvasRef} className="block rounded-lg pointer-events-none" />
 
                   {/* Lớp preview chữ ký các bước trước */}
                   {previewSignatures
@@ -1452,94 +1434,7 @@ export function IsoBatchSignModal({
               </div>
             </div>
 
-            {/* ── RIGHT TOOL PANEL: Tùy chỉnh khung ký ── */}
-            <div className="w-64 shrink-0 border-l border-slate-200 bg-white p-4 flex flex-col justify-between">
-              <div className="space-y-4">
-                <div className="text-xs font-extrabold uppercase tracking-wide text-slate-400">
-                  Tùy chọn khung ký
-                </div>
 
-                {selectedBoxId ? (
-                  (() => {
-                    const activeBox = activeDoc?.boxes.find((b) => b.id === selectedBoxId)
-                    if (!activeBox) {
-                      return <p className="text-xs text-slate-400">Chọn một khung ký trên trang để tùy chỉnh.</p>
-                    }
-
-                    return (
-                      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="min-w-0 pr-2">
-                            <span className="text-xs font-bold text-slate-700 block">Hiển thị Họ & Tên</span>
-                            <span className="text-[11px] text-slate-500 font-semibold truncate block" title={signerName}>
-                              {signerName}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => updateBoxConfig(activeBox.id, { showName: !activeBox.showName })}
-                            className={`flex h-6 w-6 items-center justify-center rounded-md border text-xs shrink-0 ${
-                              activeBox.showName
-                                ? "bg-emerald-600 text-white border-emerald-600"
-                                : "bg-white text-slate-400 border-slate-200"
-                            }`}
-                            title={activeBox.showName ? "Ẩn họ tên" : "Hiện họ tên"}
-                          >
-                            {activeBox.showName ? <Eye size={13} /> : <EyeOff size={13} />}
-                          </button>
-                        </div>
-
-                        <div className="flex items-center justify-between border-t border-slate-200/60 pt-2.5">
-                          <div className="min-w-0 pr-2">
-                            <span className="text-xs font-bold text-slate-700 block">Hiển thị Chức vụ</span>
-                            <span className="text-[11px] text-slate-500 font-semibold truncate block" title={signerChucVu || (isPheDuyet ? "Người phê duyệt" : "Người xem xét")}>
-                              {signerChucVu || (isPheDuyet ? "Người phê duyệt" : "Người xem xét")}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => updateBoxConfig(activeBox.id, { showChucVu: !activeBox.showChucVu })}
-                            className={`flex h-6 w-6 items-center justify-center rounded-md border text-xs shrink-0 ${
-                              activeBox.showChucVu
-                                ? "bg-emerald-600 text-white border-emerald-600"
-                                : "bg-white text-slate-400 border-slate-200"
-                            }`}
-                            title={activeBox.showChucVu ? "Ẩn chức vụ" : "Hiện chức vụ"}
-                          >
-                            {activeBox.showChucVu ? <Eye size={13} /> : <EyeOff size={13} />}
-                          </button>
-                        </div>
-
-                        <div className="border-t border-slate-200/60 pt-2 text-[11px] text-slate-500 leading-relaxed">
-                          Chữ ký và tên/chức vụ được đặt gọn trong khung cài đặt. Bạn có thể kéo nhãn &ldquo;Khung của bạn&rdquo; để vi chỉnh nhẹ vị trí theo dòng in.
-                        </div>
-                      </div>
-                    )
-                  })()
-                ) : (
-                  <p className="text-xs text-slate-400">Chọn một khung chữ ký trên tài liệu để chỉnh sửa.</p>
-                )}
-
-                {/* Hướng dẫn quy tắc */}
-                <div className="rounded-xl bg-blue-50 border border-blue-200 p-3 text-[11px] text-blue-900 leading-relaxed">
-                  <div className="flex items-center gap-1.5 font-bold mb-1">
-                    <Sparkles size={13} className="text-blue-600" /> Quy tắc ký duyệt
-                  </div>
-                  Vị trí chữ ký đã được tự động nạp từ mẫu. Nếu không có biểu mẫu con nào yêu cầu chữ ký, bạn chỉ cần ký ở Quy trình chính là đủ điều kiện hoàn tất.
-                </div>
-              </div>
-
-              {/* Nút hành động */}
-              <div className="space-y-2 pt-4 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={handleNextFrame}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-all"
-                >
-                  <ArrowRight size={13} /> Khung tiếp theo
-                </button>
-              </div>
-            </div>
           </>
         )}
       </div>

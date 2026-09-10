@@ -909,7 +909,7 @@ export default function IsoDocumentDetailPage() {
           nameInnerW = Math.max(40, Math.min(frameCanvasW - 8, 120))
           nameInnerH = 22
           nameInnerX = Math.max(0, (frameCanvasW - nameInnerW) / 2)
-          nameInnerY = Math.max(10, frameCanvasH - (prev.showChucVu && prev.signerChucVu ? 46 : 24))
+          nameInnerY = Math.max(10, frameCanvasH - (prev.showChucVu ? 46 : 24))
         }
         if (typeof cvInnerW !== "number" || cvInnerW <= 0) {
           cvInnerW = Math.max(40, Math.min(frameCanvasW - 8, 120))
@@ -2271,6 +2271,22 @@ export default function IsoDocumentDetailPage() {
     } catch {
       // fallback to user
     }
+    if (!realChucVu && factoryId && user.id) {
+      try {
+        const { data: staffData } = await supabase
+          .from("maintenance_staff")
+          .select("chuc_vu, chuc_vu_chinh_quyen")
+          .eq("factory_id", factoryId)
+          .eq("profile_id", user.id)
+          .eq("active", true)
+          .maybeSingle()
+        if (staffData) {
+          realChucVu = staffData.chuc_vu_chinh_quyen || staffData.chuc_vu || ""
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     let rawTemplate: {
       hasTemplate: boolean
@@ -2500,7 +2516,7 @@ export default function IsoDocumentDetailPage() {
     const qrTmpl = placementModal.rawTemplate?.qr
 
     const nameH_pt = 20
-    const chucVuH_pt = (placementModal.showChucVu && placementModal.signerChucVu) ? 18 : 0
+    const chucVuH_pt = placementModal.showChucVu ? 18 : 0
 
     let x = sigX / canvasScale
     let y = pdfPageHeight - (sigY / canvasScale) - (sigH / canvasScale)
@@ -2536,7 +2552,7 @@ export default function IsoDocumentDetailPage() {
 
       // Tên
       const nameInnerX = typeof placementModal.nameInnerX === "number" ? placementModal.nameInnerX : (boxW - 120) / 2
-      const nameInnerY = typeof placementModal.nameInnerY === "number" ? placementModal.nameInnerY : (boxH - (placementModal.showChucVu && placementModal.signerChucVu ? 46 : 24))
+      const nameInnerY = typeof placementModal.nameInnerY === "number" ? placementModal.nameInnerY : (boxH - (placementModal.showChucVu ? 46 : 24))
       const nameInnerW = typeof placementModal.nameInnerW === "number" && placementModal.nameInnerW > 0 ? placementModal.nameInnerW : Math.min(boxW - 8, 120)
       const nameInnerH = typeof placementModal.nameInnerH === "number" && placementModal.nameInnerH > 0 ? placementModal.nameInnerH : 22
 
@@ -2551,7 +2567,7 @@ export default function IsoDocumentDetailPage() {
       nameY = st.y_pt + st.h_pt - nameY_pt - nameHeight
 
       // Chức vụ
-      if (placementModal.showChucVu && placementModal.signerChucVu) {
+      if (placementModal.showChucVu) {
         const cvInnerX = typeof placementModal.cvInnerX === "number" ? placementModal.cvInnerX : (boxW - 120) / 2
         const cvInnerY = typeof placementModal.cvInnerY === "number" ? placementModal.cvInnerY : (boxH - 22)
         const cvInnerW = typeof placementModal.cvInnerW === "number" && placementModal.cvInnerW > 0 ? placementModal.cvInnerW : Math.min(boxW - 8, 120)
@@ -4958,7 +4974,7 @@ export default function IsoDocumentDetailPage() {
                       const nameInnerW = Math.min(frameW, Math.max(40, placementModal.nameInnerW || Math.min(frameW - 8, 120)))
                       const nameInnerH = placementModal.nameInnerH || 22
                       const nameInnerX = Math.max(0, Math.min(frameW - nameInnerW, placementModal.nameInnerX ?? Math.max(0, (frameW - nameInnerW) / 2)))
-                      const nameInnerY = Math.max(0, Math.min(frameH - nameInnerH, placementModal.nameInnerY ?? Math.max(10, frameH - (placementModal.showChucVu && placementModal.signerChucVu ? 46 : 24))))
+                      const nameInnerY = Math.max(0, Math.min(frameH - nameInnerH, placementModal.nameInnerY ?? Math.max(10, frameH - (placementModal.showChucVu ? 46 : 24))))
 
                       const cvInnerW = Math.min(frameW, Math.max(40, placementModal.cvInnerW || Math.min(frameW - 8, 120)))
                       const cvInnerH = placementModal.cvInnerH || 20
@@ -5061,100 +5077,96 @@ export default function IsoDocumentDetailPage() {
                           </Draggable>
 
                           {/* 2. Khối Họ tên con: di chuyển độc lập trong khung, font Times New Roman 13px chữ đứng, Title Case */}
-                          {placementModal.showSignerName && (
-                            <Draggable
-                              nodeRef={nameInnerNodeRef as RefObject<HTMLElement>}
-                              position={{ x: nameInnerX, y: nameInnerY }}
-                              bounds="parent"
-                              onStop={(_, d) => setPlacementModal((p) => p ? { ...p, nameInnerX: d.x, nameInnerY: d.y } : null)}
-                            >
-                              <div
-                                ref={nameInnerNodeRef}
-                                style={{
-                                  position: "absolute",
-                                  top: 0,
-                                  left: 0,
-                                  width: nameInnerW,
-                                  height: nameInnerH,
-                                  cursor: "move",
-                                  userSelect: "none",
-                                  fontFamily: "'Times New Roman', Times, serif",
-                                }}
-                                className="border border-sky-400 bg-sky-50/90 text-sky-950 text-[13px] py-0.5 rounded px-1.5 select-none shadow-xs text-center truncate leading-tight font-normal hover:border-sky-600"
-                                title="Kéo để di chuyển vị trí tên trong khung"
-                              >
-                                {toTitleCase(placementModal.signerName || "Người soạn thảo")}
-                              </div>
-                            </Draggable>
-                          )}
-
-                          {/* 3. Khối Chức vụ con: di chuyển độc lập trong khung, font Times New Roman 13px chữ đứng */}
-                          {placementModal.showChucVu && placementModal.signerChucVu && (
-                            <Draggable
-                              nodeRef={cvInnerNodeRef as RefObject<HTMLElement>}
-                              position={{ x: cvInnerX, y: cvInnerY }}
-                              bounds="parent"
-                              onStop={(_, d) => setPlacementModal((p) => p ? { ...p, cvInnerX: d.x, cvInnerY: d.y } : null)}
-                            >
-                              <div
-                                ref={cvInnerNodeRef}
-                                style={{
-                                  position: "absolute",
-                                  top: 0,
-                                  left: 0,
-                                  width: cvInnerW,
-                                  height: cvInnerH,
-                                  cursor: "move",
-                                  userSelect: "none",
-                                  fontFamily: "'Times New Roman', Times, serif",
-                                }}
-                                className="border border-violet-400 bg-violet-50/90 text-violet-950 text-[13px] py-0.5 rounded px-1.5 select-none shadow-xs text-center truncate leading-tight font-normal hover:border-violet-600"
-                                title="Kéo để di chuyển vị trí chức vụ trong khung"
-                              >
-                                {placementModal.signerChucVu}
-                              </div>
-                            </Draggable>
-                          )}
-
-                          {/* Hàng nút bật/tắt Tên và Chức vụ đặt ngay sát mép dưới ngoài khung, xếp ngang không bị rớt dòng */}
-                          <div
-                            className="absolute -bottom-7 left-0 flex items-center gap-2 whitespace-nowrap z-30 pointer-events-auto"
-                            onMouseDown={(e) => e.stopPropagation()}
+                          <Draggable
+                            nodeRef={nameInnerNodeRef as RefObject<HTMLElement>}
+                            position={{ x: nameInnerX, y: nameInnerY }}
+                            bounds="parent"
+                            onStop={(_, d) => setPlacementModal((p) => p ? { ...p, nameInnerX: d.x, nameInnerY: d.y } : null)}
                           >
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null)
+                            <div
+                              ref={nameInnerNodeRef}
+                              style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: nameInnerW,
+                                height: nameInnerH,
+                                cursor: "move",
+                                userSelect: "none",
+                                fontFamily: "'Times New Roman', Times, serif",
                               }}
-                              className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
+                              className={`border py-0.5 rounded pl-1.5 pr-5 select-none shadow-xs text-center leading-tight font-normal flex items-center justify-center relative transition-all ${
                                 placementModal.showSignerName
-                                  ? "bg-sky-50 border-sky-300 text-sky-700"
-                                  : "bg-slate-100 border-slate-300 text-slate-400"
+                                  ? "border-sky-400 bg-sky-50/90 text-sky-950 text-[13px] hover:border-sky-600"
+                                  : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-[13px] opacity-60"
                               }`}
-                              title={placementModal.showSignerName ? "Ẩn họ tên" : "Hiện họ tên"}
+                              title={placementModal.showSignerName ? "Kéo để di chuyển vị trí tên trong khung" : "Tên đang ẩn — Bấm icon mắt để hiện lại"}
                             >
-                              <Eye size={12} /> Tên
-                            </button>
-
-                            {placementModal.signerChucVu && (
+                              <span className={`truncate w-full ${placementModal.showSignerName ? "" : "line-through"}`}>
+                                {toTitleCase(placementModal.signerName || "Người soạn thảo")}
+                              </span>
                               <button
                                 type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null)
+                                }}
+                                className={`absolute top-0.5 right-0.5 p-0.5 rounded hover:bg-white/80 transition-colors ${
+                                  placementModal.showSignerName ? "text-sky-600 hover:text-sky-900" : "text-slate-400 hover:text-slate-700"
+                                }`}
+                                title={placementModal.showSignerName ? "Ẩn họ tên" : "Hiện lại họ tên"}
+                              >
+                                {placementModal.showSignerName ? <Eye size={11} /> : <EyeOff size={11} />}
+                              </button>
+                            </div>
+                          </Draggable>
+
+                          {/* 3. Khối Chức vụ con: di chuyển độc lập trong khung, font Times New Roman 13px chữ đứng */}
+                          <Draggable
+                            nodeRef={cvInnerNodeRef as RefObject<HTMLElement>}
+                            position={{ x: cvInnerX, y: cvInnerY }}
+                            bounds="parent"
+                            onStop={(_, d) => setPlacementModal((p) => p ? { ...p, cvInnerX: d.x, cvInnerY: d.y } : null)}
+                          >
+                            <div
+                              ref={cvInnerNodeRef}
+                              style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: cvInnerW,
+                                height: cvInnerH,
+                                cursor: "move",
+                                userSelect: "none",
+                                fontFamily: "'Times New Roman', Times, serif",
+                              }}
+                              className={`border py-0.5 rounded pl-1.5 pr-5 select-none shadow-xs text-center leading-tight font-normal flex items-center justify-center relative transition-all ${
+                                placementModal.showChucVu
+                                  ? "border-violet-400 bg-violet-50/90 text-violet-950 text-[13px] hover:border-violet-600"
+                                  : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-[13px] opacity-60"
+                              }`}
+                              title={placementModal.showChucVu ? "Kéo để di chuyển vị trí chức vụ trong khung" : "Chức vụ đang ẩn — Bấm icon mắt để hiện lại"}
+                            >
+                              <span className={`truncate w-full ${placementModal.showChucVu ? "" : "line-through"}`}>
+                                {placementModal.signerChucVu || "Người soạn thảo"}
+                              </span>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
                                 onClick={(e) => {
                                   e.stopPropagation()
                                   setPlacementModal((p) => p ? { ...p, showChucVu: !p.showChucVu } : null)
                                 }}
-                                className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
-                                  placementModal.showChucVu
-                                    ? "bg-violet-50 border-violet-300 text-violet-700"
-                                    : "bg-slate-100 border-slate-300 text-slate-400"
+                                className={`absolute top-0.5 right-0.5 p-0.5 rounded hover:bg-white/80 transition-colors ${
+                                  placementModal.showChucVu ? "text-violet-600 hover:text-violet-900" : "text-slate-400 hover:text-slate-700"
                                 }`}
-                                title={placementModal.showChucVu ? "Ẩn chức vụ" : "Hiện chức vụ"}
+                                title={placementModal.showChucVu ? "Ẩn chức vụ" : "Hiện lại chức vụ"}
                               >
-                                <Eye size={12} /> Chức vụ
+                                {placementModal.showChucVu ? <Eye size={11} /> : <EyeOff size={11} />}
                               </button>
-                            )}
-                          </div>
+                            </div>
+                          </Draggable>
                         </div>
                       )
                     })()
