@@ -445,6 +445,12 @@ export type ExtraSignPlacement = {
   nameY?: number
   nameWidth?: number
   nameHeight?: number
+  showChucVu?: boolean
+  chucVuText?: string
+  chucVuX?: number
+  chucVuY?: number
+  chucVuWidth?: number
+  chucVuHeight?: number
 }
 
 export type SignPlacement = ExtraSignPlacement & {

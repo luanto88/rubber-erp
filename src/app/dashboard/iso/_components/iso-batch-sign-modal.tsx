@@ -1,6 +1,7 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Draggable from "react-draggable"
 import {
   AlertTriangle,
   ArrowRight,
@@ -28,6 +29,13 @@ import {
   type SignedFilePlacement,
 } from "./iso-types"
 
+function toTitleCase(str: string | null | undefined): string {
+  if (!str) return ""
+  return str
+    .toLowerCase()
+    .replace(/(?:^|\s)\S/g, (char) => char.toUpperCase())
+}
+
 // Màu sắc nhận diện vai trò
 const ROLE_THEMES = {
   xem_xet: {
@@ -48,6 +56,292 @@ const ROLE_THEMES = {
   },
 }
 
+export type BatchBox = {
+  id: string
+  page: number
+  xPct: number
+  yPct: number
+  wPct: number
+  hPct: number
+  showName: boolean
+  showChucVu: boolean
+  signAs?: SignAsType
+  sigInnerX?: number
+  sigInnerY?: number
+  sigInnerW?: number
+  sigInnerH?: number
+  nameInnerX?: number
+  nameInnerY?: number
+  nameInnerW?: number
+  nameInnerH?: number
+  cvInnerX?: number
+  cvInnerY?: number
+  cvInnerW?: number
+  cvInnerH?: number
+  boxDomW?: number
+  boxDomH?: number
+}
+
+function BatchInteractiveSignBox({
+  box,
+  isSelected,
+  theme,
+  boxesOnPageCount,
+  boxIndex,
+  sigImgUrl,
+  signerName,
+  signerChucVu,
+  isPheDuyet,
+  onSelect,
+  onUpdate,
+}: {
+  box: BatchBox
+  isSelected: boolean
+  theme: (typeof ROLE_THEMES)[keyof typeof ROLE_THEMES]
+  boxesOnPageCount: number
+  boxIndex: number
+  sigImgUrl: string | null
+  signerName: string
+  signerChucVu: string
+  isPheDuyet: boolean
+  onSelect: () => void
+  onUpdate: (updates: Partial<BatchBox>) => void
+}) {
+  const boxRef = useRef<HTMLDivElement>(null)
+  const sigNodeRef = useRef<HTMLDivElement>(null)
+  const nameNodeRef = useRef<HTMLDivElement>(null)
+  const cvNodeRef = useRef<HTMLDivElement>(null)
+
+  const [boxSize, setBoxSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
+
+  useEffect(() => {
+    if (!boxRef.current) return
+    const el = boxRef.current
+    const updateSize = () => {
+      const w = el.clientWidth
+      const h = el.clientHeight
+      if (w > 0 && h > 0) {
+        setBoxSize((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
+        if (box.boxDomW !== w || box.boxDomH !== h) {
+          onUpdate({ boxDomW: w, boxDomH: h })
+        }
+      }
+    }
+    updateSize()
+    const ro = new ResizeObserver(() => updateSize())
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [box.boxDomW, box.boxDomH, onUpdate])
+
+  const bw = boxSize.w || box.boxDomW || 150
+  const bh = boxSize.h || box.boxDomH || 75
+
+  const sigInnerW = Math.min(bw, Math.max(30, box.sigInnerW || Math.min(bw - 8, 100)))
+  const sigInnerH = Math.min(bh, Math.max(15, box.sigInnerH || Math.min(bh * 0.55, 42)))
+  const sigInnerX = Math.max(0, Math.min(bw - sigInnerW, box.sigInnerX ?? Math.max(0, (bw - sigInnerW) / 2)))
+  const sigInnerY = Math.max(0, Math.min(bh - sigInnerH, box.sigInnerY ?? 4))
+
+  const nameInnerW = Math.min(bw, Math.max(40, box.nameInnerW || Math.min(bw - 8, 110)))
+  const nameInnerH = box.nameInnerH || 22
+  const nameInnerX = Math.max(0, Math.min(bw - nameInnerW, box.nameInnerX ?? Math.max(0, (bw - nameInnerW) / 2)))
+  const nameInnerY = Math.max(0, Math.min(bh - nameInnerH, box.nameInnerY ?? Math.max(6, bh - (box.showChucVu ? 46 : 24))))
+
+  const cvInnerW = Math.min(bw, Math.max(40, box.cvInnerW || Math.min(bw - 8, 110)))
+  const cvInnerH = box.cvInnerH || 20
+  const cvInnerX = Math.max(0, Math.min(bw - cvInnerW, box.cvInnerX ?? Math.max(0, (bw - cvInnerW) / 2)))
+  const cvInnerY = Math.max(0, Math.min(bh - cvInnerH, box.cvInnerY ?? Math.max(24, bh - 22)))
+
+  return (
+    <div
+      ref={boxRef}
+      onClick={onSelect}
+      className={`absolute rounded-md select-none transition-shadow ${
+        isSelected ? "ring-2 ring-amber-400/80 shadow-md" : "hover:ring-1 hover:ring-amber-300/60 shadow-xs"
+      }`}
+      style={{
+        left: `${box.xPct}%`,
+        top: `${box.yPct}%`,
+        width: `${box.wPct}%`,
+        height: `${box.hPct}%`,
+        border: `2px dashed ${theme.accentFg}`,
+        backgroundColor: "rgba(245, 158, 11, 0.05)",
+        zIndex: isSelected ? 30 : 20,
+      }}
+    >
+      <div
+        className="absolute -top-5 left-0 flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap bg-white/95 pointer-events-none"
+        style={{ color: theme.accentFg }}
+      >
+        <Lock size={10} className="text-emerald-600" />
+        Khung của bạn {boxesOnPageCount > 1 ? `#${boxIndex + 1}` : ""}
+      </div>
+
+      <Draggable
+        nodeRef={sigNodeRef as RefObject<HTMLElement>}
+        position={{ x: sigInnerX, y: sigInnerY }}
+        bounds="parent"
+        cancel=".resize-handle"
+        onStop={(_, d) => onUpdate({ sigInnerX: d.x, sigInnerY: d.y, boxDomW: bw, boxDomH: bh })}
+      >
+        <div
+          ref={sigNodeRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: sigInnerW,
+            height: sigInnerH,
+            cursor: "move",
+            userSelect: "none",
+          }}
+          className="relative group border border-dashed border-amber-400/80 bg-amber-50/30 rounded p-1 flex items-center justify-center hover:border-amber-600"
+        >
+          {sigImgUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={sigImgUrl}
+              alt="Chữ ký"
+              className="w-full h-full object-contain pointer-events-none"
+              draggable={false}
+            />
+          ) : (
+            <span className="text-[10px] font-bold text-amber-700 italic text-center px-1">
+              [Chữ ký {signerName}]
+            </span>
+          )}
+
+          <div
+            className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-125 transition-transform"
+            title="Kéo để co giãn kích thước chữ ký trong khung"
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              const startX = e.clientX
+              const startY = e.clientY
+              const startW = sigInnerW
+              const startH = sigInnerH
+              const curX = sigInnerX
+              const curY = sigInnerY
+
+              const onMove = (ev: PointerEvent) => {
+                const dx = ev.clientX - startX
+                const dy = ev.clientY - startY
+                const newW = Math.max(30, Math.min(bw - curX, startW + dx))
+                const newH = Math.max(15, Math.min(bh - curY, startH + dy))
+                onUpdate({ sigInnerW: newW, sigInnerH: newH, boxDomW: bw, boxDomH: bh })
+              }
+              const onUp = () => {
+                window.removeEventListener("pointermove", onMove)
+                window.removeEventListener("pointerup", onUp)
+              }
+              window.addEventListener("pointermove", onMove)
+              window.addEventListener("pointerup", onUp)
+            }}
+          >
+            <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 3 3 3 3 9" />
+              <polyline points="15 21 21 21 21 15" />
+              <line x1="3" y1="3" x2="10" y2="10" />
+              <line x1="21" y1="21" x2="14" y2="14" />
+            </svg>
+          </div>
+        </div>
+      </Draggable>
+
+      {box.showName && (
+        <Draggable
+          nodeRef={nameNodeRef as RefObject<HTMLElement>}
+          position={{ x: nameInnerX, y: nameInnerY }}
+          bounds="parent"
+          onStop={(_, d) => onUpdate({ nameInnerX: d.x, nameInnerY: d.y, boxDomW: bw, boxDomH: bh })}
+        >
+          <div
+            ref={nameNodeRef}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: nameInnerW,
+              height: nameInnerH,
+              cursor: "move",
+              userSelect: "none",
+              fontFamily: "'Times New Roman', Times, serif",
+            }}
+            className="border border-sky-400 bg-sky-50/90 text-sky-950 text-[13px] py-0.5 rounded px-1.5 select-none shadow-xs text-center truncate leading-tight font-normal hover:border-sky-600"
+            title="Kéo để di chuyển vị trí tên trong khung"
+          >
+            {toTitleCase(signerName || "Người ký")}
+          </div>
+        </Draggable>
+      )}
+
+      {box.showChucVu && (
+        <Draggable
+          nodeRef={cvNodeRef as RefObject<HTMLElement>}
+          position={{ x: cvInnerX, y: cvInnerY }}
+          bounds="parent"
+          onStop={(_, d) => onUpdate({ cvInnerX: d.x, cvInnerY: d.y, boxDomW: bw, boxDomH: bh })}
+        >
+          <div
+            ref={cvNodeRef}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: cvInnerW,
+              height: cvInnerH,
+              cursor: "move",
+              userSelect: "none",
+              fontFamily: "'Times New Roman', Times, serif",
+            }}
+            className="border border-violet-400 bg-violet-50/90 text-violet-950 text-[13px] py-0.5 rounded px-1.5 select-none shadow-xs text-center truncate leading-tight font-normal hover:border-violet-600"
+            title="Kéo để di chuyển vị trí chức vụ trong khung"
+          >
+            {signerChucVu || (isPheDuyet ? "Người phê duyệt" : "Người xem xét")}
+          </div>
+        </Draggable>
+      )}
+
+      <div
+        className="absolute -bottom-7 left-0 flex items-center gap-2 whitespace-nowrap z-30 pointer-events-auto"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onUpdate({ showName: !box.showName })
+          }}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
+            box.showName
+              ? "bg-sky-50 border-sky-300 text-sky-700"
+              : "bg-slate-100 border-slate-300 text-slate-400"
+          }`}
+          title={box.showName ? "Ẩn họ tên" : "Hiện họ tên"}
+        >
+          <Eye size={12} /> Tên
+        </button>
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onUpdate({ showChucVu: !box.showChucVu })
+          }}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
+            box.showChucVu
+              ? "bg-violet-50 border-violet-300 text-violet-700"
+              : "bg-slate-100 border-slate-300 text-slate-400"
+          }`}
+          title={box.showChucVu ? "Ẩn chức vụ" : "Hiện chức vụ"}
+        >
+          <Eye size={12} /> Chức vụ
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export type BatchSignDoc = {
   docId: string
   kind: SignFileKind
@@ -63,17 +357,6 @@ export type BatchSignDoc = {
   requiresSign: boolean
 }
 
-export type BatchBox = {
-  id: string
-  page: number
-  xPct: number
-  yPct: number
-  wPct: number
-  hPct: number
-  showName: boolean
-  showChucVu: boolean
-  signAs?: SignAsType
-}
 
 type PreviewSig = {
   signerUserId: string
@@ -680,49 +963,118 @@ export function IsoBatchSignModal({
         const cloneBoxes = item.boxes.slice(1)
         const dim = item.pageDims[mainBox.page] || { w: 595.28, h: 841.89 }
 
-        // Quy đổi tọa độ % (top-left) sang point PDF (bottom-left)
-        const xPt = (mainBox.xPct / 100) * dim.w
-        const wPt = (mainBox.wPct / 100) * dim.w
-        const hPt = (mainBox.hPct / 100) * dim.h
-        const yPt = dim.h - (mainBox.yPct / 100) * dim.h - hPt
+        const calcBoxPlacement = (b: BatchBox, pDim: { w: number; h: number }) => {
+          const bwPt = (b.wPct / 100) * pDim.w
+          const bhPt = (b.hPct / 100) * pDim.h
+          const bxPt = (b.xPct / 100) * pDim.w
+          const byPtBottom = pDim.h - (b.yPct / 100) * pDim.h - bhPt
+
+          const bDomW = b.boxDomW || 150
+          const bDomH = b.boxDomH || 75
+
+          const sInnerW = b.sigInnerW || Math.min(bDomW - 8, 100)
+          const sInnerH = b.sigInnerH || Math.min(bDomH * 0.55, 42)
+          const sInnerX = b.sigInnerX ?? Math.max(0, (bDomW - sInnerW) / 2)
+          const sInnerY = b.sigInnerY ?? 4
+
+          const sW_pt = Math.min(bwPt, Math.max(20, (sInnerW / bDomW) * bwPt))
+          const sH_pt = Math.min(bhPt, Math.max(10, (sInnerH / bDomH) * bhPt))
+          const sX_pt = bxPt + Math.max(0, Math.min(bwPt - sW_pt, (sInnerX / bDomW) * bwPt))
+          const sY_pt = byPtBottom + Math.max(0, Math.min(bhPt - sH_pt, (1 - (sInnerY + sInnerH) / bDomH) * bhPt))
+
+          // Tên
+          const nInnerW = b.nameInnerW || Math.min(bDomW - 8, 110)
+          const nInnerH = b.nameInnerH || 22
+          const nInnerX = b.nameInnerX ?? Math.max(0, (bDomW - nInnerW) / 2)
+          const nInnerY = b.nameInnerY ?? Math.max(6, bDomH - (b.showChucVu ? 46 : 24))
+
+          const nW_pt = Math.min(bwPt, Math.max(20, (nInnerW / bDomW) * bwPt))
+          const nH_pt = Math.min(bhPt, Math.max(10, (nInnerH / bDomH) * bhPt))
+          const nX_pt = bxPt + Math.max(0, Math.min(bwPt - nW_pt, (nInnerX / bDomW) * bwPt))
+          const nY_pt = byPtBottom + Math.max(0, Math.min(bhPt - nH_pt, (1 - (nInnerY + nInnerH) / bDomH) * bhPt))
+
+          // Chức vụ
+          let cvX_pt: number | undefined
+          let cvY_pt: number | undefined
+          let cvW_pt: number | undefined
+          let cvH_pt: number | undefined
+
+          if (b.showChucVu) {
+            const cvInnerW = b.cvInnerW || Math.min(bDomW - 8, 110)
+            const cvInnerH = b.cvInnerH || 20
+            const cvInnerX = b.cvInnerX ?? Math.max(0, (bDomW - cvInnerW) / 2)
+            const cvInnerY = b.cvInnerY ?? Math.max(24, bDomH - 22)
+
+            cvW_pt = Math.min(bwPt, Math.max(20, (cvInnerW / bDomW) * bwPt))
+            cvH_pt = Math.min(bhPt, Math.max(10, (cvInnerH / bDomH) * bhPt))
+            cvX_pt = bxPt + Math.max(0, Math.min(bwPt - cvW_pt, (cvInnerX / bDomW) * bwPt))
+            cvY_pt = byPtBottom + Math.max(0, Math.min(bhPt - cvH_pt, (1 - (cvInnerY + cvInnerH) / bDomH) * bhPt))
+          }
+
+          return {
+            x: sX_pt,
+            y: sY_pt,
+            width: sW_pt,
+            height: sH_pt,
+            nameX: nX_pt,
+            nameY: nY_pt,
+            nameWidth: nW_pt,
+            nameHeight: nH_pt,
+            chucVuX: cvX_pt,
+            chucVuY: cvY_pt,
+            chucVuWidth: cvW_pt,
+            chucVuHeight: cvH_pt,
+          }
+        }
+
+        const mainPl = calcBoxPlacement(mainBox, dim)
 
         const placement: SignPlacement = {
           page: mainBox.page,
-          x: xPt,
-          y: yPt,
-          width: wPt,
-          height: hPt,
+          x: mainPl.x,
+          y: mainPl.y,
+          width: mainPl.width,
+          height: mainPl.height,
           showSignature: true,
           showSignerName: mainBox.showName,
-          nameX: xPt,
-          nameY: Math.max(0, yPt - 22),
-          nameWidth: wPt,
-          nameHeight: 20,
+          nameX: mainPl.nameX,
+          nameY: mainPl.nameY,
+          nameWidth: mainPl.nameWidth,
+          nameHeight: mainPl.nameHeight,
+          showChucVu: mainBox.showChucVu,
+          chucVuText: signerChucVu,
+          chucVuX: mainPl.chucVuX,
+          chucVuY: mainPl.chucVuY,
+          chucVuWidth: mainPl.chucVuWidth,
+          chucVuHeight: mainPl.chucVuHeight,
           showPrefix: isPheDuyet && (mainBox.signAs || signAs) !== "none",
-          prefixX: Math.max(0, xPt - 40),
-          prefixY: yPt + 10,
+          prefixX: Math.max(0, mainPl.x - 40),
+          prefixY: mainPl.y + 10,
           prefixWidth: 35,
           prefixHeight: 20,
           extraPlacements:
             cloneBoxes.length > 0
               ? cloneBoxes.map((c) => {
                   const cDim = item.pageDims[c.page] || dim
-                  const cW = (c.wPct / 100) * cDim.w
-                  const cH = (c.hPct / 100) * cDim.h
-                  const cY = cDim.h - (c.yPct / 100) * cDim.h - cH
-                  const cX = (c.xPct / 100) * cDim.w
+                  const cPl = calcBoxPlacement(c, cDim)
                   return {
                     page: c.page,
-                    x: cX,
-                    y: cY,
-                    width: cW,
-                    height: cH,
+                    x: cPl.x,
+                    y: cPl.y,
+                    width: cPl.width,
+                    height: cPl.height,
                     showSignature: true,
                     showSignerName: c.showName,
-                    nameX: cX,
-                    nameY: Math.max(0, cY - 22),
-                    nameWidth: cW,
-                    nameHeight: 20,
+                    nameX: cPl.nameX,
+                    nameY: cPl.nameY,
+                    nameWidth: cPl.nameWidth,
+                    nameHeight: cPl.nameHeight,
+                    showChucVu: c.showChucVu,
+                    chucVuText: signerChucVu,
+                    chucVuX: cPl.chucVuX,
+                    chucVuY: cPl.chucVuY,
+                    chucVuWidth: cPl.chucVuWidth,
+                    chucVuHeight: cPl.chucVuHeight,
                   }
                 })
               : undefined,
@@ -922,8 +1274,8 @@ export function IsoBatchSignModal({
                       )}
                     </div>
 
-                    {/* Danh sách Thumbnail các trang của tài liệu này */}
-                    <div className="grid grid-cols-2 gap-2">
+                    {/* Danh sách Thumbnail các trang của tài liệu này: hiển thị 1 cột (1 trang/hàng) to rõ */}
+                    <div className="flex flex-col gap-3">
                       {Array.from({ length: item.numPages }, (_, i) => i + 1).map((p) => {
                         const dim = item.pageDims[p]
                         const aspect = dim && dim.w > 0 && dim.h > 0 ? `${dim.w} / ${dim.h}` : "1 / 1.414"
@@ -935,9 +1287,9 @@ export function IsoBatchSignModal({
                           <button
                             key={p}
                             onClick={() => handleSelectDoc(dIdx, p)}
-                            className={`group relative overflow-hidden rounded-lg border-2 text-center transition-all ${
+                            className={`group relative w-full overflow-hidden rounded-lg border-2 text-center transition-all bg-white shadow-xs ${
                               isPageSelected
-                                ? "border-emerald-600 ring-2 ring-emerald-500/40 shadow-xs"
+                                ? "border-emerald-600 ring-2 ring-emerald-500/40 shadow-md"
                                 : hasRequiredBox
                                   ? `border-amber-400 hover:border-amber-500`
                                   : "border-slate-200 hover:border-slate-300"
@@ -950,11 +1302,11 @@ export function IsoBatchSignModal({
                               <img
                                 src={item.pageThumbs[p]}
                                 alt={`Trang ${p}`}
-                                className="w-full h-full object-fill block select-none pointer-events-none"
+                                className="w-full h-full object-contain block select-none pointer-events-none"
                               />
                             ) : (
-                              <div className="flex h-full w-full items-center justify-center bg-slate-100 text-[9px] font-bold text-slate-400">
-                                P.{p}
+                              <div className="flex h-full w-full items-center justify-center bg-slate-100 text-[10px] font-bold text-slate-400">
+                                Trang {p}
                               </div>
                             )}
 
@@ -976,10 +1328,17 @@ export function IsoBatchSignModal({
                               />
                             ))}
 
-                            {/* Số trang góc dưới */}
-                            <span className="absolute bottom-0.5 left-0.5 rounded bg-slate-900/70 px-1 py-0.2 text-[8px] font-extrabold text-white pointer-events-none">
-                              {p}
-                            </span>
+                            {/* Huy hiệu ký & Số trang góc dưới */}
+                            <div className="absolute bottom-1 left-1 flex items-center gap-1 pointer-events-none">
+                              <span className="rounded bg-slate-900/80 px-1.5 py-0.5 text-[9px] font-extrabold text-white">
+                                P.{p}
+                              </span>
+                              {hasRequiredBox && (
+                                <span className="rounded bg-amber-600 px-1 py-0.5 text-[8px] font-bold text-white shadow-xs">
+                                  ✍ {boxesOnPage.length}
+                                </span>
+                              )}
+                            </div>
                           </button>
                         )
                       })}
@@ -1065,7 +1424,7 @@ export function IsoBatchSignModal({
                       )
                     })}
 
-                  {/* Khung chữ ký chuẩn theo mẫu của người duyệt */}
+                  {/* Khung chữ ký tương tác chuẩn của người duyệt (cố định theo mẫu, chữ ký & tên & chức vụ di chuyển độc lập) */}
                   {activeDoc?.boxes
                     .filter((b) => b.page === activePage)
                     .map((box, bIdx) => {
@@ -1073,105 +1432,20 @@ export function IsoBatchSignModal({
                       const boxesOnPage = activeDoc.boxes.filter((b) => b.page === activePage)
 
                       return (
-                        <div
+                        <BatchInteractiveSignBox
                           key={box.id}
-                          onClick={() => setSelectedBoxId(box.id)}
-                          className={`absolute rounded-md transition-shadow select-none ${
-                            isSelected
-                              ? "ring-2 ring-amber-400/80 shadow-md"
-                              : "hover:ring-1 hover:ring-amber-300/60 shadow-xs"
-                          }`}
-                          style={{
-                            left: `${box.xPct}%`,
-                            top: `${box.yPct}%`,
-                            width: `${box.wPct}%`,
-                            height: `${box.hPct}%`,
-                            border: `2px dashed ${theme.accentFg}`,
-                            backgroundColor: "rgba(245, 158, 11, 0.05)",
-                            zIndex: isSelected ? 30 : 20,
-                          }}
-                        >
-                          {/* Nhãn "Khung của bạn" phía trên góc trái */}
-                          <div
-                            className="absolute -top-5 left-0 flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap bg-white/95 pointer-events-none"
-                            style={{ color: theme.accentFg }}
-                          >
-                            <Lock size={10} className="text-emerald-600" />
-                            Khung của bạn {boxesOnPage.length > 1 ? `#${bIdx + 1}` : ""}
-                          </div>
-
-                          {/* Ruột hiển thị ảnh chữ ký và Tên / Chức vụ thật nằm gọn trong khung */}
-                          <div className="relative w-full h-full flex flex-col justify-between p-1.5 overflow-hidden">
-                            {/* Ảnh chữ ký căn giữa phần trên */}
-                            <div className="flex-1 min-h-0 flex items-center justify-center overflow-hidden">
-                              {sigImgUrl ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                  src={sigImgUrl}
-                                  alt="Chữ ký"
-                                  className="max-h-full max-w-full object-contain pointer-events-none"
-                                />
-                              ) : (
-                                <span className="text-[10px] font-bold text-amber-700 italic text-center px-1">
-                                  [Chữ ký {signerName}]
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Ô Tên & Chức vụ thật nằm ở đáy, gọn gàng bên trong khung */}
-                            <div className="shrink-0 flex flex-col gap-1 mt-1">
-                              {box.showName && (
-                                <div className="w-full border border-sky-400 bg-sky-50/90 text-sky-800 font-bold text-center text-xs py-1 rounded px-2 select-none shadow-xs truncate leading-tight">
-                                  {signerName || "Người ký"}
-                                </div>
-                              )}
-
-                              {box.showChucVu && (
-                                <div className="w-full border border-violet-400 bg-violet-50/90 text-violet-800 font-semibold text-center text-[11px] py-0.5 rounded px-2 select-none shadow-xs truncate leading-tight">
-                                  {signerChucVu || (isPheDuyet ? "Người phê duyệt" : "Người xem xét")}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Hàng nút bật/tắt Tên và Chức vụ đặt ngay sát mép dưới ngoài khung */}
-                          <div
-                            className="absolute -bottom-7 left-0 flex items-center gap-1.5 z-30 pointer-events-auto"
-                            onMouseDown={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                updateBoxConfig(box.id, { showName: !box.showName })
-                              }}
-                              className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
-                                box.showName
-                                  ? "bg-sky-50 border-sky-300 text-sky-700"
-                                  : "bg-slate-100 border-slate-300 text-slate-400"
-                              }`}
-                              title={box.showName ? "Ẩn họ tên" : "Hiện họ tên"}
-                            >
-                              <Eye size={12} /> Tên
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                updateBoxConfig(box.id, { showChucVu: !box.showChucVu })
-                              }}
-                              className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
-                                box.showChucVu
-                                  ? "bg-violet-50 border-violet-300 text-violet-700"
-                                  : "bg-slate-100 border-slate-300 text-slate-400"
-                              }`}
-                              title={box.showChucVu ? "Ẩn chức vụ" : "Hiện chức vụ"}
-                            >
-                              <Eye size={12} /> Chức vụ
-                            </button>
-                          </div>
-                        </div>
+                          box={box}
+                          isSelected={isSelected}
+                          theme={theme}
+                          boxesOnPageCount={boxesOnPage.length}
+                          boxIndex={bIdx}
+                          sigImgUrl={sigImgUrl}
+                          signerName={signerName}
+                          signerChucVu={signerChucVu}
+                          isPheDuyet={isPheDuyet}
+                          onSelect={() => setSelectedBoxId(box.id)}
+                          onUpdate={(updates) => updateBoxConfig(box.id, updates)}
+                        />
                       )
                     })}
                 </div>

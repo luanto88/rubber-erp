@@ -82,6 +82,12 @@ type ExtraSignPlacement = {
   nameY?: number
   nameWidth?: number
   nameHeight?: number
+  showChucVu?: boolean
+  chucVuText?: string
+  chucVuX?: number
+  chucVuY?: number
+  chucVuWidth?: number
+  chucVuHeight?: number
 }
 
 type SignPlacement = ExtraSignPlacement & {
@@ -268,6 +274,29 @@ async function getProfile(userId: string | null): Promise<SignerProfile | null> 
     .eq("id", userId)
     .single()
   return (data as SignerProfile | null) ?? null
+}
+
+function toTitleCase(str: string): string {
+  if (!str) return ""
+  return str
+    .toLowerCase()
+    .replace(/(?:^|\s)\S/g, (char) => char.toUpperCase())
+}
+
+async function getStaffChucVu(factoryId: string, userId: string | null): Promise<string> {
+  if (!userId) return ""
+  try {
+    const { data } = await supabaseAdmin
+      .from("maintenance_staff")
+      .select("chuc_vu, chuc_vu_chinh_quyen")
+      .eq("factory_id", factoryId)
+      .eq("profile_id", userId)
+      .eq("active", true)
+      .maybeSingle()
+    return data?.chuc_vu_chinh_quyen || data?.chuc_vu || ""
+  } catch {
+    return ""
+  }
 }
 
 function fmtDate(iso: string | null | undefined): string {
@@ -1528,17 +1557,36 @@ export async function POST(req: NextRequest) {
                   const pageLines = linesByPage[pageIndex] ?? []
                   const signerSlot = computeNameSlot(placement, ISO_SIGNER_NAME_STYLE)
                   const hasExistingName = findNearbyText(pageLines, signerSlot.xCenter, signerSlot.y)
-                  if (!hasExistingName) {
-                    const maxNameWidth = signerSlot.maxWidth
-                    let nameFontSize = 13
-                    while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(signerName, nameFontSize) > maxNameWidth) {
-                      nameFontSize -= 0.5
-                    }
-                    const nameWidth = signerNameFont.widthOfTextAtSize(signerName, nameFontSize)
-                    originalPages.getPage(pageIndex).drawText(signerName, {
+                  if (!hasExistingName || (typeof placement.nameX === "number" && typeof placement.nameY === "number")) {
+                    const formattedName = toTitleCase(signerName)
+                    const nameFontSize = 13
+                    const nameWidth = signerNameFont.widthOfTextAtSize(formattedName, nameFontSize)
+                    originalPages.getPage(pageIndex).drawText(formattedName, {
                       x: signerSlot.xCenter - nameWidth / 2,
                       y: signerSlot.y,
                       size: nameFontSize,
+                      font: signerNameFont,
+                      color: rgb(0, 0, 0),
+                    })
+                  }
+                }
+
+                if (placement.showChucVu !== false) {
+                  const chucVuText = placement.chucVuText || await getStaffChucVu(factoryId, signerUserId)
+                  if (chucVuText && chucVuText.trim()) {
+                    const cvFontSize = 13
+                    const cvWidth = signerNameFont.widthOfTextAtSize(chucVuText.trim(), cvFontSize)
+                    const cvXCenter = typeof placement.chucVuX === "number"
+                      ? placement.chucVuX + (placement.chucVuWidth ?? 100) / 2
+                      : (typeof placement.nameX === "number" ? placement.nameX + (placement.nameWidth ?? 100) / 2 : placement.x + placement.width / 2)
+                    const cvY = typeof placement.chucVuY === "number"
+                      ? placement.chucVuY
+                      : (typeof placement.nameY === "number" ? Math.max(0, placement.nameY - 18) : Math.max(0, placement.y - 36))
+
+                    originalPages.getPage(pageIndex).drawText(chucVuText.trim(), {
+                      x: cvXCenter - cvWidth / 2,
+                      y: cvY,
+                      size: cvFontSize,
                       font: signerNameFont,
                       color: rgb(0, 0, 0),
                     })
@@ -1579,18 +1627,37 @@ export async function POST(req: NextRequest) {
                   }
                   if (extraSignerName && extraP.showSignerName !== false) {
                     const extraSlot = computeNameSlot(extraP as SignPlacement, ISO_SIGNER_NAME_STYLE)
-                    let nameFontSize = 13
-                    while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize) > extraSlot.maxWidth) {
-                      nameFontSize -= 0.5
-                    }
-                    const nameWidth = signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize)
-                    originalPages.getPage(extraPageIndex).drawText(extraSignerName, {
+                    const formattedExtraName = toTitleCase(extraSignerName)
+                    const nameFontSize = 13
+                    const nameWidth = signerNameFont.widthOfTextAtSize(formattedExtraName, nameFontSize)
+                    originalPages.getPage(extraPageIndex).drawText(formattedExtraName, {
                       x: extraSlot.xCenter - nameWidth / 2,
                       y: extraSlot.y,
                       size: nameFontSize,
                       font: signerNameFont,
                       color: rgb(0, 0, 0),
                     })
+                  }
+                  if (extraP.showChucVu !== false) {
+                    const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, userId)
+                    if (extraCvText && extraCvText.trim()) {
+                      const cvFontSize = 13
+                      const cvWidth = signerNameFont.widthOfTextAtSize(extraCvText.trim(), cvFontSize)
+                      const cvXCenter = typeof extraP.chucVuX === "number"
+                        ? extraP.chucVuX + (extraP.chucVuWidth ?? 100) / 2
+                        : (typeof extraP.nameX === "number" ? extraP.nameX + (extraP.nameWidth ?? 100) / 2 : extraP.x + extraP.width / 2)
+                      const cvY = typeof extraP.chucVuY === "number"
+                        ? extraP.chucVuY
+                        : (typeof extraP.nameY === "number" ? Math.max(0, extraP.nameY - 18) : Math.max(0, extraP.y - 36))
+
+                      originalPages.getPage(extraPageIndex).drawText(extraCvText.trim(), {
+                        x: cvXCenter - cvWidth / 2,
+                        y: cvY,
+                        size: cvFontSize,
+                        font: signerNameFont,
+                        color: rgb(0, 0, 0),
+                      })
+                    }
                   }
                 } catch { /* bỏ qua lỗi embed bản sao */ }
               }
@@ -1716,17 +1783,36 @@ export async function POST(req: NextRequest) {
             const pageLines = linesByPage[pageIndex] ?? []
             const signerSlot = computeNameSlot(placement, ISO_SIGNER_NAME_STYLE)
             const hasExistingName = findNearbyText(pageLines, signerSlot.xCenter, signerSlot.y)
-            if (!hasExistingName) {
-              const maxNameWidth = signerSlot.maxWidth
-              let nameFontSize = 13
-              while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(signerName, nameFontSize) > maxNameWidth) {
-                nameFontSize -= 0.5
-              }
-              const nameWidth = signerNameFont.widthOfTextAtSize(signerName, nameFontSize)
-              originalPages.getPage(pageIndex).drawText(signerName, {
+            if (!hasExistingName || (typeof placement.nameX === "number" && typeof placement.nameY === "number")) {
+              const formattedName = toTitleCase(signerName)
+              const nameFontSize = 13
+              const nameWidth = signerNameFont.widthOfTextAtSize(formattedName, nameFontSize)
+              originalPages.getPage(pageIndex).drawText(formattedName, {
                 x: signerSlot.xCenter - nameWidth / 2,
                 y: signerSlot.y,
                 size: nameFontSize,
+                font: signerNameFont,
+                color: rgb(0, 0, 0),
+              })
+            }
+          }
+
+          if (placement.showChucVu !== false) {
+            const chucVuText = placement.chucVuText || await getStaffChucVu(factoryId, signerUserId)
+            if (chucVuText && chucVuText.trim()) {
+              const cvFontSize = 13
+              const cvWidth = signerNameFont.widthOfTextAtSize(chucVuText.trim(), cvFontSize)
+              const cvXCenter = typeof placement.chucVuX === "number"
+                ? placement.chucVuX + (placement.chucVuWidth ?? 100) / 2
+                : (typeof placement.nameX === "number" ? placement.nameX + (placement.nameWidth ?? 100) / 2 : placement.x + placement.width / 2)
+              const cvY = typeof placement.chucVuY === "number"
+                ? placement.chucVuY
+                : (typeof placement.nameY === "number" ? Math.max(0, placement.nameY - 18) : Math.max(0, placement.y - 36))
+
+              originalPages.getPage(pageIndex).drawText(chucVuText.trim(), {
+                x: cvXCenter - cvWidth / 2,
+                y: cvY,
+                size: cvFontSize,
                 font: signerNameFont,
                 color: rgb(0, 0, 0),
               })
@@ -1761,18 +1847,37 @@ export async function POST(req: NextRequest) {
                 }
                 if (extraSignerName && extraP.showSignerName !== false) {
                   const extraSlot = computeNameSlot(extraP as SignPlacement, ISO_SIGNER_NAME_STYLE)
-                  let nameFontSize = 13
-                  while (nameFontSize > 9 && signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize) > extraSlot.maxWidth) {
-                    nameFontSize -= 0.5
-                  }
-                  const nameWidth = signerNameFont.widthOfTextAtSize(extraSignerName, nameFontSize)
-                  originalPages.getPage(extraPageIndex).drawText(extraSignerName, {
+                  const formattedExtraName = toTitleCase(extraSignerName)
+                  const nameFontSize = 13
+                  const nameWidth = signerNameFont.widthOfTextAtSize(formattedExtraName, nameFontSize)
+                  originalPages.getPage(extraPageIndex).drawText(formattedExtraName, {
                     x: extraSlot.xCenter - nameWidth / 2,
                     y: extraSlot.y,
                     size: nameFontSize,
                     font: signerNameFont,
                     color: rgb(0, 0, 0),
                   })
+                }
+                if (extraP.showChucVu !== false) {
+                  const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, signerUserId)
+                  if (extraCvText && extraCvText.trim()) {
+                    const cvFontSize = 13
+                    const cvWidth = signerNameFont.widthOfTextAtSize(extraCvText.trim(), cvFontSize)
+                    const cvXCenter = typeof extraP.chucVuX === "number"
+                      ? extraP.chucVuX + (extraP.chucVuWidth ?? 100) / 2
+                      : (typeof extraP.nameX === "number" ? extraP.nameX + (extraP.nameWidth ?? 100) / 2 : extraP.x + extraP.width / 2)
+                    const cvY = typeof extraP.chucVuY === "number"
+                      ? extraP.chucVuY
+                      : (typeof extraP.nameY === "number" ? Math.max(0, extraP.nameY - 18) : Math.max(0, extraP.y - 36))
+
+                    originalPages.getPage(extraPageIndex).drawText(extraCvText.trim(), {
+                      x: cvXCenter - cvWidth / 2,
+                      y: cvY,
+                      size: cvFontSize,
+                      font: signerNameFont,
+                      color: rgb(0, 0, 0),
+                    })
+                  }
                 }
               } catch { /* bỏ qua lỗi embed bản sao */ }
             }

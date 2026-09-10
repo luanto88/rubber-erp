@@ -114,6 +114,12 @@ type ExtraSignPlacement = {
   nameY?: number
   nameWidth?: number
   nameHeight?: number
+  showChucVu?: boolean
+  chucVuText?: string
+  chucVuX?: number
+  chucVuY?: number
+  chucVuWidth?: number
+  chucVuHeight?: number
 }
 
 type SignPlacement = ExtraSignPlacement & {
@@ -214,6 +220,13 @@ function normalizeDocumentCode(value: string | null | undefined): string {
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "")
+}
+
+function toTitleCase(str: string | null | undefined): string {
+  if (!str) return ""
+  return str
+    .toLowerCase()
+    .replace(/(?:^|\s)\S/g, (char) => char.toUpperCase())
 }
 
 function formatDocumentCode(value: string | null | undefined): string {
@@ -422,6 +435,14 @@ export default function IsoDocumentDetailPage() {
     sigInnerY?: number
     sigInnerW?: number
     sigInnerH?: number
+    nameInnerX?: number
+    nameInnerY?: number
+    nameInnerW?: number
+    nameInnerH?: number
+    cvInnerX?: number
+    cvInnerY?: number
+    cvInnerW?: number
+    cvInnerH?: number
     thumbnails?: Record<number, string>
     thumbnailsLoading?: boolean
     rawTemplate?: {
@@ -455,6 +476,8 @@ export default function IsoDocumentDetailPage() {
   const prefixNodeRef = useRef<HTMLDivElement>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
   const sigInnerNodeRef = useRef<HTMLDivElement>(null)
+  const nameInnerNodeRef = useRef<HTMLDivElement>(null)
+  const cvInnerNodeRef = useRef<HTMLDivElement>(null)
   const pdfDocRef = useRef<unknown>(null)
 
   // Distribution
@@ -850,7 +873,14 @@ export default function IsoDocumentDetailPage() {
     const scale = viewport.height / pdfPageH
     setPlacementModal((prev) => {
       if (!prev) return null
-      let { sigX, sigY, sigW, sigH, nameX, nameY, nameW, nameH, qrX, qrY, qrW, qrH, sigInnerX, sigInnerY, sigInnerW, sigInnerH } = prev
+      let {
+        sigX, sigY, sigW, sigH,
+        nameX, nameY, nameW, nameH,
+        qrX, qrY, qrW, qrH,
+        sigInnerX, sigInnerY, sigInnerW, sigInnerH,
+        nameInnerX, nameInnerY, nameInnerW, nameInnerH,
+        cvInnerX, cvInnerY, cvInnerW, cvInnerH,
+      } = prev
       if (prev.rawTemplate?.soanThao) {
         const st = prev.rawTemplate.soanThao
         const frameCanvasX = st.x_pt * scale
@@ -869,15 +899,23 @@ export default function IsoDocumentDetailPage() {
         nameW = frameCanvasW
         nameH = nameH_pt * scale
 
-        const bottomH = (prev.showSignerName ? 24 : 0) + (prev.showChucVu && prev.signerChucVu ? 22 : 0)
-        const availW = frameCanvasW
-        const availH = Math.max(20, frameCanvasH - bottomH)
-
         if (typeof sigInnerW !== "number" || sigInnerW <= 0) {
-          sigInnerW = Math.max(30, Math.min(availW - 8, 110))
-          sigInnerH = Math.max(15, Math.min(availH - 6, 46))
-          sigInnerX = Math.max(0, (availW - sigInnerW) / 2)
-          sigInnerY = Math.max(0, (availH - sigInnerH) / 2)
+          sigInnerW = Math.max(30, Math.min(frameCanvasW - 8, 110))
+          sigInnerH = Math.max(15, Math.min(frameCanvasH * 0.55, 46))
+          sigInnerX = Math.max(0, (frameCanvasW - sigInnerW) / 2)
+          sigInnerY = 4
+        }
+        if (typeof nameInnerW !== "number" || nameInnerW <= 0) {
+          nameInnerW = Math.max(40, Math.min(frameCanvasW - 8, 120))
+          nameInnerH = 22
+          nameInnerX = Math.max(0, (frameCanvasW - nameInnerW) / 2)
+          nameInnerY = Math.max(10, frameCanvasH - (prev.showChucVu && prev.signerChucVu ? 46 : 24))
+        }
+        if (typeof cvInnerW !== "number" || cvInnerW <= 0) {
+          cvInnerW = Math.max(40, Math.min(frameCanvasW - 8, 120))
+          cvInnerH = 20
+          cvInnerX = Math.max(0, (frameCanvasW - cvInnerW) / 2)
+          cvInnerY = Math.max(26, frameCanvasH - 22)
         }
       }
       if (prev.rawTemplate?.qr) {
@@ -907,6 +945,14 @@ export default function IsoDocumentDetailPage() {
         sigInnerY,
         sigInnerW,
         sigInnerH,
+        nameInnerX,
+        nameInnerY,
+        nameInnerW,
+        nameInnerH,
+        cvInnerX,
+        cvInnerY,
+        cvInnerW,
+        cvInnerH,
       }
     })
   }
@@ -2359,6 +2405,14 @@ export default function IsoDocumentDetailPage() {
       sigInnerY: 0,
       sigInnerW: 0,
       sigInnerH: 0,
+      nameInnerX: 0,
+      nameInnerY: 0,
+      nameInnerW: 0,
+      nameInnerH: 0,
+      cvInnerX: 0,
+      cvInnerY: 0,
+      cvInnerW: 0,
+      cvInnerH: 0,
       thumbnails: {},
       thumbnailsLoading: false,
       rawTemplate,
@@ -2447,30 +2501,73 @@ export default function IsoDocumentDetailPage() {
 
     const nameH_pt = 20
     const chucVuH_pt = (placementModal.showChucVu && placementModal.signerChucVu) ? 18 : 0
-    const bottomH_pt = (placementModal.showSignerName ? nameH_pt : 0) + chucVuH_pt
 
     let x = sigX / canvasScale
     let y = pdfPageHeight - (sigY / canvasScale) - (sigH / canvasScale)
     let width = sigW / canvasScale
     let height = sigH / canvasScale
+    let nameX = placementModal.nameX / canvasScale
+    let nameY = pdfPageHeight - (placementModal.nameY / canvasScale) - (placementModal.nameH / canvasScale)
+    let nameWidth = placementModal.nameW / canvasScale
+    let nameHeight = placementModal.nameH / canvasScale
+    let chucVuX: number | undefined
+    let chucVuY: number | undefined
+    let chucVuWidth: number | undefined
+    let chucVuHeight: number | undefined
 
     if (st) {
-      const availH_pt = Math.max(10, st.h_pt - bottomH_pt)
-      const innerX_pt = placementModal.sigInnerX ? placementModal.sigInnerX / canvasScale : 0
-      const innerY_pt = placementModal.sigInnerY ? placementModal.sigInnerY / canvasScale : 0
-      const innerW_pt = placementModal.sigInnerW ? placementModal.sigInnerW / canvasScale : st.w_pt
-      const innerH_pt = placementModal.sigInnerH ? placementModal.sigInnerH / canvasScale : availH_pt
+      const boxW = sigW || (st.w_pt * canvasScale)
+      const boxH = sigH || (st.h_pt * canvasScale)
+
+      const sigInnerX = typeof placementModal.sigInnerX === "number" ? placementModal.sigInnerX : (boxW - 110) / 2
+      const sigInnerY = typeof placementModal.sigInnerY === "number" ? placementModal.sigInnerY : 4
+      const sigInnerW = typeof placementModal.sigInnerW === "number" && placementModal.sigInnerW > 0 ? placementModal.sigInnerW : Math.min(boxW - 8, 110)
+      const sigInnerH = typeof placementModal.sigInnerH === "number" && placementModal.sigInnerH > 0 ? placementModal.sigInnerH : Math.min(boxH * 0.55, 46)
+
+      const innerX_pt = (sigInnerX / boxW) * st.w_pt
+      const innerY_pt = (sigInnerY / boxH) * st.h_pt
+      const innerW_pt = (sigInnerW / boxW) * st.w_pt
+      const innerH_pt = (sigInnerH / boxH) * st.h_pt
 
       x = st.x_pt + innerX_pt
       width = Math.min(st.w_pt - innerX_pt, innerW_pt)
-      height = Math.min(availH_pt, innerH_pt)
-      y = st.y_pt + bottomH_pt + Math.max(0, availH_pt - innerY_pt - height)
-    }
+      height = Math.min(st.h_pt - innerY_pt, innerH_pt)
+      y = st.y_pt + st.h_pt - innerY_pt - height
 
-    const nameX = st ? st.x_pt : placementModal.nameX / canvasScale
-    const nameY = st ? st.y_pt + chucVuH_pt : pdfPageHeight - (placementModal.nameY / canvasScale) - (placementModal.nameH / canvasScale)
-    const nameWidth = st ? st.w_pt : placementModal.nameW / canvasScale
-    const nameHeight = st ? nameH_pt : placementModal.nameH / canvasScale
+      // Tên
+      const nameInnerX = typeof placementModal.nameInnerX === "number" ? placementModal.nameInnerX : (boxW - 120) / 2
+      const nameInnerY = typeof placementModal.nameInnerY === "number" ? placementModal.nameInnerY : (boxH - (placementModal.showChucVu && placementModal.signerChucVu ? 46 : 24))
+      const nameInnerW = typeof placementModal.nameInnerW === "number" && placementModal.nameInnerW > 0 ? placementModal.nameInnerW : Math.min(boxW - 8, 120)
+      const nameInnerH = typeof placementModal.nameInnerH === "number" && placementModal.nameInnerH > 0 ? placementModal.nameInnerH : 22
+
+      const nameX_pt = (nameInnerX / boxW) * st.w_pt
+      const nameY_pt = (nameInnerY / boxH) * st.h_pt
+      const nameW_pt = (nameInnerW / boxW) * st.w_pt
+      const nameH_pt = (nameInnerH / boxH) * st.h_pt
+
+      nameX = st.x_pt + nameX_pt
+      nameWidth = Math.min(st.w_pt - nameX_pt, nameW_pt)
+      nameHeight = Math.min(st.h_pt - nameY_pt, nameH_pt)
+      nameY = st.y_pt + st.h_pt - nameY_pt - nameHeight
+
+      // Chức vụ
+      if (placementModal.showChucVu && placementModal.signerChucVu) {
+        const cvInnerX = typeof placementModal.cvInnerX === "number" ? placementModal.cvInnerX : (boxW - 120) / 2
+        const cvInnerY = typeof placementModal.cvInnerY === "number" ? placementModal.cvInnerY : (boxH - 22)
+        const cvInnerW = typeof placementModal.cvInnerW === "number" && placementModal.cvInnerW > 0 ? placementModal.cvInnerW : Math.min(boxW - 8, 120)
+        const cvInnerH = typeof placementModal.cvInnerH === "number" && placementModal.cvInnerH > 0 ? placementModal.cvInnerH : 20
+
+        const cvX_pt = (cvInnerX / boxW) * st.w_pt
+        const cvY_pt = (cvInnerY / boxH) * st.h_pt
+        const cvW_pt = (cvInnerW / boxW) * st.w_pt
+        const cvH_pt = (cvInnerH / boxH) * st.h_pt
+
+        chucVuX = st.x_pt + cvX_pt
+        chucVuWidth = Math.min(st.w_pt - cvX_pt, cvW_pt)
+        chucVuHeight = Math.min(st.h_pt - cvY_pt, cvH_pt)
+        chucVuY = st.y_pt + st.h_pt - cvY_pt - chucVuHeight
+      }
+    }
 
     const qrX = placementModal.showQrPlacement
       ? (qrTmpl ? qrTmpl.x_pt : placementModal.qrX / canvasScale)
@@ -2497,6 +2594,12 @@ export default function IsoDocumentDetailPage() {
       nameY,
       nameWidth,
       nameHeight,
+      showChucVu: placementModal.showChucVu,
+      chucVuText: placementModal.signerChucVu,
+      chucVuX,
+      chucVuY,
+      chucVuWidth,
+      chucVuHeight,
       qrX,
       qrY,
       qrWidth,
@@ -4844,14 +4947,23 @@ export default function IsoDocumentDetailPage() {
                   {/* KHUNG DUY NHẤT CỦA NGƯỜI SOẠN THẢO (Cố định vị trí, Chữ ký co giãn bằng mũi tên 2 chiều & di chuyển trong khung) */}
                   {placementModal.showSignature && (
                     (() => {
-                      const bottomH = (placementModal.showSignerName ? 24 : 0) + (placementModal.showChucVu && placementModal.signerChucVu ? 22 : 0)
-                      const availW = placementModal.sigW
-                      const availH = Math.max(20, placementModal.sigH - bottomH)
+                      const frameW = placementModal.sigW
+                      const frameH = placementModal.sigH
 
-                      const sigInnerW = Math.min(availW, Math.max(30, placementModal.sigInnerW || Math.min(availW - 8, 110)))
-                      const sigInnerH = Math.min(availH, Math.max(15, placementModal.sigInnerH || Math.min(availH - 6, 46)))
-                      const sigInnerX = Math.max(0, Math.min(availW - sigInnerW, placementModal.sigInnerX ?? Math.max(0, (availW - sigInnerW) / 2)))
-                      const sigInnerY = Math.max(0, Math.min(availH - sigInnerH, placementModal.sigInnerY ?? Math.max(0, (availH - sigInnerH) / 2)))
+                      const sigInnerW = Math.min(frameW, Math.max(30, placementModal.sigInnerW || Math.min(frameW - 8, 110)))
+                      const sigInnerH = Math.min(frameH, Math.max(15, placementModal.sigInnerH || Math.min(frameH * 0.55, 46)))
+                      const sigInnerX = Math.max(0, Math.min(frameW - sigInnerW, placementModal.sigInnerX ?? Math.max(0, (frameW - sigInnerW) / 2)))
+                      const sigInnerY = Math.max(0, Math.min(frameH - sigInnerH, placementModal.sigInnerY ?? 4))
+
+                      const nameInnerW = Math.min(frameW, Math.max(40, placementModal.nameInnerW || Math.min(frameW - 8, 120)))
+                      const nameInnerH = placementModal.nameInnerH || 22
+                      const nameInnerX = Math.max(0, Math.min(frameW - nameInnerW, placementModal.nameInnerX ?? Math.max(0, (frameW - nameInnerW) / 2)))
+                      const nameInnerY = Math.max(0, Math.min(frameH - nameInnerH, placementModal.nameInnerY ?? Math.max(10, frameH - (placementModal.showChucVu && placementModal.signerChucVu ? 46 : 24))))
+
+                      const cvInnerW = Math.min(frameW, Math.max(40, placementModal.cvInnerW || Math.min(frameW - 8, 120)))
+                      const cvInnerH = placementModal.cvInnerH || 20
+                      const cvInnerX = Math.max(0, Math.min(frameW - cvInnerW, placementModal.cvInnerX ?? Math.max(0, (frameW - cvInnerW) / 2)))
+                      const cvInnerY = Math.max(0, Math.min(frameH - cvInnerH, placementModal.cvInnerY ?? Math.max(26, frameH - 22)))
 
                       return (
                         <div
@@ -4874,100 +4986,139 @@ export default function IsoDocumentDetailPage() {
                             Khung của bạn (Người soạn thảo)
                           </div>
 
-                          {/* Vùng chữ ký khả dụng: di chuyển và co giãn bằng mũi tên 2 chiều nhưng giới hạn trong khung */}
-                          <div className="relative w-full overflow-hidden" style={{ height: availH }}>
+                          {/* 1. Khối Chữ ký con: di chuyển và co giãn bằng mũi tên 2 chiều nhưng giới hạn trong khung */}
+                          <Draggable
+                            nodeRef={sigInnerNodeRef as RefObject<HTMLElement>}
+                            position={{ x: sigInnerX, y: sigInnerY }}
+                            bounds="parent"
+                            cancel=".resize-handle"
+                            onStop={(_, d) => setPlacementModal((p) => p ? { ...p, sigInnerX: d.x, sigInnerY: d.y } : null)}
+                          >
+                            <div
+                              ref={sigInnerNodeRef}
+                              style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: sigInnerW,
+                                height: sigInnerH,
+                                cursor: "move",
+                                userSelect: "none",
+                              }}
+                              className="relative group border border-dashed border-amber-400/80 bg-amber-50/30 rounded p-1 flex items-center justify-center hover:border-amber-600"
+                            >
+                              {placementModal.sigImgUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={placementModal.sigImgUrl}
+                                  alt="Chữ ký"
+                                  className="w-full h-full object-contain pointer-events-none"
+                                  draggable={false}
+                                />
+                              ) : (
+                                <span className="text-[10px] font-bold text-amber-700 italic text-center px-1">
+                                  [Chữ ký {placementModal.signerName}]
+                                </span>
+                              )}
+
+                              {/* Handle co giãn 2 chiều ở góc dưới bên phải (chuẩn mũi tên Tây Bắc - Đông Nam ↖ ↘) */}
+                              <div
+                                className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-125 transition-transform"
+                                title="Kéo để co giãn kích thước chữ ký trong khung"
+                                onPointerDown={(e) => {
+                                  e.stopPropagation()
+                                  e.preventDefault()
+                                  const startX = e.clientX
+                                  const startY = e.clientY
+                                  const startW = sigInnerW
+                                  const startH = sigInnerH
+                                  const curX = sigInnerX
+                                  const curY = sigInnerY
+
+                                  const onMove = (ev: PointerEvent) => {
+                                    const dx = ev.clientX - startX
+                                    const dy = ev.clientY - startY
+                                    const newW = Math.max(30, Math.min(frameW - curX, startW + dx))
+                                    const newH = Math.max(15, Math.min(frameH - curY, startH + dy))
+                                    setPlacementModal((p) => p ? { ...p, sigInnerW: newW, sigInnerH: newH } : null)
+                                  }
+                                  const onUp = () => {
+                                    window.removeEventListener("pointermove", onMove)
+                                    window.removeEventListener("pointerup", onUp)
+                                  }
+                                  window.addEventListener("pointermove", onMove)
+                                  window.addEventListener("pointerup", onUp)
+                                }}
+                              >
+                                <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="9 3 3 3 3 9" />
+                                  <polyline points="15 21 21 21 21 15" />
+                                  <line x1="3" y1="3" x2="10" y2="10" />
+                                  <line x1="21" y1="21" x2="14" y2="14" />
+                                </svg>
+                              </div>
+                            </div>
+                          </Draggable>
+
+                          {/* 2. Khối Họ tên con: di chuyển độc lập trong khung, font Times New Roman 13px chữ đứng, Title Case */}
+                          {placementModal.showSignerName && (
                             <Draggable
-                              nodeRef={sigInnerNodeRef as RefObject<HTMLElement>}
-                              position={{ x: sigInnerX, y: sigInnerY }}
+                              nodeRef={nameInnerNodeRef as RefObject<HTMLElement>}
+                              position={{ x: nameInnerX, y: nameInnerY }}
                               bounds="parent"
-                              cancel=".resize-handle"
-                              onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, sigInnerX: d.x, sigInnerY: d.y } : null)}
-                              onStop={(_, d) => setPlacementModal((p) => p ? { ...p, sigInnerX: d.x, sigInnerY: d.y } : null)}
+                              onStop={(_, d) => setPlacementModal((p) => p ? { ...p, nameInnerX: d.x, nameInnerY: d.y } : null)}
                             >
                               <div
-                                ref={sigInnerNodeRef}
+                                ref={nameInnerNodeRef}
                                 style={{
                                   position: "absolute",
                                   top: 0,
                                   left: 0,
-                                  width: sigInnerW,
-                                  height: sigInnerH,
+                                  width: nameInnerW,
+                                  height: nameInnerH,
                                   cursor: "move",
                                   userSelect: "none",
+                                  fontFamily: "'Times New Roman', Times, serif",
                                 }}
-                                className="relative group border border-dashed border-amber-400/80 bg-amber-50/30 rounded p-1 flex items-center justify-center hover:border-amber-600"
+                                className="border border-sky-400 bg-sky-50/90 text-sky-950 text-[13px] py-0.5 rounded px-1.5 select-none shadow-xs text-center truncate leading-tight font-normal hover:border-sky-600"
+                                title="Kéo để di chuyển vị trí tên trong khung"
                               >
-                                {placementModal.sigImgUrl ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={placementModal.sigImgUrl}
-                                    alt="Chữ ký"
-                                    className="w-full h-full object-contain pointer-events-none"
-                                    draggable={false}
-                                  />
-                                ) : (
-                                  <span className="text-[10px] font-bold text-amber-700 italic text-center px-1">
-                                    [Chữ ký {placementModal.signerName}]
-                                  </span>
-                                )}
-
-                                {/* Handle co giãn 2 chiều ở góc dưới bên phải */}
-                                <div
-                                  className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-125 transition-transform"
-                                  title="Kéo để co giãn kích thước chữ ký trong khung"
-                                  onPointerDown={(e) => {
-                                    e.stopPropagation()
-                                    e.preventDefault()
-                                    const startX = e.clientX
-                                    const startY = e.clientY
-                                    const startW = sigInnerW
-                                    const startH = sigInnerH
-                                    const curX = sigInnerX
-                                    const curY = sigInnerY
-
-                                    const onMove = (ev: PointerEvent) => {
-                                      const dx = ev.clientX - startX
-                                      const dy = ev.clientY - startY
-                                      const newW = Math.max(30, Math.min(availW - curX, startW + dx))
-                                      const newH = Math.max(15, Math.min(availH - curY, startH + dy))
-                                      setPlacementModal((p) => p ? { ...p, sigInnerW: newW, sigInnerH: newH } : null)
-                                    }
-                                    const onUp = () => {
-                                      window.removeEventListener("pointermove", onMove)
-                                      window.removeEventListener("pointerup", onUp)
-                                    }
-                                    window.addEventListener("pointermove", onMove)
-                                    window.addEventListener("pointerup", onUp)
-                                  }}
-                                >
-                                  <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                                    <polyline points="15 3 21 3 21 9" />
-                                    <polyline points="9 21 3 21 3 15" />
-                                    <line x1="21" y1="3" x2="14" y2="10" />
-                                    <line x1="3" y1="21" x2="10" y2="14" />
-                                  </svg>
-                                </div>
+                                {toTitleCase(placementModal.signerName || "Người soạn thảo")}
                               </div>
                             </Draggable>
-                          </div>
+                          )}
 
-                          {/* Ô Họ tên thật ở đáy khung */}
-                          <div className="shrink-0 flex flex-col gap-0.5 px-1 pb-1">
-                            {placementModal.showSignerName && (
-                              <div className="w-full border border-sky-400 bg-sky-50/90 text-sky-800 font-bold text-center text-xs py-0.5 rounded px-2 select-none shadow-xs truncate leading-tight">
-                                {placementModal.signerName || "Người soạn thảo"}
-                              </div>
-                            )}
-                            {placementModal.showChucVu && placementModal.signerChucVu && (
-                              <div className="w-full border border-violet-400 bg-violet-50/90 text-violet-800 font-semibold text-center text-[10px] py-0.5 rounded px-2 select-none shadow-xs truncate leading-tight">
+                          {/* 3. Khối Chức vụ con: di chuyển độc lập trong khung, font Times New Roman 13px chữ đứng */}
+                          {placementModal.showChucVu && placementModal.signerChucVu && (
+                            <Draggable
+                              nodeRef={cvInnerNodeRef as RefObject<HTMLElement>}
+                              position={{ x: cvInnerX, y: cvInnerY }}
+                              bounds="parent"
+                              onStop={(_, d) => setPlacementModal((p) => p ? { ...p, cvInnerX: d.x, cvInnerY: d.y } : null)}
+                            >
+                              <div
+                                ref={cvInnerNodeRef}
+                                style={{
+                                  position: "absolute",
+                                  top: 0,
+                                  left: 0,
+                                  width: cvInnerW,
+                                  height: cvInnerH,
+                                  cursor: "move",
+                                  userSelect: "none",
+                                  fontFamily: "'Times New Roman', Times, serif",
+                                }}
+                                className="border border-violet-400 bg-violet-50/90 text-violet-950 text-[13px] py-0.5 rounded px-1.5 select-none shadow-xs text-center truncate leading-tight font-normal hover:border-violet-600"
+                                title="Kéo để di chuyển vị trí chức vụ trong khung"
+                              >
                                 {placementModal.signerChucVu}
                               </div>
-                            )}
-                          </div>
+                            </Draggable>
+                          )}
 
-                          {/* Hàng nút bật/tắt Tên và Chức vụ đặt ngay sát mép dưới ngoài khung */}
+                          {/* Hàng nút bật/tắt Tên và Chức vụ đặt ngay sát mép dưới ngoài khung, xếp ngang không bị rớt dòng */}
                           <div
-                            className="absolute -bottom-7 left-0 flex items-center gap-1.5 z-30 pointer-events-auto"
+                            className="absolute -bottom-7 left-0 flex items-center gap-2 whitespace-nowrap z-30 pointer-events-auto"
                             onMouseDown={(e) => e.stopPropagation()}
                           >
                             <button
