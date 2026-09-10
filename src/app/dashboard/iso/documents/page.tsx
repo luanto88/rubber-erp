@@ -19,7 +19,7 @@ import {
   type IsoStandard,
   type IsoTrangThai,
 } from "../_components/iso-types"
-import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download, BadgeCheck } from "lucide-react"
+import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download, BadgeCheck, FileSignature } from "lucide-react"
 import Link from "next/link"
 import { DistributionModal } from "../_components/distribution-modal"
 import { DistributionManagement } from "../_components/distribution-management"
@@ -215,6 +215,13 @@ export default function IsoDocumentsPage() {
                   <Share2 size={15} /> Phân phối
                 </button>
               )}
+              <Link
+                href="/dashboard/ky/mau-vi-tri?modun=iso"
+                className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 border border-white/40 text-white font-bold rounded-xl transition-all"
+                title="Quản lý và vẽ mẫu vị trí ký cho các loại tài liệu / biểu mẫu ISO"
+              >
+                <FileSignature size={15} /> Mẫu vị trí ký
+              </Link>
               <Link
                 href="/dashboard/iso/documents/new-doc"
                 className="flex items-center gap-2 px-5 py-2.5 bg-white text-indigo-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
@@ -437,6 +444,15 @@ export default function IsoDocumentsPage() {
                                 <Pencil size={14} />
                               </Link>
                             )}
+                            {(doc.file_signed_pdf_url || doc.file_goc_url) && canEditDoc && (
+                              <Link
+                                href={`/dashboard/ky/mau-vi-tri?modun=iso&docId=${doc.id}&loaiTaiLieu=${encodeURIComponent(doc.loai_tai_lieu || doc.ma_tai_lieu || "")}&pdfUrl=${encodeURIComponent(doc.file_signed_pdf_url || doc.file_goc_url || "")}&returnTo=${encodeURIComponent("/dashboard/iso/documents")}`}
+                                title="Cài đặt mẫu vị trí ký"
+                                className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-700 transition-colors"
+                              >
+                                <FileSignature size={14} />
+                              </Link>
+                            )}
                             {canDeleteDoc && (
                               <button
                                 title="Xóa"
@@ -516,6 +532,15 @@ export default function IsoDocumentsPage() {
                                   className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
                                 >
                                   <Pencil size={14} />
+                                </Link>
+                              )}
+                              {(child.file_signed_pdf_url || child.file_goc_url) && canEditChild && (
+                                <Link
+                                  href={`/dashboard/ky/mau-vi-tri?modun=iso&docId=${child.id}&loaiTaiLieu=${encodeURIComponent(child.loai_tai_lieu || child.ma_tai_lieu || "")}&pdfUrl=${encodeURIComponent(child.file_signed_pdf_url || child.file_goc_url || "")}&returnTo=${encodeURIComponent("/dashboard/iso/documents")}`}
+                                  title="Cài đặt mẫu vị trí ký cho biểu mẫu này"
+                                  className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-700 transition-colors"
+                                >
+                                  <FileSignature size={14} />
                                 </Link>
                               )}
                               {canDeleteChild && (

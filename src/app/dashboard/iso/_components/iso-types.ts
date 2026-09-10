@@ -429,3 +429,40 @@ export type RecipientProfile = {
   department: string | null
   displayName: string // "{full_name} — {department}" đã format
 }
+
+// ── Types cho Ký duyệt số ISO (Placement & Batch Signing) ──────────────────────
+export type SignFileKind = "main" | "change_request" | "review_request"
+
+export type ExtraSignPlacement = {
+  page: number
+  x: number
+  y: number
+  width: number
+  height: number
+  showSignature?: boolean
+  showSignerName?: boolean
+  nameX?: number
+  nameY?: number
+  nameWidth?: number
+  nameHeight?: number
+}
+
+export type SignPlacement = ExtraSignPlacement & {
+  qrX?: number
+  qrY?: number
+  qrWidth?: number
+  qrHeight?: number
+  extraPlacements?: ExtraSignPlacement[]
+  showPrefix?: boolean
+  prefixX?: number
+  prefixY?: number
+  prefixWidth?: number
+  prefixHeight?: number
+}
+
+export type SignedFilePlacement = {
+  docId: string
+  kind: SignFileKind
+  placement: SignPlacement
+}
+

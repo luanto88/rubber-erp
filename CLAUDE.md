@@ -7311,3 +7311,198 @@ làm theo đúng phạm vi đã chốt.** 3 coupling cứng với Văn bản ph�
    cũ (không bị đưa nhầm sang `/iso-doc`).
 5. 2 mục còn treo của Giai đoạn 2 (bấm con dấu mở trang xác thực; mở bằng Acrobat thật) — chỉ xác
    minh được sau deploy.
+
+## Xác nhận (2026-09-09) — Giai đoạn 1+2+3 ISO đã deploy production và test tay PASS
+
+Người dùng đã deploy lên `qlsxkpt.vercel.app` và xác nhận:
+
+- **QR công khai hoạt động đúng** — quét QR in trên tài liệu ra đúng `/iso-doc/{id}`, hiển thị
+  đúng trạng thái.
+- **Tài liệu hết hiệu lực hiện banner vàng cảnh báo** ở trang xác thực chữ ký — đúng nhánh
+  `severity: "warn"` đã thiết kế ở Giai đoạn 2 (chữ ký PAdES hỏng do `restamp-pdf` ghi đè
+  `file_signed_pdf_url` là **bình thường**, không phải dấu hiệu giả mạo).
+
+⇒ **Toàn bộ lộ trình ISO Giai đoạn 1 (vá 4 lỗ hổng quyền) + Giai đoạn 2 (PAdES + trang xác
+thực) + Giai đoạn 3 (trang công khai QR) coi như HOÀN TẤT.** Không cần test lại trừ khi có
+báo lỗi mới. Commit cuối: `d6ff676`, working tree sạch.
+
+Vẫn chưa được xác nhận riêng (không chặn việc tiếp theo, test tuỳ nghi): 4 nút "Tải" ở trang
+chi tiết ISO; con dấu đỏ 38×13mm trên file DOCX mở bằng Word thật; 6 kịch bản tấn công API của
+Giai đoạn 1.
+
+---
+
+## Kế hoạch phiên sau (2026-09-09) — Mẫu vị trí ký cho ISO (giải quyết nỗi đau 19 lần kéo-thả)
+
+**CHƯA CODE GÌ.** Đây là việc có giá trị vận hành lớn nhất còn lại của module ISO, đã bị hoãn
+2 lần trước đó vì ưu tiên bảo mật/PAdES/QR.
+
+### Nỗi đau thật (số liệu đã đo trên DB, đừng đo lại)
+
+ISO dùng hệ ký RIÊNG (`api/sign/generate-pdf`), **không** dùng hệ ký dùng chung
+`src/lib/signing/requests.ts`. Mỗi người ký phải **tự kéo-thả lại vị trí chữ ký MỖI LẦN ký**,
+luôn bắt đầu từ toạ độ hard-code (`iso/documents/[id]/page.tsx` dòng ~2104 và ~2202:
+`sigX:100, sigY:100, nameX:90, nameY:168, qrX:430`).
+
+- 101 tài liệu ISO: **74 con / 27 cha**, có cha mang tới **18 hồ sơ con**.
+- 1 lượt phê duyệt bộ cha + 18 con = **19 lần kéo-thả liên tiếp** (`openPlacementForTask` ở
+  dòng ~2074 mở modal lần lượt cho từng file trong `signQueue`), chưa kể 2 file phụ soát xét.
+
+### Hạ tầng đã có sẵn — dùng lại được ngay, KHÔNG viết mới
+
+| Thành phần | Trạng thái |
+|---|---|
+| Bảng `mau_vi_tri` | Có sẵn (`20260902_signing_core_tables.sql`), unique `(factory_id, loai_tai_lieu, phien_ban)`, cột `khung` JSONB tự do — **KHÔNG có cột `modun`** |
+| `src/lib/signing/templates.ts` | `getLatestSignTemplate` / `saveSignTemplate` (chỉ tạo mới, không ghi đè — mỗi lần lưu tăng `phien_ban`); type `SignTemplateBox` đã tổng quát, comment đầu file ghi rõ "dùng chung cho mọi module upload PDF/DOCX (Văn bản, **ISO**...)" |
+| `/api/signing/templates` | GET/POST đã chạy thật |
+| `/dashboard/ky/mau-vi-tri` | Màn vẽ khung đã chạy thật cho Văn bản (kéo/resize, lưới snap 16px, nhân bản khung, 2 công tắc `show_name`/`show_chuc_vu`, tiền tố KT/TM/TL/TUQ, preview chữ ký/QR thật) |
+| Hệ toạ độ | `mau_vi_tri` dùng **point, gốc dưới-trái** — trùng khớp tuyệt đối với pdf-lib mà `generate-pdf` đang dùng ⇒ ánh xạ thuần, **không quy đổi** (đúng như đã xác nhận khi làm Văn bản) |
+
+### 4 coupling cứng với module Văn bản phải gỡ trước
+
+1. **`ky/mau-vi-tri/page.tsx` dòng ~539** query thẳng `.from("van_ban_documents")` để nạp
+   `thu_tu_ky_json`/`phe_duyet_user_id` khi mở kèm `?docId=`. ISO không có bảng/cột này.
+2. **`api/signing/templates/route.ts` dòng ~81-86** gate POST bằng `documents.create`
+   (`hasDocumentsCreatePermission`) ⇒ người chỉ có quyền `iso.*` bị **403** khi lưu mẫu.
+3. **Từ vựng vai trò cố định** — `BaseRoleId` (dòng 53) = `ky_buoc | phe_duyet | qr | ngay_ky |
+   ghi_chu`, cùng `ROLE_ORDER`/`ROLE_COLORS`/`BASE_ROLE_DEFS`. ISO là
+   `soan_thao → xem_xet → phe_duyet` (3 vai trò CỐ ĐỊNH, không phải N bước động như Văn bản).
+4. **`mau_vi_tri` namespace phẳng, thiếu cột `modun`** — hiện 2 tập mã rời nhau (Văn bản:
+   BB/BC/CV/DN/KH/TB/TTR/VB — ISO: CS/F/HD/MT/OB/PL/QC/QT/QĐ/ST/TC) nên **chưa va chạm**,
+   nhưng không có gì bảo vệ nếu sau này trùng ký hiệu.
+
+### ⚠️ Khác biệt kiến trúc ISO ↔ Văn bản — đọc kỹ trước khi thiết kế
+
+- **Hàng đợi nhiều file/lượt ký** (khác hẳn Văn bản 1 file/lượt): 1 lượt phê duyệt ISO đi qua
+  tài liệu cha + N hồ sơ con + tối đa 2 file phụ soát xét (`change_request`/`review_request`).
+  Mẫu phải áp được cho **cả hàng đợi**, không chỉ file đầu tiên.
+- **3 cột placement riêng** trên `iso_documents`: `soan_thao_placement` / `xem_xet_placement` /
+  `phe_duyet_placement` (JSONB) — khác Văn bản dùng 1 cột `placement_ky` gộp. Quyết định
+  "chốt mẫu vào đâu" phải tính đến điều này.
+- **Rule ẩn/hiện đã chốt, giữ nguyên**: tài liệu cha chỉ ẩn được **tên**, không ẩn được chữ ký;
+  hồ sơ con/file phụ ẩn được **cả hai** (`placementDocIsCon`, dòng ~824).
+- **Rule QR đã chốt, giữ nguyên**: QR chỉ đặt/kéo-thả **1 lần ở bước `soan_thao`**, áp dụng cho
+  **TẤT CẢ các trang**; bước `xem_xet`/`phe_duyet` **không** hiện lại khung QR.
+- **File phụ soát xét**: tuyệt đối không chạm footer (PDF/DOCX/XLSX) — xem
+  `.claude/rules/17-iso-soat-xet.md`.
+- **Nhánh Office (DOCX/XLSX)** dùng tag `{{...}}`, **không có khái niệm vị trí** ⇒ không đi qua
+  màn mẫu, giống hệt cách Văn bản đã xử lý.
+
+### Câu hỏi PHẢI hỏi người dùng trước khi code (chưa có câu trả lời)
+
+1. **Khoá mẫu là gì?** `mau_vi_tri.loai_tai_lieu` chỉ có 11 giá trị (QT, HD, F, PL...). Với
+   tài liệu cha (QT/HD/CS...) — trang bìa/trang duyệt theo mẫu chuẩn nên **1 mẫu / 1 loại** là
+   hợp lý. Nhưng **hồ sơ con `F` là biểu mẫu, mỗi mã F có layout hoàn toàn khác nhau** — 1 mẫu
+   chung cho tất cả `F` gần như chắc chắn sai vị trí. Hỏi: dùng khoá theo `loai_tai_lieu` (như
+   Văn bản), hay theo từng `ma_tai_lieu` cụ thể (vd `NMCB-QT01-F01`), hay lai (cha theo loại,
+   con theo mã)? **Không tự quyết** — đây là quyết định định hình toàn bộ phần còn lại.
+2. **Vào màn cài đặt vị trí lúc nào?** Văn bản đã chốt: **mọi lần** "Gửi ký" file PDF đều phải
+   đi qua màn xác nhận vị trí (kể cả khi đã có mẫu). ISO có tới 19 file/lượt — bắt xác nhận
+   từng file sẽ **không giải quyết được nỗi đau gốc**. Hỏi: đặt mẫu 1 lần ở màn riêng
+   (Cài đặt), rồi lúc ký chỉ nhập PIN — hay vẫn xác nhận nhưng gộp 1 màn cho cả hàng đợi?
+3. **Phạm vi phiên đầu**: chỉ nhánh "Soạn thảo/Soát xét" (`iso/documents/[id]`), hay làm luôn
+   "Thực hiện hồ sơ ISO" (`iso/forms/[id]`, 9 hồ sơ, `SignPlacementModal` riêng)? Khuyến nghị
+   tách phiên.
+
+### Nguyên tắc bắt buộc
+
+- `api/sign/generate-pdf/route.ts` là **ROUTE KÝ THẬT ĐANG CHẠY PRODUCTION** cho 101 tài liệu.
+  Áp dụng đúng bài học Văn bản: **tách 2 luồng theo cờ `tu_mau`, kiểm theo TỪNG FILE** — file
+  nào không có mẫu thì rơi về canvas kéo-thả cũ, **không sửa 1 dòng nào** của đường cũ. Tài
+  liệu đang luân chuyển dở khi deploy phải chạy y hệt như trước.
+- **Không đụng** `restamp-pdf` (đóng dấu hết hiệu lực) và `generate-office` (nhánh tag).
+- Verify bằng cách gọi thẳng code thật qua `node --experimental-strip-types` + trích lại nội
+  dung PDF bằng `pdfjs` (công cụ độc lập) — mirror đúng cách đã làm ở Văn bản (158 assertion),
+  không chỉ tin `tsc`/`eslint`.
+- Chỉ dùng `npx tsc --noEmit` + `npx eslint` — không chạy `npm run build`.
+
+### Prompt mở đầu session sau
+
+```
+Đọc mục "Xác nhận (2026-09-09)" và "Kế hoạch phiên sau (2026-09-09) — Mẫu vị trí ký cho ISO"
+ở cuối CLAUDE.md. Toàn bộ lộ trình ISO Giai đoạn 1+2+3 (vá lỗ hổng quyền, PAdES + trang xác
+thực, trang công khai QR) ĐÃ DEPLOY PRODUCTION VÀ TEST TAY PASS — không cần test lại, không
+cần khảo sát lại.
+
+Việc phiên này: xây MẪU VỊ TRÍ KÝ CHO ISO, tương tự màn đã chạy thật cho Văn bản
+(/dashboard/ky/mau-vi-tri + bảng mau_vi_tri + /api/signing/templates), để chấm dứt việc phải
+kéo-thả lại vị trí chữ ký mỗi lần ký — bộ tài liệu cha + 18 hồ sơ con hiện phải kéo-thả 19 lần
+liên tiếp cho 1 lượt phê duyệt.
+
+Toàn bộ khảo sát đã có sẵn trong CLAUDE.md, ĐỪNG điều tra lại: hạ tầng dùng lại được
+(mau_vi_tri, templates.ts, /api/signing/templates, màn ky/mau-vi-tri), 4 coupling cứng với
+Văn bản phải gỡ (query van_ban_documents dòng ~539; gate documents.create dòng ~81-86; từ vựng
+vai trò BaseRoleId dòng 53; thiếu cột modun), và 5 khác biệt kiến trúc ISO↔Văn bản (hàng đợi
+nhiều file/lượt, 3 cột placement riêng, rule ẩn/hiện cha-con, rule QR chỉ bước soạn thảo,
+nhánh Office không có vị trí).
+
+BẮT BUỘC hỏi tôi qua AskUserQuestion trước khi viết dòng code nào — 3 câu đã liệt kê sẵn trong
+mục "Câu hỏi PHẢI hỏi người dùng": (1) khoá mẫu theo loai_tai_lieu hay ma_tai_lieu (hồ sơ con F
+mỗi mã một layout khác nhau, đây là câu quan trọng nhất); (2) vào màn cài đặt vị trí lúc nào
+(bắt xác nhận từng file sẽ không giải quyết được nỗi đau 19 lần); (3) phiên này chỉ làm nhánh
+Soạn thảo/Soát xét hay làm luôn Thực hiện hồ sơ ISO.
+
+Nguyên tắc bắt buộc: api/sign/generate-pdf/route.ts đang chạy production cho 101 tài liệu —
+tách 2 luồng theo cờ tu_mau kiểm theo TỪNG FILE, file không có mẫu rơi về canvas cũ không sửa
+1 dòng nào; không đụng restamp-pdf và generate-office; verify bằng script gọi code thật +
+trích PDF bằng pdfjs, không chỉ tin tsc/eslint.
+
+Chỉ dùng npx tsc --noEmit + npx eslint — không chạy npm run build.
+```
+
+## Cập nhật 2026-09-09 — Hoàn tất Session 1: Hạ tầng & Màn Cài đặt vị trí ký ISO (/ky/mau-vi-tri)
+
+Đã hoàn thành toàn bộ công việc theo kế hoạch Session 1 được phê duyệt trong `implementation_plan.md`:
+1. **Hạ tầng vai trò & Schema (`src/lib/signing/templates.ts`)**:
+   - Khai báo vai trò ISO: `soan_thao`, `xem_xet`, `phe_duyet`, `qr` (`ISO_ROLE_ORDER`, `ISO_ROLE_DEFS`, `ISO_ROLE_COLORS`). Bỏ hoàn toàn `ngay_ky` và `ghi_chu` cho ISO.
+   - Cấu hình mặc định đúng yêu cầu người dùng: `showNameDefault: false`, `showChucVuDefault: false`, `signAs: null` (Ký trực tiếp).
+   - Hàm `formatIsoTemplateKey`: chuẩn hóa key lưu trữ `iso:code:${code}` hoặc `iso:loai:${loai}` trên cột `loai_tai_lieu` (TEXT) mà không phá schema DB.
+   - Hàm `getLatestSignTemplate`: hỗ trợ `fallbackLoai` (ưu tiên tìm theo mã biểu mẫu `iso:code:...`, nếu chưa có sẽ fallback về mẫu của loại tài liệu `iso:loai:...`).
+2. **API Endpoint (`src/app/api/signing/templates/route.ts`)**:
+   - Gỡ coupling cứng `documents.create`: Khi `modun=iso` hoặc key `iso:...`, gate quyền theo `iso.create` / `iso.edit` / `iso.signature` hoặc `isAdmin`. Giữ nguyên 100% logic của module Văn bản.
+   - GET API hỗ trợ nạp mẫu ISO kèm fallback.
+3. **Màn hình Cài đặt vị trí ký (`src/app/dashboard/ky/mau-vi-tri/page.tsx`)**:
+   - Thêm hỗ trợ `modun=iso`: truy vấn metadata và danh sách hồ sơ con từ `iso_documents`.
+   - Đối với Cấp 2: tự động ẩn vai trò `xem_xet` khỏi giao diện.
+   - Hiển thị thanh thumbnail bên trái có badge chấm màu trực quan thể hiện các trang đã được đặt khung.
+   - Cung cấp thanh chuyển đổi nhanh giữa Quy trình chính và các Biểu mẫu con trong bộ tài liệu.
+   - Đồng bộ giao diện, canh chỉnh lưới (16px snap-to-grid), xem trước, tùy chọn panel bên phải.
+4. **Các điểm điều hướng (`iso/documents/page.tsx` & `iso/documents/[id]/page.tsx`)**:
+   - Banner trang danh sách có nút "Mẫu vị trí ký" và từng dòng có icon thao tác nhanh.
+   - Trang chi tiết có nút "Cài đặt vị trí ký" dẫn sang màn vẽ mẫu và quay trở lại sau khi hoàn tất.
+5. **Kiểm tra chất lượng**:
+   - `npx tsc --noEmit` pass 0 lỗi.
+   - `npx eslint` pass 0 lỗi.
+
+### Tinh chỉnh & Khắc phục Màn 1 sau phản hồi người dùng (2026-09-09 & 2026-09-10):
+- **Bỏ popup confirm() trình duyệt**: `handleSwitchIsoDoc` chuyển sang tự động lưu ngầm (`auto-save`) mẫu của tài liệu hiện tại nếu `dirty` rồi chuyển tab mượt mà, kèm Toast xanh thông báo.
+- **Huy hiệu trạng thái trên từng tab Bộ hồ sơ**: Hiển thị trực quan `✓ Đã đặt` (xanh) hoặc `• Chưa đặt` (vàng) cho Quy trình chính và từng Biểu mẫu con.
+- **Ràng buộc toàn bộ biểu mẫu**: Chặn xác nhận gửi đi nếu còn biểu mẫu kèm theo có file PDF chưa được cài đặt vị trí.
+- **Luồng Soạn thảo chuẩn hóa (`iso/documents/[id]`)**: Ẩn nút "Gửi xem xét" trực tiếp ở `draft`/`tra_ve`, thay bằng nút chính "Cài đặt vị trí & Gửi đi". Khi quay về từ màn cài đặt vị trí kèm `confirmedSignTemplate=1`, hệ thống tự động dọn query param và kích hoạt sẵn Modal PIN gửi duyệt.
+- **Bỏ quy tắc 3 khung bắt buộc cho Biểu mẫu (F) và Phụ lục (HD, PL)**:
+  - Chỉ Quy trình chính (Parent document) mới bắt buộc đủ các vai trò theo Cấp 1 (3 vai trò) hoặc Cấp 2 (2 vai trò).
+  - Biểu mẫu (F), Phụ lục (HD/PL), và các hồ sơ con được miễn trừ: không bị kiểm tra thiếu vai trò (`missingRequired = []`), ẩn nhãn `• bắt buộc` trên sidebar, cho phép đặt tùy ý số lượng khung ký (0, 1, 2, 3 khung) hoặc lưu mẫu rỗng (cho biểu mẫu trắng không cần ký).
+
+## Cập nhật 2026-09-10 — Hoàn tất Phần 2: Màn hình Ký duyệt Tập trung & Nâng cấp Trang Tra cứu QR
+
+Đã hoàn thành toàn bộ các yêu cầu của Phần 2 theo kế hoạch phê duyệt:
+1. **Sửa lỗi hiển thị vị trí khung trên Thumbnail (`mau-vi-tri/page.tsx`)**:
+   - Khung thumbnail tự động điều chỉnh theo đúng tỷ lệ trang thật `aspectRatio: pageDims[p] ? `${pageDims[p].w} / ${pageDims[p].h}` : "1 / 1.414"`.
+   - Vẽ khung chữ nhật mini tại đúng tọa độ thật `%` (`r.box.xPct`, `r.box.yPct`, `r.box.wPct`, `r.box.hPct`) đè lên ảnh trang PDF thay vì chấm tròn cố định ở góc. Di chuyển đồng bộ theo thời gian thực khi kéo-thả khung trên canvas.
+2. **Màn hình Ký duyệt Tập trung (`IsoBatchSignModal.tsx`)**:
+   - Chấm dứt 19 popup modal kéo-thả giật giật.
+   - Phân nhóm hồ sơ trên thanh thumbnail trái: Quy trình chính + File phụ + Biểu mẫu con.
+   - Tự động nạp mẫu vị trí từ `mau_vi_tri` (`iso:code:...` hoặc `iso:loai:...`).
+   - Khung chữ ký mẫu hiển thị ảnh chữ ký thật của người duyệt tại đúng tọa độ template, cho phép vi chỉnh vị trí và tùy chọn Họ & Tên, Chức vụ, Tiền tố ký thay, nhân bản khung (+).
+   - Quy tắc chặn lưu: Cho phép hoàn tất ngay nếu chữ ký chỉ có ở Quy trình chính (Linh hoạt cho Lãnh đạo); bắt buộc ký đủ khung nếu có biểu mẫu con được phân công.
+   - Nhập mã PIN 1 lần duy nhất để ký số hàng loạt qua `/api/sign/generate-pdf`.
+3. **Tích hợp vào Trang Chi tiết ISO (`documents/[id]/page.tsx`)**:
+   - Nút "Ký xem xét & Gửi phê duyệt", "Phê duyệt & Ban hành", "Ký xem xét & Gửi phê duyệt lại" kích hoạt `IsoBatchSignModal`.
+4. **Nâng cấp Trang Tra cứu QR Công khai (`/iso-doc/[id]` & `/api/iso/public-doc/[id]`)**:
+   - Quét QR cha: Hiện thêm panel "Hồ sơ & Biểu mẫu trong bộ này" kèm link xem chi tiết.
+   - Quét QR con: Hiện thanh thông báo liên kết "Thuộc Quy trình cha: [Mã] · [Tên]" kèm nút chuyển sang xem Quy trình cha.
+5. **Kiểm tra chất lượng**: `npx tsc --noEmit` pass 0 lỗi; `npx eslint` pass 0 lỗi.
+
+
+
+

@@ -1,0 +1,8 @@
+
+C:\Users\Software\rubber-erp\src\app\dashboard\ky\mau-vi-tri\page.tsx
+  503:67  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                               @typescript-eslint/no-explicit-any
+  725:6   warning  React Hook useEffect has missing dependencies: 'activeDocLabel', 'activeLoai', and 'activePdfUrl'. Either include them or remove the dependency array                                                                                                                                                  react-hooks/exhaustive-deps
+  890:6   warning  React Hook useMemo has missing dependencies: 'isIso', 'isoDocData.cap_tl', 'isoDocData.phe_duyet', 'isoDocData.phe_duyet_user_id', 'isoDocData.soan_thao', 'isoDocData.soan_thao_user_id', 'isoDocData.xem_xet', and 'isoDocData.xem_xet_user_id'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+✖ 3 problems (1 error, 2 warnings)
+

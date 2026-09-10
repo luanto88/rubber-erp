@@ -69,9 +69,94 @@ export type SignTemplateRow = {
   tao_luc: string
 }
 
+// ── Định nghĩa vai trò cho module ISO ──────────────────────────────────────────
+export type IsoSignRoleId = "soan_thao" | "xem_xet" | "phe_duyet" | "qr"
+export const ISO_ROLE_ORDER: IsoSignRoleId[] = ["soan_thao", "xem_xet", "phe_duyet", "qr"]
+
+export const ISO_ROLE_DEFS: Record<
+  IsoSignRoleId,
+  {
+    label: string
+    loai: SignTemplateBoxLoai
+    batBuoc: boolean
+    showNameDefault: boolean
+    showChucVuDefault: boolean
+    defaultBox: { xPct: number; yPct: number; wPct: number; hPct: number }
+  }
+> = {
+  soan_thao: {
+    label: "Người soạn thảo",
+    loai: "chu_ky",
+    batBuoc: true,
+    showNameDefault: false,
+    showChucVuDefault: false,
+    defaultBox: { xPct: 8, yPct: 74, wPct: 26, hPct: 14 },
+  },
+  xem_xet: {
+    label: "Người xem xét",
+    loai: "chu_ky",
+    batBuoc: true,
+    showNameDefault: false,
+    showChucVuDefault: false,
+    defaultBox: { xPct: 37, yPct: 74, wPct: 26, hPct: 14 },
+  },
+  phe_duyet: {
+    label: "Người phê duyệt",
+    loai: "chu_ky",
+    batBuoc: true,
+    showNameDefault: false,
+    showChucVuDefault: false,
+    defaultBox: { xPct: 66, yPct: 74, wPct: 26, hPct: 14 },
+  },
+  qr: {
+    label: "Mã QR xác thực",
+    loai: "qr",
+    batBuoc: false,
+    showNameDefault: false,
+    showChucVuDefault: false,
+    defaultBox: { xPct: 80, yPct: 6, wPct: 14, hPct: 10 },
+  },
+}
+
+export const ISO_ROLE_COLORS: Record<IsoSignRoleId, { fg: string; bg: string }> = {
+  soan_thao: { fg: "#0284c7", bg: "rgba(2,132,199,.14)" },
+  xem_xet: { fg: "#d97706", bg: "rgba(217,119,6,.14)" },
+  phe_duyet: { fg: "#059669", bg: "rgba(5,150,105,.14)" },
+  qr: { fg: "#7c3aed", bg: "rgba(124,58,237,.14)" },
+}
+
+/**
+ * Chuẩn hoá key mẫu cho ISO:
+ * - Theo loại: `iso:loai:${loai}` (vd: `iso:loai:QT`, `iso:loai:HD`, `iso:loai:F`, `iso:loai:PL`)
+ * - Theo mã: `iso:code:${code}` (vd: `iso:code:NMCB-QT01-F01`)
+ */
+export function formatIsoTemplateKey(codeOrType: string, isSpecificCode = false): string {
+  const clean = codeOrType.trim()
+  if (clean.startsWith("iso:")) return clean
+  return isSpecificCode ? `iso:code:${clean}` : `iso:loai:${clean}`
+}
+
+export function parseTemplateKey(key: string): {
+  modun: "van_ban" | "iso"
+  isCode: boolean
+  code: string
+} {
+  if (key.startsWith("iso:code:")) {
+    return { modun: "iso", isCode: true, code: key.slice("iso:code:".length) }
+  }
+  if (key.startsWith("iso:loai:")) {
+    return { modun: "iso", isCode: false, code: key.slice("iso:loai:".length) }
+  }
+  if (key.startsWith("iso:")) {
+    return { modun: "iso", isCode: false, code: key.slice("iso:".length) }
+  }
+  return { modun: "van_ban", isCode: false, code: key }
+}
+
 export async function getLatestSignTemplate(
   factoryId: string,
   loaiTaiLieu: string,
+  options?: { fallbackLoai?: string },
 ): Promise<SignTemplateRow | null> {
   const { data, error } = await getSupabaseAdmin()
     .from("mau_vi_tri")
@@ -82,7 +167,22 @@ export async function getLatestSignTemplate(
     .limit(1)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  return (data as SignTemplateRow | null) ?? null
+  if (data) return data as SignTemplateRow
+
+  if (options?.fallbackLoai && options.fallbackLoai !== loaiTaiLieu) {
+    const { data: fallbackData, error: fallbackError } = await getSupabaseAdmin()
+      .from("mau_vi_tri")
+      .select("*")
+      .eq("factory_id", factoryId)
+      .eq("loai_tai_lieu", options.fallbackLoai)
+      .order("phien_ban", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (fallbackError) throw new Error(fallbackError.message)
+    return (fallbackData as SignTemplateRow | null) ?? null
+  }
+
+  return null
 }
 
 export async function saveSignTemplate(params: {
@@ -90,8 +190,9 @@ export async function saveSignTemplate(params: {
   loaiTaiLieu: string
   khung: SignTemplateBox[]
   taoBoi: string
+  allowEmpty?: boolean
 }): Promise<SignTemplateRow> {
-  if (!params.khung.length) {
+  if (!params.khung.length && !params.allowEmpty) {
     throw new Error("Chưa đặt khung nào — cần ít nhất 1 vai trò bắt buộc trước khi lưu mẫu")
   }
   const latest = await getLatestSignTemplate(params.factoryId, params.loaiTaiLieu)

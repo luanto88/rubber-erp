@@ -30,6 +30,7 @@ const DOC_COLS = [
   "ngay_het_hieu_luc",
   "ma_tai_lieu_cu",
   "ma_tai_lieu_moi",
+  "parent_doc_id",
   "file_signed_pdf_url",
   "file_signed_office_url",
   "file_goc_url",
@@ -45,6 +46,7 @@ type DocRow = {
   ten_tai_lieu: string | null
   loai_tai_lieu: string | null
   phan_loai_tl: string | null
+  parent_doc_id: string | null
   phong_ban: string | null
   cap_tl: string | null
   lan_ban_hanh: string | null
@@ -138,6 +140,61 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const expired = doc.trang_thai === "het_hieu_luc"
     const replacement = expired ? await findReplacement(doc) : null
 
+    // Liên kết Cha - Con phục vụ tra cứu QR:
+    // 1. Nếu là tài liệu cha: Lấy danh sách các biểu mẫu con đính kèm trong cùng bộ
+    let childDocs: Array<{
+      id: string
+      maTaiLieu: string | null
+      tenTaiLieu: string | null
+      loaiTaiLieu: string | null
+      lanBanHanh: string | null
+      fileUrl: string | null
+    }> = []
+
+    if (doc.phan_loai_tl !== "con") {
+      const { data: children } = await supabase
+        .from("iso_documents")
+        .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, lan_ban_hanh, file_signed_pdf_url, file_signed_office_url, file_goc_url")
+        .eq("factory_id", doc.factory_id)
+        .eq("parent_doc_id", doc.id)
+        .eq("trang_thai", "co_hieu_luc")
+        .order("ma_tai_lieu", { ascending: true })
+
+      if (children && children.length > 0) {
+        childDocs = children.map((c) => ({
+          id: c.id,
+          maTaiLieu: c.ma_tai_lieu,
+          tenTaiLieu: c.ten_tai_lieu,
+          loaiTaiLieu: c.loai_tai_lieu,
+          lanBanHanh: c.lan_ban_hanh,
+          fileUrl: c.file_signed_pdf_url || c.file_signed_office_url || c.file_goc_url,
+        }))
+      }
+    }
+
+    // 2. Nếu là biểu mẫu con: Lấy thông tin Quy trình cha
+    let parentDoc: {
+      id: string
+      maTaiLieu: string | null
+      tenTaiLieu: string | null
+    } | null = null
+
+    if (doc.parent_doc_id) {
+      const { data: parent } = await supabase
+        .from("iso_documents")
+        .select("id, ma_tai_lieu, ten_tai_lieu")
+        .eq("id", doc.parent_doc_id)
+        .maybeSingle()
+
+      if (parent) {
+        parentDoc = {
+          id: parent.id,
+          maTaiLieu: parent.ma_tai_lieu,
+          tenTaiLieu: parent.ten_tai_lieu,
+        }
+      }
+    }
+
     return NextResponse.json({
       id: doc.id,
       maTaiLieu: doc.ma_tai_lieu,
@@ -153,6 +210,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       // Với bản hết hiệu lực, restamp-pdf đã GHI ĐÈ file_signed_pdf_url bằng bản đóng dấu
       // "HẾT HIỆU LỰC" ⇒ QR cũ quét ra đúng bản có dấu, không cần thêm cột nào.
       fileUrl: doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url,
+      childDocs,
+      parentDoc,
       replacement: replacement
         ? {
             id: replacement.id,

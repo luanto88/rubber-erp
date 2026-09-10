@@ -18,6 +18,15 @@ type ReplacementInfo = {
   ngayHieuLuc: string | null
 }
 
+type PublicChildDoc = {
+  id: string
+  maTaiLieu: string | null
+  tenTaiLieu: string | null
+  loaiTaiLieu: string | null
+  lanBanHanh: string | null
+  fileUrl: string | null
+}
+
 type PublicDocResponse = {
   id: string
   maTaiLieu: string | null
@@ -31,6 +40,12 @@ type PublicDocResponse = {
   ngayHieuLuc: string | null
   ngayHetHieuLuc: string | null
   fileUrl: string | null
+  childDocs?: PublicChildDoc[]
+  parentDoc?: {
+    id: string
+    maTaiLieu: string | null
+    tenTaiLieu: string | null
+  } | null
   replacement: ReplacementInfo | null
   error?: string
 }
@@ -104,6 +119,26 @@ export function IsoDocPublicClient({ docId }: { docId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* Nếu là Biểu mẫu con: Hiện banner liên kết về Quy trình cha */}
+      {data.parentDoc && (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-4 shadow-sm flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <span className="text-[11px] font-extrabold uppercase tracking-wide text-blue-600 block">
+              Thuộc Quy trình cha
+            </span>
+            <p className="font-bold text-sm text-blue-900 truncate">
+              {data.parentDoc.maTaiLieu} · {data.parentDoc.tenTaiLieu}
+            </p>
+          </div>
+          <Link
+            href={`/iso-doc/${data.parentDoc.id}`}
+            className="shrink-0 inline-flex items-center gap-1 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-all"
+          >
+            Xem Quy trình <ArrowRight size={13} />
+          </Link>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-md">
         <div className={`flex items-center gap-3 p-6 ${expired ? "bg-red-50" : "bg-emerald-50"}`}>
           {expired ? (
@@ -160,6 +195,45 @@ export function IsoDocPublicClient({ docId }: { docId: string }) {
           </div>
         )}
       </div>
+
+      {/* Danh mục Hồ sơ & Biểu mẫu đính kèm trong bộ này (nếu là Quy trình cha) */}
+      {data.childDocs && data.childDocs.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-md">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-extrabold text-slate-800">
+              Hồ sơ & Biểu mẫu trong bộ này ({data.childDocs.length})
+            </p>
+            <span className="text-[11px] text-slate-400">Đang áp dụng</span>
+          </div>
+
+          <div className="divide-y divide-slate-100">
+            {data.childDocs.map((child) => (
+              <div key={child.id} className="py-2.5 flex items-center justify-between gap-3 first:pt-0 last:pb-0">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-xs font-bold text-emerald-700">
+                      {child.maTaiLieu || "—"}
+                    </span>
+                    <span className="text-[10px] rounded bg-slate-100 px-1 text-slate-500 font-semibold">
+                      {child.loaiTaiLieu || "F"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-700 font-medium truncate mt-0.5">
+                    {child.tenTaiLieu || ""}
+                  </p>
+                </div>
+
+                <Link
+                  href={`/iso-doc/${child.id}`}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 transition-all"
+                >
+                  Chi tiết <ArrowRight size={12} />
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {expired && (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-md">

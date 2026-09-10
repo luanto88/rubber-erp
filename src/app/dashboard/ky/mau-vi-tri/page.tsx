@@ -39,18 +39,23 @@ import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/li
 import {
   SIGN_TEMPLATE_SIGN_AS_OPTIONS,
   SIGN_TEMPLATE_SIGN_AS_LABEL,
+  ISO_ROLE_DEFS,
+  ISO_ROLE_ORDER,
+  ISO_ROLE_COLORS,
+  formatIsoTemplateKey,
   type SignTemplateAnchor,
   type SignTemplateBox,
   type SignTemplateBoxLoai,
   type ChucVuKey,
   type SignTemplateSignAsKey,
+  type IsoSignRoleId,
 } from "@/lib/signing/templates"
 
-// ── Vai trò gốc — cấu hình cho module "documents" (Văn bản). Vai trò khác free-text,
+// ── Vai trò gốc — cấu hình cho module "documents" (Văn bản) và "iso" (ISO). Vai trò khác free-text,
 // người dùng có thể "Nhân bản" (duplicate) bất kỳ vai trò đã đặt nào để tạo thêm vị trí
 // (vd nhiều bước ký phòng ban khác nhau) — mirror đúng cơ chế mockup, không hardcode
 // số lượng cố định. ──
-type BaseRoleId = "ky_buoc" | "phe_duyet" | "qr" | "ngay_ky" | "ghi_chu"
+type BaseRoleId = "ky_buoc" | "phe_duyet" | "qr" | "ngay_ky" | "ghi_chu" | "soan_thao" | "xem_xet"
 
 const ROLE_ORDER: BaseRoleId[] = ["ky_buoc", "phe_duyet", "qr", "ngay_ky", "ghi_chu"]
 
@@ -99,6 +104,20 @@ const BASE_ROLE_DEFS: Record<
     showNameDefault: false,
     defaultBox: { xPct: 6, yPct: 89, wPct: 88, hPct: 8 },
   },
+  soan_thao: {
+    label: "Soạn thảo",
+    loai: "chu_ky",
+    batBuoc: true,
+    showNameDefault: false,
+    defaultBox: { xPct: 6, yPct: 74, wPct: 26, hPct: 14 },
+  },
+  xem_xet: {
+    label: "Xem xét",
+    loai: "chu_ky",
+    batBuoc: true,
+    showNameDefault: false,
+    defaultBox: { xPct: 37, yPct: 74, wPct: 26, hPct: 14 },
+  },
 }
 
 const CHUC_VU_LABELS: Record<ChucVuKey, string> = {
@@ -113,6 +132,8 @@ const ROLE_COLORS: Record<BaseRoleId, { fg: string; bg: string }> = {
   qr: { fg: "#8b5cf6", bg: "rgba(139,92,246,.14)" },
   ngay_ky: { fg: "#f43f5e", bg: "rgba(244,63,94,.14)" },
   ghi_chu: { fg: "#0d9488", bg: "rgba(13,148,136,.14)" },
+  soan_thao: { fg: "#0284c7", bg: "rgba(2,132,199,.14)" },
+  xem_xet: { fg: "#d97706", bg: "rgba(217,119,6,.14)" },
 }
 
 // Bảng màu riêng cho từng slot NHÂN BẢN của family "ky_buoc" — index 0 giữ đúng màu amber cũ
@@ -199,8 +220,29 @@ const GRID_STEP_PX = 16
 const SIDEBAR_MIN_WIDTH = 260
 const MIN_BOX_PCT = 4
 
-function makeBaseRole(baseId: BaseRoleId): EditorRole {
-  const def = BASE_ROLE_DEFS[baseId]
+function makeBaseRole(baseId: BaseRoleId, isIso = false, isExempt = false): EditorRole {
+  if (isIso && (baseId in ISO_ROLE_DEFS)) {
+    const def = ISO_ROLE_DEFS[baseId as IsoSignRoleId]
+    return {
+      id: baseId,
+      baseId,
+      label: def.label,
+      loai: def.loai,
+      batBuoc: isExempt ? false : def.batBuoc,
+      isClone: false,
+      placed: false,
+      anchor: "dau",
+      page: 1,
+      box: { ...def.defaultBox },
+      showName: false,
+      showChucVu: false,
+      chucVuKey: null,
+      signAs: null,
+      outOfBounds: false,
+      hiddenForDoc: false,
+    }
+  }
+  const def = BASE_ROLE_DEFS[baseId] || BASE_ROLE_DEFS.ky_buoc
   return {
     id: baseId,
     baseId,
@@ -223,8 +265,29 @@ function makeBaseRole(baseId: BaseRoleId): EditorRole {
 
 // Tách riêng từ duplicateRole() để dùng chung cho cả nhân bản thủ công lẫn tự "pad" thêm slot
 // khớp số bước thật của văn bản (xem reconcileForDoc bên dưới).
-function makeCloneRole(baseId: BaseRoleId, n: number, sourceBox: PctBox): EditorRole {
-  const def = BASE_ROLE_DEFS[baseId]
+function makeCloneRole(baseId: BaseRoleId, n: number, sourceBox: PctBox, isIso = false): EditorRole {
+  if (isIso && (baseId in ISO_ROLE_DEFS)) {
+    const def = ISO_ROLE_DEFS[baseId as IsoSignRoleId]
+    return {
+      id: `${baseId}__ban${n}`,
+      baseId,
+      label: `${def.label} · bản ${n}`,
+      loai: def.loai,
+      batBuoc: false,
+      isClone: true,
+      placed: false,
+      anchor: "dau",
+      page: 1,
+      box: { ...sourceBox },
+      showName: false,
+      showChucVu: false,
+      chucVuKey: null,
+      signAs: null,
+      outOfBounds: false,
+      hiddenForDoc: false,
+    }
+  }
+  const def = BASE_ROLE_DEFS[baseId] || BASE_ROLE_DEFS.ky_buoc
   return {
     id: `${baseId}__ban${n}`,
     baseId,
@@ -254,8 +317,11 @@ function roleCloneIndex(role: EditorRole): number {
 
 // Chỉ đa sắc cho các slot nhân bản của "ky_buoc" (nhiều người cùng ký 1 bước) — các vai trò khác
 // giữ nguyên đúng 1 màu cố định trong ROLE_COLORS kể cả khi bị nhân bản.
-function getRoleColor(role: EditorRole): { fg: string; bg: string } {
-  if (role.baseId !== "ky_buoc") return ROLE_COLORS[role.baseId]
+function getRoleColor(role: EditorRole, isIso = false): { fg: string; bg: string } {
+  if (isIso && (role.baseId in ISO_ROLE_COLORS)) {
+    return ISO_ROLE_COLORS[role.baseId as IsoSignRoleId]
+  }
+  if (role.baseId !== "ky_buoc") return ROLE_COLORS[role.baseId] ?? { fg: "#059669", bg: "rgba(5,150,105,.14)" }
   const idx = (roleCloneIndex(role) - 1) % KY_BUOC_CLONE_PALETTE.length
   return KY_BUOC_CLONE_PALETTE[idx]
 }
@@ -297,11 +363,61 @@ function snap(v: number, active: boolean, stepPct: number): number {
 export default function SignTemplateEditorPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const loaiTaiLieu = searchParams.get("loai") || ""
-  const pdfUrl = searchParams.get("pdfUrl") || ""
-  const docLabel = searchParams.get("docLabel") || loaiTaiLieu
+  const paramLoai = searchParams.get("loai") || searchParams.get("loaiTaiLieu") || ""
+  const modun = searchParams.get("modun") || (paramLoai.startsWith("iso:") ? "iso" : "van_ban")
+  const isIso = modun === "iso"
+  const paramPdfUrl = searchParams.get("pdfUrl") || ""
+  const paramDocLabel = searchParams.get("docLabel") || paramLoai
   const returnTo = searchParams.get("returnTo") || ""
   const docId = searchParams.get("docId") || ""
+
+  const [activePdfUrl, setActivePdfUrl] = useState<string>(paramPdfUrl)
+  const [activeLoai, setActiveLoai] = useState<string>(paramLoai)
+  const [activeDocLabel, setActiveDocLabel] = useState<string>(paramDocLabel)
+  const [activeDocId, setActiveDocId] = useState<string>(docId)
+  const [isoChildDocs, setIsoChildDocs] = useState<
+    Array<{ id: string; ma_tai_lieu: string | null; ten_tai_lieu: string | null; loai_tai_lieu: string | null; url: string }>
+  >([])
+  const [docTemplateStatus, setDocTemplateStatus] = useState<Record<string, boolean>>({})
+  const [isoDocData, setIsoDocData] = useState<{
+    id: string
+    ma_tai_lieu: string | null
+    ten_tai_lieu: string | null
+    loai_tai_lieu: string | null
+    cap_tl: string | null
+    phan_loai_tl: string | null
+    soan_thao_user_id: string | null
+    xem_xet_user_id: string | null
+    phe_duyet_user_id: string | null
+    soan_thao: string | null
+    xem_xet: string | null
+    phe_duyet: string | null
+    file_signed_pdf_url: string | null
+    file_goc_url: string | null
+  } | null>(null)
+
+  // Kiểm tra tài liệu hiện tại có được miễn trừ quy tắc ký đủ 3 khung (Biểu mẫu F, Phụ lục HD/PL, hồ sơ con)
+  const isExemptIsoDoc = useMemo(() => {
+    if (!isIso) return false
+    // 1. Đang chọn tài liệu con trong bộ hồ sơ (activeDocId khác docId chính)
+    if (activeDocId && docId && activeDocId !== docId) return true
+    // 2. Hoặc activeDocId nằm trong danh sách hồ sơ con
+    if (isoChildDocs.some((c) => c.id === activeDocId)) return true
+    // 3. Hoặc dữ liệu tài liệu chính nhưng có phan_loai_tl là "con"
+    if (isoDocData && activeDocId === docId && isoDocData.phan_loai_tl === "con") return true
+    // 4. Kiểm tra loại tài liệu (F = Biểu mẫu, HD/PL = Hướng dẫn/Phụ lục)
+    const loai = (activeLoai || "").toUpperCase().trim().replace(/^ISO:(LOAI|CODE):/, "")
+    if (loai === "F" || loai === "HD" || loai === "PL") return true
+    if (/-F\d+/i.test(loai) || /-HD\d+/i.test(loai) || /-PL\d+/i.test(loai)) return true
+    // 5. Kiểm tra thông tin của child doc hiện tại
+    const currentChild = isoChildDocs.find((c) => c.id === activeDocId)
+    if (currentChild) {
+      const cLoai = (currentChild.loai_tai_lieu || "").toUpperCase().trim()
+      if (cLoai === "F" || cLoai === "HD" || cLoai === "PL") return true
+      if (currentChild.ma_tai_lieu && (/-F\d+/i.test(currentChild.ma_tai_lieu) || /-HD\d+/i.test(currentChild.ma_tai_lieu) || /-PL\d+/i.test(currentChild.ma_tai_lieu))) return true
+    }
+    return false
+  }, [isIso, activeDocId, docId, isoChildDocs, isoDocData, activeLoai])
 
   const [me, setMe] = useState<SessionUser | null>(null)
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -313,7 +429,10 @@ export default function SignTemplateEditorPage() {
   const [pageImages, setPageImages] = useState<Record<number, string>>({})
   const [currentPage, setCurrentPage] = useState(1)
 
-  const [roles, setRoles] = useState<EditorRole[]>(() => ROLE_ORDER.map(makeBaseRole))
+  const [roles, setRoles] = useState<EditorRole[]>(() => {
+    const order = isIso ? ISO_ROLE_ORDER : ROLE_ORDER
+    return order.map((id) => makeBaseRole(id as BaseRoleId, isIso))
+  })
   const [initialSnapshot, setInitialSnapshot] = useState<string>("")
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null)
   const [armedRoleId, setArmedRoleId] = useState<string | null>(null)
@@ -348,10 +467,12 @@ export default function SignTemplateEditorPage() {
   useEffect(() => {
     let cancelled = false
     const run = async () => {
-      if (!loaiTaiLieu || !pdfUrl) {
-        setError("Thiếu tham số loại tài liệu hoặc file tham chiếu — không thể mở màn cài đặt vị trí ký.")
-        setLoading(false)
-        return
+      if (!activeLoai || !activePdfUrl) {
+        if (!docId) {
+          setError("Thiếu tham số loại tài liệu hoặc file tham chiếu — không thể mở màn cài đặt vị trí ký.")
+          setLoading(false)
+          return
+        }
       }
       const fid = await getActiveFactoryId()
       const { user } = await hydrateActiveSession()
@@ -366,14 +487,18 @@ export default function SignTemplateEditorPage() {
     }
     void run()
     return () => { cancelled = true }
-  }, [loaiTaiLieu, pdfUrl])
+  }, [activeLoai, activePdfUrl, docId])
 
   // ── Render PDF tham chiếu thành ảnh (mirror ky/[id]/page.tsx) ──
   useEffect(() => {
-    if (!pdfUrl) return
+    if (!activePdfUrl) return
     let cancelled = false
     const run = async () => {
       try {
+        setNumPages(0)
+        setPageDims({})
+        setPageImages({})
+        setCurrentPage(1)
         const pdfjsLib = await import("pdfjs-dist")
         if ((globalThis as Record<string, unknown>).pdfjsWorker) {
           pdfjsLib.GlobalWorkerOptions.workerSrc = ""
@@ -383,7 +508,7 @@ export default function SignTemplateEditorPage() {
             import.meta.url,
           ).toString()
         }
-        const pdf = await pdfjsLib.getDocument(pdfUrl).promise
+        const pdf = await pdfjsLib.getDocument(activePdfUrl).promise
         if (cancelled) return
         setNumPages(pdf.numPages)
         const dims: Record<number, { w: number; h: number }> = {}
@@ -398,27 +523,25 @@ export default function SignTemplateEditorPage() {
           canvas.width = Math.floor(viewport.width)
           canvas.height = Math.floor(viewport.height)
           const ctx = canvas.getContext("2d")
-          if (!ctx) continue
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await page.render({ canvasContext: ctx, viewport } as any).promise
-          images[p] = canvas.toDataURL("image/png")
+          if (ctx) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await page.render({ canvasContext: ctx, viewport } as any).promise
+            images[p] = canvas.toDataURL("image/png")
+          }
         }
         if (cancelled) return
         setPageDims(dims)
         setPageImages(images)
-      } catch {
-        // Lỗi render PDF chặn đứng effect nạp mẫu vị trí ngay sau đây (nó chờ numPages > 0)
-        // — phải tự hạ loading ở đây, nếu không màn sẽ kẹt spinner vĩnh viễn thay vì hiện
-        // đúng màn báo lỗi.
+      } catch (err) {
         if (!cancelled) {
-          setError("Không hiển thị được nội dung file tham chiếu — kiểm tra lại đường dẫn file.")
+          setError(err instanceof Error ? err.message : "Lỗi đọc file PDF tham chiếu")
           setLoading(false)
         }
       }
     }
     void run()
     return () => { cancelled = true }
-  }, [pdfUrl])
+  }, [activePdfUrl])
 
   // ── Nạp mẫu vị trí đã lưu (nếu có), quy đổi pt -> % theo đúng trang của từng khung ──
   const boxPctFromTemplate = useCallback(
@@ -443,23 +566,42 @@ export default function SignTemplateEditorPage() {
   )
 
   useEffect(() => {
-    if (!factoryId || !loaiTaiLieu || numPages === 0 || Object.keys(pageDims).length === 0) return
+    if (!factoryId || !activeLoai || numPages === 0 || Object.keys(pageDims).length === 0) return
     let cancelled = false
     const run = async () => {
       try {
         const { data: sessionData } = await supabase.auth.getSession()
         const token = sessionData.session?.access_token || ""
+        const keyToLoad = isIso ? formatIsoTemplateKey(activeLoai) : activeLoai
+        const childObj = isIso && isoChildDocs.length > 0 ? isoChildDocs.find((c) => c.id === activeDocId) : null
+        const fallbackLoai = childObj?.loai_tai_lieu ? formatIsoTemplateKey(childObj.loai_tai_lieu) : undefined
+        const fallbackQuery = fallbackLoai && fallbackLoai !== keyToLoad ? `&fallbackLoai=${encodeURIComponent(fallbackLoai)}` : ""
         const res = await fetch(
-          `/api/signing/templates?factoryId=${factoryId}&loaiTaiLieu=${encodeURIComponent(loaiTaiLieu)}`,
+          `/api/signing/templates?factoryId=${factoryId}&loaiTaiLieu=${encodeURIComponent(keyToLoad)}${isIso ? "&modun=iso" : ""}${fallbackQuery}`,
           { headers: { Authorization: `Bearer ${token}` } },
         )
         const json = (await res.json()) as { template?: { khung: SignTemplateBox[] } | null; error?: string }
         if (cancelled) return
         if (!res.ok) throw new Error(json.error || "Không tải được mẫu vị trí")
         const template = json.template
-        if (!template || !template.khung.length) {
+        const roleOrder = isIso ? ISO_ROLE_ORDER : ROLE_ORDER
+        const roleDefs = isIso
+          ? (ISO_ROLE_DEFS as unknown as Record<
+              string,
+              {
+                label: string
+                loai: SignTemplateBoxLoai
+                batBuoc: boolean
+                showNameDefault: boolean
+                showChucVuDefault: boolean
+                defaultBox: { xPct: number; yPct: number; wPct: number; hPct: number }
+              }
+            >)
+          : BASE_ROLE_DEFS
+
+        if (!template) {
           setTemplateExisted(false)
-          const fresh = ROLE_ORDER.map(makeBaseRole)
+          const fresh = roleOrder.map((id) => makeBaseRole(id as BaseRoleId, isIso, isExemptIsoDoc))
           setRoles(fresh)
           setInitialSnapshot(JSON.stringify(fresh))
           setLoading(false)
@@ -467,13 +609,21 @@ export default function SignTemplateEditorPage() {
           return
         }
         setTemplateExisted(true)
+        if (!template.khung.length) {
+          const fresh = roleOrder.map((id) => makeBaseRole(id as BaseRoleId, isIso, isExemptIsoDoc))
+          setRoles(fresh)
+          setInitialSnapshot(JSON.stringify(fresh))
+          setLoading(false)
+          setTemplateLoaded(true)
+          return
+        }
         const byBase = new Map<string, EditorRole[]>()
         const seq: Record<string, number> = {}
         for (const box of template.khung) {
           const resolved = boxPctFromTemplate(box, pageDims, numPages)
           if (!resolved) continue
           const baseId = (box.clone_of || box.vai_tro) as BaseRoleId
-          const def = BASE_ROLE_DEFS[baseId]
+          const def = roleDefs[baseId]
           if (!def) continue
           const isClone = !!box.clone_of
           if (isClone) seq[baseId] = (seq[baseId] || 1) + 1
@@ -482,16 +632,14 @@ export default function SignTemplateEditorPage() {
             baseId,
             label: isClone ? `${def.label} · bản ${seq[baseId]}` : def.label,
             loai: box.loai,
-            batBuoc: !isClone && def.batBuoc,
+            batBuoc: !isClone && (isExemptIsoDoc ? false : def.batBuoc),
             isClone,
             placed: true,
             anchor: box.neo_trang,
             page: resolved.page,
             box: resolved.pct,
             showName: box.show_name ?? def.showNameDefault,
-            // Mẫu cũ (trước khi tách 2 công tắc) chỉ có show_name → suy ra show_chuc_vu = show_name
-            // để giữ đúng ý nghĩa "bật là bật cả tên lẫn chức vụ" của mẫu đã lưu.
-            showChucVu: box.show_chuc_vu ?? box.show_name ?? def.showNameDefault,
+            showChucVu: box.show_chuc_vu ?? (isIso ? false : (box.show_name ?? def.showNameDefault)),
             chucVuKey: box.chuc_vu_key ?? null,
             signAs: box.sign_as ?? null,
             outOfBounds: false,
@@ -503,16 +651,13 @@ export default function SignTemplateEditorPage() {
         }
         cloneSeqRef.current = seq
         const result: EditorRole[] = []
-        for (const baseId of ROLE_ORDER) {
+        for (const baseId of roleOrder) {
           const placedForBase = byBase.get(baseId) || []
           if (placedForBase.length === 0) {
-            result.push(makeBaseRole(baseId))
+            result.push(makeBaseRole(baseId as BaseRoleId, isIso, isExemptIsoDoc))
           } else {
-            // Dòng đầu tiên (không phải clone) giữ đúng id gốc = baseId; nếu mẫu không có
-            // bản gốc (chỉ có bản nhân bản) vẫn thêm 1 dòng "chưa đặt" cho vai trò gốc để
-            // người dùng luôn thấy đủ vai trò cơ bản.
             const hasOriginal = placedForBase.some((r) => r.id === baseId)
-            if (!hasOriginal) result.push(makeBaseRole(baseId))
+            if (!hasOriginal) result.push(makeBaseRole(baseId as BaseRoleId, isIso, isExemptIsoDoc))
             result.push(...placedForBase)
           }
         }
@@ -527,7 +672,7 @@ export default function SignTemplateEditorPage() {
     }
     void run()
     return () => { cancelled = true }
-  }, [factoryId, loaiTaiLieu, numPages, pageDims, boxPctFromTemplate])
+  }, [factoryId, activeLoai, numPages, pageDims, boxPctFromTemplate, isIso, isExemptIsoDoc, activeDocId, isoChildDocs])
 
   // ── Nạp dữ liệu người ký thật của văn bản đang mở (chỉ khi có docId) ──
   useEffect(() => {
@@ -535,6 +680,78 @@ export default function SignTemplateEditorPage() {
     let cancelled = false
     const run = async () => {
       try {
+        if (isIso) {
+          const { data, error: fetchErr } = await supabase
+            .from("iso_documents")
+            .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, cap_tl, phan_loai_tl, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id, soan_thao, xem_xet, phe_duyet, file_signed_pdf_url, file_goc_url")
+            .eq("id", docId)
+            .eq("factory_id", factoryId)
+            .single()
+          if (cancelled) return
+          if (fetchErr || !data) {
+            setDocFetchOk(false)
+            setDocLoaded(true)
+            return
+          }
+          setIsoDocData(data)
+          const pdfToLoad = data.file_signed_pdf_url || data.file_goc_url || ""
+          if (pdfToLoad) setActivePdfUrl((prev) => prev || pdfToLoad)
+          if (data.loai_tai_lieu) setActiveLoai((prev) => prev || data.loai_tai_lieu || "")
+          const defaultLabel = data.ma_tai_lieu ? `${data.ma_tai_lieu} · ${data.ten_tai_lieu || ""}` : (data.ten_tai_lieu || data.loai_tai_lieu || "")
+          if (defaultLabel) setActiveDocLabel((prev) => prev || defaultLabel)
+
+          // Nạp các hồ sơ con nếu đây là tài liệu cha
+          if (data.phan_loai_tl !== "con") {
+            const { data: children } = await supabase
+              .from("iso_documents")
+              .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phan_loai_tl, file_signed_pdf_url, file_goc_url")
+              .eq("factory_id", factoryId)
+              .eq("parent_doc_id", docId)
+              .order("ma_tai_lieu")
+            if (!cancelled && children) {
+              const validChildren = children
+                .filter((c) => !!(c.file_signed_pdf_url || c.file_goc_url))
+                .map((c) => ({
+                  id: c.id,
+                  ma_tai_lieu: c.ma_tai_lieu,
+                  ten_tai_lieu: c.ten_tai_lieu,
+                  loai_tai_lieu: c.loai_tai_lieu,
+                  url: (c.file_signed_pdf_url || c.file_goc_url) as string,
+                }))
+              setIsoChildDocs(validChildren)
+            }
+
+            // Kiểm tra trạng thái mẫu đã lưu cho toàn bộ bộ tài liệu
+            const { data: tmplRows } = await supabase
+              .from("mau_vi_tri")
+              .select("loai_tai_lieu")
+              .eq("factory_id", factoryId)
+              .like("loai_tai_lieu", "iso:%")
+            if (!cancelled) {
+              const tmplKeySet = new Set((tmplRows || []).map((t) => t.loai_tai_lieu))
+              const checkHasTmpl = (item: { ma_tai_lieu: string | null; loai_tai_lieu: string | null }) => {
+                if (item.ma_tai_lieu && tmplKeySet.has(`iso:code:${item.ma_tai_lieu}`)) return true
+                if (item.loai_tai_lieu && tmplKeySet.has(`iso:loai:${item.loai_tai_lieu}`)) return true
+                return false
+              }
+              const statusMap: Record<string, boolean> = {
+                [data.id]: checkHasTmpl(data),
+              }
+              if (children) {
+                children.forEach((c) => {
+                  statusMap[c.id] = checkHasTmpl(c)
+                })
+              }
+              setDocTemplateStatus(statusMap)
+            }
+          }
+
+          setDocFetchOk(true)
+          setDocLoaded(true)
+          return
+        }
+
+        // Văn bản query
         const { data, error: fetchErr } = await supabase
           .from("van_ban_documents")
           .select("thu_tu_ky_json, phe_duyet_user_id")
@@ -560,20 +777,27 @@ export default function SignTemplateEditorPage() {
     }
     void run()
     return () => { cancelled = true }
-  }, [docId, factoryId])
+  }, [docId, factoryId, isIso])
 
   // ── Tra tên/chức vụ thật + xác nhận có ảnh chữ ký cho các user đã chọn ở màn soạn thảo ──
   useEffect(() => {
     if (!docLoaded || !docFetchOk || !factoryId) return
-    const ids = Array.from(
-      new Set([
-        // MỌI bước có người đích danh — không chỉ `ca_nhan`. Trước 2026-09-05 bước nhánh Nội bộ
-        // công ty (`phong_ban`) không có user_id nên không tra được tên, khiến màn này chỉ hiện
-        // đúng tên người Phê duyệt; nay bước nào cũng có người ký cụ thể.
-        ...docSteps.map((s) => docStepSignerId(s)).filter((id): id is string => !!id),
-        ...(docPheDuyetUserId ? [docPheDuyetUserId] : []),
-      ]),
-    )
+    let ids: string[] = []
+    if (isIso) {
+      if (!isoDocData) return
+      ids = [
+        isoDocData.soan_thao_user_id,
+        isoDocData.cap_tl === "Cấp 2" ? null : isoDocData.xem_xet_user_id,
+        isoDocData.phe_duyet_user_id,
+      ].filter((id): id is string => !!id)
+    } else {
+      ids = Array.from(
+        new Set([
+          ...docSteps.map((s) => docStepSignerId(s)).filter((id): id is string => !!id),
+          ...(docPheDuyetUserId ? [docPheDuyetUserId] : []),
+        ]),
+      )
+    }
     if (ids.length === 0) return
     let cancelled = false
     const run = async () => {
@@ -598,7 +822,7 @@ export default function SignTemplateEditorPage() {
     }
     void run()
     return () => { cancelled = true }
-  }, [docLoaded, docFetchOk, docSteps, docPheDuyetUserId, factoryId])
+  }, [docLoaded, docFetchOk, docSteps, docPheDuyetUserId, factoryId, isIso, isoDocData])
 
   // ── Đối chiếu số slot "Ký bước" khớp N bước thật của văn bản — chạy đúng 1 lần sau khi cả
   // mẫu (templateLoaded) lẫn văn bản (docLoaded) đã sẵn sàng. Không cần re-run khi roles đổi
@@ -607,11 +831,71 @@ export default function SignTemplateEditorPage() {
     if (!templateLoaded || !docLoaded || reconciledRef.current) return
     reconciledRef.current = true
     if (!docId || !docFetchOk) return
+    if (isIso) {
+      if (isoDocData?.cap_tl === "Cấp 2") {
+        setRoles((prev) => prev.map((r) => r.baseId === "xem_xet" ? { ...r, hiddenForDoc: true } : r))
+      }
+      return
+    }
     const result = reconcileForDoc(roles, docSteps, cloneSeqRef)
     setRoles(result)
     setInitialSnapshot(JSON.stringify(result))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateLoaded, docLoaded, docId, docFetchOk, docSteps])
+  }, [templateLoaded, docLoaded, docId, docFetchOk, docSteps, isIso, isoDocData])
+
+  const handleSwitchIsoDoc = async (
+    targetDocId: string,
+    targetUrl: string,
+    targetLoai: string,
+    targetLabel: string,
+  ) => {
+    if (targetDocId === activeDocId) return
+
+    // Tự động lưu tài liệu hiện tại nếu có thay đổi HOẶC tài liệu con chưa có mẫu
+    if ((dirty || (!templateExisted && isExemptIsoDoc)) && factoryId && me) {
+      const placedBoxes = buildKhungPayload()
+      if (placedBoxes.length > 0 || isExemptIsoDoc) {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession()
+          const token = sessionData.session?.access_token || ""
+          const keyToSave = isIso ? formatIsoTemplateKey(activeLoai) : activeLoai
+          const res = await fetch("/api/signing/templates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              factoryId,
+              loaiTaiLieu: keyToSave,
+              khung: placedBoxes,
+              modun: isIso ? "iso" : "van_ban",
+              allowEmpty: isExemptIsoDoc,
+            }),
+          })
+          if (res.ok) {
+            setDocTemplateStatus((prev) => ({ ...prev, [activeDocId]: true }))
+            showToast(`Đã tự động lưu vị trí cho ${activeDocLabel}`)
+          }
+        } catch {
+          // ignore auto-save error non-blocking
+        }
+      }
+    }
+
+    setActiveDocId(targetDocId)
+    setActivePdfUrl(targetUrl)
+    setActiveLoai(targetLoai)
+    setActiveDocLabel(targetLabel)
+    setTemplateLoaded(false)
+    const roleOrder = isIso ? ISO_ROLE_ORDER : ROLE_ORDER
+    const targetIsExempt = isIso && (
+      targetDocId !== docId ||
+      isoChildDocs.some((c) => c.id === targetDocId) ||
+      ["F", "HD", "PL"].includes(targetLoai.toUpperCase().trim().replace(/^ISO:(LOAI|CODE):/, "")) ||
+      /-F\d+/i.test(targetLoai) || /-HD\d+/i.test(targetLoai) || /-PL\d+/i.test(targetLoai)
+    )
+    setRoles(roleOrder.map((id) => makeBaseRole(id as BaseRoleId, isIso, targetIsExempt)))
+    setSelectedRoleId(null)
+    setArmedRoleId(null)
+  }
 
   const dirty = useMemo(() => {
     if (!initialSnapshot) return false
@@ -628,8 +912,43 @@ export default function SignTemplateEditorPage() {
   const docSignerByRoleId = useMemo(() => {
     const map: Record<string, DocSignerInfo> = {}
     if (!docId) return map
+
+    if (isIso) {
+      if (isoDocData?.soan_thao_user_id) {
+        const info = signerInfoById[isoDocData.soan_thao_user_id]
+        map["soan_thao"] = {
+          kind: "ca_nhan",
+          userId: isoDocData.soan_thao_user_id,
+          fullName: info?.fullName || isoDocData.soan_thao || "",
+          chucVu: info?.chucVu || "",
+          hasSignature: info?.hasSignature ?? true,
+        }
+      }
+      if (isoDocData?.xem_xet_user_id && isoDocData.cap_tl !== "Cấp 2") {
+        const info = signerInfoById[isoDocData.xem_xet_user_id]
+        map["xem_xet"] = {
+          kind: "ca_nhan",
+          userId: isoDocData.xem_xet_user_id,
+          fullName: info?.fullName || isoDocData.xem_xet || "",
+          chucVu: info?.chucVu || "",
+          hasSignature: info?.hasSignature ?? true,
+        }
+      }
+      if (isoDocData?.phe_duyet_user_id) {
+        const info = signerInfoById[isoDocData.phe_duyet_user_id]
+        map["phe_duyet"] = {
+          kind: "ca_nhan",
+          userId: isoDocData.phe_duyet_user_id,
+          fullName: info?.fullName || isoDocData.phe_duyet || "",
+          chucVu: info?.chucVu || "",
+          hasSignature: info?.hasSignature ?? true,
+        }
+      }
+      return map
+    }
+
     const kyBuocFamily = roles
-      .filter((r) => r.baseId === "ky_buoc")
+      .filter((r) => r.baseId === "ky_buoc" && !r.hiddenForDoc)
       .slice()
       .sort((a, b) => roleCloneIndex(a) - roleCloneIndex(b))
     docSteps.forEach((step, idx) => {
@@ -644,8 +963,6 @@ export default function SignTemplateEditorPage() {
           fullName: info?.fullName || step.ten || "",
           chucVu: info?.chucVu || "",
           hasSignature: info?.hasSignature || false,
-          // Bước nhánh Nội bộ công ty vừa có người đích danh vừa thuộc 1 phòng ban — giữ nhãn
-          // phòng ban làm thông tin phụ vì đó mới là thứ được in dưới chữ ký trên chứng từ.
           deptLabel: step.phong_ban_name || step.phong_ban_code || undefined,
         }
       } else if (step.type === "phong_ban") {
@@ -665,15 +982,19 @@ export default function SignTemplateEditorPage() {
       }
     }
     return map
-  }, [docId, docSteps, docPheDuyetUserId, signerInfoById, roles])
+  }, [docId, docSteps, docPheDuyetUserId, signerInfoById, roles, isIso, isoDocData])
 
   // Bắt buộc đặt khung khi: (a) vai trò bắt buộc ở cấp MẪU (batBuoc, lưu vào mau_vi_tri),
   // HOẶC (b) đang mở đúng 1 văn bản thật (docId) và vai trò này đại diện 1 người ký thật
   // (docSignerByRoleId) — kể cả slot "Ký bước" tự pad thêm bởi reconcileForDoc() luôn có
   // batBuoc=false nhưng vẫn đại diện người ký thật, không được bỏ sót ở đây.
+  // ĐẶC BIỆT: Biểu mẫu (F) và Phụ lục (HD, PL) trong ISO không áp dụng quy tắc ký đủ 3 khung bắt buộc.
   const isRequiredForConfirm = useCallback(
-    (role: EditorRole) => role.batBuoc || (!!docId && !!docSignerByRoleId[role.id]),
-    [docId, docSignerByRoleId],
+    (role: EditorRole) => {
+      if (isExemptIsoDoc) return false
+      return role.batBuoc || (!!docId && !!docSignerByRoleId[role.id])
+    },
+    [isExemptIsoDoc, docId, docSignerByRoleId],
   )
   const missingRequired = useMemo(
     () => roles.filter((r) => isRequiredForConfirm(r) && !r.placed && !r.hiddenForDoc),
@@ -924,6 +1245,26 @@ export default function SignTemplateEditorPage() {
       showToast("Có khung nằm ngoài khổ giấy — vui lòng chỉnh lại trước khi xác nhận.")
       return
     }
+    // Ràng buộc đối với ISO: tất cả tài liệu & biểu mẫu kèm theo phải được cài đặt vị trí trước khi gửi duyệt
+    if (isIso && returnTo) {
+      const missingDocs: string[] = []
+      if (activeDocId !== docId && !docTemplateStatus[docId]) {
+        missingDocs.push(isoDocData?.ma_tai_lieu || "Quy trình chính")
+      }
+      if (isoChildDocs.length > 0) {
+        isoChildDocs.forEach((c) => {
+          if (c.id !== activeDocId && !docTemplateStatus[c.id]) {
+            missingDocs.push(c.ma_tai_lieu || c.ten_tai_lieu || "Biểu mẫu")
+          }
+        })
+      }
+      if (missingDocs.length > 0) {
+        showToast(
+          `Chưa thể gửi đi: Còn ${missingDocs.length} tài liệu/biểu mẫu chưa cài đặt vị trí (${missingDocs.join(", ")}). Vui lòng chọn từng tài liệu trên thanh "Bộ hồ sơ" để đặt vị trí trước khi gửi đi.`,
+        )
+        return
+      }
+    }
     if (!factoryId || !me) return
     setSaving(true)
     setError("")
@@ -931,14 +1272,24 @@ export default function SignTemplateEditorPage() {
       if (dirty || !templateExisted) {
         const { data: sessionData } = await supabase.auth.getSession()
         const token = sessionData.session?.access_token || ""
+        const keyToSave = isIso ? formatIsoTemplateKey(activeLoai) : activeLoai
         const res = await fetch("/api/signing/templates", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ factoryId, loaiTaiLieu, khung: buildKhungPayload() }),
+            body: JSON.stringify({
+              factoryId,
+              loaiTaiLieu: keyToSave,
+              khung: buildKhungPayload(),
+              modun: isIso ? "iso" : "van_ban",
+              allowEmpty: isExemptIsoDoc,
+            }),
         })
         const json = (await res.json()) as { template?: unknown; error?: string }
         if (!res.ok) throw new Error(json.error || "Lỗi lưu mẫu vị trí")
       }
+      setInitialSnapshot(JSON.stringify(roles))
+      setTemplateExisted(true)
+      setDocTemplateStatus((prev) => ({ ...prev, [activeDocId]: true }))
       if (returnTo) {
         const sep = returnTo.includes("?") ? "&" : "?"
         router.push(`${returnTo}${sep}confirmedSignTemplate=1`)
@@ -985,10 +1336,12 @@ export default function SignTemplateEditorPage() {
       {/* Top bar */}
       <div className="text-white px-5 py-3 flex flex-wrap items-center justify-between gap-3" style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}>
         <div className="flex flex-col gap-1 min-w-[240px]">
-          <div className="text-[11px] opacity-75">Cài đặt vị trí ký · {loaiTaiLieu}</div>
+          <div className="text-[11px] opacity-75">
+            {isIso ? "Cài đặt vị trí ký ISO" : "Cài đặt vị trí ký"} · {activeLoai}
+          </div>
           <div className="text-base font-bold flex items-center gap-2">
-            <span className="font-mono text-xs bg-white/15 px-2 py-0.5 rounded">{loaiTaiLieu}</span>
-            <span className="truncate max-w-[380px]">{docLabel}</span>
+            <span className="font-mono text-xs bg-white/15 px-2 py-0.5 rounded">{activeLoai}</span>
+            <span className="truncate max-w-[380px]">{activeDocLabel}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -1006,39 +1359,139 @@ export default function SignTemplateEditorPage() {
             className="flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg bg-white text-[#1c3a32] hover:bg-emerald-50 disabled:opacity-50"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            Xác nhận vị trí & Gửi đi
+            {returnTo ? "Xác nhận vị trí & Gửi đi" : "Lưu mẫu vị trí"}
           </button>
         </div>
       </div>
 
+      {/* ISO Child Documents selector tabs (if any) */}
+      {isIso && isoChildDocs.length > 0 && (
+        <div className="bg-[#1c3a32] border-t border-white/10 px-5 py-2 flex items-center gap-2 overflow-x-auto text-xs">
+          <span className="text-white/60 text-[11px] font-semibold shrink-0">Bộ hồ sơ:</span>
+          <button
+            onClick={() => {
+              if (docId) {
+                void handleSwitchIsoDoc(
+                  docId,
+                  isoDocData?.file_signed_pdf_url || isoDocData?.file_goc_url || paramPdfUrl,
+                  isoDocData?.loai_tai_lieu || paramLoai,
+                  isoDocData?.ma_tai_lieu ? `${isoDocData.ma_tai_lieu} · ${isoDocData.ten_tai_lieu || ""}` : (isoDocData?.ten_tai_lieu || paramLoai),
+                )
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium shrink-0 transition-all ${
+              activeDocId === docId ? "bg-emerald-500 text-white font-bold shadow-xs" : "bg-white/10 text-white/80 hover:bg-white/20"
+            }`}
+          >
+            <span>📄 Quy trình chính ({isoDocData?.ma_tai_lieu || "Cha"})</span>
+            {(docTemplateStatus[docId] || (activeDocId === docId && roles.some((r) => r.placed))) ? (
+              <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
+            ) : (
+              <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">• Chưa đặt</span>
+            )}
+          </button>
+          {isoChildDocs.map((child, idx) => (
+            <button
+              key={child.id}
+              onClick={() => {
+                void handleSwitchIsoDoc(
+                  child.id,
+                  child.url,
+                  child.ma_tai_lieu || child.loai_tai_lieu || "",
+                  child.ma_tai_lieu ? `${child.ma_tai_lieu} · ${child.ten_tai_lieu || ""}` : (child.ten_tai_lieu || `Hồ sơ ${idx + 1}`),
+                )
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium shrink-0 transition-all ${
+                activeDocId === child.id ? "bg-emerald-500 text-white font-bold shadow-xs" : "bg-white/10 text-white/80 hover:bg-white/20"
+              }`}
+            >
+              <span>📑 Biểu mẫu: {child.ma_tai_lieu || child.ten_tai_lieu || `Con ${idx + 1}`}</span>
+              {(docTemplateStatus[child.id] || (activeDocId === child.id && (roles.some((r) => r.placed) || isExemptIsoDoc))) ? (
+                <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
+              ) : (
+                <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">• Chưa đặt</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="bg-emerald-50 border-b border-emerald-200 text-emerald-900 text-xs px-5 py-2">
-        💡 Vẽ khung <strong>một lần</strong> cho loại tài liệu này — lần soạn thảo sau hệ thống tự áp lại mẫu đã lưu, bạn chỉ cần xác nhận hoặc chỉnh nhẹ nếu bố cục file thay đổi.
+        {isIso ? (
+          <>💡 Vẽ khung <strong>một lần</strong> cho Loại tài liệu / Biểu mẫu này. Lần soạn thảo sau hệ thống tự động áp lại mẫu đã lưu, bạn chỉ cần xác nhận hoặc chỉnh nhẹ nếu bố cục thay đổi.</>
+        ) : (
+          <>💡 Vẽ khung <strong>một lần</strong> cho loại tài liệu này — lần soạn thảo sau hệ thống tự áp lại mẫu đã lưu, bạn chỉ cần xác nhận hoặc chỉnh nhẹ nếu bố cục file thay đổi.</>
+        )}
       </div>
       {dirty && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-xs px-5 py-2">
-          ✏️ Bạn vừa chỉnh khác so với mẫu đã lưu — bấm &quot;Xác nhận vị trí &amp; Gửi đi&quot; sẽ lưu thành phiên bản mẫu mới rồi mới gửi.
+          ✏️ Bạn vừa chỉnh khác so với mẫu đã lưu — bấm &quot;{returnTo ? "Xác nhận vị trí & Gửi đi" : "Lưu mẫu vị trí"}&quot; sẽ lưu thành phiên bản mẫu mới.
         </div>
       )}
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Page thumbnails */}
+        {/* Page thumbnails with indicator dots */}
         {numPages > 1 && (
           <div className="w-24 bg-white border-r border-slate-200 overflow-y-auto py-3 px-2 flex flex-col items-center gap-4">
             <div className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">{numPages} trang</div>
-            {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                onClick={() => goToPage(p)}
-                className={`w-16 h-24 rounded border-2 relative flex items-center justify-center text-[10px] font-bold text-slate-400 ${p === currentPage ? "border-emerald-600" : "border-slate-200"}`}
-              >
-                {pageImages[p] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={pageImages[p]} alt={`Trang ${p}`} className="w-full h-full object-contain" />
-                ) : (
-                  <span>Trang {p}</span>
-                )}
-              </button>
-            ))}
+            {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => {
+              const rolesOnThisThumb = roles.filter((r) => {
+                if (!r.placed || r.hiddenForDoc) return false
+                if (r.anchor === "moi_trang") return true
+                if (r.anchor === "cuoi") return p === numPages
+                return r.page === p
+              })
+              const dim = pageDims[p]
+              const aspect = dim && dim.w > 0 && dim.h > 0 ? `${dim.w} / ${dim.h}` : "1 / 1.414"
+              return (
+                <button
+                  key={p}
+                  onClick={() => goToPage(p)}
+                  className={`w-16 rounded border-2 relative overflow-hidden flex flex-col items-center justify-center text-[10px] font-bold transition-all ${
+                    p === currentPage
+                      ? "border-emerald-600 shadow-sm ring-1 ring-emerald-500/50"
+                      : rolesOnThisThumb.length > 0
+                        ? "border-slate-300 hover:border-slate-400"
+                        : "border-slate-200 hover:border-slate-300"
+                  }`}
+                  style={{ aspectRatio: aspect }}
+                  title={`Trang ${p}${rolesOnThisThumb.length > 0 ? ` (${rolesOnThisThumb.map((r) => r.label).join(", ")})` : ""}`}
+                >
+                  {pageImages[p] ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={pageImages[p]} alt={`Trang ${p}`} className="w-full h-full object-fill block select-none pointer-events-none" />
+                  ) : (
+                    <span className="text-slate-400">Trang {p}</span>
+                  )}
+                  {/* Khung mini thể hiện vị trí THẬT của các khung trên trang */}
+                  {rolesOnThisThumb.map((r) => {
+                    const color = getRoleColor(r, isIso)
+                    const isSelected = r.id === selectedRoleId
+                    return (
+                      <span
+                        key={r.id}
+                        className="absolute pointer-events-none rounded-[1.5px] transition-all"
+                        style={{
+                          left: `${Math.max(0, Math.min(100, r.box.xPct))}%`,
+                          top: `${Math.max(0, Math.min(100, r.box.yPct))}%`,
+                          width: `${Math.max(4, Math.min(100, r.box.wPct))}%`,
+                          height: `${Math.max(3, Math.min(100, r.box.hPct))}%`,
+                          border: `${isSelected ? "2px" : "1.5px"} solid ${color.fg}`,
+                          backgroundColor: color.bg,
+                          boxShadow: isSelected ? `0 0 4px ${color.fg}` : `0 0 2px ${color.fg}99`,
+                          zIndex: isSelected ? 10 : 5,
+                        }}
+                        title={r.label}
+                      />
+                    )
+                  })}
+                  {/* Số trang góc dưới */}
+                  <span className="absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded text-[8px] font-bold bg-slate-900/60 text-white pointer-events-none leading-tight">
+                    {p}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         )}
 
@@ -1105,7 +1558,7 @@ export default function SignTemplateEditorPage() {
               />
             )}
             {rolesOnPage.map((role) => {
-              const color = getRoleColor(role)
+              const color = getRoleColor(role, isIso)
               const isSelected = role.id === selectedRoleId
               return (
                 <div
@@ -1168,12 +1621,18 @@ export default function SignTemplateEditorPage() {
         <div className="bg-white border-l border-slate-200 overflow-y-auto flex flex-col shrink-0" style={{ width: sidebarWidth }}>
           <div className="p-4 border-b border-slate-100">
             <h3 className="text-[11px] font-extrabold uppercase tracking-wide text-slate-400 mb-1">Vai trò cần đặt khung</h3>
-            <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
-              Vai trò đã đặt có thể <strong>&quot;Nhân bản&quot;</strong> nếu tài liệu có thêm bước ký khác (vd nhiều phòng ban ký nối tiếp). Chỉ khung chữ ký mới có tuỳ chọn hiện tên/chức vụ.
-            </p>
+            {isExemptIsoDoc ? (
+              <div className="mb-3 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] leading-snug">
+                ℹ️ <strong>Biểu mẫu / Phụ lục</strong>: Không áp dụng quy tắc ký đủ 3 khung. Bạn có thể đặt số khung ký tùy ý (hoặc không đặt khung nếu biểu mẫu không yêu cầu ký).
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-500 leading-relaxed mb-3">
+                Vai trò đã đặt có thể <strong>&quot;Nhân bản&quot;</strong> nếu tài liệu có thêm bước ký khác (vd nhiều phòng ban ký nối tiếp). Chỉ khung chữ ký mới có tuỳ chọn hiện tên/chức vụ.
+              </p>
+            )}
             <div className="space-y-1.5">
               {roles.filter((r) => !r.hiddenForDoc).map((role) => {
-                const color = getRoleColor(role)
+                const color = getRoleColor(role, isIso)
                 const anchorLabel = role.anchor === "moi_trang" ? "Mọi trang" : role.anchor === "cuoi" ? "Trang cuối cùng" : `Trang ${role.page}`
                 const signer = docSignerByRoleId[role.id]
                 return (
@@ -1201,7 +1660,7 @@ export default function SignTemplateEditorPage() {
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="text-[13px] font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
-                          {role.label} {role.batBuoc && <span className="text-red-500 text-[10px]">• bắt buộc</span>}
+                          {role.label} {role.batBuoc && !isExemptIsoDoc && <span className="text-red-500 text-[10px]">• bắt buộc</span>}
                         </div>
                         <div className="text-[11px] text-slate-500">
                           {role.placed ? <span className="text-teal-700 font-semibold">Đã đặt · {anchorLabel}</span> : <span className="italic text-slate-400">Chưa đặt</span>}
@@ -1333,7 +1792,11 @@ export default function SignTemplateEditorPage() {
 
           <div className="p-4 mt-auto">
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              Mẫu vị trí lưu <strong>vai trò</strong>, không lưu người cụ thể — khi áp dụng cho 1 hồ sơ thật, hệ thống sẽ ánh xạ sang đúng người ký theo cấu hình định tuyến (chưa tích hợp ở phiên này).
+              {isIso ? (
+                <>Mẫu vị trí ISO lưu <strong>vai trò</strong> (Soạn thảo, Xem xét, Phê duyệt, QR) theo loại tài liệu hoặc mã biểu mẫu. Khi quy trình chuyển bước, hệ thống sẽ căn cứ vào người ký thật đã chỉ định để đóng dấu.</>
+              ) : (
+                <>Mẫu vị trí lưu <strong>vai trò</strong>, không lưu người cụ thể — khi áp dụng cho 1 hồ sơ thật, hệ thống sẽ ánh xạ sang đúng người ký theo cấu hình định tuyến (chưa tích hợp ở phiên này).</>
+              )}
             </p>
           </div>
         </div>

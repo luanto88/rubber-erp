@@ -42,11 +42,32 @@ async function hasDocumentsCreatePermission(userId: string, role: string | null)
   return !!roleGrant
 }
 
+async function hasIsoTemplatePermission(userId: string, role: string | null): Promise<boolean> {
+  const codes = ["iso.create", "iso.edit", "iso.signature"]
+  const { data: explicit } = await supabaseAdmin
+    .from("user_permissions")
+    .select("granted")
+    .eq("user_id", userId)
+    .in("permission_code", codes)
+    .eq("granted", true)
+    .limit(1)
+  if (explicit && explicit.length > 0) return true
+  if (!role) return false
+  const { data: roleGrant } = await supabaseAdmin
+    .from("role_permissions")
+    .select("role")
+    .eq("role", role)
+    .in("permission_code", codes)
+    .limit(1)
+  return !!(roleGrant && roleGrant.length > 0)
+}
+
 export async function GET(req: NextRequest) {
   try {
     const authUser = await requireAuthUser(req)
     const factoryId = req.nextUrl.searchParams.get("factoryId")
     const loaiTaiLieu = req.nextUrl.searchParams.get("loaiTaiLieu")
+    const fallbackLoai = req.nextUrl.searchParams.get("fallbackLoai") || undefined
     if (!factoryId || !loaiTaiLieu) {
       return NextResponse.json({ error: "Thiếu factoryId hoặc loaiTaiLieu" }, { status: 400 })
     }
@@ -54,7 +75,7 @@ export async function GET(req: NextRequest) {
     if (!profile || profile.factory_id !== factoryId) {
       return NextResponse.json({ error: "Không có quyền xem nhà máy này" }, { status: 403 })
     }
-    const template = await getLatestSignTemplate(factoryId, loaiTaiLieu)
+    const template = await getLatestSignTemplate(factoryId, loaiTaiLieu, { fallbackLoai })
     return NextResponse.json({ template })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })
@@ -65,6 +86,8 @@ type SaveBody = {
   factoryId: string
   loaiTaiLieu: string
   khung: SignTemplateBox[]
+  modun?: string
+  allowEmpty?: boolean
 }
 
 export async function POST(req: NextRequest) {
@@ -78,8 +101,11 @@ export async function POST(req: NextRequest) {
     if (!profile || profile.factory_id !== body.factoryId) {
       return NextResponse.json({ error: "Không có quyền lưu mẫu cho nhà máy này" }, { status: 403 })
     }
+    const isIso = body.loaiTaiLieu.startsWith("iso:") || body.modun === "iso" || req.nextUrl.searchParams.get("modun") === "iso"
     if (profile.role !== "admin") {
-      const allowed = await hasDocumentsCreatePermission(authUser.id, profile.role)
+      const allowed = isIso
+        ? await hasIsoTemplatePermission(authUser.id, profile.role)
+        : await hasDocumentsCreatePermission(authUser.id, profile.role)
       if (!allowed) {
         return NextResponse.json({ error: "Bạn không có quyền lưu mẫu vị trí ký" }, { status: 403 })
       }
@@ -89,6 +115,7 @@ export async function POST(req: NextRequest) {
       loaiTaiLieu: body.loaiTaiLieu,
       khung: body.khung,
       taoBoi: authUser.id,
+      allowEmpty: isIso || !!body.allowEmpty,
     })
     return NextResponse.json({ template })
   } catch (err) {

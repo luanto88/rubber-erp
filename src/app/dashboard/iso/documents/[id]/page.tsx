@@ -1,7 +1,7 @@
 "use client"
 
 import { Fragment, type RefObject, useCallback, useEffect, useRef, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
 // `<a download>` bị trình duyệt BỎ QUA khi file khác origin (Supabase Storage) — nút "Tải" khi đó
@@ -31,6 +31,7 @@ import {
   type IsoStandard,
   type SignAsType,
 } from "../../_components/iso-types"
+import { IsoBatchSignModal } from "../../_components/iso-batch-sign-modal"
 import {
   ArrowLeft,
   Save,
@@ -51,7 +52,7 @@ import {
   ChevronRight,
   Share2,
   ChevronUp,
-  Plus,
+  FileSignature,
 } from "lucide-react"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
@@ -65,38 +66,6 @@ type ProfileOption = {
   full_name: string
   username: string
   role: string
-}
-
-function ExtraDraggableBox({
-  position,
-  onDrag,
-  onStop,
-  zIndex = 12,
-  children,
-}: {
-  position: { x: number; y: number }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onDrag?: (e: any, d: { x: number; y: number }) => void
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onStop?: (e: any, d: { x: number; y: number }) => void
-  zIndex?: number
-  children: React.ReactNode
-}) {
-  const nodeRef = useRef<HTMLDivElement>(null)
-  return (
-    <Draggable
-      nodeRef={nodeRef as RefObject<HTMLElement>}
-      position={position}
-      onDrag={onDrag}
-      onStop={onStop}
-      bounds="parent"
-      cancel=".react-resizable-handle,button,button *,a,.no-drag"
-    >
-      <div ref={nodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex, cursor: "move" }}>
-        {children}
-      </div>
-    </Draggable>
-  )
 }
 
 type UploadedMainFile = {
@@ -332,8 +301,11 @@ const ISO_OFFICE_SIGNATURE_TAGS = [
 export default function IsoDocumentDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const docId = params.id as string
   const isNew = docId === "new-doc"
+  const [templateConfirmed, setTemplateConfirmed] = useState(false)
+  const autoSendTriedRef = useRef(false)
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
@@ -391,6 +363,22 @@ export default function IsoDocumentDetailPage() {
   const [pinLoading, setPinLoading] = useState(false)
   const [lyDoTraVe, setLyDoTraVe] = useState("")
 
+  useEffect(() => {
+    if (autoSendTriedRef.current) return
+    if (!doc || !factoryId) return
+    if (searchParams.get("confirmedSignTemplate") !== "1") return
+    autoSendTriedRef.current = true
+    setTemplateConfirmed(true)
+    router.replace(`/dashboard/iso/documents/${docId}`)
+    showToast(true, "Đã lưu cài đặt vị trí ký thành công. Vui lòng bấm Ký để tiến hành gửi duyệt.")
+  }, [doc, factoryId, searchParams, docId, router])
+
+  // Modal ký duyệt tập trung ISO (Xem xét & Phê duyệt)
+  const [batchSignModal, setBatchSignModal] = useState<{
+    open: boolean
+    action: "gui_phe_duyet" | "phe_duyet" | "gui_lai_phe_duyet"
+  } | null>(null)
+
   // Signature placement modal
   const [placementModal, setPlacementModal] = useState<{
     show: boolean
@@ -425,8 +413,29 @@ export default function IsoDocumentDetailPage() {
     sigImgUrl: string | null
     previewSignatures: PreviewSignature[]
     signerName: string
+    signerChucVu?: string
     showSignature: boolean
     showSignerName: boolean
+    showChucVu?: boolean
+    isLocked?: boolean
+    sigInnerX?: number
+    sigInnerY?: number
+    sigInnerW?: number
+    sigInnerH?: number
+    thumbnails?: Record<number, string>
+    thumbnailsLoading?: boolean
+    rawTemplate?: {
+      hasTemplate: boolean
+      soanThao: {
+        x_pt: number; y_pt: number; w_pt: number; h_pt: number
+        so_trang: number; show_name: boolean; show_chuc_vu: boolean
+        chuc_vu_key: string | null
+      } | null
+      qr: {
+        x_pt: number; y_pt: number; w_pt: number; h_pt: number
+        so_trang: number
+      } | null
+    }
     prefixX: number
     prefixY: number
     prefixW: number
@@ -445,16 +454,7 @@ export default function IsoDocumentDetailPage() {
   const [signAs, setSignAs] = useState<SignAsType>("none")
   const prefixNodeRef = useRef<HTMLDivElement>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
-  const draggableNodeRef = useRef<HTMLDivElement>(null)
-  const nameNodeRef = useRef<HTMLDivElement>(null)
-  const qrNodeRef = useRef<HTMLDivElement>(null)
-  const MAX_EXTRA_SIG = 5
-  const extraSigNodeArray = useRef<Array<{ current: HTMLDivElement | null }>>(
-    Array.from({ length: 5 }, () => ({ current: null as HTMLDivElement | null }))
-  )
-  const extraNameNodeArray = useRef<Array<{ current: HTMLDivElement | null }>>(
-    Array.from({ length: 5 }, () => ({ current: null as HTMLDivElement | null }))
-  )
+  const sigInnerNodeRef = useRef<HTMLDivElement>(null)
   const pdfDocRef = useRef<unknown>(null)
 
   // Distribution
@@ -772,6 +772,7 @@ export default function IsoDocumentDetailPage() {
   useEffect(() => {
     const sourcePdfUrl = placementModal?.sourcePdfUrl
     if (!placementModal?.show || !sourcePdfUrl) return
+    let isCancelled = false
     const loadPdf = async () => {
       try {
         const pdfjsLib = await import("pdfjs-dist")
@@ -780,19 +781,53 @@ export default function IsoDocumentDetailPage() {
         pdfjsLib.GlobalWorkerOptions.workerSrc =
           `https://cdn.jsdelivr.net/npm/pdfjs-dist@${ver}/build/pdf.worker.min.mjs`
         const pdfDoc = await pdfjsLib.getDocument(sourcePdfUrl).promise
+        if (isCancelled) return
         pdfDocRef.current = pdfDoc
-        setPlacementModal((p) => p ? { ...p, totalPages: pdfDoc.numPages } : null)
+        setPlacementModal((p) => p ? { ...p, totalPages: pdfDoc.numPages, thumbnailsLoading: true } : null)
         await renderPdfPage(pdfDoc, 1)
+
+        // Tạo thumbnails các trang ngầm trong background
+        void (async () => {
+          try {
+            const thumbMap: Record<number, string> = {}
+            for (let p = 1; p <= pdfDoc.numPages; p++) {
+              if (isCancelled) return
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const page: any = await pdfDoc.getPage(p)
+                const vp1 = page.getViewport({ scale: 1 })
+                const thumbW = 90
+                const scale = thumbW / (vp1.width || thumbW)
+                const vp = page.getViewport({ scale })
+                const canvas = document.createElement("canvas")
+                canvas.width = Math.floor(vp.width)
+                canvas.height = Math.floor(vp.height)
+                const ctx = canvas.getContext("2d")
+                if (ctx) {
+                  await page.render({ canvasContext: ctx, viewport: vp }).promise
+                  thumbMap[p] = canvas.toDataURL("image/webp", 0.7)
+                }
+              } catch (e) {
+                console.warn(`Render thumb p${p} failed`, e)
+              }
+            }
+            if (!isCancelled) {
+              setPlacementModal((prev) => prev ? { ...prev, thumbnails: thumbMap, thumbnailsLoading: false } : null)
+            }
+          } catch (e) {
+            console.warn("Lỗi generate thumbnails:", e)
+          }
+        })()
       } catch (err) {
         console.error("PDF load failed:", err)
         showToast(false, "Không tải được file PDF để đặt chữ ký. Chữ ký sẽ chỉ hiện trên Phiếu Ký Duyệt.")
-        // Đóng modal trước, rồi gọi doTransition bên ngoài setState (tránh side-effect trong setter)
         const snapshot = placementModal
         setPlacementModal(null)
         if (snapshot) void doTransition(snapshot.action, snapshot.token, null, snapshot.lyDo)
       }
     }
     void loadPdf()
+    return () => { isCancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [placementModal?.show, placementModal?.sourcePdfUrl])
 
@@ -813,7 +848,67 @@ export default function IsoDocumentDetailPage() {
     await p.render({ canvasContext: ctx, viewport }).promise
     const pdfPageH = p.view[3] - p.view[1]
     const scale = viewport.height / pdfPageH
-    setPlacementModal((prev) => prev ? { ...prev, canvasScale: scale, pdfPageHeight: pdfPageH } : null)
+    setPlacementModal((prev) => {
+      if (!prev) return null
+      let { sigX, sigY, sigW, sigH, nameX, nameY, nameW, nameH, qrX, qrY, qrW, qrH, sigInnerX, sigInnerY, sigInnerW, sigInnerH } = prev
+      if (prev.rawTemplate?.soanThao) {
+        const st = prev.rawTemplate.soanThao
+        const frameCanvasX = st.x_pt * scale
+        const frameCanvasY = (pdfPageH - st.y_pt - st.h_pt) * scale
+        const frameCanvasW = st.w_pt * scale
+        const frameCanvasH = st.h_pt * scale
+
+        sigX = frameCanvasX
+        sigY = frameCanvasY
+        sigW = frameCanvasW
+        sigH = frameCanvasH
+
+        const nameH_pt = 20
+        nameX = frameCanvasX
+        nameY = frameCanvasY + (st.h_pt - nameH_pt) * scale
+        nameW = frameCanvasW
+        nameH = nameH_pt * scale
+
+        const bottomH = (prev.showSignerName ? 24 : 0) + (prev.showChucVu && prev.signerChucVu ? 22 : 0)
+        const availW = frameCanvasW
+        const availH = Math.max(20, frameCanvasH - bottomH)
+
+        if (typeof sigInnerW !== "number" || sigInnerW <= 0) {
+          sigInnerW = Math.max(30, Math.min(availW - 8, 110))
+          sigInnerH = Math.max(15, Math.min(availH - 6, 46))
+          sigInnerX = Math.max(0, (availW - sigInnerW) / 2)
+          sigInnerY = Math.max(0, (availH - sigInnerH) / 2)
+        }
+      }
+      if (prev.rawTemplate?.qr) {
+        const qr = prev.rawTemplate.qr
+        qrX = qr.x_pt * scale
+        qrY = (pdfPageH - qr.y_pt - qr.h_pt) * scale
+        qrW = qr.w_pt * scale
+        qrH = qr.h_pt * scale
+      }
+      return {
+        ...prev,
+        canvasScale: scale,
+        pdfPageHeight: pdfPageH,
+        sigX,
+        sigY,
+        sigW,
+        sigH,
+        nameX,
+        nameY,
+        nameW,
+        nameH,
+        qrX,
+        qrY,
+        qrW,
+        qrH,
+        sigInnerX,
+        sigInnerY,
+        sigInnerW,
+        sigInnerH,
+      }
+    })
   }
 
   const trangThai = doc?.trang_thai || "draft"
@@ -1907,6 +2002,17 @@ export default function IsoDocumentDetailPage() {
     }
   }
 
+  const handleBatchTransitionSuccess = async (
+    completedPlacements: SignedFilePlacement[],
+    token: string,
+    batchSignAs: SignAsType,
+  ) => {
+    if (!batchSignModal) return
+    const currentAction = batchSignModal.action
+    await doTransition(currentAction, token, null, undefined, completedPlacements, batchSignAs)
+    setBatchSignModal(null)
+  }
+
   // Xác nhận PIN → mở placement modal hoặc transition trực tiếp
   const isPdfUrl = (url: string | null | undefined) =>
     !!url && url.split("?")[0].toLowerCase().endsWith(".pdf")
@@ -2071,7 +2177,7 @@ export default function IsoDocumentDetailPage() {
     return null
   }
 
-  const openPlacementForTask = (
+  const openPlacementForTask = async (
     task: SignFileTask,
     pendingFiles: SignFileTask[],
     completedPlacements: SignedFilePlacement[],
@@ -2088,6 +2194,129 @@ export default function IsoDocumentDetailPage() {
     const currentStep = item ? resolveWorkflowStepForAction(item, action) : null
     const isSoanThaoStep = currentStep === "soan_thao"
     const useSignedPdfAsBackground = task.kind === "main" && !!doc?.file_signed_pdf_url
+
+    const initialSigX = 100
+    const initialSigY = 100
+    const initialSigW = 120
+    const initialSigH = 60
+    const initialNameX = 90
+    const initialNameY = 168
+    const initialNameW = 140
+    const initialNameH = 26
+    const initialQrX = 430
+    const initialQrY = 110
+    const initialQrW = 96
+    const initialQrH = 96
+    let initialPage = 1
+    let initialShowName = true
+    let initialShowChucVu = false
+
+    let realName = user.full_name || user.username || ""
+    let realChucVu = ""
+    try {
+      const infoRes = await fetch(`/api/documents/signer-info?factoryId=${factoryId}&userIds=${user.id}`)
+      if (infoRes.ok) {
+        const infoData = await infoRes.json()
+        if (Array.isArray(infoData) && infoData.length > 0) {
+          realName = infoData[0].full_name || infoData[0].username || realName
+          realChucVu = infoData[0].chuc_vu || infoData[0].chuc_vu_chinh_quyen || ""
+        }
+      }
+    } catch {
+      // fallback to user
+    }
+
+    let rawTemplate: {
+      hasTemplate: boolean
+      soanThao: {
+        x_pt: number; y_pt: number; w_pt: number; h_pt: number
+        so_trang: number; show_name: boolean; show_chuc_vu: boolean
+        chuc_vu_key: string | null
+      } | null
+      qr: {
+        x_pt: number; y_pt: number; w_pt: number; h_pt: number
+        so_trang: number
+      } | null
+    } = { hasTemplate: false, soanThao: null, qr: null }
+
+    if (item && factoryId) {
+      const rawKeys = [
+        item.ma_tai_lieu,
+        item.loai_tai_lieu,
+      ].filter(Boolean) as string[]
+
+      const tmplKeys: string[] = []
+      for (const k of rawKeys) {
+        tmplKeys.push(`iso:code:${k}`)
+        tmplKeys.push(`iso:loai:${k}`)
+        tmplKeys.push(`iso:${k}`)
+        tmplKeys.push(k)
+      }
+
+      if (tmplKeys.length > 0) {
+        try {
+          const { data: tmplRows } = await supabase
+            .from("mau_vi_tri")
+            .select("khung, loai_tai_lieu, phien_ban")
+            .eq("factory_id", factoryId)
+            .in("loai_tai_lieu", tmplKeys)
+            .order("phien_ban", { ascending: false })
+
+          if (tmplRows && tmplRows.length > 0) {
+            const codeRow = item.ma_tai_lieu
+              ? tmplRows.find((r) => r.loai_tai_lieu === `iso:code:${item.ma_tai_lieu}` || r.loai_tai_lieu === `iso:loai:${item.ma_tai_lieu}` || r.loai_tai_lieu === item.ma_tai_lieu)
+              : null
+            const bestRow = codeRow || tmplRows[0]
+
+            if (bestRow && Array.isArray(bestRow.khung)) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const soanThaoBox = bestRow.khung.find((k: any) => k.vai_tro === "soan_thao")
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const qrBox = bestRow.khung.find((k: any) => k.vai_tro === "qr" || k.la_qr)
+
+              if (soanThaoBox || qrBox) {
+                rawTemplate = {
+                  hasTemplate: true,
+                  soanThao: soanThaoBox ? {
+                    x_pt: Number(soanThaoBox.x_pt) || 0,
+                    y_pt: Number(soanThaoBox.y_pt) || 0,
+                    w_pt: Number(soanThaoBox.w_pt) || 160,
+                    h_pt: Number(soanThaoBox.h_pt) || 75,
+                    so_trang: Number(soanThaoBox.so_trang) || 1,
+                    show_name: typeof soanThaoBox.show_name === "boolean" ? soanThaoBox.show_name : true,
+                    show_chuc_vu: typeof soanThaoBox.show_chuc_vu === "boolean" ? soanThaoBox.show_chuc_vu : false,
+                    chuc_vu_key: soanThaoBox.chuc_vu_key || null,
+                  } : null,
+                  qr: qrBox ? {
+                    x_pt: Number(qrBox.x_pt) || 0,
+                    y_pt: Number(qrBox.y_pt) || 0,
+                    w_pt: Number(qrBox.w_pt) || 40,
+                    h_pt: Number(qrBox.h_pt) || 40,
+                    so_trang: Number(qrBox.so_trang) ?? 1,
+                  } : null,
+                }
+                if (rawTemplate.soanThao?.so_trang) {
+                  initialPage = rawTemplate.soanThao.so_trang
+                } else if (rawTemplate.qr?.so_trang && rawTemplate.qr.so_trang > 0) {
+                  initialPage = rawTemplate.qr.so_trang
+                }
+                if (rawTemplate.soanThao) {
+                  if (typeof rawTemplate.soanThao.show_name === "boolean") {
+                    initialShowName = rawTemplate.soanThao.show_name
+                  }
+                  if (typeof rawTemplate.soanThao.show_chuc_vu === "boolean") {
+                    initialShowChucVu = rawTemplate.soanThao.show_chuc_vu
+                  }
+                }
+              }
+            }
+          }
+        } catch {
+          // fallback to defaults
+        }
+      }
+    }
+
     setPlacementModal({
       show: true,
       sourcePdfUrl: task.url,
@@ -2101,28 +2330,38 @@ export default function IsoDocumentDetailPage() {
       token,
       action,
       lyDo,
-      sigX: 100,
-      sigY: 100,
-      sigW: 120,
-      sigH: 60,
-      nameX: 90,
-      nameY: 168,
-      nameW: 140,
-      nameH: 26,
-      qrX: 430,
-      qrY: 110,
-      qrW: 96,
-      qrH: 96,
-      showQrPlacement: isSoanThaoStep,
-      currentPage: 1,
+      sigX: initialSigX,
+      sigY: initialSigY,
+      sigW: initialSigW,
+      sigH: initialSigH,
+      nameX: initialNameX,
+      nameY: initialNameY,
+      nameW: initialNameW,
+      nameH: initialNameH,
+      qrX: initialQrX,
+      qrY: initialQrY,
+      qrW: initialQrW,
+      qrH: initialQrH,
+      showQrPlacement: isSoanThaoStep || !!rawTemplate.qr,
+      currentPage: initialPage,
       totalPages: 1,
       canvasScale: 1,
       pdfPageHeight: 842,
       sigImgUrl: sigUrlData.publicUrl,
       previewSignatures: useSignedPdfAsBackground || task.kind !== "main" ? [] : buildPreviewSignatures(action),
-      signerName: user.full_name || user.username || "",
-      showSignature: true,
-      showSignerName: true,
+      signerName: realName,
+      signerChucVu: realChucVu,
+      showSignature: rawTemplate.hasTemplate ? !!rawTemplate.soanThao : true,
+      showSignerName: initialShowName,
+      showChucVu: initialShowChucVu,
+      isLocked: true,
+      sigInnerX: 0,
+      sigInnerY: 0,
+      sigInnerW: 0,
+      sigInnerH: 0,
+      thumbnails: {},
+      thumbnailsLoading: false,
+      rawTemplate,
       prefixX: 250,
       prefixY: 100,
       prefixW: 60,
@@ -2175,60 +2414,19 @@ export default function IsoDocumentDetailPage() {
       const signQueue = buildSignFileQueue()
       if (signQueue.length > 0) {
         const [firstTask, ...pendingFiles] = signQueue
-        openPlacementForTask(firstTask, pendingFiles, [], verifyJson.token, action, currentLyDo, 1, signQueue.length)
+        await openPlacementForTask(firstTask, pendingFiles, [], verifyJson.token, action, currentLyDo, 1, signQueue.length)
         return
       }
 
       const fileExt = doc?.file_goc_url?.split("?")[0].split(".").pop()?.toLowerCase()
       if (doc?.file_goc_url && fileExt === "pdf") {
-        const sigPath = `signatures/${factoryId}/${user.id}/chu_ky.png`
-        const { data: sigUrlData } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
-        const isSoanThaoStep = user.id === doc.soan_thao_user_id && (action === "gui_xem_xet" || action === "gui_phe_duyet")
-        const sourcePdfUrl = doc.file_signed_pdf_url || doc.file_goc_url
-        const useSignedPdfAsBackground = !!doc.file_signed_pdf_url
-        setPlacementModal({
-          show: true,
-          sourcePdfUrl,
-          docId,
-          fileKind: "main",
-          fileLabel: "File PDF chính",
-          fileIndex: 1,
-          fileTotal: 1,
-          pendingFiles: [],
-          completedPlacements: [],
-          token: verifyJson.token,
-          action,
-          lyDo: currentLyDo,
-          sigX: 100,
-          sigY: 100,
-          sigW: 120,
-          sigH: 60,
-          nameX: 90,
-          nameY: 168,
-          nameW: 140,
-          nameH: 26,
-          qrX: 430,
-          qrY: 110,
-          qrW: 96,
-          qrH: 96,
-          showQrPlacement: isSoanThaoStep,
-          currentPage: 1,
-          totalPages: 1,
-          canvasScale: 1,
-          pdfPageHeight: 842,
-          sigImgUrl: sigUrlData.publicUrl,
-          // Khi dùng signed PDF làm nền, chữ ký/tên lũy kế đã nằm sẵn trong canvas.
-          // Không render lớp preview nữa để tránh đè 2 lần.
-          previewSignatures: useSignedPdfAsBackground ? [] : buildPreviewSignatures(action),
-          signerName: user.full_name || user.username || "",
-          showSignature: true,
-          showSignerName: true,
-          prefixX: 250,
-          prefixY: 100,
-          prefixW: 60,
-          prefixH: 24,
-          extraSigBoxes: [],
-        })
+        const fallbackTask: SignFileTask = {
+          docId: doc.id,
+          kind: "main",
+          label: "File PDF chính",
+          url: doc.file_signed_pdf_url || doc.file_goc_url,
+        }
+        await openPlacementForTask(fallbackTask, [], [], verifyJson.token, action, currentLyDo, 1, 1)
         return
       }
 
@@ -2243,22 +2441,66 @@ export default function IsoDocumentDetailPage() {
   const handlePlacementConfirm = async () => {
     if (!placementModal) return
     const { token, action, lyDo, sigX, sigY, sigW, sigH, canvasScale, pdfPageHeight, currentPage } = placementModal
+    const isLocked = true
+    const st = placementModal.rawTemplate?.soanThao
+    const qrTmpl = placementModal.rawTemplate?.qr
+
+    const nameH_pt = 20
+    const chucVuH_pt = (placementModal.showChucVu && placementModal.signerChucVu) ? 18 : 0
+    const bottomH_pt = (placementModal.showSignerName ? nameH_pt : 0) + chucVuH_pt
+
+    let x = sigX / canvasScale
+    let y = pdfPageHeight - (sigY / canvasScale) - (sigH / canvasScale)
+    let width = sigW / canvasScale
+    let height = sigH / canvasScale
+
+    if (st) {
+      const availH_pt = Math.max(10, st.h_pt - bottomH_pt)
+      const innerX_pt = placementModal.sigInnerX ? placementModal.sigInnerX / canvasScale : 0
+      const innerY_pt = placementModal.sigInnerY ? placementModal.sigInnerY / canvasScale : 0
+      const innerW_pt = placementModal.sigInnerW ? placementModal.sigInnerW / canvasScale : st.w_pt
+      const innerH_pt = placementModal.sigInnerH ? placementModal.sigInnerH / canvasScale : availH_pt
+
+      x = st.x_pt + innerX_pt
+      width = Math.min(st.w_pt - innerX_pt, innerW_pt)
+      height = Math.min(availH_pt, innerH_pt)
+      y = st.y_pt + bottomH_pt + Math.max(0, availH_pt - innerY_pt - height)
+    }
+
+    const nameX = st ? st.x_pt : placementModal.nameX / canvasScale
+    const nameY = st ? st.y_pt + chucVuH_pt : pdfPageHeight - (placementModal.nameY / canvasScale) - (placementModal.nameH / canvasScale)
+    const nameWidth = st ? st.w_pt : placementModal.nameW / canvasScale
+    const nameHeight = st ? nameH_pt : placementModal.nameH / canvasScale
+
+    const qrX = placementModal.showQrPlacement
+      ? (qrTmpl ? qrTmpl.x_pt : placementModal.qrX / canvasScale)
+      : undefined
+    const qrY = placementModal.showQrPlacement
+      ? (qrTmpl ? qrTmpl.y_pt : pdfPageHeight - (placementModal.qrY / canvasScale) - (placementModal.qrH / canvasScale))
+      : undefined
+    const qrWidth = placementModal.showQrPlacement
+      ? (qrTmpl ? qrTmpl.w_pt : placementModal.qrW / canvasScale)
+      : undefined
+    const qrHeight = placementModal.showQrPlacement
+      ? (qrTmpl ? qrTmpl.h_pt : placementModal.qrH / canvasScale)
+      : undefined
+
     const placement: SignPlacement = {
-      page: currentPage,
-      x: sigX / canvasScale,
-      y: pdfPageHeight - (sigY / canvasScale) - (sigH / canvasScale),
-      width: sigW / canvasScale,
-      height: sigH / canvasScale,
+      page: isLocked && st && st.so_trang ? st.so_trang : currentPage,
+      x,
+      y,
+      width,
+      height,
       showSignature: placementModal.showSignature,
       showSignerName: placementModal.showSignerName,
-      nameX: placementModal.nameX / canvasScale,
-      nameY: pdfPageHeight - (placementModal.nameY / canvasScale) - (placementModal.nameH / canvasScale),
-      nameWidth: placementModal.nameW / canvasScale,
-      nameHeight: placementModal.nameH / canvasScale,
-      qrX: placementModal.showQrPlacement ? (placementModal.qrX / canvasScale) : undefined,
-      qrY: placementModal.showQrPlacement ? (pdfPageHeight - (placementModal.qrY / canvasScale) - (placementModal.qrH / canvasScale)) : undefined,
-      qrWidth: placementModal.showQrPlacement ? (placementModal.qrW / canvasScale) : undefined,
-      qrHeight: placementModal.showQrPlacement ? (placementModal.qrH / canvasScale) : undefined,
+      nameX,
+      nameY,
+      nameWidth,
+      nameHeight,
+      qrX,
+      qrY,
+      qrWidth,
+      qrHeight,
       showPrefix: action === "phe_duyet" && signAs !== "none" ? true : undefined,
       prefixX: action === "phe_duyet" && signAs !== "none" ? (placementModal.prefixX / canvasScale) : undefined,
       prefixY: action === "phe_duyet" && signAs !== "none"
@@ -2285,7 +2527,7 @@ export default function IsoDocumentDetailPage() {
     const completedPlacements = [...placementModal.completedPlacements, { docId: placementModal.docId, kind: placementModal.fileKind, placement }]
     const [nextTask, ...remainingFiles] = placementModal.pendingFiles
     if (nextTask) {
-      openPlacementForTask(
+      await openPlacementForTask(
         nextTask,
         remainingFiles,
         completedPlacements,
@@ -3268,50 +3510,78 @@ export default function IsoDocumentDetailPage() {
               <QRCodeSVG value={recordUrl} size={48} className="rounded-lg border border-slate-200 p-1" />
             )}
 
-            {/* Nút workflow — dùng inline style để tránh Tailwind purge */}
-            {!isNew && trangThai === "draft" && isSoanThao && (
-              <button
-                onClick={() => {
-                  const label = form.cap_tl === "Cấp 2" ? "Xác nhận gửi phê duyệt" : "Xác nhận gửi xem xét"
-                  setPinModal({ action: "gui_xem_xet", label })
-                  setPin("")
-                  setPinError("")
-                }}
-                disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
-                style={{ background: "#d97706" }}
-                className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all hover:opacity-90"
-              >
-                <Send size={14} />
-                {form.cap_tl === "Cấp 2" ? "Gửi phê duyệt" : "Gửi xem xét"}
-              </button>
-            )}
-
-            {/* Gửi xem xét lại sau khi bị trả về */}
-            {!isNew && trangThai === "tra_ve" && userId === doc?.soan_thao_user_id && (
-              <button
-                onClick={() => {
-                  const label = form.cap_tl === "Cấp 2" ? "Xác nhận gửi phê duyệt lại" : "Xác nhận gửi xem xét lại"
-                  setPinModal({ action: "gui_xem_xet", label })
-                  setPin("")
-                  setPinError("")
-                }}
-                disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
-                style={{ background: "#d97706" }}
-                className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all hover:opacity-90"
-              >
-                <Send size={14} />
-                {form.cap_tl === "Cấp 2" ? "Gửi phê duyệt lại" : "Gửi xem xét lại"}
-              </button>
+            {/* Luồng Soạn thảo: draft hoặc tra_ve */}
+            {!isNew && (trangThai === "draft" || trangThai === "tra_ve") && isSoanThao && (
+              <>
+                {/* Nếu chưa xác nhận vị trí trên màn mau-vi-tri (và có file PDF/upload) */}
+                {(doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl) && !templateConfirmed ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const pdfToUse = doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl || ""
+                      const loai = doc?.loai_tai_lieu || form.loai_tai_lieu || doc?.ma_tai_lieu || ""
+                      const label = doc?.ma_tai_lieu ? `${doc.ma_tai_lieu} · ${doc.ten_tai_lieu || ""}` : (doc?.ten_tai_lieu || loai)
+                      const url = `/dashboard/ky/mau-vi-tri?modun=iso&docId=${docId}&loaiTaiLieu=${encodeURIComponent(loai)}&pdfUrl=${encodeURIComponent(pdfToUse)}&docLabel=${encodeURIComponent(label)}&returnTo=${encodeURIComponent(`/dashboard/iso/documents/${docId}`)}`
+                      router.push(url)
+                    }}
+                    disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
+                    style={{ background: "#d97706" }}
+                    className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all hover:opacity-90 shadow-xs"
+                    title="Cài đặt mẫu vị trí ký cho quy trình và các biểu mẫu trước khi gửi duyệt"
+                  >
+                    <FileSignature size={15} />
+                    Cài đặt vị trí ký
+                  </button>
+                ) : (
+                  <>
+                    {(doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const pdfToUse = doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl || ""
+                          const loai = doc?.loai_tai_lieu || form.loai_tai_lieu || doc?.ma_tai_lieu || ""
+                          const label = doc?.ma_tai_lieu ? `${doc.ma_tai_lieu} · ${doc.ten_tai_lieu || ""}` : (doc?.ten_tai_lieu || loai)
+                          const url = `/dashboard/ky/mau-vi-tri?modun=iso&docId=${docId}&loaiTaiLieu=${encodeURIComponent(loai)}&pdfUrl=${encodeURIComponent(pdfToUse)}&docLabel=${encodeURIComponent(label)}&returnTo=${encodeURIComponent(`/dashboard/iso/documents/${docId}`)}`
+                          router.push(url)
+                        }}
+                        className="flex items-center gap-2 px-3.5 py-2 text-emerald-800 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-sm font-semibold rounded-xl transition-all shadow-xs"
+                        title="Chỉnh sửa lại vị trí ký đã cài đặt"
+                      >
+                        <FileSignature size={15} className="text-emerald-700" />
+                        Chỉnh sửa vị trí ký
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        const label = form.cap_tl === "Cấp 2"
+                          ? (trangThai === "tra_ve" ? "Xác nhận ký & gửi phê duyệt lại" : "Xác nhận ký & gửi phê duyệt")
+                          : (trangThai === "tra_ve" ? "Xác nhận ký & gửi xem xét lại" : "Xác nhận ký & gửi xem xét")
+                        setPinModal({ action: "gui_xem_xet", label })
+                        setPin("")
+                        setPinError("")
+                      }}
+                      disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
+                      style={{ background: "#d97706" }}
+                      className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all hover:opacity-90"
+                    >
+                      <Send size={14} />
+                      {form.cap_tl === "Cấp 2"
+                        ? (trangThai === "tra_ve" ? "Ký & Gửi phê duyệt lại" : "Ký & Gửi phê duyệt")
+                        : (trangThai === "tra_ve" ? "Ký & Gửi xem xét lại" : "Ký & Gửi xem xét")}
+                    </button>
+                  </>
+                )}
+              </>
             )}
 
             {/* Xem xét → gửi phê duyệt */}
             {!isNew && trangThai === "cho_xem_xet" && canXemXet && (
               <button
-                onClick={() => { setPinModal({ action: "gui_phe_duyet", label: "Ký xem xét & gửi phê duyệt" }); setPin(""); setPinError("") }}
+                onClick={() => setBatchSignModal({ open: true, action: "gui_phe_duyet" })}
                 style={{ background: "#ea580c" }}
                 className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
               >
-                <Send size={14} /> Gửi phê duyệt
+                <Send size={14} /> Ký xem xét & Gửi phê duyệt
               </button>
             )}
 
@@ -3329,11 +3599,11 @@ export default function IsoDocumentDetailPage() {
             {/* Phê duyệt */}
             {!isNew && (trangThai === "cho_phe_duyet") && canApprove && (
               <button
-                onClick={() => { setPinModal({ action: "phe_duyet", label: "Phê duyệt tài liệu" }); setPin(""); setPinError("") }}
+                onClick={() => setBatchSignModal({ open: true, action: "phe_duyet" })}
                 style={{ background: "#16a34a" }}
                 className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
               >
-                <CheckCircle2 size={14} /> Phê duyệt
+                <CheckCircle2 size={14} /> Phê duyệt & Ban hành
               </button>
             )}
 
@@ -3352,11 +3622,11 @@ export default function IsoDocumentDetailPage() {
             {!isNew && trangThai === "bi_tu_choi_phe_duyet" && canXemXet && (
               <>
                 <button
-                  onClick={() => { setPinModal({ action: "gui_lai_phe_duyet", label: "Ký xem xét & gửi phê duyệt lại" }); setPin(""); setPinError("") }}
+                  onClick={() => setBatchSignModal({ open: true, action: "gui_lai_phe_duyet" })}
                   style={{ background: "#ea580c" }}
                   className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
                 >
-                  <Send size={14} /> Gửi phê duyệt lại
+                  <Send size={14} /> Ký xem xét & Gửi phê duyệt lại
                 </button>
                 <button
                   onClick={() => { setPinModal({ action: "tra_ve_nhap", label: "Trả về Nháp" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
@@ -4425,8 +4695,9 @@ export default function IsoDocumentDetailPage() {
                 </button>
               </div>
               <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
-                <span className="rounded-full bg-amber-50 px-2 py-1 text-amber-700 border border-amber-200">
-                  Không đặt ra ngoài ô chứa
+                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700 border border-emerald-300 font-semibold flex items-center gap-1 shadow-xs">
+                  <Lock size={12} className="text-emerald-600" />
+                  Đã khóa vị trí theo mẫu
                 </span>
                 {placementModal.action === "phe_duyet" && (
                   <div className="flex items-center gap-2 flex-wrap">
@@ -4453,532 +4724,359 @@ export default function IsoDocumentDetailPage() {
                     ))}
                   </div>
                 )}
-                {placementModal.extraSigBoxes.length < MAX_EXTRA_SIG && (
-                  <button
-                    onClick={() => setPlacementModal((p) => p ? {
-                      ...p,
-                      extraSigBoxes: [...p.extraSigBoxes, {
-                        id: Date.now() + Math.random(),
-                        sigX: p.sigX + 30 * (p.extraSigBoxes.length + 1),
-                        sigY: p.sigY + 30 * (p.extraSigBoxes.length + 1),
-                        sigW: p.sigW,
-                        sigH: p.sigH,
-                        nameX: p.nameX + 30 * (p.extraSigBoxes.length + 1),
-                        nameY: p.nameY + 30 * (p.extraSigBoxes.length + 1),
-                        nameW: p.nameW,
-                        nameH: p.nameH,
-                        showSignature: p.showSignature,
-                        showSignerName: p.showSignerName,
-                      }],
-                    } : null)}
-                    className="px-2 py-1 rounded-lg border border-violet-300 text-violet-700 hover:bg-violet-50 transition-all font-bold"
-                  >
-                    + Nhân bản chữ ký
-                  </button>
-                )}
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => void handlePlacementConfirm()}
                   style={{ background: "#7c3aed" }}
-                  className="px-4 py-1.5 text-sm text-white font-bold rounded-xl hover:opacity-90 transition-all"
+                  className="px-4 py-1.5 text-sm text-white font-bold rounded-xl hover:opacity-90 transition-all shadow-xs"
                 >
                   Xác nhận vị trí
                 </button>
               </div>
             </div>
-            {/* Canvas area */}
-            <div className="flex-1 overflow-auto flex items-start p-4 bg-slate-100">
-              <div className="relative inline-block shadow-2xl bg-white select-none mx-auto">
-                <canvas ref={pdfCanvasRef} className="block" />
-                {placementModal.previewSignatures
-                  .filter((entry) => entry.page === placementModal.currentPage)
-                  .map((entry) => (
-                    <div key={`prev-${entry.signerUserId}-${entry.page}`} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 5 }}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={entry.url}
-                        alt=""
-                        draggable={false}
-                        style={{
-                          position: "absolute",
-                          left: entry.x * placementModal.canvasScale,
-                          top: (placementModal.pdfPageHeight - entry.y - entry.height) * placementModal.canvasScale,
-                          width: entry.width * placementModal.canvasScale,
-                          height: entry.height * placementModal.canvasScale,
-                          objectFit: "contain",
-                          opacity: 0.45,
-                        }}
-                      />
-                      {entry.showSignerName !== false && entry.signerName && (
+
+            {/* Modal Body: Left Thumbnail Rail + Main Canvas Area */}
+            <div className="flex-1 min-h-0 flex flex-row overflow-hidden bg-slate-100">
+              {/* Left Thumbnail Rail */}
+              <div className="w-28 shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-y-auto p-2 gap-2 select-none">
+                <div className="text-[10px] uppercase font-bold text-slate-400 text-center tracking-wider mb-1">
+                  {placementModal.totalPages} trang
+                </div>
+                {Array.from({ length: placementModal.totalPages }, (_, i) => i + 1).map((pageNum) => {
+                  const isCurrent = pageNum === placementModal.currentPage
+                  const hasSignature = placementModal.rawTemplate?.soanThao?.so_trang === pageNum
+                  const hasQr = placementModal.rawTemplate?.qr?.so_trang === pageNum
+                  const thumbUrl = placementModal.thumbnails?.[pageNum]
+
+                  return (
+                    <button
+                      key={`thumb-${pageNum}`}
+                      type="button"
+                      onClick={() => void handlePageChange(pageNum)}
+                      className={`relative w-full rounded-lg border-2 transition-all p-1 flex flex-col items-center bg-white ${
+                        isCurrent
+                          ? "border-amber-500 shadow-md ring-2 ring-amber-200"
+                          : "border-slate-200 hover:border-slate-400"
+                      }`}
+                    >
+                      {(hasSignature || hasQr) && (
+                        <div className="absolute -top-1.5 -right-1.5 flex gap-0.5 z-10">
+                          {hasSignature && (
+                            <span className="bg-amber-500 text-white rounded-full px-1 py-0.2 text-[8px] font-bold shadow-xs" title="Trang có chữ ký">
+                              ✍
+                            </span>
+                          )}
+                          {hasQr && (
+                            <span className="bg-sky-500 text-white rounded-full px-1 py-0.2 text-[8px] font-bold shadow-xs" title="Trang có mã QR">
+                              QR
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {thumbUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={thumbUrl} alt={`Trang ${pageNum}`} className="w-full h-auto object-contain rounded shadow-2xs pointer-events-none" />
+                      ) : (
+                        <div className={`w-full aspect-[1/1.4] bg-slate-50 border border-slate-100 rounded flex items-center justify-center text-xs font-bold text-slate-400 ${placementModal.thumbnailsLoading ? "animate-pulse" : ""}`}>
+                          {pageNum}
+                        </div>
+                      )}
+                      <span className={`text-[10px] font-bold mt-1 ${isCurrent ? "text-amber-700" : "text-slate-500"}`}>
+                        Trang {pageNum}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Main Canvas Area */}
+              <div className="flex-1 overflow-auto flex items-start p-4">
+                <div className="relative inline-block shadow-2xl bg-white select-none mx-auto">
+                  <canvas ref={pdfCanvasRef} className="block" />
+                  {placementModal.previewSignatures
+                    .filter((entry) => entry.page === placementModal.currentPage)
+                    .map((entry) => (
+                      <div key={`prev-${entry.signerUserId}-${entry.page}`} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 5 }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={entry.url}
+                          alt=""
+                          draggable={false}
+                          style={{
+                            position: "absolute",
+                            left: entry.x * placementModal.canvasScale,
+                            top: (placementModal.pdfPageHeight - entry.y - entry.height) * placementModal.canvasScale,
+                            width: entry.width * placementModal.canvasScale,
+                            height: entry.height * placementModal.canvasScale,
+                            objectFit: "contain",
+                            opacity: 0.45,
+                          }}
+                        />
+                        {entry.showSignerName !== false && entry.signerName && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              left: (entry.nameX ?? 0) * placementModal.canvasScale,
+                              top: (placementModal.pdfPageHeight - (entry.nameY ?? 0) - (entry.nameHeight ?? 20)) * placementModal.canvasScale,
+                              width: (entry.nameWidth ?? 80) * placementModal.canvasScale,
+                              height: (entry.nameHeight ?? 20) * placementModal.canvasScale,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 10,
+                              fontFamily: '"Times New Roman", serif',
+                              color: "#374151",
+                              fontStyle: "italic",
+                              border: "1px dashed rgba(100,100,200,0.4)",
+                              backgroundColor: "rgba(200,200,255,0.15)",
+                              overflow: "hidden",
+                              whiteSpace: "nowrap",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {entry.signerName}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                  {/* KHUNG DUY NHẤT CỦA NGƯỜI SOẠN THẢO (Cố định vị trí, Chữ ký co giãn bằng mũi tên 2 chiều & di chuyển trong khung) */}
+                  {placementModal.showSignature && (
+                    (() => {
+                      const bottomH = (placementModal.showSignerName ? 24 : 0) + (placementModal.showChucVu && placementModal.signerChucVu ? 22 : 0)
+                      const availW = placementModal.sigW
+                      const availH = Math.max(20, placementModal.sigH - bottomH)
+
+                      const sigInnerW = Math.min(availW, Math.max(30, placementModal.sigInnerW || Math.min(availW - 8, 110)))
+                      const sigInnerH = Math.min(availH, Math.max(15, placementModal.sigInnerH || Math.min(availH - 6, 46)))
+                      const sigInnerX = Math.max(0, Math.min(availW - sigInnerW, placementModal.sigInnerX ?? Math.max(0, (availW - sigInnerW) / 2)))
+                      const sigInnerY = Math.max(0, Math.min(availH - sigInnerH, placementModal.sigInnerY ?? Math.max(0, (availH - sigInnerH) / 2)))
+
+                      return (
                         <div
                           style={{
                             position: "absolute",
-                            left: (entry.nameX ?? 0) * placementModal.canvasScale,
-                            top: (placementModal.pdfPageHeight - (entry.nameY ?? 0) - (entry.nameHeight ?? 20)) * placementModal.canvasScale,
-                            width: (entry.nameWidth ?? 80) * placementModal.canvasScale,
-                            height: (entry.nameHeight ?? 20) * placementModal.canvasScale,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: 10,
-                            fontFamily: '"Times New Roman", serif',
-                            color: "#374151",
-                            fontStyle: "italic",
-                            border: "1px dashed rgba(100,100,200,0.4)",
-                            backgroundColor: "rgba(200,200,255,0.15)",
-                            overflow: "hidden",
-                            whiteSpace: "nowrap",
-                            textOverflow: "ellipsis",
+                            left: placementModal.sigX,
+                            top: placementModal.sigY,
+                            width: placementModal.sigW,
+                            height: placementModal.sigH,
+                            border: "2px dashed #d97706",
+                            backgroundColor: "rgba(245, 158, 11, 0.05)",
+                            borderRadius: 6,
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                            zIndex: 20,
                           }}
                         >
-                          {entry.signerName}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                {placementModal.sigImgUrl && (
-                  <Draggable
-                    nodeRef={draggableNodeRef as RefObject<HTMLElement>}
-                    position={{ x: placementModal.sigX, y: placementModal.sigY }}
-                    onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, sigX: d.x, sigY: d.y } : null)}
-                    onStop={(_, d) => setPlacementModal((p) => p ? { ...p, sigX: d.x, sigY: d.y } : null)}
-                    bounds="parent"
-                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
-                  >
-                    <div ref={draggableNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 10, cursor: "move" }}>
-                      <Resizable
-                        size={{ width: placementModal.sigW, height: placementModal.sigH }}
-                        onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
-                          ...p,
-                          sigW: parseInt(ref.style.width) || p.sigW,
-                          sigH: parseInt(ref.style.height) || p.sigH,
-                        } : null)}
-                        minWidth={40}
-                        minHeight={20}
-                        style={{ border: "2px dashed #7c3aed", position: "relative" }}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={placementModal.sigImgUrl}
-                          alt="chữ ký"
-                          style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: placementModal.showSignature ? "block" : "none" }}
-                          draggable={false}
-                        />
-                        {!placementModal.showSignature && (
-                          <div style={{
-                            position: "absolute", inset: 0,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            background: "rgba(241,245,249,0.85)",
-                          }}>
-                            <span style={{ fontSize: 10, color: "#94a3b8" }}>Ẩn chữ ký</span>
+                          {/* Nhãn "Khung của bạn" phía trên góc trái */}
+                          <div className="absolute -top-5 left-0 flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap bg-white/95 text-amber-700 pointer-events-none">
+                            <Lock size={10} className="text-emerald-600" />
+                            Khung của bạn (Người soạn thảo)
                           </div>
-                        )}
-                        {placementModal.showSignature && (
-                          <span style={{
-                            position: "absolute",
-                            top: -20,
-                            left: 0,
-                            fontSize: 10,
-                            color: "#7c3aed",
-                            background: "rgba(255,255,255,0.92)",
-                            padding: "1px 5px",
-                            borderRadius: 4,
-                            whiteSpace: "nowrap",
-                            pointerEvents: "none",
-                          }}>
-                            Không đặt ra ngoài ô chứa
-                          </span>
-                        )}
-                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? { ...p, showSignature: !p.showSignature } : null) }}
-                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
-                            title={placementModal.showSignature ? "Ẩn chữ ký" : "Hiện chữ ký"}
-                          >
-                            {placementModal.showSignature ? <EyeOff size={12} /> : <Eye size={12} />}
-                          </button>
-                          {placementModal.extraSigBoxes.length < MAX_EXTRA_SIG && (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onTouchStart={(e) => e.stopPropagation()}
-                              onTouchEnd={(e) => e.stopPropagation()}
-                              onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
-                                ...p,
-                                extraSigBoxes: [...p.extraSigBoxes, {
-                                  id: Date.now() + Math.random(),
-                                  sigX: p.sigX + 30 * (p.extraSigBoxes.length + 1),
-                                  sigY: p.sigY + 30 * (p.extraSigBoxes.length + 1),
-                                  sigW: p.sigW,
-                                  sigH: p.sigH,
-                                  nameX: p.nameX + 30 * (p.extraSigBoxes.length + 1),
-                                  nameY: p.nameY + 30 * (p.extraSigBoxes.length + 1),
-                                  nameW: p.nameW,
-                                  nameH: p.nameH,
-                                  showSignature: p.showSignature,
-                                  showSignerName: p.showSignerName,
-                                }],
-                              } : null) }}
-                              className="w-7 h-7 sm:w-5 sm:h-5 bg-violet-600 border border-violet-700 text-white rounded-full shadow flex items-center justify-center hover:bg-violet-700 font-bold active:scale-95 transition-transform"
-                              title="Nhân bản chữ ký và tên (+)"
-                            >
-                              <Plus size={12} />
-                            </button>
-                          )}
-                        </div>
-                      </Resizable>
-                    </div>
-                  </Draggable>
-                )}
-                {placementModal.showQrPlacement && (
-                  <Draggable
-                    nodeRef={qrNodeRef as RefObject<HTMLElement>}
-                    position={{ x: placementModal.qrX, y: placementModal.qrY }}
-                    onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, qrX: d.x, qrY: d.y } : null)}
-                    onStop={(_, d) => setPlacementModal((p) => p ? { ...p, qrX: d.x, qrY: d.y } : null)}
-                    bounds="parent"
-                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
-                  >
-                    <div ref={qrNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 10, cursor: "move" }}>
-                      <Resizable
-                        size={{ width: placementModal.qrW, height: placementModal.qrH }}
-                        onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
-                          ...p,
-                          qrW: parseInt(ref.style.width) || p.qrW,
-                          qrH: parseInt(ref.style.height) || p.qrH,
-                        } : null)}
-                        minWidth={40}
-                        minHeight={40}
-                        style={{ border: "2px dashed #0ea5e9", position: "relative", background: "rgba(255,255,255,0.9)" }}
-                      >
-                        <QRCodeSVG
-                          value={recordUrl}
-                          size={Math.max(Math.min(placementModal.qrW, placementModal.qrH) - 8, 20)}
-                          className="m-1"
-                        />
-                        <span style={{
-                          position: "absolute",
-                          top: -20,
-                          left: 0,
-                          fontSize: 10,
-                          color: "#0ea5e9",
-                          background: "rgba(255,255,255,0.92)",
-                          padding: "1px 5px",
-                          borderRadius: 4,
-                          whiteSpace: "nowrap",
-                          pointerEvents: "none",
-                        }}>
-                          Không đặt ra ngoài ô chứa
-                        </span>
-                      </Resizable>
-                    </div>
-                  </Draggable>
-                )}
-                {placementModal.signerName && (
-                  <Draggable
-                    nodeRef={nameNodeRef as RefObject<HTMLElement>}
-                    position={{ x: placementModal.nameX, y: placementModal.nameY }}
-                    onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, nameX: d.x, nameY: d.y } : null)}
-                    onStop={(_, d) => setPlacementModal((p) => p ? { ...p, nameX: d.x, nameY: d.y } : null)}
-                    bounds="parent"
-                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
-                  >
-                    <div
-                      ref={nameNodeRef}
-                      style={{ position: "absolute", top: 0, left: 0, zIndex: 11, cursor: "move" }}
-                    >
-                      <Resizable
-                        size={{ width: placementModal.nameW, height: placementModal.nameH }}
-                        onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
-                          ...p,
-                          nameW: parseInt(ref.style.width) || p.nameW,
-                          nameH: parseInt(ref.style.height) || p.nameH,
-                        } : null)}
-                        minWidth={90}
-                        minHeight={22}
-                        style={{
-                          border: "2px dashed #0f766e",
-                          position: "relative",
-                          background: "rgba(255,255,255,0.95)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          padding: "2px 8px",
-                        }}
-                      >
-                        {placementModal.showSignerName ? (
-                          <span
-                            style={{
-                              fontFamily: "\"Times New Roman\", serif",
-                              fontSize: 13,
-                              lineHeight: 1.1,
-                              color: "#111827",
-                              maxWidth: "100%",
-                              textAlign: "center",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              pointerEvents: "none",
-                            }}
-                          >
-                            {placementModal.signerName}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 10, color: "#94a3b8", pointerEvents: "none" }}>Ẩn tên</span>
-                        )}
-                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
-                          <button
-                            type="button"
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null) }}
-                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
-                            title={placementModal.showSignerName ? "Ẩn tên" : "Hiện tên"}
-                          >
-                            {placementModal.showSignerName ? <EyeOff size={12} /> : <Eye size={12} />}
-                          </button>
-                          {placementModal.extraSigBoxes.length < MAX_EXTRA_SIG && (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onTouchStart={(e) => e.stopPropagation()}
-                              onTouchEnd={(e) => e.stopPropagation()}
-                              onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
-                                ...p,
-                                extraSigBoxes: [...p.extraSigBoxes, {
-                                  id: Date.now() + Math.random(),
-                                  sigX: p.sigX + 30 * (p.extraSigBoxes.length + 1),
-                                  sigY: p.sigY + 30 * (p.extraSigBoxes.length + 1),
-                                  sigW: p.sigW,
-                                  sigH: p.sigH,
-                                  nameX: p.nameX + 30 * (p.extraSigBoxes.length + 1),
-                                  nameY: p.nameY + 30 * (p.extraSigBoxes.length + 1),
-                                  nameW: p.nameW,
-                                  nameH: p.nameH,
-                                  showSignature: p.showSignature,
-                                  showSignerName: p.showSignerName,
-                                }],
-                              } : null) }}
-                              className="w-7 h-7 sm:w-5 sm:h-5 bg-purple-600 border border-purple-700 text-white rounded-full shadow flex items-center justify-center hover:bg-purple-700 font-bold active:scale-95 transition-transform"
-                              title="Nhân bản chữ ký và tên (+)"
-                            >
-                              <Plus size={12} />
-                            </button>
-                          )}
-                        </div>
-                        {placementModal.showSignerName && (
-                          <span style={{
-                            position: "absolute",
-                            top: -20,
-                            left: 0,
-                            fontSize: 10,
-                            color: "#0f766e",
-                            background: "rgba(255,255,255,0.92)",
-                            padding: "1px 5px",
-                            borderRadius: 4,
-                            whiteSpace: "nowrap",
-                            pointerEvents: "none",
-                          }}>
-                            Không đặt ra ngoài ô chứa
-                          </span>
-                        )}
-                      </Resizable>
-                    </div>
-                  </Draggable>
-                )}
 
-                {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước Phê duyệt, chỉ hiện khi đã chọn */}
-                {placementModal.action === "phe_duyet" && signAs !== "none" && (
-                  <Draggable
-                    nodeRef={prefixNodeRef as RefObject<HTMLElement>}
-                    position={{ x: placementModal.prefixX, y: placementModal.prefixY }}
-                    onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, prefixX: d.x, prefixY: d.y } : null)}
-                    onStop={(_, d) => setPlacementModal((p) => p ? { ...p, prefixX: d.x, prefixY: d.y } : null)}
-                    bounds="parent"
-                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
-                  >
-                    <div ref={prefixNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 11, cursor: "move" }}>
-                      <Resizable
-                        size={{ width: placementModal.prefixW, height: placementModal.prefixH }}
-                        onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
-                          ...p,
-                          prefixW: parseInt(ref.style.width) || p.prefixW,
-                          prefixH: parseInt(ref.style.height) || p.prefixH,
-                        } : null)}
-                        minWidth={36}
-                        minHeight={16}
-                        style={{
-                          border: "2px dashed #059669",
-                          position: "relative",
-                          background: "rgba(236,253,245,0.9)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#047857", pointerEvents: "none" }}>{signAs}.</span>
-                      </Resizable>
-                    </div>
-                  </Draggable>
-                )}
-                {/* Extra sig boxes (clone) */}
-                {placementModal.extraSigBoxes.map((box, idx) => (
-                  <Fragment key={box.id}>
-                    <ExtraDraggableBox
-                      position={{ x: box.sigX, y: box.sigY }}
-                      onStop={(_, d) => setPlacementModal((p) => p ? {
-                        ...p,
-                        extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, sigX: d.x, sigY: d.y } : b),
-                      } : null)}
-                      zIndex={12}
-                    >
-                      <Resizable
-                        size={{ width: box.sigW, height: box.sigH }}
-                        onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
-                          ...p,
-                          extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? {
-                            ...b,
-                            sigW: parseInt(ref.style.width) || b.sigW,
-                            sigH: parseInt(ref.style.height) || b.sigH,
-                          } : b),
-                        } : null)}
-                        minWidth={40}
-                        minHeight={20}
-                        style={{ border: "2px dashed #9333ea", position: "relative" }}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={placementModal.sigImgUrl ?? ""}
-                          alt="chữ ký bản sao"
-                          style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.9, display: box.showSignature ? "block" : "none" }}
-                          draggable={false}
-                        />
-                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
-                          <button
-                            type="button"
+                          {/* Vùng chữ ký khả dụng: di chuyển và co giãn bằng mũi tên 2 chiều nhưng giới hạn trong khung */}
+                          <div className="relative w-full overflow-hidden" style={{ height: availH }}>
+                            <Draggable
+                              nodeRef={sigInnerNodeRef as RefObject<HTMLElement>}
+                              position={{ x: sigInnerX, y: sigInnerY }}
+                              bounds="parent"
+                              cancel=".resize-handle"
+                              onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, sigInnerX: d.x, sigInnerY: d.y } : null)}
+                              onStop={(_, d) => setPlacementModal((p) => p ? { ...p, sigInnerX: d.x, sigInnerY: d.y } : null)}
+                            >
+                              <div
+                                ref={sigInnerNodeRef}
+                                style={{
+                                  position: "absolute",
+                                  top: 0,
+                                  left: 0,
+                                  width: sigInnerW,
+                                  height: sigInnerH,
+                                  cursor: "move",
+                                  userSelect: "none",
+                                }}
+                                className="relative group border border-dashed border-amber-400/80 bg-amber-50/30 rounded p-1 flex items-center justify-center hover:border-amber-600"
+                              >
+                                {placementModal.sigImgUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={placementModal.sigImgUrl}
+                                    alt="Chữ ký"
+                                    className="w-full h-full object-contain pointer-events-none"
+                                    draggable={false}
+                                  />
+                                ) : (
+                                  <span className="text-[10px] font-bold text-amber-700 italic text-center px-1">
+                                    [Chữ ký {placementModal.signerName}]
+                                  </span>
+                                )}
+
+                                {/* Handle co giãn 2 chiều ở góc dưới bên phải */}
+                                <div
+                                  className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-125 transition-transform"
+                                  title="Kéo để co giãn kích thước chữ ký trong khung"
+                                  onPointerDown={(e) => {
+                                    e.stopPropagation()
+                                    e.preventDefault()
+                                    const startX = e.clientX
+                                    const startY = e.clientY
+                                    const startW = sigInnerW
+                                    const startH = sigInnerH
+                                    const curX = sigInnerX
+                                    const curY = sigInnerY
+
+                                    const onMove = (ev: PointerEvent) => {
+                                      const dx = ev.clientX - startX
+                                      const dy = ev.clientY - startY
+                                      const newW = Math.max(30, Math.min(availW - curX, startW + dx))
+                                      const newH = Math.max(15, Math.min(availH - curY, startH + dy))
+                                      setPlacementModal((p) => p ? { ...p, sigInnerW: newW, sigInnerH: newH } : null)
+                                    }
+                                    const onUp = () => {
+                                      window.removeEventListener("pointermove", onMove)
+                                      window.removeEventListener("pointerup", onUp)
+                                    }
+                                    window.addEventListener("pointermove", onMove)
+                                    window.addEventListener("pointerup", onUp)
+                                  }}
+                                >
+                                  <svg viewBox="0 0 24 24" width="10" height="10" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="15 3 21 3 21 9" />
+                                    <polyline points="9 21 3 21 3 15" />
+                                    <line x1="21" y1="3" x2="14" y2="10" />
+                                    <line x1="3" y1="21" x2="10" y2="14" />
+                                  </svg>
+                                </div>
+                              </div>
+                            </Draggable>
+                          </div>
+
+                          {/* Ô Họ tên thật ở đáy khung */}
+                          <div className="shrink-0 flex flex-col gap-0.5 px-1 pb-1">
+                            {placementModal.showSignerName && (
+                              <div className="w-full border border-sky-400 bg-sky-50/90 text-sky-800 font-bold text-center text-xs py-0.5 rounded px-2 select-none shadow-xs truncate leading-tight">
+                                {placementModal.signerName || "Người soạn thảo"}
+                              </div>
+                            )}
+                            {placementModal.showChucVu && placementModal.signerChucVu && (
+                              <div className="w-full border border-violet-400 bg-violet-50/90 text-violet-800 font-semibold text-center text-[10px] py-0.5 rounded px-2 select-none shadow-xs truncate leading-tight">
+                                {placementModal.signerChucVu}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Hàng nút bật/tắt Tên và Chức vụ đặt ngay sát mép dưới ngoài khung */}
+                          <div
+                            className="absolute -bottom-7 left-0 flex items-center gap-1.5 z-30 pointer-events-auto"
                             onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
-                              ...p,
-                              extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, showSignature: !b.showSignature } : b),
-                            } : null) }}
-                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
-                            title={box.showSignature ? "Ẩn chữ ký bản sao" : "Hiện chữ ký bản sao"}
                           >
-                            {box.showSignature ? <EyeOff size={12} /> : <Eye size={12} />}
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
-                              ...p,
-                              extraSigBoxes: p.extraSigBoxes.filter((b) => b.id !== box.id),
-                            } : null) }}
-                            className="w-7 h-7 sm:w-5 sm:h-5 bg-red-500 border border-red-600 text-white rounded-full shadow flex items-center justify-center hover:bg-red-600 text-xs font-bold active:scale-95 transition-transform"
-                            title="Tắt / Xóa bản sao này"
-                          >
-                            ×
-                          </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setPlacementModal((p) => p ? { ...p, showSignerName: !p.showSignerName } : null)
+                              }}
+                              className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
+                                placementModal.showSignerName
+                                  ? "bg-sky-50 border-sky-300 text-sky-700"
+                                  : "bg-slate-100 border-slate-300 text-slate-400"
+                              }`}
+                              title={placementModal.showSignerName ? "Ẩn họ tên" : "Hiện họ tên"}
+                            >
+                              <Eye size={12} /> Tên
+                            </button>
+
+                            {placementModal.signerChucVu && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setPlacementModal((p) => p ? { ...p, showChucVu: !p.showChucVu } : null)
+                                }}
+                                className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold border shadow-xs transition-all ${
+                                  placementModal.showChucVu
+                                    ? "bg-violet-50 border-violet-300 text-violet-700"
+                                    : "bg-slate-100 border-slate-300 text-slate-400"
+                                }`}
+                                title={placementModal.showChucVu ? "Ẩn chức vụ" : "Hiện chức vụ"}
+                              >
+                                <Eye size={12} /> Chức vụ
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <span style={{
-                          position: "absolute", top: -20, left: 0, fontSize: 10,
-                          color: "#9333ea", background: "rgba(255,255,255,0.92)",
-                          padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap", pointerEvents: "none",
-                        }}>
-                          Bản sao {idx + 1}
-                        </span>
-                      </Resizable>
-                    </ExtraDraggableBox>
-                    {box.showSignerName && placementModal.signerName && (
-                      <ExtraDraggableBox
-                        position={{ x: box.nameX, y: box.nameY }}
-                        onStop={(_, d) => setPlacementModal((p) => p ? {
-                          ...p,
-                          extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, nameX: d.x, nameY: d.y } : b),
-                        } : null)}
-                        zIndex={13}
+                      )
+                    })()
+                  )}
+
+                  {/* QR CODE BOX (Cố định vị trí theo mẫu vị trí) */}
+                  {placementModal.showQrPlacement && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: placementModal.qrX,
+                        top: placementModal.qrY,
+                        width: placementModal.qrW,
+                        height: placementModal.qrH,
+                        border: "2px dashed #0ea5e9",
+                        background: "rgba(255,255,255,0.92)",
+                        borderRadius: 6,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                        zIndex: 10,
+                      }}
+                    >
+                      <div
+                        className="absolute -top-5 left-0 flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap bg-white/95 text-sky-700 pointer-events-none"
                       >
+                        <Lock size={10} className="text-emerald-600" />
+                        Mã QR xác thực
+                      </div>
+                      <QRCodeSVG
+                        value={recordUrl}
+                        size={Math.max(Math.min(placementModal.qrW, placementModal.qrH) - 8, 20)}
+                        className="m-1"
+                      />
+                    </div>
+                  )}
+
+                  {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước Phê duyệt, chỉ hiện khi đã chọn */}
+                  {placementModal.action === "phe_duyet" && signAs !== "none" && (
+                    <Draggable
+                      nodeRef={prefixNodeRef as RefObject<HTMLElement>}
+                      position={{ x: placementModal.prefixX, y: placementModal.prefixY }}
+                      onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, prefixX: d.x, prefixY: d.y } : null)}
+                      onStop={(_, d) => setPlacementModal((p) => p ? { ...p, prefixX: d.x, prefixY: d.y } : null)}
+                      bounds="parent"
+                      cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                    >
+                      <div ref={prefixNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 11, cursor: "move" }}>
                         <Resizable
-                          size={{ width: box.nameW, height: box.nameH }}
+                          size={{ width: placementModal.prefixW, height: placementModal.prefixH }}
                           onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
                             ...p,
-                            extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? {
-                              ...b,
-                              nameW: parseInt(ref.style.width) || b.nameW,
-                              nameH: parseInt(ref.style.height) || b.nameH,
-                            } : b),
+                            prefixW: parseInt(ref.style.width) || p.prefixW,
+                            prefixH: parseInt(ref.style.height) || p.prefixH,
                           } : null)}
-                          minWidth={90}
-                          minHeight={22}
+                          minWidth={36}
+                          minHeight={16}
                           style={{
-                            border: "2px dashed #0f766e",
+                            border: "2px dashed #059669",
                             position: "relative",
-                            background: "rgba(255,255,255,0.95)",
+                            background: "rgba(236,253,245,0.9)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            padding: "2px 8px",
                           }}
                         >
-                          <span
-                            style={{
-                              fontFamily: "\"Times New Roman\", serif",
-                              fontSize: 13,
-                              lineHeight: 1.1,
-                              color: "#111827",
-                              maxWidth: "100%",
-                              textAlign: "center",
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              pointerEvents: "none",
-                            }}
-                          >
-                            {placementModal.signerName}
-                          </span>
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); setPlacementModal((p) => p ? {
-                              ...p,
-                              extraSigBoxes: p.extraSigBoxes.map((b) => b.id === box.id ? { ...b, showSignerName: !b.showSignerName } : b),
-                            } : null) }}
-                            className="absolute -top-3 -right-3 w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
-                            style={{ zIndex: 20 }}
-                            title={box.showSignerName ? "Ẩn tên bản sao" : "Hiện tên bản sao"}
-                          >
-                            {box.showSignerName ? <EyeOff size={12} /> : <Eye size={12} />}
-                          </button>
-                          <span style={{
-                            position: "absolute",
-                            top: -20,
-                            left: 0,
-                            fontSize: 10,
-                            color: "#0f766e",
-                            background: "rgba(255,255,255,0.92)",
-                            padding: "1px 5px",
-                            borderRadius: 4,
-                            whiteSpace: "nowrap",
-                            pointerEvents: "none",
-                          }}>
-                            Tên bản sao {idx + 1}
-                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#047857", pointerEvents: "none" }}>{signAs}.</span>
                         </Resizable>
-                      </ExtraDraggableBox>
-                    )}
-                  </Fragment>
-                ))}
+                      </div>
+                    </Draggable>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -5085,6 +5183,21 @@ export default function IsoDocumentDetailPage() {
             setShowDistributeModal(false)
             setShowManagement(true)
           }}
+        />
+      )}
+
+      {/* Modal Ký duyệt tập trung (Xem xét & Phê duyệt) */}
+      {batchSignModal?.open && doc && factoryId && user && (
+        <IsoBatchSignModal
+          open={batchSignModal.open}
+          onClose={() => setBatchSignModal(null)}
+          doc={doc}
+          childDocs={childDocs}
+          action={batchSignModal.action}
+          factoryId={factoryId}
+          currentUser={user}
+          initialSignAs={signAs}
+          onTransitionSuccess={handleBatchTransitionSuccess}
         />
       )}
     </IsoShell>
