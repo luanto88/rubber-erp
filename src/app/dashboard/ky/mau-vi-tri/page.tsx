@@ -53,6 +53,13 @@ import {
   type SignTemplateSignAsKey,
   type IsoSignRoleId,
 } from "@/lib/signing/templates"
+import {
+  computeDefaultSubLayout,
+  SIGN_PREFIX_FONT_SIZE_PT,
+  SIGN_TEXT_FONT_FAMILY,
+  SIGN_TEXT_FONT_SIZE_PT,
+} from "@/lib/signing/template-layout"
+import { ResizeHandleIcon } from "@/app/dashboard/_components/resize-handle-icon"
 
 // ── Vai trò gốc — cấu hình cho module "documents" (Văn bản) và "iso" (ISO). Vai trò khác free-text,
 // người dùng có thể "Nhân bản" (duplicate) bất kỳ vai trò đã đặt nào để tạo thêm vị trí
@@ -465,9 +472,25 @@ export default function SignTemplateEditorPage() {
 
   const cloneSeqRef = useRef<Record<string, number>>({})
   const pageWrapRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * Bề rộng thực tế (px) của khung trang đang hiển thị — trang co giãn theo màn hình
+   * (`w-full max-w-[640px]`) nên phải đo mới quy được cỡ chữ point của PDF sang pixel xem trước.
+   */
+  const [pageWrapWidth, setPageWrapWidth] = useState(0)
   const dragRef = useRef<{ id: string; startX: number; startY: number; startLeft: number; startTop: number; rectW: number; rectH: number } | null>(null)
   const resizeRef = useRef<{ id: string; startX: number; startY: number; startW: number; startH: number; left: number; top: number; rectW: number; rectH: number } | null>(null)
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+
+  // Theo dõi bề rộng khung trang để cỡ chữ xem trước luôn khớp cỡ chữ sẽ đóng dấu.
+  useEffect(() => {
+    const el = pageWrapRef.current
+    if (!el) return
+    const update = () => setPageWrapWidth(el.clientWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const nudgeRole = (roleId: string, dxSteps: number, dySteps: number) => {
     const wrap = pageWrapRef.current
@@ -945,6 +968,16 @@ export default function SignTemplateEditorPage() {
     [roles, currentPage],
   )
 
+  /**
+   * Quy đổi point (đơn vị PDF) → pixel màn hình theo bề rộng trang đang hiển thị. Nhờ hệ số này,
+   * chữ xem trước to đúng bằng chữ sau khi ký ở mọi kích thước cửa sổ.
+   */
+  const ptToPx = useMemo(() => {
+    const dim = pageDims[currentPage]
+    if (!dim || dim.w <= 0 || pageWrapWidth <= 0) return 1
+    return pageWrapWidth / dim.w
+  }, [pageDims, currentPage, pageWrapWidth])
+
   // Người/phòng ban thật đã chọn ở màn soạn thảo (new/page.tsx) cho đúng văn bản đang mở —
   // chỉ dùng để hiển thị preview, KHÔNG bao giờ lưu vào mau_vi_tri (xem DocSignerInfo).
   const docSignerByRoleId = useMemo(() => {
@@ -1129,6 +1162,16 @@ export default function SignTemplateEditorPage() {
   }
 
   const removeRole = (roleId: string) => {
+    // Slot ứng với MỘT BƯỚC KÝ THẬT của văn bản đang mở thì không được xoá khỏi danh sách: xoá đi
+    // là mẫu thiếu khung cho bước đó, và khi tới lượt người ấy hệ thống rơi về luồng kéo-thả tự do
+    // thay vì ký theo mẫu. Chỉ cho "gỡ khung" (đưa về trạng thái chưa đặt) để đặt lại chỗ khác —
+    // lúc đó `missingRequired` vẫn chặn gửi đi cho tới khi đặt đủ.
+    if (docSignerByRoleId[roleId]) {
+      setRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, placed: false, outOfBounds: false } : r)))
+      if (selectedRoleId === roleId) setSelectedRoleId(null)
+      showToast("Đã gỡ khung — bước ký này bắt buộc phải có vị trí, hãy đặt lại trước khi gửi đi")
+      return
+    }
     setRoles((prev) => {
       const role = prev.find((r) => r.id === roleId)
       if (!role) return prev
@@ -1449,7 +1492,10 @@ export default function SignTemplateEditorPage() {
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
-                      {role.label} {role.batBuoc && !isExemptIsoDoc && <span className="text-red-500 text-[10px]">• bắt buộc</span>}
+                      {/* Dùng isRequiredForConfirm chứ không phải role.batBuoc: các slot "Ký bước"
+                          thứ 2 trở đi là bản nhân bản (batBuoc = false) nhưng vẫn ứng với một bước
+                          ký thật của văn bản, bỏ trống là bước đó không ký theo mẫu được. */}
+                      {role.label} {isRequiredForConfirm(role) && <span className="text-red-500 text-[10px]">• bắt buộc</span>}
                     </div>
                     <div className="text-[11px] text-slate-500">
                       {role.placed ? <span className="text-teal-700 font-semibold">Đã đặt · {anchorLabel}</span> : <span className="italic text-slate-400">Chưa đặt</span>}
@@ -1485,7 +1531,15 @@ export default function SignTemplateEditorPage() {
                         <button onClick={() => duplicateRole(role.id)} title="Nhân bản" className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600">
                           <Copy size={12} />
                         </button>
-                        <button onClick={() => removeRole(role.id)} title="Bỏ" className="p-1.5 rounded text-slate-400 hover:text-red-600">
+                        <button
+                          onClick={() => removeRole(role.id)}
+                          title={
+                            docSignerByRoleId[role.id]
+                              ? "Gỡ khung để đặt lại chỗ khác (bước ký này bắt buộc phải có vị trí)"
+                              : "Bỏ"
+                          }
+                          className="p-1.5 rounded text-slate-400 hover:text-red-600"
+                        >
                           <Trash2 size={12} />
                         </button>
                       </>
@@ -1850,11 +1904,12 @@ export default function SignTemplateEditorPage() {
                     boxShadow: isSelected ? `0 0 0 3px ${color.fg}` : undefined,
                     cursor: previewMode ? "default" : "grab",
                     zIndex: isSelected ? 5 : 1,
-                    padding: previewMode ? "4px 6px" : undefined,
+                    // KHÔNG padding ở chế độ xem trước: nội dung được đặt tuyệt đối theo đúng tỉ lệ
+                    // khung mà `computeDefaultSubLayout()` dùng lúc đóng dấu — thêm padding là lệch.
                   }}
                 >
                   {previewMode ? (
-                    <PreviewContent role={role} color={color.fg} signer={docSignerByRoleId[role.id]} factoryId={factoryId} />
+                    <PreviewContent role={role} color={color.fg} signer={docSignerByRoleId[role.id]} factoryId={factoryId} ptToPx={ptToPx} />
                   ) : (
                     <span
                       className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-white pointer-events-none whitespace-nowrap"
@@ -1868,9 +1923,11 @@ export default function SignTemplateEditorPage() {
                       onPointerDown={(e) => startResize(e, role)}
                       onPointerMove={(e) => onResizeMove(e, role)}
                       onPointerUp={onResizeEnd}
-                      className="absolute w-6 h-6 sm:w-3 sm:h-3 border-2 border-white rounded-sm shadow-xs"
-                      style={{ right: -8, bottom: -8, background: color.fg, cursor: "nwse-resize", touchAction: "none" }}
-                    />
+                      className="absolute"
+                      style={{ right: -14, bottom: -14, width: 28, height: 28, touchAction: "none" }}
+                    >
+                      <ResizeHandleIcon color={color.fg} title="Kéo để co giãn khung ký" />
+                    </div>
                   )}
                 </div>
               )
@@ -2044,16 +2101,93 @@ export default function SignTemplateEditorPage() {
   )
 }
 
+/**
+ * Xem trước nội dung 1 khung ký, ĐẶT ĐÚNG CHỖ chữ sẽ rơi vào sau khi ký.
+ *
+ * Trước đây khối này xếp bằng `flex-col` co cụm vào giữa khung, trong khi lúc đóng dấu thật
+ * `computeDefaultSubLayout()` chia khung thành các dải cố định theo tỉ lệ — nên xem trước và bản
+ * PDF lệch nhau (tên bị tụt xuống, tràn ra ngoài ô bảng). Giờ gọi CHÍNH hàm đó với khung quy ước
+ * 100×100 để lấy tỉ lệ, rồi đặt tuyệt đối theo `%` — cùng một công thức với server.
+ *
+ * `ptToPx` quy cỡ chữ từ point (PDF) sang pixel theo bề rộng trang đang hiển thị, nhờ vậy chữ xem
+ * trước to đúng bằng chữ thật ở mọi kích thước màn hình.
+ */
+function SignBoxPreviewLayout({
+  sigNode,
+  nameText,
+  chucVuText,
+  prefixText,
+  showName,
+  showChucVu,
+  ptToPx,
+}: {
+  sigNode: React.ReactNode
+  nameText: string
+  chucVuText: string
+  prefixText: string | null
+  showName: boolean
+  showChucVu: boolean
+  ptToPx: number
+}) {
+  const d = computeDefaultSubLayout(
+    { x: 0, y: 0, width: 100, height: 100 },
+    { withName: showName, withChucVu: showChucVu, withPrefix: !!prefixText },
+  )
+  // Hệ của computeDefaultSubLayout là gốc DƯỚI-trái (như pdf-lib); CSS là gốc TRÊN-trái.
+  const toCss = (r: { x: number; y: number; width: number; height: number }): React.CSSProperties => ({
+    position: "absolute",
+    left: `${r.x}%`,
+    top: `${100 - (r.y + r.height)}%`,
+    width: `${r.width}%`,
+    height: `${r.height}%`,
+  })
+  const textFontPx = Math.max(4, SIGN_TEXT_FONT_SIZE_PT * ptToPx)
+  const prefixFontPx = Math.max(4, SIGN_PREFIX_FONT_SIZE_PT * ptToPx)
+
+  return (
+    <div className="absolute inset-0" style={{ fontFamily: SIGN_TEXT_FONT_FAMILY }}>
+      <div style={toCss(d.sig)} className="flex items-center justify-center overflow-hidden">
+        {sigNode}
+      </div>
+      {showName && d.name && (
+        // pdf-lib đặt đường chân chữ của TÊN ở đáy khối → canh đáy cho khớp.
+        <div style={toCss(d.name)} className="flex items-end justify-center overflow-hidden">
+          <span className="leading-none text-slate-900 whitespace-nowrap" style={{ fontSize: textFontPx }}>
+            {nameText}
+          </span>
+        </div>
+      )}
+      {showChucVu && chucVuText && (
+        <div style={toCss(d.chuc_vu!)} className="flex items-center justify-center overflow-hidden">
+          <span className="leading-none text-slate-900 whitespace-nowrap" style={{ fontSize: textFontPx }}>
+            {chucVuText}
+          </span>
+        </div>
+      )}
+      {prefixText && d.prefix && (
+        <div style={toCss(d.prefix)} className="flex items-center justify-center overflow-hidden">
+          <span className="leading-none text-slate-900 whitespace-nowrap" style={{ fontSize: prefixFontPx }}>
+            {prefixText}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PreviewContent({
   role,
   color,
   signer,
   factoryId,
+  ptToPx,
 }: {
   role: EditorRole
   color: string
   signer?: DocSignerInfo
   factoryId: string | null
+  /** Hệ số quy đổi point (PDF) → pixel theo bề rộng trang đang hiển thị. */
+  ptToPx: number
 }) {
   if (role.loai === "qr") {
     return (
@@ -2077,14 +2211,29 @@ function PreviewContent({
 
   // Vai trò gắn với NGƯỜI THẬT đã chọn ở màn soạn thảo (chỉ khi mở kèm docId) — hiện tên/chức
   // vụ/ảnh chữ ký thật thay placeholder giả, để người soạn thảo có căn cứ thật khi đặt vị trí.
+  const prefixText = role.signAs ? `${role.signAs}.` : null
+  const fakeSig = (
+    <svg viewBox="0 0 52 34" width="80%" height="80%" fill="none" preserveAspectRatio="xMidYMid meet">
+      <path d="M2,22 C10,4 16,30 24,10 S38,26 46,14" stroke={color} strokeWidth={2.4} strokeLinecap="round" fill="none" />
+    </svg>
+  )
+
   if (signer?.kind === "phong_ban") {
     return (
-      <div className="flex flex-col items-center gap-0.5 text-center px-1">
-        <div className="text-[10px] font-bold text-slate-800">{signer.label}</div>
-        <div className="text-[8px] italic text-slate-400">(người ký thật xác định khi ký)</div>
-      </div>
+      <SignBoxPreviewLayout
+        sigNode={fakeSig}
+        // Văn bản cũ: bước mới chỉ định phòng ban, chưa chốt người ký nên chưa biết tên/chức vụ
+        // thật — hiện tên phòng ban ở dải "tên" cho người soạn thảo có căn cứ đặt khung.
+        nameText={signer.label}
+        chucVuText=""
+        prefixText={prefixText}
+        showName={role.showName}
+        showChucVu={false}
+        ptToPx={ptToPx}
+      />
     )
   }
+
   if (signer?.kind === "ca_nhan") {
     let chucVuText = ""
     if (role.chucVuKey === "kiem_nhiem") {
@@ -2095,41 +2244,38 @@ function PreviewContent({
       chucVuText = signer.chucVu || (role.chucVuKey ? CHUC_VU_LABELS[role.chucVuKey] : "")
     }
     return (
-      <div className="flex flex-col items-center gap-0.5">
-        {signer.hasSignature && factoryId ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={supabase.storage.from("iso-documents").getPublicUrl(`signatures/${factoryId}/${signer.userId}/chu_ky.png`).data.publicUrl}
-            alt="Chữ ký"
-            className="max-h-[55%] object-contain"
-          />
-        ) : (
-          <span className="text-[8.5px] italic text-slate-400">Chưa có ảnh chữ ký</span>
-        )}
-        {role.showName && (
-          <div className="text-[10px] font-bold text-slate-800">{signer.fullName || "(chưa rõ tên)"}</div>
-        )}
-        {role.showChucVu && chucVuText && (
-          <div className="text-[8.5px] italic text-slate-500">{chucVuText}</div>
-        )}
-        {/* Mã phòng ban của bước — thông tin phụ, vì đây mới là thứ thực sự được in dưới chữ ký
-            trên chứng từ (`chucVu = step.phong_ban_code || step.chuc_vu` ở route ký). */}
-        {signer.deptLabel && (
-          <div className="text-[8px] text-slate-400">{signer.deptLabel}</div>
-        )}
-      </div>
+      <SignBoxPreviewLayout
+        sigNode={
+          signer.hasSignature && factoryId ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={supabase.storage.from("iso-documents").getPublicUrl(`signatures/${factoryId}/${signer.userId}/chu_ky.png`).data.publicUrl}
+              alt="Chữ ký"
+              className="w-full h-full object-contain"
+            />
+          ) : (
+            <span className="text-[8.5px] italic text-slate-400">Chưa có ảnh chữ ký</span>
+          )
+        }
+        nameText={signer.fullName || "(chưa rõ tên)"}
+        chucVuText={chucVuText}
+        prefixText={prefixText}
+        showName={role.showName}
+        showChucVu={role.showChucVu && !!chucVuText}
+        ptToPx={ptToPx}
+      />
     )
   }
 
   return (
-    <div className="flex flex-col items-center gap-0.5">
-      <svg viewBox="0 0 52 34" width="70%" height="55%" fill="none">
-        <path d="M2,22 C10,4 16,30 24,10 S38,26 46,14" stroke={color} strokeWidth={2.4} strokeLinecap="round" fill="none" />
-      </svg>
-      {role.showName && <div className="text-[10px] font-bold text-slate-800">Nguyễn Văn A</div>}
-      {role.showChucVu && role.chucVuKey && (
-        <div className="text-[8.5px] italic text-slate-500">{CHUC_VU_LABELS[role.chucVuKey]}</div>
-      )}
-    </div>
+    <SignBoxPreviewLayout
+      sigNode={fakeSig}
+      nameText="Nguyễn Văn A"
+      chucVuText={role.chucVuKey ? CHUC_VU_LABELS[role.chucVuKey] : ""}
+      prefixText={prefixText}
+      showName={role.showName}
+      showChucVu={role.showChucVu && !!role.chucVuKey}
+      ptToPx={ptToPx}
+    />
   )
 }

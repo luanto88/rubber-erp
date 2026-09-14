@@ -1138,3 +1138,92 @@ ngược lại từ `apply-template.ts` để call site server không đổi.
 chạy `npm run build`: viết script duyệt đệ quy import từ file `"use client"`, bỏ qua `import type`,
 báo động nếu chạm `fs`/`path`/`pdf-lib`/`@cantoo/pdf-lib`/`node-forge`/`supabase-admin`. Hằng số
 hay type dùng chung 2 phía thì đặt ở module thuần, đừng đặt trong file có logic server.
+
+---
+
+## Đồng bộ giao diện ký với ISO — icon co giãn, icon mắt, chữ 13pt (2026-09-14)
+
+Trước đợt này, màn ký Văn bản lệch hẳn ISO ở 3 điểm, và bản xem trước không phản ánh đúng bản
+đóng dấu:
+
+| | ISO (mẫu tham chiếu) | Văn bản (trước) |
+|---|---|---|
+| Núm co giãn | Nút tròn có icon mũi tên chéo | Vùng trong suốt mặc định của `re-resizable` — không nhìn thấy |
+| Ẩn/hiện Tên–Chức vụ | Icon mắt **trên chính thẻ**, tắt thì thẻ mờ + gạch ngang | Nút chữ **ngoài khung** (`-bottom-6`) |
+| Cỡ chữ đóng dấu | 13pt Times New Roman | Tên 10→7pt, chức vụ 8.5→6pt |
+
+### Cỡ chữ: 4 hằng số dùng chung ở `template-layout.ts`
+
+`SIGN_TEXT_FONT_FAMILY` · `SIGN_TEXT_FONT_SIZE_PT` (13) · `SIGN_TEXT_MIN_FONT_SIZE_PT` (9) ·
+`SIGN_PREFIX_FONT_SIZE_PT` (10).
+
+Đặt ở file THUẦN này (không phải `stamp-pdf.ts` — file đó `import fs`) để màn cài đặt, màn ký và
+route đóng dấu dùng **chung một nguồn**. Đây là lý do xem trước không còn lệch bản thật.
+
+- `TEMPLATE_SIGNER_NAME_STYLE` (`apply-template.ts`) → 13→9pt; chức vụ `drawTextFit` → 13→9pt.
+- **Giữ vòng thu nhỏ** (ISO hardcode 13pt không thu nhỏ nên tên dài tràn khung — không lặp lại).
+- ⚠️ `VAN_BAN_SIGNER_NAME_STYLE` **giữ nguyên 10→7pt** — nó chỉ còn phục vụ luồng ký TỰ DO (văn
+  bản cũ chưa có mẫu). Đổi nó sẽ làm khác giao diện văn bản đang luân chuyển dở.
+
+### Lệch vị trí ở màn "Cài đặt vị trí ký" — nguyên nhân và cách sửa
+
+`PreviewContent` xếp nội dung bằng `flex-col` co cụm vào **giữa** khung, trong khi lúc đóng dấu
+`computeDefaultSubLayout()` chia khung thành các **dải cố định** theo tỉ lệ. Hệ quả: tên tụt xuống,
+tràn ra ngoài ô bảng của văn bản.
+
+Sửa bằng `SignBoxPreviewLayout`: gọi **chính** `computeDefaultSubLayout()` với khung quy ước
+100×100 để lấy tỉ lệ, rồi đặt tuyệt đối theo `%`. Lưu ý khi sửa tiếp:
+
+- Hệ của hàm đó là gốc **dưới-trái** (pdf-lib), CSS là gốc **trên-trái** → `top% = 100 - (y + h)`.
+- Khung ở chế độ xem trước **không được có `padding`** — thêm padding là lệch ngay.
+- Tên canh **đáy** khối (`items-end`) vì `drawSignerName` đặt đường chân chữ ở đáy; chức vụ và
+  tiền tố canh **giữa** (`drawTextFit` canh giữa cả 2 chiều).
+- Cỡ chữ px = `SIGN_TEXT_FONT_SIZE_PT × ptToPx`, với `ptToPx = pageWrapWidth / pageDims[trang].w`
+  (trang co giãn theo màn hình nên phải đo bằng `ResizeObserver`, không dùng hằng số).
+
+Ở màn ký thì `ptToPx` chính là `pdfScale` (1.5) — canvas render `className="block"` nên hiển thị
+đúng số pixel gốc, không bị CSS co.
+
+### Icon co giãn dùng chung
+
+`src/app/dashboard/_components/resize-handle-icon.tsx` — `ResizeHandleIcon`,
+`RESIZE_HANDLE_CLASS`, `RESIZE_HANDLE_STYLE`. Với `re-resizable` phải truyền **đủ 3 prop**
+(`handleComponent` + `handleClasses` + `handleStyles`); thiếu `handleClasses` thì kéo núm sẽ kéo
+trôi cả khối.
+
+⚠️ **Bẫy đã sửa**: `cancel` của các `<Draggable>` trước đây ghi `.react-resizable-handle` — class
+của thư viện **`react-resizable`**, KHÔNG phải `re-resizable` đang dùng, nên chưa từng khớp. Nay
+là `.resize-handle,.resize-handle *`, trùng `RESIZE_HANDLE_CLASS`.
+
+### Icon mắt trên thẻ + không mất vị trí đã kéo
+
+Thẻ Tên/Chức vụ/Tiền tố (`SignBlockCard` trong `documents/[id]/page.tsx`) **luôn render** khi MẪU
+cho phép; tắt thì xám mờ + gạch ngang chứ không biến mất — nếu ẩn hẳn thì không còn chỗ bấm bật
+lại. Icon mắt `-top-1 -right-1`, hiện `Eye` khi đang hiện (theo `iso/documents/[id]`; lưu ý
+`iso/forms/[id]` làm ngược lại, đừng copy nhánh đó).
+
+`toggleLockedBlock` nay **chỉ đảo cờ**, giữ nguyên rect — trước đây gọi lại
+`computeDefaultSubLayout()` cho cả khung nên mỗi lần bật/tắt là mất sạch công kéo chỉnh. Khối đang
+tắt vẫn giữ rect trong state; `handleConfirm` mới là nơi lọc bỏ rect của khối tắt trước khi gửi
+lên server — hợp đồng dữ liệu với server **không đổi**.
+
+### Bước ký bị bỏ khung → rơi về luồng ký cũ
+
+`removeRole()` xoá **hẳn** slot khỏi danh sách nếu là bản nhân bản — mà các bước ký thứ 2, 3, 4
+đều là bản nhân bản. Slot biến mất ⇒ `missingRequired` không thấy thiếu ⇒ lưu mẫu thiếu khung ⇒
+bước đó không có entry trong `placement_ky` ⇒ route ký rơi về `stampPdfStep` (kéo-thả tự do).
+
+Nay: slot ứng với một bước ký thật (`docSignerByRoleId[roleId]`) chỉ được **gỡ khung**
+(`placed = false`) chứ không xoá khỏi danh sách, kèm toast giải thích — `missingRequired` vẫn chặn
+gửi đi cho tới khi đặt lại. Nhãn "• bắt buộc" cũng đổi sang dùng `isRequiredForConfirm(role)` thay
+vì `role.batBuoc`, vì bản nhân bản có `batBuoc = false` nhưng vẫn bắt buộc.
+
+### Tự kiểm chứng
+
+Script tạm (`node --experimental-strip-types` + `module.register` map `@/`→`src/`) gọi thẳng
+`apply-template.ts`, dựng PDF rồi **trích lại text bằng pdfjs** — **14/14 PASS**: tên/chức vụ đúng
+13pt khi khung rộng; khung hẹp thu nhỏ đúng sàn 9pt và không tràn ngang; tên nằm đúng dải
+`name.y` (baseline = đáy khối); chức vụ nằm dưới tên; bố cục mặc định của văn bản cũ không đổi.
+
+⚠️ Script loại này phải chạy với `cwd` = gốc repo, nếu không `loadSignerNameFont()` trả `null` và
+mọi hàm vẽ text im lặng bỏ qua ⇒ test "pass" giả.

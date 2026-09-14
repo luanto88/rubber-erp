@@ -25,6 +25,29 @@ import type { ChucVuKey, SignTemplateAnchor, SignTemplateSignAsKey } from "@/lib
  */
 export const MAU_META_KEY = "_mau"
 
+/**
+ * Kiểu chữ dùng cho tên người ký + chức vụ khi đóng dấu lên PDF.
+ *
+ * Đặt ở file THUẦN này (không phải `stamp-pdf.ts` — file đó `import fs`) để 3 nơi dùng CHUNG một
+ * nguồn, nhờ vậy chữ xem trước và chữ sau khi ký không lệch nhau:
+ *   - màn "Cài đặt vị trí ký" (`ky/mau-vi-tri/page.tsx`) — người soạn thảo vẽ mẫu;
+ *   - màn ký (`documents/[id]/page.tsx`) — người ký xê dịch trong khung;
+ *   - route đóng dấu thật (`apply-template.ts`).
+ *
+ * PDF vẽ bằng `public/fonts/TimesNewRoman.ttf`, nét thường (không đậm, không nghiêng) — bản xem
+ * trước phải khai đúng họ font này, đừng để rơi về font hệ thống.
+ */
+export const SIGN_TEXT_FONT_FAMILY = "'Times New Roman', Times, serif"
+
+/** Cỡ mặc định (pt) của tên + chức vụ. */
+export const SIGN_TEXT_FONT_SIZE_PT = 13
+
+/** Sàn khi thu nhỏ: tên/chức vụ quá dài so với bề rộng khối thì giảm dần tới mức này. */
+export const SIGN_TEXT_MIN_FONT_SIZE_PT = 9
+
+/** Tiền tố ký thay (KT./TM./TL./TUQ.) — nhỏ hơn tên, giữ nguyên cỡ đã chạy thật. */
+export const SIGN_PREFIX_FONT_SIZE_PT = 10
+
 export type LayoutRect = { x: number; y: number; width: number; height: number }
 
 /**

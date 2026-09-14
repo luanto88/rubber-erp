@@ -13,6 +13,9 @@ import {
 } from "@/lib/signing/stamp-pdf"
 import {
   MAU_META_KEY,
+  SIGN_PREFIX_FONT_SIZE_PT,
+  SIGN_TEXT_FONT_SIZE_PT,
+  SIGN_TEXT_MIN_FONT_SIZE_PT,
   resolveAnchorPages,
   resolveEffectiveNoteLayout,
   resolveEffectiveQrRect,
@@ -255,13 +258,25 @@ export async function loadSignerChucVu(factoryId: string, userId: string): Promi
 // ── Đóng dấu theo mẫu ─────────────────────────────────────────────────────────
 
 /**
- * Style tên người ký cho chế độ mẫu — giống hệt `VAN_BAN_SIGNER_NAME_STYLE` trừ `minMaxWidth`.
+ * Style tên người ký cho chế độ mẫu.
  *
- * Bản gốc ép bề rộng tối đa của tên luôn ≥ 60pt (kể cả khi khung hẹp hơn), nên chữ có thể tràn
- * ra NGOÀI khung người ký vừa kéo — phá vỡ đúng cam kết "chỉ xê dịch bên trong vùng cho phép".
- * Ở chế độ mẫu, tên phải co đúng theo bề rộng khối đã kéo.
+ * Khác `VAN_BAN_SIGNER_NAME_STYLE` (luồng ký tự do, văn bản cũ chưa có mẫu) ở 2 điểm:
+ *
+ * 1. `minMaxWidth: 0` — bản gốc ép bề rộng tối đa của tên luôn ≥ 60pt kể cả khi khung hẹp hơn,
+ *    nên chữ tràn ra NGOÀI khung người ký vừa kéo, phá vỡ cam kết "chỉ xê dịch trong vùng cho
+ *    phép". Ở chế độ mẫu, tên phải co đúng theo bề rộng khối đã kéo.
+ * 2. Cỡ chữ 13→9pt thay cho 10→7pt — thống nhất với ISO và với bản xem trước (xem
+ *    `SIGN_TEXT_FONT_SIZE_PT` trong template-layout.ts). Vẫn giữ vòng thu nhỏ để tên dài không
+ *    tràn khung (ISO hardcode 13pt không thu nhỏ nên bị tràn — không lặp lại).
+ *
+ * Chỉ áp dụng cho luồng theo mẫu. `VAN_BAN_SIGNER_NAME_STYLE` giữ nguyên cỡ cũ cho luồng tự do.
  */
-const TEMPLATE_SIGNER_NAME_STYLE: NameStyle = { ...VAN_BAN_SIGNER_NAME_STYLE, minMaxWidth: 0 }
+const TEMPLATE_SIGNER_NAME_STYLE: NameStyle = {
+  ...VAN_BAN_SIGNER_NAME_STYLE,
+  minMaxWidth: 0,
+  maxFontSize: SIGN_TEXT_FONT_SIZE_PT,
+  minFontSize: SIGN_TEXT_MIN_FONT_SIZE_PT,
+}
 
 /**
  * Vẽ 3 khối con (ảnh chữ ký / tên / chức danh) trong 1 khung mẫu.
@@ -313,14 +328,21 @@ async function drawSignBoxOnPage(
   }
 
   if (layout.chuc_vu) {
-    drawTextFit(page, chucVuText, layout.chuc_vu, opts.font, { maxFontSize: 8.5, minFontSize: 6 })
+    // Cùng cỡ với tên (13→9pt) — bản xem trước ở màn cài đặt/màn ký cũng dùng đúng 2 hằng số này.
+    drawTextFit(page, chucVuText, layout.chuc_vu, opts.font, {
+      maxFontSize: SIGN_TEXT_FONT_SIZE_PT,
+      minFontSize: SIGN_TEXT_MIN_FONT_SIZE_PT,
+    })
   }
 
   // Tiền tố ký thay (KT./TM./TL./TUQ.) — từ 2026-09-05 là KHỐI CON THỨ 4, nằm TRONG khung và
   // người ký kéo/tắt được (trước đây vẽ cứng ngoài mép trên khung). Dùng drawTextFit (canh giữa
   // được) thay vì drawSignPrefix (canh trái, không nhận chiều rộng).
   if (opts.prefixText && layout.prefix) {
-    drawTextFit(page, opts.prefixText, layout.prefix, opts.font, { maxFontSize: 10, minFontSize: 7 })
+    drawTextFit(page, opts.prefixText, layout.prefix, opts.font, {
+      maxFontSize: SIGN_PREFIX_FONT_SIZE_PT,
+      minFontSize: 7,
+    })
   }
 }
 

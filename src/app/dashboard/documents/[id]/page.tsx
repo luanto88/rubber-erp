@@ -53,12 +53,16 @@ import {
   Plus,
 } from "lucide-react"
 import type { SessionUser } from "@/lib/auth"
+import { ResizeHandleIcon, RESIZE_HANDLE_CLASS, RESIZE_HANDLE_STYLE } from "@/app/dashboard/_components/resize-handle-icon"
 import {
   clampRectToBox,
   computeDefaultNoteLayout,
   computeDefaultSubLayout,
   resolveAnchorPages,
   resolveEffectiveQrRect,
+  SIGN_PREFIX_FONT_SIZE_PT,
+  SIGN_TEXT_FONT_FAMILY,
+  SIGN_TEXT_FONT_SIZE_PT,
   type LayoutRect,
   type NoteSubLayout,
   type SignerSubLayout,
@@ -146,12 +150,78 @@ function ExtraDraggableBox({
       onDrag={onDrag}
       onStop={onStop}
       bounds="parent"
-      cancel=".react-resizable-handle,button,button *,a,.no-drag"
+      cancel=".resize-handle,.resize-handle *,button,button *,a,.no-drag"
     >
       <div ref={nodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex, cursor: "move" }}>
         {children}
       </div>
     </Draggable>
+  )
+}
+
+/**
+ * Thẻ Tên / Chức danh / Tiền tố bên trong khung ký — kèm icon con mắt ngay trên góc để bật/tắt.
+ *
+ * Thẻ LUÔN hiển thị kể cả khi người ký đã tắt (chuyển xám mờ + gạch ngang) để còn bấm bật lại
+ * được; nếu ẩn hẳn thì không còn chỗ nào để bật. Mirror đúng cách module ISO đang làm.
+ *
+ * Chữ dùng Times New Roman đúng cỡ sẽ đóng dấu (nhân `pdfScale` để quy từ point sang pixel
+ * canvas) và nét thường — để xem trước khớp với PDF sau khi ký.
+ */
+function SignBlockCard({
+  active,
+  tone,
+  fontSizePx,
+  bold,
+  alignBottom,
+  onToggle,
+  toggleTitle,
+  children,
+}: {
+  active: boolean
+  tone: "sky" | "violet" | "orange"
+  fontSizePx: number
+  bold?: boolean
+  /** Canh chữ xuống đáy khối — dùng cho TÊN vì pdf-lib đặt đường chân chữ ở đáy khung. */
+  alignBottom?: boolean
+  onToggle: () => void
+  toggleTitle: string
+  children: React.ReactNode
+}) {
+  const toneCls = {
+    sky: { on: "border-sky-500 bg-sky-50/85 text-sky-900", eye: "text-sky-600 hover:text-sky-900" },
+    violet: { on: "border-violet-500 bg-violet-50/85 text-violet-900", eye: "text-violet-600 hover:text-violet-900" },
+    orange: { on: "border-orange-500 bg-orange-50/85 text-orange-900", eye: "text-orange-600 hover:text-orange-900" },
+  }[tone]
+
+  return (
+    <div
+      className={`relative w-full h-full border rounded flex justify-center pl-1 pr-5 transition-colors ${
+        alignBottom ? "items-end pb-0.5" : "items-center"
+      } ${active ? toneCls.on : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 opacity-60"}`}
+      style={{ fontFamily: SIGN_TEXT_FONT_FAMILY }}
+    >
+      <span
+        className={`w-full text-center whitespace-nowrap overflow-hidden leading-none ${bold ? "font-bold" : "font-normal"} ${active ? "" : "line-through"}`}
+        style={{ fontSize: fontSizePx }}
+      >
+        {children}
+      </span>
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onToggle() }}
+        title={toggleTitle}
+        className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
+          active ? toneCls.eye : "text-slate-400 hover:text-slate-700"
+        }`}
+      >
+        {active ? <Eye size={12} /> : <EyeOff size={12} />}
+      </button>
+    </div>
   )
 }
 
@@ -587,9 +657,14 @@ function SignPlacementModal({
   }
 
   /**
-   * Bật/tắt khối Tên / Chức danh / Tiền tố. Đổi lựa chọn sẽ ĐẶT LẠI bố cục mặc định của cả khung
-   * — vì tỉ lệ chia dải phụ thuộc số khối đang hiện (tắt tên mà giữ nguyên ô chữ ký cũ sẽ để lại
-   * một khoảng trống vô nghĩa). Người ký nên bật/tắt trước rồi mới xê dịch.
+   * Bật/tắt khối Tên / Chức danh / Tiền tố.
+   *
+   * CHỈ đảo cờ hiển thị, GIỮ NGUYÊN vị trí người ký đã kéo — trước đây hàm này tính lại
+   * `computeDefaultSubLayout()` cho cả khung nên mỗi lần bật/tắt là mất sạch công kéo chỉnh của
+   * 3 khối còn lại. Khối đang tắt vẫn giữ rect trong state (chỉ không vẽ) để bật lại là về đúng
+   * chỗ cũ; `handleConfirm` mới là nơi lọc bỏ rect của khối tắt trước khi gửi lên server.
+   *
+   * Khối chưa từng có rect (mẫu cho phép nhưng bố cục cũ chưa tính tới) thì lấy vị trí mặc định.
    */
   const toggleLockedBlock = (idx: number, key: "name" | "chuc_vu" | "prefix") => {
     if (!lockedEntry) return
@@ -598,19 +673,24 @@ function SignPlacementModal({
         if (i !== idx) return cur
         const box = lockedEntry.boxes[i]
         if (!box) return cur
-        const withName = key === "name" ? !cur.show_name : cur.show_name
-        const withChucVu = key === "chuc_vu" ? !cur.show_chuc_vu : cur.show_chuc_vu
-        const withPrefix = key === "prefix" ? !cur.show_prefix : cur.show_prefix
-        const d = computeDefaultSubLayout(box, { withName, withChucVu, withPrefix })
-        return {
-          sig: d.sig,
-          name: d.name,
-          chuc_vu: d.chuc_vu,
-          prefix: d.prefix,
-          show_name: withName,
-          show_chuc_vu: withChucVu,
-          show_prefix: withPrefix,
+        const next = { ...cur }
+        if (key === "name") next.show_name = !cur.show_name
+        else if (key === "chuc_vu") next.show_chuc_vu = !cur.show_chuc_vu
+        else next.show_prefix = !cur.show_prefix
+
+        if (!next[key]) return next
+        // Bật lại một khối chưa từng có toạ độ → lấy dải mặc định của riêng khối đó.
+        if (!next.name || !next.chuc_vu || !next.prefix) {
+          const d = computeDefaultSubLayout(box, {
+            withName: next.show_name,
+            withChucVu: next.show_chuc_vu,
+            withPrefix: next.show_prefix,
+          })
+          if (key === "name" && !next.name) next.name = d.name
+          if (key === "chuc_vu" && !next.chuc_vu) next.chuc_vu = d.chuc_vu
+          if (key === "prefix" && !next.prefix) next.prefix = d.prefix
         }
+        return next
       }),
     )
   }
@@ -1067,7 +1147,7 @@ function SignPlacementModal({
                       position={{ x: sigState.x, y: sigState.y }}
                       onStop={(_, d) => setSigState((p) => ({ ...p, x: d.x, y: d.y }))}
                       bounds="parent"
-                      cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                      cancel=".resize-handle,.resize-handle *,button,button *,a,.no-drag"
                     >
                       <div ref={sigNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
                         <Resizable
@@ -1076,6 +1156,9 @@ function SignPlacementModal({
                             setSigState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                           enable={{ right: true, bottom: true, bottomRight: true }}
                           minWidth={40} minHeight={20}
+                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#d97706" title="Kéo để co giãn khung chữ ký" /> }}
+                          handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                          handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                         >
                           <div className="w-full h-full border border-dashed border-amber-400 bg-amber-50/60 rounded relative select-none">
                             {showSig && signatureUrl && (
@@ -1145,7 +1228,7 @@ function SignPlacementModal({
                       position={{ x: nameState.x, y: nameState.y }}
                       onStop={(_, d) => setNameState((p) => ({ ...p, x: d.x, y: d.y }))}
                       bounds="parent"
-                      cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                      cancel=".resize-handle,.resize-handle *,button,button *,a,.no-drag"
                     >
                       <div ref={nameNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
                         <Resizable
@@ -1154,6 +1237,9 @@ function SignPlacementModal({
                             setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                           enable={{ right: true, bottom: true, bottomRight: true }}
                           minWidth={60} minHeight={16}
+                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung họ tên" /> }}
+                          handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                          handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                         >
                           <div className="w-full h-full border border-dashed border-blue-400 bg-blue-50/60 rounded relative select-none flex items-center justify-center">
                             {showName ? (
@@ -1216,7 +1302,7 @@ function SignPlacementModal({
                         position={{ x: prefixState.x, y: prefixState.y }}
                         onStop={(_, d) => setPrefixState((p) => ({ ...p, x: d.x, y: d.y }))}
                         bounds="parent"
-                        cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                        cancel=".resize-handle,.resize-handle *,button,button *,a,.no-drag"
                       >
                         <div ref={prefixNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
                           <Resizable
@@ -1225,6 +1311,9 @@ function SignPlacementModal({
                               setPrefixState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                             enable={{ right: true, bottom: true, bottomRight: true }}
                             minWidth={36} minHeight={16}
+                            handleComponent={{ bottomRight: <ResizeHandleIcon color="#059669" title="Kéo để co giãn khung tiền tố ký thay" /> }}
+                            handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                            handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                           >
                             <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none flex items-center justify-center">
                               <span className="text-[10px] font-bold text-emerald-700 truncate px-1">{signAs}.</span>
@@ -1242,7 +1331,7 @@ function SignPlacementModal({
                         position={{ x: qrState.x, y: qrState.y }}
                         onStop={(_, d) => setQrState((p) => ({ ...p, x: d.x, y: d.y }))}
                         bounds="parent"
-                        cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                        cancel=".resize-handle,.resize-handle *,button,button *,a,.no-drag"
                       >
                         <div ref={qrNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
                           <Resizable
@@ -1252,6 +1341,9 @@ function SignPlacementModal({
                             enable={{ right: true, bottom: true, bottomRight: true }}
                             lockAspectRatio
                             minWidth={30} minHeight={30}
+                            handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn mã QR" /> }}
+                            handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                            handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                           >
                             <div className="w-full h-full border-2 border-dashed border-violet-400 bg-white rounded flex items-center justify-center select-none p-1">
                               <QRCodeSVG
@@ -1277,6 +1369,9 @@ function SignPlacementModal({
                               setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, sigW: b.sigW + delta.width, sigH: b.sigH + delta.height } : b))}
                             enable={{ right: true, bottom: true, bottomRight: true }}
                             minWidth={40} minHeight={20}
+                            handleComponent={{ bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung chữ ký bản sao" /> }}
+                            handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                            handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                           >
                             <div className="w-full h-full border border-dashed border-blue-500 bg-blue-50/70 rounded relative select-none">
                               {box.showSignature && signatureUrl && (
@@ -1330,6 +1425,9 @@ function SignPlacementModal({
                               setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
                             enable={{ right: true, bottom: true, bottomRight: true }}
                             minWidth={60} minHeight={16}
+                            handleComponent={{ bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung họ tên bản sao" /> }}
+                            handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                            handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                           >
                             <div className="w-full h-full border border-dashed border-blue-400 bg-blue-50/70 rounded relative select-none flex items-center justify-center">
                               {box.showSignerName ? (
@@ -1368,9 +1466,11 @@ function SignPlacementModal({
                       if (!resolveAnchorPages(box, numPages).includes(currentPage)) return null
                       const region = toCanvas({ x: box.x, y: box.y, width: box.width, height: box.height })
                       const sigCan = toCanvas(layout.sig)
-                      const nameCan = layout.show_name && layout.name ? toCanvas(layout.name) : null
-                      const chucVuCan = layout.show_chuc_vu && layout.chuc_vu ? toCanvas(layout.chuc_vu) : null
+                      // Thẻ Tên/Chức vụ/Tiền tố LUÔN hiện khi mẫu cho phép — tắt thì chuyển xám mờ
+                      // + gạch ngang chứ không biến mất, để icon mắt trên thẻ còn bấm bật lại được.
+                      const nameCan = box.show_name && layout.name ? toCanvas(layout.name) : null
                       const allowChucVu = box.show_chuc_vu && !!signerChucVu
+                      const chucVuCan = allowChucVu && layout.chuc_vu ? toCanvas(layout.chuc_vu) : null
                       return (
                         <div
                           key={`locked-${idx}`}
@@ -1406,6 +1506,9 @@ function SignPlacementModal({
                                 setLockedRect(idx, "sig", sigCan.x, sigCan.y, sigCan.w + delta.width, sigCan.h + delta.height)}
                               enable={{ right: true, bottom: true, bottomRight: true }}
                               minWidth={20} minHeight={12}
+                              handleComponent={{ bottomRight: <ResizeHandleIcon color={myColor.fg} title="Kéo để co giãn khung chữ ký" /> }}
+                              handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                              handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                             >
                               <div
                                 className="w-full h-full rounded flex items-center justify-center overflow-hidden bg-white/85"
@@ -1432,10 +1535,22 @@ function SignPlacementModal({
                                   setLockedRect(idx, "name", nameCan.x, nameCan.y, nameCan.w + delta.width, nameCan.h + delta.height)}
                                 enable={{ right: true, bottom: true, bottomRight: true }}
                                 minWidth={30} minHeight={10}
+                                handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung họ tên" /> }}
+                                handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                                handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                               >
-                                <div className="w-full h-full border border-sky-500 bg-sky-50/85 rounded flex items-center justify-center overflow-hidden">
-                                  <span className="text-[10px] font-bold text-sky-800 truncate px-1">{userName || "Người ký"}</span>
-                                </div>
+                                <SignBlockCard
+                                  active={layout.show_name}
+                                  tone="sky"
+                                  fontSizePx={SIGN_TEXT_FONT_SIZE_PT * pdfScale}
+                                  /* PDF đặt đường chân chữ của TÊN ở đáy khối (drawSignerName) — canh
+                                     đáy để xem trước khớp đúng chỗ chữ sẽ rơi vào. */
+                                  alignBottom
+                                  onToggle={() => toggleLockedBlock(idx, "name")}
+                                  toggleTitle={layout.show_name ? "Ẩn họ tên" : "Hiện lại họ tên"}
+                                >
+                                  {userName || "Người ký"}
+                                </SignBlockCard>
                               </Resizable>
                             </ExtraDraggableBox>
                           )}
@@ -1444,7 +1559,7 @@ function SignPlacementModal({
                             <ExtraDraggableBox
                               position={{ x: chucVuCan.x - region.x, y: chucVuCan.y - region.y }}
                               onStop={(_, d) => setLockedRect(idx, "chuc_vu", region.x + d.x, region.y + d.y, chucVuCan.w, chucVuCan.h)}
-                              zIndex={14}
+                              zIndex={15}
                             >
                               <Resizable
                                 size={{ width: chucVuCan.w, height: chucVuCan.h }}
@@ -1452,23 +1567,32 @@ function SignPlacementModal({
                                   setLockedRect(idx, "chuc_vu", chucVuCan.x, chucVuCan.y, chucVuCan.w + delta.width, chucVuCan.h + delta.height)}
                                 enable={{ right: true, bottom: true, bottomRight: true }}
                                 minWidth={30} minHeight={10}
+                                handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung chức danh" /> }}
+                                handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                                handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                               >
-                                <div className="w-full h-full border border-violet-500 bg-violet-50/85 rounded flex items-center justify-center overflow-hidden">
-                                  <span className="text-[9px] font-semibold text-violet-800 truncate px-1">{signerChucVu}</span>
-                                </div>
+                                <SignBlockCard
+                                  active={layout.show_chuc_vu}
+                                  tone="violet"
+                                  fontSizePx={SIGN_TEXT_FONT_SIZE_PT * pdfScale}
+                                  onToggle={() => toggleLockedBlock(idx, "chuc_vu")}
+                                  toggleTitle={layout.show_chuc_vu ? "Ẩn chức danh" : "Hiện lại chức danh"}
+                                >
+                                  {signerChucVu}
+                                </SignBlockCard>
                               </Resizable>
                             </ExtraDraggableBox>
                           )}
 
                           {/* Tiền tố ký thay (KT./TM./…) — khối con thứ 4, chỉ có khi mẫu chọn
                               ký thay cho bước này. Nằm TRONG khung như 3 khối kia. */}
-                          {layout.show_prefix && layout.prefix && (() => {
+                          {!!lockedPrefixText && layout.prefix && (() => {
                             const preCan = toCanvas(layout.prefix)
                             return (
                               <ExtraDraggableBox
                                 position={{ x: preCan.x - region.x, y: preCan.y - region.y }}
                                 onStop={(_, d) => setLockedRect(idx, "prefix", region.x + d.x, region.y + d.y, preCan.w, preCan.h)}
-                                zIndex={15}
+                                zIndex={16}
                               >
                                 <Resizable
                                   size={{ width: preCan.w, height: preCan.h }}
@@ -1476,54 +1600,28 @@ function SignPlacementModal({
                                     setLockedRect(idx, "prefix", preCan.x, preCan.y, preCan.w + delta.width, preCan.h + delta.height)}
                                   enable={{ right: true, bottom: true, bottomRight: true }}
                                   minWidth={24} minHeight={10}
+                                  handleComponent={{ bottomRight: <ResizeHandleIcon color="#ea580c" title="Kéo để co giãn khung tiền tố ký thay" /> }}
+                                  handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                                  handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                                 >
-                                  <div className="w-full h-full border border-orange-500 bg-orange-50/85 rounded flex items-center justify-center overflow-hidden">
-                                    <span className="text-[10px] font-extrabold text-orange-800 truncate px-1">{lockedPrefixText}</span>
-                                  </div>
+                                  <SignBlockCard
+                                    active={layout.show_prefix}
+                                    tone="orange"
+                                    fontSizePx={SIGN_PREFIX_FONT_SIZE_PT * pdfScale}
+                                    bold
+                                    onToggle={() => toggleLockedBlock(idx, "prefix")}
+                                    toggleTitle={
+                                      layout.show_prefix
+                                        ? `Tắt ký thay ${lockedPrefixText} (không đóng dấu tiền tố)`
+                                        : `Bật lại ký thay ${lockedPrefixText}`
+                                    }
+                                  >
+                                    {lockedPrefixText}
+                                  </SignBlockCard>
                                 </Resizable>
                               </ExtraDraggableBox>
                             )
                           })()}
-
-                          {/* Nút bật/tắt đặt NGOÀI khối (dưới vùng cho phép) để còn bật lại được
-                              sau khi đã tắt. Chỉ hiện đúng những khối mẫu CHO PHÉP. */}
-                          {(box.show_name || allowChucVu || !!lockedPrefixText) && (
-                            <div className="absolute -bottom-6 left-0 flex items-center gap-1" style={{ zIndex: 20 }}>
-                              {!!lockedPrefixText && (
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  onClick={(e) => { e.stopPropagation(); toggleLockedBlock(idx, "prefix") }}
-                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border shadow-sm ${layout.show_prefix ? "bg-white border-orange-300 text-orange-700" : "bg-slate-100 border-slate-300 text-slate-400"}`}
-                                  title={layout.show_prefix ? `Tắt ký thay ${lockedPrefixText} (không đóng dấu tiền tố)` : `Bật lại ký thay ${lockedPrefixText}`}
-                                >
-                                  {layout.show_prefix ? <Eye size={10} /> : <EyeOff size={10} />} {lockedPrefixText}
-                                </button>
-                              )}
-                              {box.show_name && (
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  onClick={(e) => { e.stopPropagation(); toggleLockedBlock(idx, "name") }}
-                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border shadow-sm ${layout.show_name ? "bg-white border-sky-300 text-sky-700" : "bg-slate-100 border-slate-300 text-slate-400"}`}
-                                  title={layout.show_name ? "Ẩn tên (đặt lại vị trí mặc định)" : "Hiện tên"}
-                                >
-                                  {layout.show_name ? <Eye size={10} /> : <EyeOff size={10} />} Tên
-                                </button>
-                              )}
-                              {allowChucVu && (
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  onClick={(e) => { e.stopPropagation(); toggleLockedBlock(idx, "chuc_vu") }}
-                                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold border shadow-sm ${layout.show_chuc_vu ? "bg-white border-violet-300 text-violet-700" : "bg-slate-100 border-slate-300 text-slate-400"}`}
-                                  title={layout.show_chuc_vu ? "Ẩn chức danh (đặt lại vị trí mặc định)" : "Hiện chức danh"}
-                                >
-                                  {layout.show_chuc_vu ? <Eye size={10} /> : <EyeOff size={10} />} Chức danh
-                                </button>
-                              )}
-                            </div>
-                          )}
                         </div>
                       )
                     })}
@@ -1565,6 +1663,9 @@ function SignPlacementModal({
                                     setNoteRect("text", textCan.x, textCan.y, textCan.w + delta.width, textCan.h + delta.height)}
                                   enable={{ right: true, bottom: true, bottomRight: true }}
                                   minWidth={40} minHeight={12}
+                                  handleComponent={{ bottomRight: <ResizeHandleIcon color="#0d9488" title="Kéo để co giãn ô ý kiến chỉ đạo" /> }}
+                                  handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                                  handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                                 >
                                   {/* Xem trước wrap bằng CSS nên XẤP XỈ vị trí xuống dòng thật của
                                       drawTextWrapped (pdf-lib đo theo font TimesNewRoman) — đủ để
@@ -1589,6 +1690,9 @@ function SignPlacementModal({
                                       setNoteRect("ky_nhay", kyNhayCan.x, kyNhayCan.y, kyNhayCan.w + delta.width, kyNhayCan.h + delta.height)}
                                     enable={{ right: true, bottom: true, bottomRight: true }}
                                     minWidth={20} minHeight={10}
+                                    handleComponent={{ bottomRight: <ResizeHandleIcon color="#d97706" title="Kéo để co giãn chữ ký nháy" /> }}
+                                    handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                                    handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                                   >
                                     <div className="w-full h-full border border-amber-500 bg-amber-50/85 rounded flex items-center justify-center overflow-hidden">
                                       {signatureUrl ? (
@@ -1642,6 +1746,9 @@ function SignPlacementModal({
                                 enable={{ right: true, bottom: true, bottomRight: true }}
                                 lockAspectRatio
                                 minWidth={20} minHeight={20}
+                                handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn mã QR" /> }}
+                                handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                                handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                               >
                                 {qrInner}
                               </Resizable>

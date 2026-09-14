@@ -57,9 +57,13 @@ export const ISO_SIGNER_NAME_STYLE: NameStyle = {
   minMaxWidth: 110,
 }
 
-// Hằng số style hiện có của module Văn bản (`api/documents/sign/route.ts`) — nhỏ hơn ISO
-// có chủ đích (khung chữ ký Văn bản nhỏ hơn khung ISO). KHÔNG được đổi thành
-// `ISO_SIGNER_NAME_STYLE` — sẽ đổi giao diện chữ ký Văn bản đã ký thật trên production.
+// Hằng số style của module Văn bản — CHỈ CÒN phục vụ luồng ký TỰ DO (`stampPdfStep` trong
+// `api/documents/sign/route.ts`), tức văn bản cũ chưa có mẫu vị trí ký. KHÔNG được đổi cỡ chữ ở
+// đây — sẽ đổi giao diện chữ ký của các văn bản đang luân chuyển dở trên production.
+//
+// Luồng theo mẫu ("vị trí CỨNG") đã chuyển sang 13→9pt từ 2026-09-14 để khớp bản xem trước —
+// xem `TEMPLATE_SIGNER_NAME_STYLE` (apply-template.ts) và `SIGN_TEXT_FONT_SIZE_PT`
+// (template-layout.ts).
 export const VAN_BAN_SIGNER_NAME_STYLE: NameStyle = {
   maxFontSize: 10,
   minFontSize: 7,
