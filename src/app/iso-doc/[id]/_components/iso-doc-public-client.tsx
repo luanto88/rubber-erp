@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowRight, CheckCircle2, Download, ExternalLink, Loader2, XCircle } from "lucide-react"
+import { AlertTriangle, ArrowRight, CheckCircle2, Download, ExternalLink, Loader2, Lock, XCircle } from "lucide-react"
 import { LOAI_TAI_LIEU_LABEL, TRANG_THAI_LABEL } from "@/app/dashboard/iso/_components/iso-types"
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
 
 // Trang tra cứu CÔNG KHAI cho QR in trên tài liệu ISO — mirror `/storage` (tra cứu ngăn lưu) và
 // `/van-ban-verify` (xác thực chữ ký). Nguồn dữ liệu là route service-role
@@ -24,7 +23,6 @@ type PublicChildDoc = {
   tenTaiLieu: string | null
   loaiTaiLieu: string | null
   lanBanHanh: string | null
-  fileUrl: string | null
 }
 
 type PublicDocResponse = {
@@ -39,7 +37,8 @@ type PublicDocResponse = {
   trangThai: string
   ngayHieuLuc: string | null
   ngayHetHieuLuc: string | null
-  fileUrl: string | null
+  /** Có file đính kèm hay không — URL file KHÔNG được trả ra trang công khai (xem route). */
+  hasFile: boolean
   childDocs?: PublicChildDoc[]
   parentDoc?: {
     id: string
@@ -55,6 +54,18 @@ function fmtDate(value: string | null): string {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleDateString("vi-VN")
+}
+
+/**
+ * Mọi thao tác Xem/Tải đều đi qua đăng nhập rồi mở trang chi tiết trong dashboard.
+ *
+ * KHÔNG trỏ thẳng `/dashboard/iso/documents/:id`: `dashboard/layout.tsx` chuyển hướng người
+ * CHƯA đăng nhập từ route đó về đúng trang công khai này (`isoPublicFallbackFor`) ⇒ bấm nút
+ * sẽ quay vòng về chỗ cũ thay vì hiện form đăng nhập. Đi qua `/login?next=` thì người đã có
+ * phiên được đưa thẳng tới tài liệu, người chưa có phiên đăng nhập xong cũng tới đúng đó.
+ */
+function loginGatedDocLink(targetDocId: string): string {
+  return `/login?next=${encodeURIComponent(`/dashboard/iso/documents/${targetDocId}`)}`
 }
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -112,10 +123,6 @@ export function IsoDocPublicClient({ docId }: { docId: string }) {
   const expired = data.trangThai === "het_hieu_luc"
   const trangThaiLabel = (TRANG_THAI_LABEL as Record<string, string>)[data.trangThai] || data.trangThai
   const loaiLabel = data.loaiTaiLieu ? LOAI_TAI_LIEU_LABEL[data.loaiTaiLieu] || data.loaiTaiLieu : null
-  const downloadUrl = buildStorageDownloadUrl(
-    data.fileUrl,
-    `${data.maTaiLieu || "Tài liệu ISO"} ${data.tenTaiLieu || ""}`.trim(),
-  )
 
   return (
     <div className="space-y-4">
@@ -175,23 +182,42 @@ export function IsoDocPublicClient({ docId }: { docId: string }) {
           <Row label="Trạng thái" value={trangThaiLabel} />
         </div>
 
-        {data.fileUrl && (
-          <div className="flex flex-wrap gap-2 border-t border-slate-100 bg-slate-50/60 p-6">
-            <a
-              href={data.fileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700"
-            >
-              <ExternalLink size={16} /> Xem tài liệu
-            </a>
-            <a
-              href={downloadUrl}
-              download
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-bold text-slate-700 transition-all hover:bg-slate-100"
-            >
-              <Download size={16} /> Tải về
-            </a>
+        {(data.hasFile || (expired && data.replacement)) && (
+          <div className="border-t border-slate-100 bg-slate-50/60 p-6">
+            <div className="flex flex-wrap gap-2">
+              {expired && data.replacement && (
+                <Link
+                  href={loginGatedDocLink(data.replacement.id)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700"
+                >
+                  <ExternalLink size={16} /> Xem tài liệu thay thế
+                </Link>
+              )}
+              {data.hasFile && (
+                <>
+                  <Link
+                    href={loginGatedDocLink(data.id)}
+                    className={
+                      expired
+                        ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-bold text-slate-700 transition-all hover:bg-slate-100"
+                        : "inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700"
+                    }
+                  >
+                    <ExternalLink size={16} /> Xem tài liệu
+                  </Link>
+                  <Link
+                    href={loginGatedDocLink(data.id)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-bold text-slate-700 transition-all hover:bg-slate-100"
+                  >
+                    <Download size={16} /> Tải tài liệu
+                  </Link>
+                </>
+              )}
+            </div>
+            <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
+              <Lock size={12} className="shrink-0" />
+              Cần đăng nhập tài khoản nội bộ để xem hoặc tải nội dung tài liệu.
+            </p>
           </div>
         )}
       </div>

@@ -1484,6 +1484,27 @@ export default function IsoFormInstancePage() {
           </div>
         )}
 
+        {/* Thanh Xem/Tải file cho mobile — khối file nằm cuối trang trên màn hẹp, người dùng
+            phải cuộn rất xa mới bấm được. Chỉ hiện ở <lg, desktop giữ nguyên vị trí cũ. */}
+        {fileUrl && (
+          <div className="flex gap-2 lg:hidden">
+            <a
+              href={fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-emerald-700"
+            >
+              <Eye size={16} /> Xem file
+            </a>
+            <button
+              onClick={handleDownload}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-slate-900"
+            >
+              <Download size={16} /> Tải file
+            </button>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* ── Left column (2/3) ── */}
           <div className="lg:col-span-2 space-y-5">

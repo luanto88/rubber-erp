@@ -522,6 +522,34 @@ checkbox tự động tick đúng; xác nhận danh sách/chi tiết/kho ISO hi�
 "—" thay vì lỗi (các nơi hiển thị `ma_tai_lieu` đã có sẵn fallback từ trước, không sửa gì
 thêm).
 
+## Trang tra cứu công khai `/iso-doc/[id]` — KHÔNG lộ URL file (2026-09-14)
+
+Bucket `iso-documents` là **public**: lộ URL file ra trang công khai = lộ luôn nội dung tài
+liệu cho bất kỳ ai quét được QR. Vì vậy:
+
+- `GET /api/iso/public-doc/[id]` **không trả `fileUrl`** (của chính tài liệu lẫn của
+  `childDocs`), chỉ trả cờ `hasFile: boolean` để client biết có nên hiện nút hay không. Không
+  thêm lại field URL nào vào payload này.
+- Mọi nút **Xem tài liệu / Tải tài liệu / Xem tài liệu thay thế** trỏ tới
+  `/login?next=/dashboard/iso/documents/{id}` (helper `loginGatedDocLink`).
+- ⚠️ **Không trỏ thẳng `/dashboard/iso/documents/{id}`**: `dashboard/layout.tsx`
+  (`isoPublicFallbackFor`) chuyển hướng người CHƯA đăng nhập từ route đó **về đúng trang
+  công khai này** ⇒ bấm nút sẽ quay vòng tại chỗ thay vì hiện form đăng nhập. Đi qua
+  `/login?next=` thì người đã có phiên được `router.replace` thẳng tới tài liệu, người chưa
+  có phiên đăng nhập xong cũng tới đúng đó.
+- `/login` hỗ trợ `?next=` (thêm 2026-09-14), **chỉ nhận đường dẫn nội bộ**: bắt buộc bắt đầu
+  bằng đúng một `/`, chặn `//host` và `/\host` (protocol-relative ⇒ lỗ hổng chuyển hướng mở).
+- Tài liệu hết hiệu lực vẫn xem được trang công khai bình thường: header đỏ "TÀI LIỆU ĐÃ HẾT
+  HIỆU LỰC", hiện **cả** Ngày hiệu lực **và** Ngày hết hiệu lực, cộng nút "Xem tài liệu thay
+  thế" (login-gated) khi tìm được bản thay thế.
+
+## Thanh Xem/Tải file cho mobile ở trang chi tiết (2026-09-14)
+
+Trên màn hẹp, khối "File đính kèm" nằm tận cuối trang chi tiết — phải cuộn rất xa mới bấm
+được. Đã thêm 1 thanh 2 nút (Xem file / Tải file) ngay đầu trang, **chỉ hiện `<lg`**
+(`lg:hidden`), ở cả `iso/documents/[id]` và `iso/forms/[id]`. Desktop giữ nguyên vị trí cũ,
+khối file gốc không đụng tới.
+
 ## Nguồn ưu tiên khi có mâu thuẫn
 
 Khi có mâu thuẫn giữa tài liệu lịch sử, ưu tiên theo thứ tự:

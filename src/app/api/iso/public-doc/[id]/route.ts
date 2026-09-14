@@ -148,13 +148,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       tenTaiLieu: string | null
       loaiTaiLieu: string | null
       lanBanHanh: string | null
-      fileUrl: string | null
     }> = []
 
     if (doc.phan_loai_tl !== "con") {
       const { data: children } = await supabase
         .from("iso_documents")
-        .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, lan_ban_hanh, file_signed_pdf_url, file_signed_office_url, file_goc_url")
+        .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, lan_ban_hanh")
         .eq("factory_id", doc.factory_id)
         .eq("parent_doc_id", doc.id)
         .eq("trang_thai", "co_hieu_luc")
@@ -167,7 +166,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           tenTaiLieu: c.ten_tai_lieu,
           loaiTaiLieu: c.loai_tai_lieu,
           lanBanHanh: c.lan_ban_hanh,
-          fileUrl: c.file_signed_pdf_url || c.file_signed_office_url || c.file_goc_url,
         }))
       }
     }
@@ -207,9 +205,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       trangThai: doc.trang_thai,
       ngayHieuLuc: doc.ngay_hieu_luc,
       ngayHetHieuLuc: doc.ngay_het_hieu_luc,
-      // Với bản hết hiệu lực, restamp-pdf đã GHI ĐÈ file_signed_pdf_url bằng bản đóng dấu
-      // "HẾT HIỆU LỰC" ⇒ QR cũ quét ra đúng bản có dấu, không cần thêm cột nào.
-      fileUrl: doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url,
+      // CỐ Ý không trả URL file ra ngoài: bucket `iso-documents` là public, lộ URL ở đây là
+      // lộ luôn nội dung tài liệu cho bất kỳ ai quét được QR. Trang công khai chỉ hiển thị
+      // metadata; mọi thao tác Xem/Tải đều đẩy qua đăng nhập rồi mở trang chi tiết trong
+      // dashboard. `hasFile` chỉ để biết có nên hiện nút hay không.
+      hasFile: Boolean(doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url),
       childDocs,
       parentDoc,
       replacement: replacement

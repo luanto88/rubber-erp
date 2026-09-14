@@ -3816,6 +3816,32 @@ export default function IsoDocumentDetailPage() {
           </div>
         )}
 
+        {/* Thanh Xem/Tải file cho mobile — trên màn hẹp khối "File đính kèm" nằm tận cuối
+            trang, người dùng phải cuộn rất xa mới bấm được. Chỉ hiện ở <lg, desktop giữ
+            nguyên vị trí cũ. */}
+        {!isNew && mainFileUrl && (
+          <div className="flex gap-2 lg:hidden">
+            <a
+              href={mainFileUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-emerald-700"
+            >
+              <Eye size={16} /> Xem file
+            </a>
+            <a
+              href={buildStorageDownloadUrl(
+                mainFileUrl,
+                `${doc?.ma_tai_lieu || form.ma_tai_lieu || "Tài liệu ISO"} ${doc?.ten_tai_lieu || form.ten_tai_lieu || ""}`.trim(),
+              )}
+              download
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-slate-900"
+            >
+              <Download size={16} /> Tải file
+            </a>
+          </div>
+        )}
+
         <div className={`grid grid-cols-1 gap-4 lg:grid-cols-3`}>
           {/* Form chính */}
           <div className={`lg:col-span-2 space-y-4`}>

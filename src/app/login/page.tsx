@@ -135,6 +135,20 @@ function LoginPageContent() {
 
   const reason = searchParams.get("reason") || ""
 
+  // `?next=` cho phép trang công khai (vd tra cứu QR ISO `/iso-doc/[id]`) đẩy người dùng qua
+  // đăng nhập rồi quay lại đúng chỗ cần xem/tải file.
+  //
+  // Chỉ nhận đường dẫn NỘI BỘ: bắt buộc bắt đầu bằng đúng một dấu `/`. Chuỗi `//host` hay
+  // `/\host` bị trình duyệt hiểu là URL tuyệt đối protocol-relative ⇒ thành lỗ hổng chuyển
+  // hướng mở nếu không chặn.
+  const nextPath = (() => {
+    const raw = searchParams.get("next") || ""
+    if (!raw.startsWith("/")) return ""
+    if (raw.startsWith("//") || raw.startsWith("/\\")) return ""
+    return raw
+  })()
+  const afterLoginPath = nextPath || "/dashboard"
+
   // Mặc định tiếng Việt (đa số người dùng là nhân viên nhà máy) — chỉ theo lựa chọn đã
   // lưu trước đó nếu người dùng (hoặc Customer Portal) đã từng đổi ngôn ngữ tường minh.
   useEffect(() => {
@@ -215,7 +229,7 @@ function LoginPageContent() {
           const blockReason = authBlockReason(user)
 
           if (user && !blockReason) {
-            router.replace("/dashboard")
+            router.replace(afterLoginPath)
             return
           }
 
@@ -295,7 +309,7 @@ function LoginPageContent() {
         return
       }
 
-      router.replace("/dashboard")
+      router.replace(afterLoginPath)
     } catch (err) {
       setError(describeAuthError(err))
     }

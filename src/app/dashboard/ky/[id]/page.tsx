@@ -849,10 +849,15 @@ export default function SignScreenPage() {
         </div>
       )}
 
-      {/* Confirm-sign sheet */}
+      {/* Confirm-sign sheet — mobile: bám đáy; từ sm: modal giữa màn hình.
+          Lớp bọc `fixed inset-0 flex` là cách canh giữa DUY NHẤT an toàn ở đây: bản cũ đặt
+          `inset-x-0` (left:0 + right:0) rồi ghi đè `left-1/2`, nhưng `right:0` vẫn còn hiệu lực
+          nên hộp bị dồn về nửa phải — mép phải luôn rơi đúng 75% bề rộng màn hình, màn càng rộng
+          càng lệch. */}
       {confirmOpen && (
-        <div className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-[420px] rounded-t-2xl bg-white p-5 shadow-[0_-12px_32px_rgba(15,23,42,0.25)] left-1/2 -translate-x-1/2">
-          <div className="mx-auto mb-3.5 h-1 w-10 rounded-full bg-slate-200" />
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+        <div className="w-full max-w-[420px] max-h-[85dvh] overflow-y-auto rounded-t-2xl bg-white p-5 shadow-[0_-12px_32px_rgba(15,23,42,0.25)] sm:rounded-2xl sm:shadow-2xl">
+          <div className="mx-auto mb-3.5 h-1 w-10 rounded-full bg-slate-200 sm:hidden" />
           <div className="mb-1 flex items-start justify-between">
             <h4 className="text-[15px] font-extrabold text-slate-800">
               Xác nhận ký {mySignaturePositions.length} khung
@@ -904,12 +909,14 @@ export default function SignScreenPage() {
             </button>
           </div>
         </div>
+        </div>
       )}
 
-      {/* Return-request sheet */}
+      {/* Return-request sheet — cùng cơ chế canh giữa với sheet xác nhận ký ở trên. */}
       {returnOpen && (
-        <div className="fixed inset-x-0 bottom-0 z-50 mx-auto w-full max-w-[420px] rounded-t-2xl bg-white p-5 shadow-[0_-12px_32px_rgba(15,23,42,0.25)] left-1/2 -translate-x-1/2">
-          <div className="mx-auto mb-3.5 h-1 w-10 rounded-full bg-slate-200" />
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+        <div className="w-full max-w-[420px] max-h-[85dvh] overflow-y-auto rounded-t-2xl bg-white p-5 shadow-[0_-12px_32px_rgba(15,23,42,0.25)] sm:rounded-2xl sm:shadow-2xl">
+          <div className="mx-auto mb-3.5 h-1 w-10 rounded-full bg-slate-200 sm:hidden" />
           <div className="mb-1 flex items-start justify-between">
             <h4 className="text-[15px] font-extrabold text-slate-800">Trả về hồ sơ</h4>
             <button onClick={() => !returning && setReturnOpen(false)} className="text-slate-400 hover:text-slate-600">
@@ -952,6 +959,7 @@ export default function SignScreenPage() {
               Trả về
             </button>
           </div>
+        </div>
         </div>
       )}
 

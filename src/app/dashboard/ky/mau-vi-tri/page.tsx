@@ -231,6 +231,20 @@ const GRID_STEP_PX = 8
 const SIDEBAR_MIN_WIDTH = 260
 const MIN_BOX_PCT = 4
 
+/**
+ * Dung sai khi kiểm tra khung có nằm ngoài khổ giấy hay không.
+ *
+ * Toạ độ đi qua vòng quy đổi pt → % → pt nên hay lệch vài phần vạn; so sánh chặt `> 100` sẽ báo
+ * "ngoài khổ giấy" oan cho khung thực chất vừa khít mép.
+ */
+const BOUNDS_EPSILON_PCT = 0.05
+
+/** Kẹp toạ độ một cạnh của khung vào trong trang, biết bề rộng/cao (%) của chính khung đó. */
+function clampPct(value: number, sizePct: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(Math.max(value, 0), Math.max(0, 100 - sizePct))
+}
+
 function makeBaseRole(baseId: BaseRoleId, isIso = false, isExempt = false): EditorRole {
   if (isIso && (baseId in ISO_ROLE_DEFS)) {
     const def = ISO_ROLE_DEFS[baseId as IsoSignRoleId]
@@ -597,13 +611,20 @@ export default function SignTemplateEditorPage() {
         : Math.min(Math.max(box.so_trang, 1), total || box.so_trang)
       const dim = dims[page]
       if (!dim) return null
+      // Mẫu lưu theo LOẠI tài liệu (không theo từng file) nên toạ độ pt có thể là của một file
+      // khổ giấy/hướng giấy KHÁC. Không kẹp lại thì khung ra ngoài 0-100% (vd mẫu lưu từ A4 dọc
+      // mở trên A4 ngang cho yPct ≈ −33%), bị vùng cuộn cắt mất ⇒ người dùng thấy cảnh báo
+      // "ngoài khổ giấy" mà không thấy khung đâu, và không chạm được vào khung để sửa ⇒ cờ cảnh
+      // báo kẹt vĩnh viễn, chỉ còn cách xoá khung đặt lại.
+      const wPct = Math.min(100, Math.max(MIN_BOX_PCT, (box.w_pt / dim.w) * 100))
+      const hPct = Math.min(100, Math.max(MIN_BOX_PCT, (box.h_pt / dim.h) * 100))
       return {
         page,
         pct: {
-          xPct: (box.x_pt / dim.w) * 100,
-          yPct: ((dim.h - box.y_pt - box.h_pt) / dim.h) * 100,
-          wPct: (box.w_pt / dim.w) * 100,
-          hPct: (box.h_pt / dim.h) * 100,
+          xPct: clampPct((box.x_pt / dim.w) * 100, wPct),
+          yPct: clampPct(((dim.h - box.y_pt - box.h_pt) / dim.h) * 100, hPct),
+          wPct,
+          hPct,
         },
       }
     },
@@ -1085,16 +1106,49 @@ export default function SignTemplateEditorPage() {
   const recomputeBounds = useCallback((list: EditorRole[]) => {
     return list.map((r) => ({
       ...r,
-      outOfBounds: r.box.xPct < 0 || r.box.yPct < 0 || r.box.xPct + r.box.wPct > 100 || r.box.yPct + r.box.hPct > 100,
+      outOfBounds:
+        r.box.xPct < -BOUNDS_EPSILON_PCT ||
+        r.box.yPct < -BOUNDS_EPSILON_PCT ||
+        r.box.xPct + r.box.wPct > 100 + BOUNDS_EPSILON_PCT ||
+        r.box.yPct + r.box.hPct > 100 + BOUNDS_EPSILON_PCT,
     }))
   }, [])
 
+  /** Kéo một khung đang nằm ngoài khổ giấy về lại trong trang — lối thoát khi khung không còn nhìn thấy được. */
+  const bringRoleIntoPage = useCallback(
+    (roleId: string) => {
+      setRoles((prev) =>
+        recomputeBounds(
+          prev.map((r) => {
+            if (r.id !== roleId) return r
+            const wPct = Math.min(100, Math.max(MIN_BOX_PCT, r.box.wPct))
+            const hPct = Math.min(100, Math.max(MIN_BOX_PCT, r.box.hPct))
+            return {
+              ...r,
+              box: { xPct: clampPct(r.box.xPct, wPct), yPct: clampPct(r.box.yPct, hPct), wPct, hPct },
+            }
+          }),
+        ),
+      )
+      setSelectedRoleId(roleId)
+    },
+    [recomputeBounds],
+  )
+
+  // Cờ `outOfBounds` nằm trong state nên phải tính lại mỗi khi TOẠ ĐỘ đổi, không chỉ khi thêm/bớt
+  // khung: trước đây dep là `roles.length` nên các đường đổi toạ độ không qua handler kéo-thả
+  // (nạp mẫu, đối chiếu theo số bước ký, đổi neo trang, khôi phục bản đã lưu) để lại cờ sai.
+  const boundsSignature = useMemo(
+    () => roles.map((r) => `${r.id}:${r.placed ? 1 : 0}:${r.box.xPct},${r.box.yPct},${r.box.wPct},${r.box.hPct}`).join("|"),
+    [roles],
+  )
   useEffect(() => {
-    setRoles((prev) => recomputeBounds(prev))
-    // chỉ cần chạy lại khi số lượng box thay đổi hình dạng — theo dõi qua roles.length là đủ
-    // vì mọi thay đổi vị trí đã tự gọi recomputeBounds tại chỗ trong handler tương ứng.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roles.length])
+    setRoles((prev) => {
+      const next = recomputeBounds(prev)
+      // Chỉ set lại khi thực sự có cờ đổi — tránh vòng lặp render vô tận.
+      return next.some((r, i) => r.outOfBounds !== prev[i]?.outOfBounds) ? next : prev
+    })
+  }, [boundsSignature, recomputeBounds])
 
   const goToPage = (p: number) => {
     setCurrentPage(Math.min(Math.max(p, 1), numPages || 1))
@@ -1621,8 +1675,32 @@ export default function SignTemplateEditorPage() {
         <h3 className="text-[11px] font-extrabold uppercase tracking-wide text-slate-400 mb-2">Cảnh báo</h3>
         {outOfBoundsRoles.length > 0 ? (
           <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 text-[11px] text-red-800 leading-relaxed">
-            <div className="font-bold mb-1">⚠ Khung nằm ngoài khổ giấy</div>
-            {outOfBoundsRoles.map((r) => <div key={r.id}>{r.label}</div>)}
+            <div className="font-bold mb-1.5">⚠ Khung nằm ngoài khổ giấy</div>
+            {/* Khung lỗi có thể đang ở TRANG KHÁC hoặc nằm hẳn ngoài vùng nhìn — nên phải nói rõ
+                trang, cho bấm để nhảy tới, và luôn có nút kéo nó về trong trang. */}
+            {outOfBoundsRoles.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-2 py-0.5">
+                <button
+                  type="button"
+                  onClick={() => { goToPage(r.anchor === "cuoi" ? numPages || 1 : r.page); setSelectedRoleId(r.id) }}
+                  className="min-w-0 flex-1 text-left font-semibold underline decoration-dotted underline-offset-2 hover:text-red-900"
+                  title="Đi tới khung này"
+                >
+                  <span className="truncate">{r.label}</span>
+                  <span className="ml-1 font-normal text-red-600">
+                    · Trang {r.anchor === "cuoi" ? numPages || 1 : r.page}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => bringRoleIntoPage(r.id)}
+                  className="shrink-0 rounded-md border border-red-300 bg-white px-1.5 py-0.5 font-bold text-red-700 hover:bg-red-100"
+                  title="Kéo khung này về nằm gọn trong trang"
+                >
+                  Đưa về trong trang
+                </button>
+              </div>
+            ))}
           </div>
         ) : (
           <p className="text-[11px] text-slate-500">Không có cảnh báo nào — mọi khung đều nằm trong khổ giấy.</p>
