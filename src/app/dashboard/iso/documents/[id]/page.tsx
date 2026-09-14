@@ -31,6 +31,7 @@ import {
   type IsoStandard,
   type SignAsType,
 } from "../../_components/iso-types"
+import { canOpenIsoFile, EXPIRED_FILE_HINT } from "../../_components/iso-file-access"
 import { IsoBatchSignModal } from "../../_components/iso-batch-sign-modal"
 import {
   ArrowLeft,
@@ -139,6 +140,22 @@ type SignPlacement = ExtraSignPlacement & {
 }
 
 // Đọc tiền tố ký thay để hiển thị trên UI.
+/**
+ * Thay cho cặp nút Xem/Tải khi bản ghi đã hết hiệu lực và người xem chưa được cấp quyền
+ * `iso.view_het_hieu_luc`. Hiện chữ thay vì ẩn trắng để người dùng biết vì sao mất nút,
+ * khỏi tưởng giao diện lỗi.
+ */
+function ExpiredFileNotice() {
+  return (
+    <span
+      title={EXPIRED_FILE_HINT}
+      className="shrink-0 rounded-lg bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600"
+    >
+      Hết hiệu lực — cần quyền xem
+    </span>
+  )
+}
+
 function signAsPrefixLabel(signAs: SignAsType | null | undefined): string {
   return signAs && signAs !== "none" ? `${signAs}. ` : ""
 }
@@ -980,6 +997,9 @@ export default function IsoDocumentDetailPage() {
   // draft/tra_ve chỉ cho phép soạn thảo chỉnh sửa; bi_tu_choi chỉ cho xem xét
   const isEditable = isNew || ((trangThai === "draft" || trangThai === "tra_ve") && isSoanThao) || (trangThai === "bi_tu_choi_phe_duyet" && canXemXet)
   const canToggleAutoConvert = (trangThai === "draft" || trangThai === "tra_ve") && !!userId && userId === doc?.soan_thao_user_id
+  // Mở/tải file của CHÍNH bản ghi này. Bản hết hiệu lực cần quyền iso.view_het_hieu_luc —
+  // thông tin chi tiết vẫn xem bình thường, chỉ nội dung file bị khoá.
+  const canOpenThisFile = canOpenIsoFile(trangThai, user)
   const canAddChildRow = !!(selectedParentDocId && form.loai_tai_lieu_cha && form.so_hieu_cha)
 
   const showToast = (ok: boolean, text: string) => {
@@ -2923,6 +2943,7 @@ export default function IsoDocumentDetailPage() {
         <div className="max-h-56 space-y-2 overflow-auto">
           {childDocs.map((child) => {
             const url = childFileUrl(child)
+            const canOpenChild = canOpenIsoFile(child.trang_thai, user)
             return (
               <div key={child.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 space-y-1">
                 <div className="flex items-center gap-2">
@@ -2934,7 +2955,8 @@ export default function IsoDocumentDetailPage() {
                   <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700">
                     {childTypeLabelMap[child.loai_tai_lieu || ""] || child.loai_tai_lieu || "Hồ sơ"}
                   </span>
-                  {url && (
+                  {url && !canOpenChild && <ExpiredFileNotice />}
+                  {url && canOpenChild && (
                     <>
                       <a href={url} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem hồ sơ">
                         <Eye size={14} />
@@ -3816,35 +3838,9 @@ export default function IsoDocumentDetailPage() {
           </div>
         )}
 
-        {/* Thanh Xem/Tải file cho mobile — trên màn hẹp khối "File đính kèm" nằm tận cuối
-            trang, người dùng phải cuộn rất xa mới bấm được. Chỉ hiện ở <lg, desktop giữ
-            nguyên vị trí cũ. */}
-        {!isNew && mainFileUrl && (
-          <div className="flex gap-2 lg:hidden">
-            <a
-              href={mainFileUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-emerald-700"
-            >
-              <Eye size={16} /> Xem file
-            </a>
-            <a
-              href={buildStorageDownloadUrl(
-                mainFileUrl,
-                `${doc?.ma_tai_lieu || form.ma_tai_lieu || "Tài liệu ISO"} ${doc?.ten_tai_lieu || form.ten_tai_lieu || ""}`.trim(),
-              )}
-              download
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-slate-900"
-            >
-              <Download size={16} /> Tải file
-            </a>
-          </div>
-        )}
-
         <div className={`grid grid-cols-1 gap-4 lg:grid-cols-3`}>
           {/* Form chính */}
-          <div className={`lg:col-span-2 space-y-4`}>
+          <div className={`lg:col-span-2 flex flex-col gap-4`}>
             {/* Thông tin cơ bản */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-700 mb-4">Thông tin tài liệu</h2>
@@ -4122,7 +4118,8 @@ export default function IsoDocumentDetailPage() {
                         <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl">
                           <FileText size={16} className="text-amber-600 shrink-0" />
                           <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
-                          <a href={doc?.file_phieu_yeu_cau_thay_doi_signed_url || reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg"><Eye size={13} className="text-amber-600" /></a>
+                          {!canOpenThisFile && <ExpiredFileNotice />}
+                        {canOpenThisFile && <a href={doc?.file_phieu_yeu_cau_thay_doi_signed_url || reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg"><Eye size={13} className="text-amber-600" /></a>}
                         </div>
                       )}
                       <button type="button" onClick={() => reviewChangeFileInputRef.current?.click()} disabled={fileUploading} className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-amber-400 text-slate-500 hover:text-amber-700 text-xs font-medium rounded-xl transition-all">
@@ -4135,7 +4132,8 @@ export default function IsoDocumentDetailPage() {
                         <div className="flex items-center gap-2 p-3 bg-sky-50 rounded-xl">
                           <FileText size={16} className="text-sky-600 shrink-0" />
                           <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
-                          <a href={doc?.file_de_nghi_soat_xet_signed_url || reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg"><Eye size={13} className="text-sky-600" /></a>
+                          {!canOpenThisFile && <ExpiredFileNotice />}
+                        {canOpenThisFile && <a href={doc?.file_de_nghi_soat_xet_signed_url || reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg"><Eye size={13} className="text-sky-600" /></a>}
                         </div>
                       )}
                       <button type="button" onClick={() => reviewRequestFileInputRef.current?.click()} disabled={fileUploading} className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-sky-400 text-slate-500 hover:text-sky-700 text-xs font-medium rounded-xl transition-all">
@@ -4241,6 +4239,7 @@ export default function IsoDocumentDetailPage() {
                 <div className="space-y-2">
                   {siblingDocs.map((sib) => {
                     const sibUrl = sib.file_signed_pdf_url || sib.file_signed_office_url || sib.file_goc_url
+                    const canOpenSib = canOpenIsoFile(sib.trang_thai, user)
                     const isSelf = sib.id === docId
                     const statusColor = (TRANG_THAI_COLOR as Record<string, string>)[sib.trang_thai] || "bg-slate-100 text-slate-600"
                     return (
@@ -4257,7 +4256,8 @@ export default function IsoDocumentDetailPage() {
                           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${statusColor}`}>
                             {(TRANG_THAI_LABEL as Record<string, string>)[sib.trang_thai] || sib.trang_thai}
                           </span>
-                          {sibUrl && (
+                          {sibUrl && !canOpenSib && <ExpiredFileNotice />}
+                          {sibUrl && canOpenSib && (
                             <>
                               <a href={sibUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem file">
                                 <Eye size={13} />
@@ -4311,8 +4311,10 @@ export default function IsoDocumentDetailPage() {
               </div>
             )}
             {/* File đính kèm — ẩn khi TẠO MỚI hồ sơ con (TH2/TH4). Hiện khi: cha mới, tài liệu đã tồn tại (kể cả hồ sơ con đang xem xét) */}
+            {/* order-first: trên màn hẹp khối file nhảy lên đầu cột — trước đây nằm tận cuối
+                trang, phải cuộn qua toàn bộ form mới bấm được Xem/Tải. Desktop giữ nguyên chỗ cũ. */}
             {!(isNew && form.phan_loai_tl === "con") && (
-            <div id="file-goc-upload" className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div id="file-goc-upload" className="order-first lg:order-none bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-700 mb-3">{fileSectionLabel}</h2>
               <p className="text-xs text-slate-500 mb-3">PDF, DOCX hoặc XLSX</p>
 
@@ -4320,23 +4322,29 @@ export default function IsoDocumentDetailPage() {
                 <div className="mb-3 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
                   <CheckCircle2 size={21} className="text-emerald-600 shrink-0" />
                   <span className="flex-1 text-sm font-extrabold text-emerald-800">PDF có chữ ký</span>
-                  <a
-                    href={doc.file_signed_pdf_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    title="Xem PDF có chữ ký"
-                    className="shrink-0 rounded-xl bg-emerald-600 p-2.5 text-white shadow-sm transition-all hover:bg-emerald-700"
-                  >
-                    <Eye size={18} />
-                  </a>
-                  <a
-                    href={buildStorageDownloadUrl(doc.file_signed_pdf_url, `${doc.ma_tai_lieu || "Tài liệu ISO"} ${doc.ten_tai_lieu || ""}`.trim())}
-                    download
-                    title="Tải PDF có chữ ký"
-                    className="shrink-0 rounded-xl bg-slate-800 p-2.5 text-white shadow-sm transition-all hover:bg-slate-900"
-                  >
-                    <Download size={18} />
-                  </a>
+                  {canOpenThisFile ? (
+                    <>
+                      <a
+                        href={doc.file_signed_pdf_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Xem PDF có chữ ký"
+                        className="shrink-0 rounded-xl bg-emerald-600 p-2.5 text-white shadow-sm transition-all hover:bg-emerald-700"
+                      >
+                        <Eye size={18} />
+                      </a>
+                      <a
+                        href={buildStorageDownloadUrl(doc.file_signed_pdf_url, `${doc.ma_tai_lieu || "Tài liệu ISO"} ${doc.ten_tai_lieu || ""}`.trim())}
+                        download
+                        title="Tải PDF có chữ ký"
+                        className="shrink-0 rounded-xl bg-slate-800 p-2.5 text-white shadow-sm transition-all hover:bg-slate-900"
+                      >
+                        <Download size={18} />
+                      </a>
+                    </>
+                  ) : (
+                    <ExpiredFileNotice />
+                  )}
                   {isEditable && (
                     <button
                       type="button"
@@ -4356,17 +4364,23 @@ export default function IsoDocumentDetailPage() {
                     <div className="flex items-center gap-2 rounded-xl bg-white/80 p-3">
                       <FileText size={16} className="text-violet-600 shrink-0" />
                       <span className="text-xs text-slate-700 flex-1 truncate">{mainFileName}</span>
-                      <a href={mainFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-violet-100 rounded-lg" title="Xem file hiện tại">
-                        <Eye size={13} className="text-violet-600" />
-                      </a>
-                      <a
-                        href={buildStorageDownloadUrl(mainFileUrl, `${doc?.ma_tai_lieu || form.ma_tai_lieu || "Tài liệu ISO"} ${doc?.ten_tai_lieu || form.ten_tai_lieu || ""}`.trim())}
-                        download
-                        className="shrink-0 p-1 hover:bg-violet-100 rounded-lg"
-                        title="Tải file hiện tại"
-                      >
-                        <Download size={13} className="text-violet-600" />
-                      </a>
+                      {canOpenThisFile ? (
+                        <>
+                          <a href={mainFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-violet-100 rounded-lg" title="Xem file hiện tại">
+                            <Eye size={13} className="text-violet-600" />
+                          </a>
+                          <a
+                            href={buildStorageDownloadUrl(mainFileUrl, `${doc?.ma_tai_lieu || form.ma_tai_lieu || "Tài liệu ISO"} ${doc?.ten_tai_lieu || form.ten_tai_lieu || ""}`.trim())}
+                            download
+                            className="shrink-0 p-1 hover:bg-violet-100 rounded-lg"
+                            title="Tải file hiện tại"
+                          >
+                            <Download size={13} className="text-violet-600" />
+                          </a>
+                        </>
+                      ) : (
+                        <ExpiredFileNotice />
+                      )}
                     </div>
                     {isEditable && (
                       <button
@@ -4754,9 +4768,10 @@ export default function IsoDocumentDetailPage() {
                       <div className="flex items-center gap-2 p-3 bg-amber-50 rounded-xl">
                         <FileText size={16} className="text-amber-600 shrink-0" />
                         <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
-                        <a href={doc?.file_phieu_yeu_cau_thay_doi_signed_url || reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg">
+                        {!canOpenThisFile && <ExpiredFileNotice />}
+                        {canOpenThisFile && <a href={doc?.file_phieu_yeu_cau_thay_doi_signed_url || reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg">
                           <Eye size={13} className="text-amber-600" />
-                        </a>
+                        </a>}
                       </div>
                     ) : null}
                     {isEditable && (
@@ -4776,9 +4791,10 @@ export default function IsoDocumentDetailPage() {
                       <div className="flex items-center gap-2 p-3 bg-sky-50 rounded-xl">
                         <FileText size={16} className="text-sky-600 shrink-0" />
                         <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
-                        <a href={doc?.file_de_nghi_soat_xet_signed_url || reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg">
+                        {!canOpenThisFile && <ExpiredFileNotice />}
+                        {canOpenThisFile && <a href={doc?.file_de_nghi_soat_xet_signed_url || reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg">
                           <Eye size={13} className="text-sky-600" />
-                        </a>
+                        </a>}
                       </div>
                     ) : null}
                     {isEditable && (

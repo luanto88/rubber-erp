@@ -485,6 +485,10 @@ export const DEFAULT_PERMISSION_CODES = [
   "iso.phe_duyet",
   "iso.print",
   "iso.signature",
+  // Gate nút mở/tải FILE của tài liệu đã hết hiệu lực (migration 20260915). Người chỉ có
+  // iso.view vẫn xem được thông tin chi tiết, chỉ không mở được nội dung bản cũ.
+  // Cố ý KHÔNG có trong ROLE_DEFAULTS.manager/user — chỉ admin, cấp tay cho từng người.
+  "iso.view_het_hieu_luc",
   // Nhóm documents.* đã được seed vào bảng `permissions`/`role_permissions` từ migration
   // 20260522 nhưng bị bỏ quên ở danh sách fallback này — nghĩa là khi DB chưa seed kịp,
   // `ROLE_DEFAULTS` sinh ra bộ quyền KHÔNG có module Văn bản. Bổ sung cho khớp đúng DB thật.

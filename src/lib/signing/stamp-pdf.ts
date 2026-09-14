@@ -156,6 +156,49 @@ export function drawSignPrefix(
   } catch { /* bỏ qua nếu vẽ tiền tố thất bại */ }
 }
 
+/** Khung CHỨC VỤ trong 1 placement — mọi trường đều optional để placement cũ vẫn hợp lệ. */
+export type ChucVuBox = {
+  showChucVu?: boolean
+  chucVuText?: string | null
+  cvX?: number
+  cvY?: number
+  cvWidth?: number
+  cvHeight?: number
+}
+
+/**
+ * Vẽ CHỨC VỤ của người ký vào khung riêng — khối độc lập với chữ ký và tên (người ký tự bật/tắt
+ * và kéo riêng), không phải một dòng phụ nằm dưới tên.
+ *
+ * Hoàn toàn BỔ SUNG và có điều kiện: placement lưu trước khi có tính năng này không mang nhóm
+ * trường `showChucVu`/`chucVuText`/`cv*` nên hàm thoát ngay ở các guard dưới — mọi hồ sơ/tài liệu
+ * đang luân chuyển dở giữ nguyên hình ảnh cũ, không lệch một nét.
+ *
+ * `chucVuText` đi kèm trong chính placement (không tra lại hồ sơ nhân sự lúc đóng dấu) vì có
+ * luồng vẽ lại toàn bộ các bước ký từ file gốc ở bước cuối — chức vụ của những bước trước phải
+ * tự mang theo dữ liệu của chính nó mới sống sót.
+ */
+export function drawChucVu(
+  page: PDFPage,
+  box: ChucVuBox,
+  font: PDFFont | null,
+  style: NameStyle,
+): void {
+  if (!box.showChucVu || !font) return
+  const text = (box.chucVuText || "").trim()
+  if (!text) return
+  const { cvX, cvY, cvWidth, cvHeight } = box
+  if (
+    typeof cvX !== "number" || typeof cvY !== "number"
+    || typeof cvWidth !== "number" || typeof cvHeight !== "number"
+  ) return
+  drawTextFit(page, text, { x: cvX, y: cvY, width: cvWidth, height: cvHeight }, font, {
+    maxFontSize: style.maxFontSize,
+    minFontSize: style.minFontSize,
+    fontStep: style.fontStep,
+  })
+}
+
 /**
  * Vẽ text canh giữa, tự thu nhỏ cỡ chữ, TRỰC TIẾP vào 1 khung `(x,y,w,h)` — khác
  * `drawSignerName()` (tính vị trí LỆCH so với 1 khung chữ ký khác theo `NameStyle`).

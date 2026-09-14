@@ -542,13 +542,54 @@ liệu cho bất kỳ ai quét được QR. Vì vậy:
 - Tài liệu hết hiệu lực vẫn xem được trang công khai bình thường: header đỏ "TÀI LIỆU ĐÃ HẾT
   HIỆU LỰC", hiện **cả** Ngày hiệu lực **và** Ngày hết hiệu lực, cộng nút "Xem tài liệu thay
   thế" (login-gated) khi tìm được bản thay thế.
+- **Cụm thao tác luôn nằm gọn MỘT DÒNG** ở mọi khổ màn hình (2026-09-15): không `flex-wrap`,
+  mỗi nút `flex-1 min-w-0 whitespace-nowrap`, phần chữ dài (" tài liệu") chỉ hiện từ `sm:`
+  trở lên. Trước đó 3 nút + `flex-wrap` làm rớt dòng ở cả desktop lẫn mobile.
+- **Bản hết hiệu lực CỐ Ý không có nút Xem/Tải bản cũ** (2026-09-15): chỉ còn "Xem tài liệu
+  thay thế" + một link chữ nhỏ ghi rõ điều kiện, vì từ nay mở nội dung bản cũ cần quyền
+  `iso.view_het_hieu_luc` — để nút to ở đây sẽ dẫn đa số người dùng vào ngõ cụt sau khi đăng
+  nhập. Link nhỏ vẫn giữ lối vào từ QR cho người thật sự có quyền.
 
-## Thanh Xem/Tải file cho mobile ở trang chi tiết (2026-09-14)
+## Khối file lên đầu trang trên mobile (2026-09-15)
 
-Trên màn hẹp, khối "File đính kèm" nằm tận cuối trang chi tiết — phải cuộn rất xa mới bấm
-được. Đã thêm 1 thanh 2 nút (Xem file / Tải file) ngay đầu trang, **chỉ hiện `<lg`**
-(`lg:hidden`), ở cả `iso/documents/[id]` và `iso/forms/[id]`. Desktop giữ nguyên vị trí cũ,
-khối file gốc không đụng tới.
+Trên màn hẹp, khối file nằm tận cuối trang chi tiết — phải cuộn qua toàn bộ form mới bấm được
+Xem/Tải.
+
+Bản đầu (2026-09-14) thêm 1 thanh 2 nút `lg:hidden` ở đầu trang **nhưng giữ nguyên khối file
+cũ** ⇒ thành ra 2 chỗ cùng có nút, người dùng vẫn thấy nút ở cuối trang và báo "chưa sửa". Nay
+làm đúng cách: **chính khối file nhảy lên đầu cột** ở `<lg`, không nhân đôi UI.
+
+- Cột trái đổi từ `space-y-N` sang `flex flex-col gap-N` — `order` không có tác dụng trên
+  `div` khối, bắt buộc phải là flex/grid container.
+- Khối file thêm `order-first lg:order-none`; desktop giữ nguyên vị trí cũ.
+- Áp dụng cho cả `iso/documents/[id]` (card `#file-goc-upload`) và `iso/forms/[id]`
+  (card "File hồ sơ").
+
+## Quyền `iso.view_het_hieu_luc` — mở/tải file bản hết hiệu lực (2026-09-15)
+
+Migration `supabase/migrations/20260915_iso_view_het_hieu_luc_permission.sql` (seed
+`permissions` + `role_permissions` cho admin; **chạy tay** trên Supabase SQL Editor).
+
+- Người chỉ có `iso.view` vẫn xem **đầy đủ thông tin chi tiết** của bản hết hiệu lực (mã, tên,
+  ngày hiệu lực/hết hiệu lực, lịch sử ký) — chỉ mất nút **mở file** và **tải file**.
+- Helper dùng chung `canOpenIsoFile(trangThai, user)` +
+  `EXPIRED_FILE_HINT` trong `src/app/dashboard/iso/_components/iso-file-access.ts`.
+  ⚠️ **File RIÊNG, không gộp vào `iso-types.ts`** — file đó đang bị
+  `api/iso/forms/[id]/finalize/route.ts` import, mà `@/lib/auth` kéo theo Supabase browser
+  client, không nên nạp vào runtime server (bài học ranh giới client/server ở rule 22).
+- **Gate theo trạng thái của CHÍNH bản ghi đang render** — hồ sơ con có `trang_thai` riêng với
+  tài liệu cha, không suy từ cha. Các điểm đã gate: danh sách ISO (nút Download của tài liệu cha
+  + hồ sơ con — icon Eye ở đó là "Xem chi tiết", **giữ nguyên**), trang chi tiết (card "PDF có
+  chữ ký", card file hiện tại, 2 file phụ soát xét ×2 nơi, panel "Hồ sơ đã lưu", panel "Các hồ sơ
+  trong bộ này").
+- **Không áp dụng cho Thực hiện hồ sơ ISO** (`iso/forms/*`): `IsoFormInstanceStatus` không hề
+  có `het_hieu_luc`.
+- Quyền vừa cấp chỉ có hiệu lực sau khi người dùng **tải lại trang** — chỉ bootstrap của
+  `dashboard/layout.tsx` mới gọi `hydrateActiveSession()` làm mới `localStorage.erp_user`;
+  heartbeat 60s là bản nhẹ, không nạp lại danh sách quyền.
+- ⚠️ **Đây là rào ở tầng giao diện.** Bucket `iso-documents` là public và trang chi tiết query
+  thẳng Supabase nên URL file vẫn nằm trong payload — người biết dùng devtools vẫn lấy được.
+  Chặn thật cần signed URL (ảnh hưởng cả QR đã in), ngoài phạm vi.
 
 ## Nguồn ưu tiên khi có mâu thuẫn
 

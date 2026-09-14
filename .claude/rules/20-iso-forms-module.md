@@ -738,3 +738,111 @@ phía trên, không lặp lại danh sách checklist ở đây nữa. 3 migratio
 **Còn 1 việc cần xác nhận**: `GEMINI_API_KEY` đã có trong `.env.local`, nhưng cần
 xác nhận đã thêm vào biến môi trường Vercel (production) hay chưa — nếu chưa, tính
 năng semantic search/embed sẽ lỗi trên production dù chạy đúng ở local.
+
+---
+
+## Cập nhật 2026-09-14 — Khối Chức vụ + mẫu vị trí ký + đồng bộ giao diện ký
+
+Đưa trải nghiệm ký của **Thực hiện hồ sơ ISO** lên ngang Văn bản / Soạn thảo ISO. 5 khoảng
+cách đã khảo sát bằng grep trước khi sửa (không suy đoán), nay đã xử lý hết.
+
+### 1. Khối CHỨC VỤ — khối kéo-thả thứ 3, ĐỘC LẬP
+
+Trước đây `iso/forms/[id]/page.tsx` không có chữ `chuc_vu` nào (0 kết quả grep): người ký chỉ
+đóng dấu được chữ ký + tên.
+
+- Là **khối riêng** (vị trí riêng, công tắc riêng), **không** phải dòng phụ nằm trong hộp Tên —
+  người dùng đã chốt hướng này.
+- Nguồn chức vụ: `maintenance_staff.chuc_vu_chinh_quyen || chuc_vu` theo `profile_id` +
+  `active = true`, đúng thứ tự ưu tiên đang dùng ở Văn bản và Soạn thảo ISO. **Không** lấy từ
+  `profiles` (bảng đó không có chức vụ).
+- Mặc định **TẮT**: nhiều biểu mẫu ISO đã in sẵn chức danh dưới ô ký, bật mặc định sẽ đè chữ.
+- Người ký **chưa khai chức vụ** trong Nhân sự bảo trì → khối không được dựng (dựng lên chỉ ra
+  một khung rỗng, người ký tưởng hỏng).
+
+### ⚠️ `chucVuText` lưu THẲNG trong placement — bắt buộc, không được "tối ưu" thành tra lại DB
+
+Bước `phe_duyet` của `finalize/route.ts` **vẽ lại CẢ 3 placement** (soạn thảo + xem xét + phê
+duyệt) từ file gốc. Nếu chức vụ được tra theo `userId` lúc stamp thì chức vụ của 2 bước trước sẽ
+bị tra theo nhân sự HIỆN TẠI (hoặc mất hẳn nếu người đó đã nghỉ/đổi chức vụ). Vì vậy mỗi
+placement tự mang theo `chucVuText` của chính nó — đây là snapshot, đúng tinh thần `soan_thao`/
+`xem_xet` (tên người ký) cũng là snapshot.
+
+### `drawChucVu` nằm ở `src/lib/signing/stamp-pdf.ts` (dùng chung)
+
+Cùng loại với `drawSignerName`/`drawSignPrefix` nên đặt chung chỗ, nhận `ChucVuBox` (mọi trường
+optional) + `NameStyle`. **Thuần bổ sung**: placement cũ không có nhóm trường `showChucVu`/
+`chucVuText`/`cv*` → hàm thoát ở guard, không vẽ gì. Đường ký cũ **không sửa một dòng nào**.
+
+Cỡ chữ dùng chung dải của tên người ký (`ISO_SIGNER_NAME_STYLE`, 13→9pt) để 2 dòng cân nhau.
+
+### 2. Mẫu vị trí ký (`mau_vi_tri`) cho biểu mẫu
+
+Trước đây grep `mau_vi_tri` trong cả trang lẫn route ra 0 kết quả — mỗi lượt ký phải kéo-thả lại
+từ toạ độ mặc định.
+
+- **Khoá mẫu gắn với BIỂU MẪU, không gắn với từng hồ sơ**: `iso:code:{template.ma_tai_lieu}`,
+  fallback `iso:loai:{loai_tai_lieu}`. Vẽ 1 lần → mọi hồ sơ lập sau của cùng biểu mẫu tự đặt sẵn.
+- Nút **"Cài đặt vị trí ký"** ở thanh hành động trang chi tiết, mở
+  `/dashboard/ky/mau-vi-tri?modun=iso&loai=...&pdfUrl=...&returnTo=...`.
+  **KHÔNG truyền `docId`** — tham số đó của màn cài đặt trỏ vào bảng `iso_documents`, còn đây là
+  `iso_form_instances` (bảng khác), truyền vào sẽ tra nhầm bản ghi.
+- **Không phải sửa `ky/mau-vi-tri/page.tsx`**: màn đó đã chạy được khi không có `docId`
+  (`docLoaded`/`docFetchOk` khởi tạo `true`), và biểu mẫu `F`/`HD`/`PL` được `isExemptIsoDoc`
+  miễn quy tắc ép đủ 3 khung.
+- Khác **"vị trí CỨNG"** của Văn bản: ở đây mẫu chỉ **ĐẶT SẴN**, người ký vẫn kéo/chỉnh và
+  bật/tắt tự do trước khi ký. Không có mẫu → giữ nguyên vị trí mặc định như trước.
+- Khung mẫu được chia 3 dải con bằng `computeDefaultSubLayout` dùng chung (chữ ký 55% / tên /
+  chức vụ) — cùng công thức với Văn bản nên bố cục nhất quán toàn app.
+- ⚠️ **TUYỆT ĐỐI không fallback sang vai trò khác** khi mẫu thiếu khung của vai trò đang ký:
+  dùng khung của người khác sẽ đóng dấu chữ ký người này lên đúng ô dành cho người kia.
+- QR chỉ áp mẫu ở bước `soan_thao` (các bước sau dùng lại QR đã chốt của bước đầu).
+
+### 3-4-5. Đồng bộ giao diện
+
+- **Núm co giãn nhìn thấy được**: dùng `ResizeHandleIcon` + `RESIZE_HANDLE_CLASS` +
+  `RESIZE_HANDLE_STYLE` cho đủ 7 khung (chữ ký, tên, chức vụ, QR, tiền tố, 2 khung bản sao).
+- ⚠️ `cancel` của `<Draggable>` trước đây ghi `.react-resizable-handle` — **class của thư viện
+  KHÁC**, không phải `re-resizable`. Hệ quả: kéo núm sẽ kéo trôi cả khối. Đã đổi hết sang
+  `.resize-handle` (`RESIZE_HANDLE_CLASS`).
+- **Chữ xem trước khớp bản đóng dấu**: preview cũ dùng `text-[10px]` font hệ thống trong khi
+  stamp là Times New Roman 13→9pt. Nay dùng `SIGN_TEXT_FONT_FAMILY` + `SIGN_TEXT_FONT_SIZE_PT` +
+  `SIGN_TEXT_MIN_FONT_SIZE_PT` (`template-layout.ts`), quy pt→px theo `pdfScale`, ước lượng thu
+  nhỏ theo số ký tự.
+- **Icon con mắt** đảo lại cho đúng quy ước `iso/documents/[id]`: `Eye` khi đang HIỆN, `EyeOff`
+  khi đang TẮT (trước đây ngược).
+
+### Kiểm chứng (2026-09-14) — 21/21 PASS bằng code thật
+
+Script gọi thẳng `drawChucVu`/`drawSignerName`/`loadSignerNameFont`/`ISO_SIGNER_NAME_STYLE`/
+`computeDefaultSubLayout` thật qua `node --experimental-strip-types` (cwd = gốc repo), trích lại
+nội dung PDF bằng **pdfjs** (công cụ độc lập, không tin code tự đánh giá chính nó):
+
+- Font thật nạp được (chặn đúng bẫy "test pass giả": `loadSignerNameFont()` trả `null` khi sai
+  cwd → mọi hàm vẽ text im lặng bỏ qua).
+- Chức vụ vẽ đúng nội dung (giữ dấu tiếng Việt), nằm trong khung cả 2 trục, canh giữa, cỡ chữ
+  trong dải 13→9pt.
+- **Placement cũ → chỉ có đúng tên người ký, không sinh thêm nét vẽ nào.**
+- 5 guard (tắt công tắc / rỗng / toàn khoảng trắng / null / thiếu toạ độ) đều không vẽ.
+- 3 khối từ mẫu không chồng nhau và nằm trong khung mẫu; quy đổi canvas↔PDF khứ hồi không sai lệch.
+
+**Hạn chế đã biết (có sẵn, không phải do đợt này)**: `drawTextFit` dừng thu nhỏ ở 9pt — chức vụ
+quá dài so với khung vẫn có thể tràn (đo được: 254pt chữ trong khung 150pt). Hành vi này giống hệt
+tên người ký, không xử lý riêng cho chức vụ.
+
+### CHƯA test tay trên trình duyệt
+
+1. Mở hồ sơ PDF, bấm ký từng bước → xác nhận khối **Chức vụ** hiện đúng chức vụ thật, bật/tắt và
+   kéo/co giãn độc lập với Chữ ký và Tên.
+2. Tài khoản **chưa khai chức vụ** trong Nhân sự bảo trì → xác nhận khối Chức vụ không xuất hiện,
+   ký vẫn bình thường.
+3. Bấm **"Cài đặt vị trí ký"** → vẽ mẫu cho biểu mẫu → quay lại, **lập hồ sơ MỚI cùng biểu mẫu** →
+   xác nhận 3 khối tự đặt đúng chỗ đã vẽ và nhãn đổi thành "Đã đặt sẵn theo mẫu vị trí ký...".
+4. Mẫu có `so_trang > 1` → xác nhận modal tự nhảy sang đúng trang đó.
+5. **Không hồi quy**: ký tiếp một hồ sơ đang luân chuyển dở (đã ký bước trước khi có tính năng) →
+   PDF cuối phải giữ nguyên hình ảnh chữ ký của các bước cũ.
+6. Ký đủ 3 bước một hồ sơ Cấp 1 → xác nhận chức vụ của **cả 3 bước** đều còn trên PDF cuối (bước
+   phê duyệt vẽ lại từ file gốc).
+7. Kéo đúng **núm tròn có mũi tên** ở góc dưới-phải → phải co giãn khung, **không** kéo trôi cả khối.
+8. Hồ sơ **Office (DOCX/XLSX)** → xác nhận luồng thay tag không đổi (không có canvas, không có
+   khối chức vụ).

@@ -182,42 +182,61 @@ export function IsoDocPublicClient({ docId }: { docId: string }) {
           <Row label="Trạng thái" value={trangThaiLabel} />
         </div>
 
-        {(data.hasFile || (expired && data.replacement)) && (
+        {/* Cụm thao tác — luôn nằm GỌN MỘT DÒNG ở mọi khổ màn hình: không `flex-wrap`, mỗi nút
+            `flex-1` chia đều, phần chữ dài chỉ hiện từ `sm:` trở lên.
+            Bản hết hiệu lực CỐ Ý không có nút Xem/Tải bản cũ: từ 2026-09-15 chỉ tài khoản được
+            cấp `iso.view_het_hieu_luc` mới mở được nội dung, nên nút to ở đây sẽ dẫn đa số
+            người dùng vào ngõ cụt. Thay bằng 1 link chữ nhỏ có ghi rõ điều kiện, để người thật
+            sự có quyền vẫn vào được từ QR. */}
+        {(!expired ? data.hasFile : Boolean(data.replacement) || data.hasFile) && (
           <div className="border-t border-slate-100 bg-slate-50/60 p-6">
-            <div className="flex flex-wrap gap-2">
-              {expired && data.replacement && (
-                <Link
-                  href={loginGatedDocLink(data.replacement.id)}
-                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700"
-                >
-                  <ExternalLink size={16} /> Xem tài liệu thay thế
-                </Link>
-              )}
-              {data.hasFile && (
+            <div className="flex items-stretch gap-2">
+              {expired ? (
+                data.replacement && (
+                  <Link
+                    href={loginGatedDocLink(data.replacement.id)}
+                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:bg-emerald-700 sm:px-5 sm:text-sm"
+                  >
+                    <ExternalLink size={16} className="shrink-0" />
+                    <span>Xem <span className="hidden sm:inline">tài liệu </span>thay thế</span>
+                  </Link>
+                )
+              ) : (
                 <>
                   <Link
                     href={loginGatedDocLink(data.id)}
-                    className={
-                      expired
-                        ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-bold text-slate-700 transition-all hover:bg-slate-100"
-                        : "inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md transition-all hover:bg-emerald-700"
-                    }
+                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:bg-emerald-700 sm:px-5 sm:text-sm"
                   >
-                    <ExternalLink size={16} /> Xem tài liệu
+                    <ExternalLink size={16} className="shrink-0" />
+                    <span>Xem<span className="hidden sm:inline"> tài liệu</span></span>
                   </Link>
                   <Link
                     href={loginGatedDocLink(data.id)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-bold text-slate-700 transition-all hover:bg-slate-100"
+                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-slate-300 px-3 py-2.5 text-xs font-bold text-slate-700 transition-all hover:bg-slate-100 sm:px-5 sm:text-sm"
                   >
-                    <Download size={16} /> Tải tài liệu
+                    <Download size={16} className="shrink-0" />
+                    <span>Tải<span className="hidden sm:inline"> tài liệu</span></span>
                   </Link>
                 </>
               )}
             </div>
-            <p className="mt-3 flex items-center gap-1.5 text-xs text-slate-500">
-              <Lock size={12} className="shrink-0" />
-              Cần đăng nhập tài khoản nội bộ để xem hoặc tải nội dung tài liệu.
-            </p>
+            {expired && data.hasFile ? (
+              <p className="mt-3 flex items-start gap-1.5 text-[11px] text-slate-500">
+                <Lock size={12} className="mt-0.5 shrink-0" />
+                <span>
+                  Cần bản hết hiệu lực để đối chiếu?{" "}
+                  <Link href={loginGatedDocLink(data.id)} className="font-semibold text-slate-700 underline">
+                    Đăng nhập
+                  </Link>{" "}
+                  bằng tài khoản được cấp quyền xem file bản hết hiệu lực.
+                </span>
+              </p>
+            ) : (
+              <p className="mt-3 flex items-center gap-1.5 text-[11px] text-slate-500">
+                <Lock size={12} className="shrink-0" />
+                Cần đăng nhập tài khoản nội bộ để xem hoặc tải nội dung tài liệu.
+              </p>
+            )}
           </div>
         )}
       </div>

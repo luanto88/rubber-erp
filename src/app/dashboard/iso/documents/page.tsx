@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
 import { FilterBar } from "../../_components/filter-bar"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
@@ -19,6 +19,7 @@ import {
   type IsoStandard,
   type IsoTrangThai,
 } from "../_components/iso-types"
+import { canOpenIsoFile, EXPIRED_FILE_HINT } from "../_components/iso-file-access"
 import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download, BadgeCheck, FileSignature } from "lucide-react"
 import Link from "next/link"
 import { DistributionModal } from "../_components/distribution-modal"
@@ -31,6 +32,7 @@ export default function IsoDocumentsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [userRole, setUserRole] = useState("")
+  const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [docs, setDocs] = useState<IsoDocument[]>([])
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
@@ -94,6 +96,10 @@ export default function IsoDocumentsPage() {
       const uid = session?.user?.id
       if (uid) {
         setUserId(uid)
+        // Cache session (đã gồm mảng permissions) — mirror đúng cách trang chi tiết ISO đang
+        // làm. Quyền vừa được admin cấp chỉ có hiệu lực sau khi tải lại trang, vì chỉ bootstrap
+        // của dashboard/layout.tsx mới gọi hydrateActiveSession() làm mới cache này.
+        setUser(JSON.parse(localStorage.getItem("erp_user") || "{}") as SessionUser)
         const [profRes, permRes] = await Promise.all([
           supabase.from("profiles").select("role").eq("id", uid).single(),
           supabase.from("user_permissions").select("permission_code").eq("user_id", uid).eq("permission_code", "iso.distribute"),
@@ -392,6 +398,7 @@ export default function IsoDocumentsPage() {
                         const canDeleteDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
                         // `<a download>` bị bỏ qua khi khác origin (file nằm trên Supabase
                         // Storage) — phải dùng `?download=` của Storage, xem storage-download.ts.
+                        const canOpenDocFile = canOpenIsoFile(doc.trang_thai, user)
                         const downloadUrl = buildStorageDownloadUrl(
                           doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url,
                           `${doc.ma_tai_lieu || "Tài liệu ISO"} ${doc.ten_tai_lieu || ""}`.trim(),
@@ -405,7 +412,14 @@ export default function IsoDocumentsPage() {
                             >
                               <Eye size={14} />
                             </Link>
-                            {downloadUrl ? (
+                            {!canOpenDocFile ? (
+                              <span
+                                title={EXPIRED_FILE_HINT}
+                                className="p-1.5 rounded-lg text-slate-200 cursor-not-allowed"
+                              >
+                                <Download size={14} />
+                              </span>
+                            ) : downloadUrl ? (
                               <a
                                 href={downloadUrl}
                                 target="_blank"
@@ -491,6 +505,7 @@ export default function IsoDocumentsPage() {
                           const isAdmin = userRole === "admin"
                           const canEditChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
                           const canDeleteChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
+                          const canOpenChildFile = canOpenIsoFile(child.trang_thai, user)
                           const childDownloadUrl = buildStorageDownloadUrl(
                             child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url,
                             `${child.ma_tai_lieu || "Hồ sơ ISO"} ${child.ten_tai_lieu || ""}`.trim(),
@@ -504,7 +519,14 @@ export default function IsoDocumentsPage() {
                               >
                                 <Eye size={14} />
                               </Link>
-                              {childDownloadUrl ? (
+                              {!canOpenChildFile ? (
+                                <span
+                                  title={EXPIRED_FILE_HINT}
+                                  className="p-1.5 rounded-lg text-slate-200 cursor-not-allowed"
+                                >
+                                  <Download size={14} />
+                                </span>
+                              ) : childDownloadUrl ? (
                                 <a
                                   href={childDownloadUrl}
                                   target="_blank"

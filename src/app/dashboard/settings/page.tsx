@@ -674,6 +674,7 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "documents.print": "in văn bản",
   "documents.upload_signed": "tải lên bản đã ký tay",
   "documents.distribute": "phân phối văn bản",
+  "iso.view_het_hieu_luc": "xem file bản hết hiệu lực",
 }
 
 function prettifyPermissionModule(moduleName: string) {

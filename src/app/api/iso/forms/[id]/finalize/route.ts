@@ -14,6 +14,7 @@ import {
   drawSignerName,
   drawSignPrefix,
   drawExtraPlacements,
+  drawChucVu,
   ISO_SIGNER_NAME_STYLE,
 } from "@/lib/signing/stamp-pdf"
 
@@ -35,6 +36,16 @@ type SignPlacement = {
   nameY?: number
   nameWidth?: number
   nameHeight?: number
+  // Khối CHỨC VỤ — khối thứ 3, độc lập với chữ ký và tên (người ký tự bật/tắt và kéo riêng).
+  // `chucVuText` nằm THẲNG trong placement thay vì tra lại DB lúc stamp: bước `phe_duyet` vẽ
+  // lại CẢ 3 placement (soạn thảo + xem xét + phê duyệt) từ file gốc, nên chức vụ của 2 bước
+  // trước phải tự mang theo dữ liệu của chính nó mới sống sót qua lần vẽ cuối.
+  showChucVu?: boolean
+  chucVuText?: string | null
+  cvX?: number
+  cvY?: number
+  cvWidth?: number
+  cvHeight?: number
   qrX?: number
   qrY?: number
   qrWidth?: number
@@ -145,6 +156,7 @@ async function stampPdf(
 
     await drawSignatureImage(pdfDoc, page, sigImg, placement)
     drawSignerName(page, signerName, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
+    drawChucVu(page, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
     drawSignPrefix(page, prefixText, placement, signerNameFont)
     await drawExtraPlacements(pdfDoc, placement.extraPlacements, sigImg, signerName, signerNameFont, ISO_SIGNER_NAME_STYLE)
   }

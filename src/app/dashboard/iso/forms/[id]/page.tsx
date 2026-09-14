@@ -1,19 +1,30 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState, Fragment } from "react"
-import type { RefObject } from "react"
+import type { CSSProperties, RefObject } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft, Download, Upload, Eye, EyeOff, CheckCircle2, X,
   AlertTriangle, Loader2, FileText, Send, Pen,
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
-  ChevronLeft, ChevronRight, Plus,
+  ChevronLeft, ChevronRight, Plus, LayoutTemplate,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import {
+  ResizeHandleIcon,
+  RESIZE_HANDLE_CLASS,
+  RESIZE_HANDLE_STYLE,
+} from "../../../_components/resize-handle-icon"
+import {
+  SIGN_TEXT_FONT_FAMILY,
+  SIGN_TEXT_FONT_SIZE_PT,
+  SIGN_TEXT_MIN_FONT_SIZE_PT,
+  computeDefaultSubLayout,
+} from "@/lib/signing/template-layout"
 import { IsoShell } from "../../_components/iso-shell"
 import { ModalShell } from "../../../_components/modal-shell"
 import {
@@ -38,6 +49,13 @@ type FullPlacement = {
   x: number; y: number; width: number; height: number
   showSignature: boolean; showSignerName: boolean
   nameX: number; nameY: number; nameWidth: number; nameHeight: number
+  // Khối CHỨC VỤ — khối kéo-thả thứ 3, độc lập hoàn toàn với chữ ký và tên (công tắc riêng,
+  // vị trí riêng). `chucVuText` được lưu THẲNG vào placement thay vì tra lại lúc stamp: bước
+  // `phe_duyet` của finalize/route.ts vẽ lại CẢ 3 placement (soạn thảo + xem xét + phê duyệt)
+  // từ file gốc, nên chức vụ của 2 bước trước phải tự mang theo dữ liệu của chính nó.
+  showChucVu?: boolean
+  chucVuText?: string | null
+  cvX?: number; cvY?: number; cvWidth?: number; cvHeight?: number
   qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number
   // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng ở bước Phê duyệt, chỉ áp
   // dụng cho PDF (không có khái niệm tương đương cho DOCX/XLSX).
@@ -184,7 +202,7 @@ function ExtraDraggableBox({
       onDrag={onDrag}
       onStop={onStop}
       bounds="parent"
-      cancel=".react-resizable-handle,button,button *,a,.no-drag"
+      cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
     >
       <div ref={nodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex, cursor: "move" }}>
         {children}
@@ -201,6 +219,10 @@ function SignPlacementModal({
   autoConvertPdf,
   signatureUrl,
   userName,
+  userChucVu,
+  factoryId,
+  templateMa,
+  templateLoai,
   instanceId,
   userId,
   acting,
@@ -213,6 +235,10 @@ function SignPlacementModal({
   autoConvertPdf: boolean
   signatureUrl: string | null
   userName: string
+  userChucVu: string
+  factoryId: string | null
+  templateMa: string | null
+  templateLoai: string | null
   instanceId: string
   userId: string
   acting: boolean
@@ -250,10 +276,17 @@ function SignPlacementModal({
   // Element states (canvas pixels)
   const [sigState, setSigState] = useState<ElemState>({ x: 60, y: 200, w: 140, h: 60 })
   const [nameState, setNameState] = useState<ElemState>({ x: 60, y: 270, w: 140, h: 24 })
+  const [cvState, setCvState] = useState<ElemState>({ x: 60, y: 298, w: 140, h: 22 })
   const [qrState, setQrState] = useState<ElemState>({ x: 0, y: 10, w: 80, h: 80 })
   const [prefixState, setPrefixState] = useState<ElemState>({ x: 220, y: 270, w: 60, h: 24 })
   const [showSig, setShowSig] = useState(true)
   const [showName, setShowName] = useState(true)
+  // Chức vụ mặc định TẮT: nhiều biểu mẫu ISO đã in sẵn chức danh dưới ô ký, bật mặc định sẽ
+  // đè chữ lên nhau. Người ký tự bật khi cần (hoặc mẫu vị trí ký bật sẵn hộ).
+  const [showChucVu, setShowChucVu] = useState(false)
+  // Mẫu vị trí ký đã nạp được cho biểu mẫu này (nếu có) — chỉ để hiển thị nhãn cho người ký
+  // biết vị trí đang là "theo mẫu" hay mặc định.
+  const [templateApplied, setTemplateApplied] = useState<string | null>(null)
   const [extraSigBoxes, setExtraSigBoxes] = useState<Array<{
     id: number
     sigX: number; sigY: number; sigW: number; sigH: number
@@ -264,14 +297,17 @@ function SignPlacementModal({
   // nodeRefs for react-draggable (React 19 requirement)
   const sigNodeRef = useRef<HTMLDivElement>(null)
   const nameNodeRef = useRef<HTMLDivElement>(null)
+  const cvNodeRef = useRef<HTMLDivElement>(null)
   const qrNodeRef = useRef<HTMLDivElement>(null)
   const prefixNodeRef = useRef<HTMLDivElement>(null)
 
   // Render 1 trang PDF lên canvas — tách riêng để gọi lại khi đổi trang, không
   // phải load lại toàn bộ file. Tính lại viewport/scale mỗi lần vì kích thước
   // trang có thể khác nhau giữa các trang.
+  // Trả về thông số trang vừa render để nơi gọi dùng NGAY, không phải đợi setState commit —
+  // cần cho việc quy đổi toạ độ mẫu vị trí ký (point) sang pixel canvas ngay trong cùng lượt.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const renderPdfPage = async (pdf: any, pageNum: number) => {
+  const renderPdfPage = async (pdf: any, pageNum: number): Promise<{ scale: number; pageH: number } | null> => {
     const page = await pdf.getPage(pageNum)
     const scale = 1.5
     const viewport = page.getViewport({ scale })
@@ -279,18 +315,19 @@ function SignPlacementModal({
     const cH = Math.floor(viewport.height)
 
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas) return null
     canvas.width = cW
     canvas.height = cH
 
     const ctx = canvas.getContext("2d")
-    if (!ctx) return
+    if (!ctx) return null
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await page.render({ canvasContext: ctx, viewport } as any).promise
 
     const unscaledViewport = page.getViewport({ scale: 1 })
     setPdfScale(scale)
     setPdfPageH(unscaledViewport.height)
+    return { scale, pageH: unscaledViewport.height }
   }
 
   // Load PDF and render to canvas — chỉ chạy khi đã sang bước "placement" (PIN đã
@@ -298,6 +335,116 @@ function SignPlacementModal({
   useEffect(() => {
     if (!showCanvas || !sourceFileUrl || step !== "placement") return
     let cancelled = false
+
+    /**
+     * Nạp mẫu vị trí ký của biểu mẫu đang thực hiện và đặt sẵn 3 khối (chữ ký / tên / chức vụ)
+     * cùng khung QR vào đúng chỗ người soạn thảo đã vẽ 1 lần ở màn "Cài đặt vị trí ký".
+     *
+     * Khác "vị trí CỨNG" của module Văn bản: ở đây mẫu chỉ ĐẶT SẴN, người ký vẫn kéo/chỉnh và
+     * bật/tắt tự do trước khi ký. Không có mẫu → giữ nguyên vị trí mặc định như trước.
+     */
+    const applyTemplate = async (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      pdf: any,
+      scale: number,
+      pageH: number,
+      isCancelled: () => boolean,
+    ) => {
+      if (!factoryId) return
+      try {
+        const keys: string[] = []
+        if (templateMa) keys.push(`iso:code:${templateMa}`, `iso:loai:${templateMa}`, templateMa)
+        if (templateLoai) keys.push(`iso:loai:${templateLoai}`, `iso:${templateLoai}`, templateLoai)
+        if (!keys.length) return
+
+        const { data: rows } = await supabase
+          .from("mau_vi_tri")
+          .select("khung, loai_tai_lieu, phien_ban")
+          .eq("factory_id", factoryId)
+          .in("loai_tai_lieu", keys)
+          .order("phien_ban", { ascending: false })
+        if (isCancelled() || !rows || rows.length === 0) return
+
+        // Ưu tiên mẫu đặt riêng cho ĐÚNG mã biểu mẫu; chỉ khi không có mới dùng mẫu chung theo loại.
+        const codeRow = templateMa
+          ? rows.find((r) => r.loai_tai_lieu === `iso:code:${templateMa}`
+              || r.loai_tai_lieu === `iso:loai:${templateMa}`
+              || r.loai_tai_lieu === templateMa)
+          : null
+        const best = codeRow ?? rows[0]
+        const khung = Array.isArray(best?.khung)
+          ? (best.khung as Array<Record<string, unknown>>)
+          : []
+        if (khung.length === 0) return
+
+        const num = (v: unknown, fb: number) => (typeof v === "number" && Number.isFinite(v) ? v : fb)
+        // TUYỆT ĐỐI không fallback sang vai trò khác khi thiếu khung của vai trò đang ký — dùng
+        // khung của người khác sẽ đóng dấu chữ ký người này lên đúng ô dành cho người kia.
+        const roleBox = khung.find((k) => k.vai_tro === action)
+        const qrBox = khung.find((k) => k.vai_tro === "qr" || k.loai === "qr")
+        if (!roleBox && !qrBox) return
+
+        let curScale = scale
+        let curPageH = pageH
+        const wantedPage = num(roleBox?.so_trang, 0) || num(qrBox?.so_trang, 0)
+        if (wantedPage > 1 && wantedPage <= pdf.numPages) {
+          const d = await renderPdfPage(pdf, wantedPage)
+          if (isCancelled()) return
+          if (d) {
+            curScale = d.scale
+            curPageH = d.pageH
+            setCurrentPage(wantedPage)
+          }
+        }
+
+        // Mẫu lưu theo point, gốc dưới-trái (hệ pdf-lib); canvas là pixel, gốc trên-trái.
+        const toCanvas = (r: { x: number; y: number; width: number; height: number }): ElemState => ({
+          x: r.x * curScale,
+          y: (curPageH - r.y - r.height) * curScale,
+          w: r.width * curScale,
+          h: r.height * curScale,
+        })
+
+        if (roleBox) {
+          const tmplShowName = typeof roleBox.show_name === "boolean" ? roleBox.show_name : true
+          // Mẫu cũ (trước 2026-09-04) chỉ có `show_name` gộp chung — fallback theo đúng quy ước
+          // đã ghi ở `SignTemplateBox.show_chuc_vu`.
+          const tmplShowCv = typeof roleBox.show_chuc_vu === "boolean"
+            ? roleBox.show_chuc_vu
+            : tmplShowName
+          const sub = computeDefaultSubLayout(
+            {
+              x: num(roleBox.x_pt, 0),
+              y: num(roleBox.y_pt, 0),
+              width: num(roleBox.w_pt, 160),
+              height: num(roleBox.h_pt, 75),
+            },
+            { withName: tmplShowName, withChucVu: tmplShowCv },
+          )
+          setSigState(toCanvas(sub.sig))
+          if (sub.name) setNameState(toCanvas(sub.name))
+          if (sub.chuc_vu) setCvState(toCanvas(sub.chuc_vu))
+          setShowName(tmplShowName)
+          // Không bật khối chức vụ nếu người ký chưa khai chức vụ trong Nhân sự — bật lên sẽ ra
+          // một khung rỗng, người ký tưởng hỏng.
+          setShowChucVu(tmplShowCv && !!userChucVu)
+        }
+
+        // QR chỉ đặt ở bước soạn thảo (các bước sau dùng lại QR đã chốt của bước đầu).
+        if (qrBox && action === "soan_thao") {
+          setQrState(toCanvas({
+            x: num(qrBox.x_pt, 0),
+            y: num(qrBox.y_pt, 0),
+            width: num(qrBox.w_pt, 54),
+            height: num(qrBox.h_pt, 54),
+          }))
+        }
+
+        setTemplateApplied(String(best.loai_tai_lieu ?? ""))
+      } catch {
+        // Không có mẫu / lỗi mạng → giữ nguyên vị trí mặc định, KHÔNG chặn luồng ký.
+      }
+    }
 
     const loadPdf = async () => {
       const pdfjsLib = await import("pdfjs-dist")
@@ -315,30 +462,60 @@ function SignPlacementModal({
 
       pdfDocRef.current = pdf
       setNumPages(pdf.numPages)
-      await renderPdfPage(pdf, 1)
+      const dims = await renderPdfPage(pdf, 1)
       if (cancelled) return
 
       const cH = canvasRef.current?.height || 0
       const cW = canvasRef.current?.width || 0
 
       // Set default positions based on canvas size
-      setSigState({ x: 60, y: cH - 120, w: 140, h: 60 })
-      setNameState({ x: 60, y: cH - 55, w: 140, h: 24 })
+      setSigState({ x: 60, y: cH - 150, w: 140, h: 60 })
+      setNameState({ x: 60, y: cH - 85, w: 140, h: 24 })
+      setCvState({ x: 60, y: cH - 57, w: 140, h: 22 })
       setQrState({ x: cW - 100, y: 10, w: 80, h: 80 })
-      setPrefixState({ x: 220, y: cH - 55, w: 60, h: 24 })
+      setPrefixState({ x: 220, y: cH - 85, w: 60, h: 24 })
       setCanvasReady(true)
+
+      // ── Áp mẫu vị trí ký (nếu biểu mẫu này đã có mẫu) ──────────────────────
+      // Mẫu chỉ GỢI Ý vị trí ban đầu — người ký vẫn kéo/chỉnh tự do trước khi ký, khác
+      // "vị trí CỨNG" của module Văn bản. Lỗi nạp mẫu không được chặn luồng ký.
+      if (dims) await applyTemplate(pdf, dims.scale, dims.pageH, () => cancelled)
     }
 
     loadPdf().catch(() => {
       if (!cancelled) setCanvasError("Không tải được file PDF để hiển thị. Chữ ký sẽ đặt ở vị trí mặc định.")
     })
     return () => { cancelled = true }
-  }, [showCanvas, sourceFileUrl, step])
+    // `action`/`factoryId`/`templateMa`/`templateLoai`/`userChucVu` phục vụ việc nạp mẫu vị trí
+    // ký bên trong effect. Modal ký chỉ mở SAU khi trang cha đã nạp xong hồ sơ + biểu mẫu +
+    // phiên đăng nhập, nên trong suốt vòng đời một lần mở modal chúng không đổi — không gây tải
+    // lại PDF ngoài ý muốn.
+  }, [showCanvas, sourceFileUrl, step, action, factoryId, templateMa, templateLoai, userChucVu])
 
   const goToPage = (p: number) => {
     if (p < 1 || p > numPages || !pdfDocRef.current) return
     setCurrentPage(p)
     void renderPdfPage(pdfDocRef.current, p)
+  }
+
+  /**
+   * Cỡ chữ xem trước phải khớp cỡ chữ SẼ đóng dấu, nếu không người ký căn khung theo một đằng
+   * mà PDF ra một nẻo. Bản đóng dấu dùng Times New Roman 13pt, tự thu nhỏ dần tới 9pt khi chữ
+   * rộng hơn khung (`ISO_SIGNER_NAME_STYLE` / `drawTextFit`); canvas thì đang phóng `pdfScale`
+   * lần so với khổ PDF thật nên phải nhân lại.
+   *
+   * Ước lượng bề rộng theo số ký tự (Times New Roman ~0.5em/ký tự) thay vì đo thật — đủ để xem
+   * trước, không cần chính xác từng pixel.
+   */
+  const previewTextStyle = (text: string, boxW: number): CSSProperties => {
+    const maxPx = SIGN_TEXT_FONT_SIZE_PT * pdfScale
+    const minPx = SIGN_TEXT_MIN_FONT_SIZE_PT * pdfScale
+    const fitted = text ? (boxW - 4) / (text.length * 0.5) : maxPx
+    return {
+      fontFamily: SIGN_TEXT_FONT_FAMILY,
+      fontSize: Math.max(minPx, Math.min(maxPx, fitted)),
+      lineHeight: 1.15,
+    }
   }
 
   // Convert canvas coords to PDF coords
@@ -386,6 +563,8 @@ function SignPlacementModal({
     if (showCanvas && canvasReady) {
       const sigPdf = toPdf(sigState.x, sigState.y, sigState.w, sigState.h)
       const namePdf = toPdf(nameState.x, nameState.y, nameState.w, nameState.h)
+      const cvPdf = toPdf(cvState.x, cvState.y, cvState.w, cvState.h)
+      const cvOn = showChucVu && !!userChucVu
 
       placement = {
         page: currentPage,
@@ -393,6 +572,11 @@ function SignPlacementModal({
         showSignature: showSig,
         showSignerName: showName,
         nameX: namePdf.x, nameY: namePdf.y, nameWidth: namePdf.width, nameHeight: namePdf.height,
+        // Chỉ gửi khối chức vụ khi thật sự bật VÀ có nội dung — placement của hồ sơ cũ không
+        // có các trường này, route vẽ có điều kiện nên hồ sơ đang luân chuyển dở không đổi.
+        showChucVu: cvOn,
+        chucVuText: cvOn ? userChucVu : null,
+        cvX: cvPdf.x, cvY: cvPdf.y, cvWidth: cvPdf.width, cvHeight: cvPdf.height,
       }
 
       if (extraSigBoxes.length > 0) {
@@ -518,7 +702,9 @@ function SignPlacementModal({
           <h3 className="font-extrabold text-slate-800">{stepLabel}</h3>
           <p className="text-xs text-slate-400 mt-0.5">
             {showCanvas
-              ? "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
+              ? templateApplied
+                ? "Đã đặt sẵn theo mẫu vị trí ký của biểu mẫu — vẫn kéo/chỉnh lại được trước khi ký"
+                : "Kéo và thay đổi kích thước để đặt vị trí chữ ký trên PDF"
               : autoConvertPdf
                 ? "Tag chữ ký sẽ được thay tại mỗi bước; file sẽ convert sang PDF khi phê duyệt"
                 : "Tag trong file Office sẽ được thay tự động khi ký"}
@@ -603,6 +789,7 @@ function SignPlacementModal({
                     position={{ x: qrState.x, y: qrState.y }}
                     onStop={(_, d) => setQrState((p) => ({ ...p, x: d.x, y: d.y }))}
                     bounds="parent"
+                    cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
                   >
                     <div
                       ref={qrNodeRef}
@@ -615,6 +802,9 @@ function SignPlacementModal({
                           setQrState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                         enable={{ right: true, bottom: true, bottomRight: true }}
                         minWidth={32} minHeight={32}
+                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn mã QR" /> }}
+                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                       >
                         <div className="w-full h-full border-2 border-dashed border-blue-400 bg-white/80 rounded flex items-center justify-center select-none overflow-hidden p-0.5">
                           <QRCodeSVG
@@ -634,7 +824,7 @@ function SignPlacementModal({
                   position={{ x: sigState.x, y: sigState.y }}
                   onStop={(_, d) => setSigState((p) => ({ ...p, x: d.x, y: d.y }))}
                   bounds="parent"
-                  cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                  cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
                 >
                   <div
                     ref={sigNodeRef}
@@ -647,6 +837,9 @@ function SignPlacementModal({
                         setSigState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                       enable={{ right: true, bottom: true, bottomRight: true }}
                       minWidth={40} minHeight={20}
+                      handleComponent={{ bottomRight: <ResizeHandleIcon color="#059669" title="Kéo để co giãn khung chữ ký" /> }}
+                      handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                      handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                     >
                       <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none">
                         {showSig && signatureUrl && (
@@ -672,7 +865,7 @@ function SignPlacementModal({
                             className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             title={showSig ? "Ẩn chữ ký" : "Hiện chữ ký"}
                           >
-                            {showSig ? <EyeOff size={12} /> : <Eye size={12} />}
+                            {showSig ? <Eye size={12} /> : <EyeOff size={12} />}
                           </button>
                           <button
                             type="button"
@@ -716,7 +909,7 @@ function SignPlacementModal({
                   position={{ x: nameState.x, y: nameState.y }}
                   onStop={(_, d) => setNameState((p) => ({ ...p, x: d.x, y: d.y }))}
                   bounds="parent"
-                  cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                  cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
                 >
                   <div
                     ref={nameNodeRef}
@@ -729,10 +922,18 @@ function SignPlacementModal({
                         setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                       enable={{ right: true, bottom: true, bottomRight: true }}
                       minWidth={60} minHeight={16}
+                      handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên" /> }}
+                      handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                      handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                     >
                       <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/60 rounded relative select-none flex items-center justify-center">
                         {showName ? (
-                          <span className="text-[10px] font-bold text-violet-700 truncate px-1">{userName || "Người ký"}</span>
+                          <span
+                            className="font-bold text-violet-700 truncate px-1"
+                            style={previewTextStyle(userName || "Người ký", nameState.w)}
+                          >
+                            {userName || "Người ký"}
+                          </span>
                         ) : (
                           <span className="text-[10px] text-slate-400">Ẩn tên</span>
                         )}
@@ -746,7 +947,7 @@ function SignPlacementModal({
                             className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                             title={showName ? "Ẩn tên" : "Hiện tên"}
                           >
-                            {showName ? <EyeOff size={12} /> : <Eye size={12} />}
+                            {showName ? <Eye size={12} /> : <EyeOff size={12} />}
                           </button>
                           <button
                             type="button"
@@ -784,6 +985,62 @@ function SignPlacementModal({
                   </div>
                 </Draggable>
 
+                {/* Chức vụ — khối kéo-thả thứ 3, ĐỘC LẬP với chữ ký và tên (vị trí riêng, công
+                    tắc riêng). Chỉ dựng khi người ký đã khai chức vụ trong Nhân sự bảo trì —
+                    không có thì khối này vô nghĩa, dựng lên chỉ tổ rối canvas. */}
+                {userChucVu && (
+                  <Draggable
+                    nodeRef={cvNodeRef as RefObject<HTMLElement>}
+                    position={{ x: cvState.x, y: cvState.y }}
+                    onStop={(_, d) => setCvState((p) => ({ ...p, x: d.x, y: d.y }))}
+                    bounds="parent"
+                    cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
+                  >
+                    <div
+                      ref={cvNodeRef}
+                      className="absolute top-0 left-0 cursor-move"
+                      style={{ zIndex: 11 }}
+                    >
+                      <Resizable
+                        size={{ width: cvState.w, height: cvState.h }}
+                        onResizeStop={(_, __, ___, delta) =>
+                          setCvState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        minWidth={60} minHeight={14}
+                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ" /> }}
+                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                      >
+                        <div className="w-full h-full border border-dashed border-sky-400 bg-sky-50/60 rounded relative select-none flex items-center justify-center">
+                          {showChucVu ? (
+                            <span
+                              className="text-sky-700 truncate px-1"
+                              style={previewTextStyle(userChucVu, cvState.w)}
+                            >
+                              {userChucVu}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">Ẩn chức vụ</span>
+                          )}
+                          <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); setShowChucVu((v) => !v) }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
+                              title={showChucVu ? "Ẩn chức vụ" : "Hiện chức vụ"}
+                            >
+                              {showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
+                            </button>
+                          </div>
+                        </div>
+                      </Resizable>
+                    </div>
+                  </Draggable>
+                )}
+
                 {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước Phê duyệt, chỉ hiện khi đã chọn */}
                 {showSignAsPicker && signAs !== "none" && (
                   <Draggable
@@ -791,7 +1048,7 @@ function SignPlacementModal({
                     position={{ x: prefixState.x, y: prefixState.y }}
                     onStop={(_, d) => setPrefixState((p) => ({ ...p, x: d.x, y: d.y }))}
                     bounds="parent"
-                    cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                    cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
                   >
                     <div ref={prefixNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
                       <Resizable
@@ -800,6 +1057,9 @@ function SignPlacementModal({
                           setPrefixState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                         enable={{ right: true, bottom: true, bottomRight: true }}
                         minWidth={36} minHeight={16}
+                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#059669" title="Kéo để co giãn khung tiền tố ký thay" /> }}
+                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                       >
                         <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none flex items-center justify-center">
                           <span className="text-[10px] font-bold text-emerald-700 truncate px-1">{signAs}.</span>
@@ -822,6 +1082,9 @@ function SignPlacementModal({
                           setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, sigW: b.sigW + delta.width, sigH: b.sigH + delta.height } : b))}
                         enable={{ right: true, bottom: true, bottomRight: true }}
                         minWidth={40} minHeight={20}
+                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#059669" title="Kéo để co giãn khung chữ ký bản sao" /> }}
+                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                       >
                         <div className="w-full h-full border border-dashed border-emerald-500 bg-emerald-50/70 rounded relative select-none">
                           {box.showSignature && signatureUrl && (
@@ -847,7 +1110,7 @@ function SignPlacementModal({
                               className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
                               title={box.showSignature ? "Ẩn chữ ký bản sao" : "Hiện chữ ký bản sao"}
                             >
-                              {box.showSignature ? <EyeOff size={12} /> : <Eye size={12} />}
+                              {box.showSignature ? <Eye size={12} /> : <EyeOff size={12} />}
                             </button>
                             <button
                               type="button"
@@ -875,10 +1138,18 @@ function SignPlacementModal({
                           setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
                         enable={{ right: true, bottom: true, bottomRight: true }}
                         minWidth={60} minHeight={16}
+                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên bản sao" /> }}
+                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                       >
                         <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/70 rounded relative select-none flex items-center justify-center">
                           {box.showSignerName ? (
-                            <span className="text-[10px] font-bold text-violet-700 truncate px-1">{userName || "Người ký"}</span>
+                            <span
+                              className="font-bold text-violet-700 truncate px-1"
+                              style={previewTextStyle(userName || "Người ký", box.nameW)}
+                            >
+                              {userName || "Người ký"}
+                            </span>
                           ) : (
                             <span className="text-[10px] text-slate-400">Ẩn tên bản sao</span>
                           )}
@@ -892,7 +1163,7 @@ function SignPlacementModal({
                             style={{ zIndex: 20 }}
                             title={box.showSignerName ? "Ẩn tên bản sao" : "Hiện tên bản sao"}
                           >
-                            {box.showSignerName ? <EyeOff size={12} /> : <Eye size={12} />}
+                            {box.showSignerName ? <Eye size={12} /> : <EyeOff size={12} />}
                           </button>
                         </div>
                       </Resizable>
@@ -988,6 +1259,7 @@ export default function IsoFormInstancePage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [userName, setUserName] = useState("")
+  const [userChucVu, setUserChucVu] = useState("")
   const [loading, setLoading] = useState(true)
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
 
@@ -1042,6 +1314,21 @@ export default function IsoFormInstancePage() {
           .single()
         if (profile) {
           setUserName((profile.full_name as string) || (profile.username as string) || "")
+        }
+        // Chức vụ để đóng dấu — nguồn chuẩn của toàn app là hồ sơ Nhân sự bảo trì (liên kết
+        // tài khoản qua `profile_id`), KHÔNG phải `profiles`. Ưu tiên chức vụ chính quyền,
+        // đúng thứ tự đang dùng ở module Văn bản và Soạn thảo ISO.
+        const { data: staff } = await supabase
+          .from("maintenance_staff")
+          .select("chuc_vu, chuc_vu_chinh_quyen")
+          .eq("factory_id", fid)
+          .eq("profile_id", uid)
+          .eq("active", true)
+          .maybeSingle()
+        if (staff) {
+          setUserChucVu(
+            (staff.chuc_vu_chinh_quyen as string) || (staff.chuc_vu as string) || "",
+          )
         }
         // Load user's signature URL
         const { data: sigUrlData } = supabase.storage
@@ -1381,6 +1668,28 @@ export default function IsoFormInstancePage() {
     : (instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url)
   const isNguoiTao = instance.nguoi_tao === userId
 
+  // ── Link sang màn "Cài đặt vị trí ký" ─────────────────────────────────────────
+  // Mẫu vị trí gắn với BIỂU MẪU (mã tài liệu của template), không gắn với từng hồ sơ thực
+  // hiện — vẽ 1 lần, mọi hồ sơ lập sau của cùng biểu mẫu tự áp dụng. KHÔNG truyền `docId`:
+  // tham số đó của màn cài đặt trỏ vào bảng `iso_documents`, còn đây là `iso_form_instances`
+  // (bảng khác) — truyền vào sẽ tra nhầm bản ghi.
+  const templateSignSetupPdf = [
+    urlIsPdf(instance.draft_file_url) ? instance.draft_file_url : null,
+    urlIsPdf(template?.file_signed_pdf_url ?? null) ? template?.file_signed_pdf_url ?? null : null,
+    urlIsPdf(template?.file_goc_url ?? null) ? template?.file_goc_url ?? null : null,
+  ].find(Boolean) ?? null
+  const templateSignSetupKey = template?.ma_tai_lieu
+    ? `iso:code:${template.ma_tai_lieu}`
+    : template?.loai_tai_lieu
+      ? `iso:loai:${template.loai_tai_lieu}`
+      : null
+  const templateSignSetupUrl = templateSignSetupPdf && templateSignSetupKey
+    ? `/dashboard/ky/mau-vi-tri?modun=iso&loai=${encodeURIComponent(templateSignSetupKey)}`
+      + `&pdfUrl=${encodeURIComponent(templateSignSetupPdf)}`
+      + `&docLabel=${encodeURIComponent(template?.ma_tai_lieu || template?.ten_tai_lieu || instance.tieu_de)}`
+      + `&returnTo=${encodeURIComponent(`/dashboard/iso/forms/${instanceId}`)}`
+    : null
+
   return (
     <IsoShell>
       <div className="space-y-5">
@@ -1452,6 +1761,18 @@ export default function IsoFormInstancePage() {
                   <RotateCcw size={13} /> Trả về
                 </button>
               )}
+              {/* Cài đặt vị trí ký — vẽ 1 lần cho MẪU biểu mẫu (theo mã tài liệu của template),
+                  mọi hồ sơ thực hiện sau của cùng biểu mẫu sẽ tự đặt sẵn vị trí. Chỉ mở được khi
+                  có file PDF làm nền để vẽ. */}
+              {templateSignSetupUrl && (
+                <button
+                  onClick={() => router.push(templateSignSetupUrl)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 text-sm font-bold rounded-xl border border-sky-200 transition-colors"
+                  title="Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng"
+                >
+                  <LayoutTemplate size={13} /> Cài đặt vị trí ký
+                </button>
+              )}
               <button
                 onClick={() => factoryId && void loadInstance(factoryId)}
                 className="flex items-center gap-1.5 px-3 py-2 text-slate-400 hover:text-slate-600 text-xs rounded-xl hover:bg-slate-50"
@@ -1484,30 +1805,9 @@ export default function IsoFormInstancePage() {
           </div>
         )}
 
-        {/* Thanh Xem/Tải file cho mobile — khối file nằm cuối trang trên màn hẹp, người dùng
-            phải cuộn rất xa mới bấm được. Chỉ hiện ở <lg, desktop giữ nguyên vị trí cũ. */}
-        {fileUrl && (
-          <div className="flex gap-2 lg:hidden">
-            <a
-              href={fileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-emerald-700"
-            >
-              <Eye size={16} /> Xem file
-            </a>
-            <button
-              onClick={handleDownload}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-800 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-slate-900"
-            >
-              <Download size={16} /> Tải file
-            </button>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* ── Left column (2/3) ── */}
-          <div className="lg:col-span-2 space-y-5">
+          <div className="lg:col-span-2 flex flex-col gap-5">
 
             {/* Template info */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
@@ -1547,8 +1847,9 @@ export default function IsoFormInstancePage() {
               )}
             </div>
 
-            {/* File section */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+            {/* File section — order-first: trên màn hẹp nhảy lên đầu cột để khỏi phải cuộn
+                qua toàn bộ thông tin biểu mẫu mới bấm được Xem/Tải. Desktop giữ chỗ cũ. */}
+            <div className="order-first lg:order-none bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-700 mb-3 flex items-center gap-2">
                 <Upload size={14} className="text-slate-500" />
                 File hồ sơ
@@ -1892,6 +2193,10 @@ export default function IsoFormInstancePage() {
           autoConvertPdf={instance.auto_convert_pdf}
           signatureUrl={signatureUrl}
           userName={userName}
+          userChucVu={userChucVu}
+          factoryId={factoryId}
+          templateMa={template?.ma_tai_lieu ?? null}
+          templateLoai={template?.loai_tai_lieu ?? null}
           instanceId={instanceId}
           userId={userId}
           acting={signLoading}
