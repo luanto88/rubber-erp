@@ -3,7 +3,11 @@
 import { useState, useEffect, useCallback } from "react"
 import { Archive, Eye, Download, AlertTriangle, BadgeCheck } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, type SessionUser } from "@/lib/auth"
+import { canOpenIsoFile, EXPIRED_FILE_HINT } from "@/app/dashboard/iso/_components/iso-file-access"
+// `<a download>` bị trình duyệt BỎ QUA khi file khác origin (Supabase Storage) — nút "Tải" khi đó
+// chỉ mở tab xem. Phải đi qua `?download=` của Storage, xem src/lib/storage-download.ts.
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { IsoShell } from "@/app/dashboard/iso/_components/iso-shell"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -44,6 +48,10 @@ async function trackAction(docId: string, action: "view" | "download") {
 export default function KhoPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  // Cache session (gồm mảng permissions) — cần cho canOpenIsoFile. Quyền vừa được admin cấp
+  // chỉ có hiệu lực sau khi tải lại trang, vì chỉ bootstrap của dashboard/layout.tsx mới gọi
+  // hydrateActiveSession() làm mới cache này.
+  const [user, setUser] = useState<SessionUser | null>(null)
   const [items, setItems] = useState<KhoItem[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -134,6 +142,7 @@ export default function KhoPage() {
       }
       setFactoryId(fid)
       setUserId(uid)
+      setUser(JSON.parse(localStorage.getItem("erp_user") || "{}") as SessionUser)
     }
     void bootstrap()
   }, [])
@@ -309,7 +318,21 @@ export default function KhoPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2 justify-end">
-                          {item.file_url ? (
+                          {!item.file_url ? (
+                            <span className="text-xs text-slate-400">
+                              Chưa có file
+                            </span>
+                          ) : !canOpenIsoFile(item.trang_thai, user) ? (
+                            // Tài liệu đã phân phối trước đây nhưng nay hết hiệu lực: người
+                            // chưa được cấp iso.view_het_hieu_luc không mở/tải được nữa, vẫn
+                            // thấy nguyên dòng để biết mình từng nhận tài liệu này.
+                            <span
+                              title={EXPIRED_FILE_HINT}
+                              className="rounded-lg bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600"
+                            >
+                              Hết hiệu lực — cần quyền xem
+                            </span>
+                          ) : (
                             <>
                               <a
                                 href={item.file_url}
@@ -325,7 +348,10 @@ export default function KhoPage() {
                                 Xem
                               </a>
                               <a
-                                href={item.file_url}
+                                href={buildStorageDownloadUrl(
+                                  item.file_url,
+                                  `${item.ma_tai_lieu || "Tài liệu ISO"} ${item.ten_tai_lieu || ""}`.trim(),
+                                )}
                                 download
                                 onClick={() =>
                                   void trackAction(item.docId, "download")
@@ -337,10 +363,6 @@ export default function KhoPage() {
                                 Tải
                               </a>
                             </>
-                          ) : (
-                            <span className="text-xs text-slate-400">
-                              Chưa có file
-                            </span>
                           )}
                         </div>
                       </td>
