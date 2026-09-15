@@ -3668,6 +3668,36 @@ export default function IsoDocumentDetailPage() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Xem / Tải file — PHẢI đặt ở header, KHÔNG phải trong thẻ "File tài liệu".
+                Thẻ file nằm ở CỘT PHẢI, mà trên mobile cột phải xếp xuống dưới toàn bộ cột
+                trái (Nhân sự ký duyệt, form...) nên người dùng phải cuộn rất sâu mới bấm được.
+                `order-first` của thẻ đó chỉ sắp xếp trong nội bộ cột phải, không thể nhảy lên
+                trên cột trái được — header là nơi duy nhất đứng trên cả 2 cột. */}
+            {!isNew && mainFileUrl && canOpenThisFile && (
+              <>
+                <a
+                  href={mainFileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Xem file"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold shadow-sm transition-all"
+                >
+                  <Eye size={15} /> <span className="hidden sm:inline">Xem file</span>
+                </a>
+                <a
+                  href={buildStorageDownloadUrl(
+                    mainFileUrl,
+                    `${doc?.ma_tai_lieu || "Tài liệu ISO"} ${doc?.ten_tai_lieu || ""}`.trim(),
+                  )}
+                  download
+                  title="Tải file"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold shadow-sm transition-all"
+                >
+                  <Download size={15} /> <span className="hidden sm:inline">Tải file</span>
+                </a>
+              </>
+            )}
+
             {/* QR code khi đã có mã */}
             {!isNew && doc?.ma_tai_lieu && (
               <QRCodeSVG value={recordUrl} size={48} className="rounded-lg border border-slate-200 p-1" />

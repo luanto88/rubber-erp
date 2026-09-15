@@ -846,3 +846,64 @@ tên người ký, không xử lý riêng cho chức vụ.
 7. Kéo đúng **núm tròn có mũi tên** ở góc dưới-phải → phải co giãn khung, **không** kéo trôi cả khối.
 8. Hồ sơ **Office (DOCX/XLSX)** → xác nhận luồng thay tag không đổi (không có canvas, không có
    khối chức vụ).
+
+---
+
+## Cập nhật 2026-09-15 — 4 sửa lỗi sau khi test thật trên `main`
+
+### Xem/Tải file trên mobile phải nằm ở HEADER (`iso/documents/[id]`)
+
+Thẻ "File tài liệu" nằm ở **cột phải** của grid `lg:grid-cols-3`. Trên mobile grid co về 1 cột
+nên cột phải xếp xuống **dưới toàn bộ cột trái** (form + "Nhân sự ký duyệt") — người dùng phải
+cuộn rất sâu mới bấm được Xem/Tải.
+
+⚠️ `order-first` trên thẻ đó **không cứu được**: nó chỉ sắp xếp trong **nội bộ cột phải**, không
+thể nhảy lên trên cột trái. **Header là nơi duy nhất đứng trên cả 2 cột** → cụm Xem/Tải đặt ở
+đó. Đừng sửa lại bằng `order-*`.
+
+### Bố cục 2 cột cân đối (`iso/forms/[id]`)
+
+`lg:grid-cols-3` (2+1) → `lg:grid-cols-5` (**3+2**) + `items-stretch`, thẻ cuối mỗi cột thêm
+`lg:flex-1` để 2 cột luôn cao bằng nhau. Mirror đúng trang chi tiết Văn bản.
+
+### Nút "Cài đặt vị trí ký" chỉ hiện đúng lúc
+
+Đây là thao tác cấu hình **MỘT LẦN cho biểu mẫu**, không phải việc của người xem xét/phê duyệt.
+Điều kiện hiện: `isEditable && isNguoiTao`. Ngoài ra **disabled tới khi chọn đủ người ký**
+(`signStepsReady` — dùng CHÍNH điều kiện mà `openSendModal()` validate để 2 nơi không lệch).
+
+### Khung mẫu = VÙNG CHO PHÉP, không phải khoá cứng
+
+⚠️ Bản đầu của phiên này làm SAI: khoá cứng kéo + co giãn khi có mẫu. Thiết kế chung của app
+(giống module Văn bản) là: **khung mẫu là vùng cho phép, 3 khối chữ ký / tên / chức vụ vẫn kéo
+và co giãn được BÊN TRONG khung**. Nhờ vậy mẫu giữ bố cục chung mà người ký vẫn căn được cho
+vừa ô ký in sẵn trên từng biểu mẫu.
+
+- State `templateBox` / `templateQrBox` (pixel canvas) = vùng cho phép; `null` = biểu mẫu chưa
+  có mẫu → kéo-thả tự do toàn trang như trước.
+- Giới hạn kéo bằng `boundsIn()`: biên phải/dưới **phải trừ đúng kích thước khối**, vì `bounds`
+  của react-draggable tính theo góc trái-trên.
+- Giới hạn co giãn bằng `maxSizeIn()` (`maxWidth`/`maxHeight` của `re-resizable`).
+- Khi xác nhận ký, kẹp lần cuối bằng **chính `clampRectToBox`** mà Văn bản và server dùng — UI
+  và server không thể lệch chuẩn biên.
+- Vẽ viền đứt vùng cho phép (`pointer-events-none`, zIndex thấp hơn các khối) để người ký nhìn
+  thấy giới hạn.
+- Vẫn ẩn nút **"Nhân bản"** khi có mẫu: bản sao nằm ngoài vùng cho phép nên không kẹp vào đâu
+  được, cho nhân bản là phá vỡ bố cục đã cài đặt.
+- Chữ tên/chức vụ mặc định **Times New Roman 13pt** (`SIGN_TEXT_FONT_SIZE_PT`, thu nhỏ tới 9pt),
+  mỗi khối có **icon con mắt** bật/tắt riêng — quy tắc 2 tầng: mẫu quyết định "CHO PHÉP hiện",
+  người ký quyết định "có hiện không".
+
+**Đã kiểm chứng 12/12 assertion** bằng `clampRectToBox`/`computeDefaultSubLayout` thật: kéo vượt
+4 phía, co giãn to hơn cả khung, toạ độ âm đều bị kẹp về trong vùng; khối hợp lệ không bị xê
+dịch oan; công thức `boundsIn()` của UI khớp đúng hàm kẹp ở 2 góc biên.
+
+⚠️ **Khoảng trống đã biết**: server (`finalize/route.ts`) **chưa kẹp lại** — nó chỉ đóng dấu theo
+toạ độ client gửi lên, vì route không nạp mẫu. Văn bản kẹp được ở server nhờ `placement_ky` mang
+sẵn khung. Cần bổ sung khi làm N bước ký động (xem plan).
+
+### Còn lại: N bước ký động (chưa làm)
+
+Bỏ Cấp 1/Cấp 2, chọn bước ký như Văn bản, thêm vai trò `ngay_ky` + `ghi_chu` vào màn cài đặt vị
+trí. Cần **migration + viết lại `finalize/route.ts`** → xem
+`.claude/plans/iso-thuc-hien-n-buoc-ky-2026-09-15.md`.
