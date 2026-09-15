@@ -70,8 +70,10 @@ export type SignTemplateRow = {
 }
 
 // ── Định nghĩa vai trò cho module ISO ──────────────────────────────────────────
-export type IsoSignRoleId = "soan_thao" | "xem_xet" | "phe_duyet" | "qr"
-export const ISO_ROLE_ORDER: IsoSignRoleId[] = ["soan_thao", "xem_xet", "phe_duyet", "qr"]
+export type IsoSignRoleId = "soan_thao" | "xem_xet" | "phe_duyet" | "qr" | "ngay_ky" | "ghi_chu"
+export const ISO_ROLE_ORDER: IsoSignRoleId[] = [
+  "soan_thao", "xem_xet", "phe_duyet", "qr", "ngay_ky", "ghi_chu",
+]
 
 export const ISO_ROLE_DEFS: Record<
   IsoSignRoleId,
@@ -116,6 +118,24 @@ export const ISO_ROLE_DEFS: Record<
     showChucVuDefault: false,
     defaultBox: { xPct: 80, yPct: 6, wPct: 14, hPct: 10 },
   },
+  // Ngày ký và Ghi chú: tuỳ chọn, chỉ vẽ khi người soạn thảo có đặt khung. Biểu mẫu ISO thường
+  // đã in sẵn dòng "Ngày ... tháng ... năm ..." nên KHÔNG bật mặc định — bật lên sẽ đè chữ.
+  ngay_ky: {
+    label: "Ngày ký",
+    loai: "ngay_ky",
+    batBuoc: false,
+    showNameDefault: false,
+    showChucVuDefault: false,
+    defaultBox: { xPct: 66, yPct: 62, wPct: 26, hPct: 5 },
+  },
+  ghi_chu: {
+    label: "Ghi chú / Ý kiến",
+    loai: "ghi_chu",
+    batBuoc: false,
+    showNameDefault: false,
+    showChucVuDefault: false,
+    defaultBox: { xPct: 8, yPct: 58, wPct: 55, hPct: 12 },
+  },
 }
 
 export const ISO_ROLE_COLORS: Record<IsoSignRoleId, { fg: string; bg: string }> = {
@@ -123,6 +143,8 @@ export const ISO_ROLE_COLORS: Record<IsoSignRoleId, { fg: string; bg: string }> 
   xem_xet: { fg: "#d97706", bg: "rgba(217,119,6,.14)" },
   phe_duyet: { fg: "#059669", bg: "rgba(5,150,105,.14)" },
   qr: { fg: "#7c3aed", bg: "rgba(124,58,237,.14)" },
+  ngay_ky: { fg: "#e11d48", bg: "rgba(225,29,72,.14)" },
+  ghi_chu: { fg: "#0d9488", bg: "rgba(13,148,136,.14)" },
 }
 
 /**

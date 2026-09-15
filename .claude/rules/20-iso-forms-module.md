@@ -907,3 +907,56 @@ sẵn khung. Cần bổ sung khi làm N bước ký động (xem plan).
 Bỏ Cấp 1/Cấp 2, chọn bước ký như Văn bản, thêm vai trò `ngay_ky` + `ghi_chu` vào màn cài đặt vị
 trí. Cần **migration + viết lại `finalize/route.ts`** → xem
 `.claude/plans/iso-thuc-hien-n-buoc-ky-2026-09-15.md`.
+
+---
+
+## Cập nhật 2026-09-15 (tiếp) — 3 lỗi phát hiện khi test bản deploy `876c9d1`
+
+### 🐛 Mất cấu hình người ký khi sang màn cài đặt vị trí — nguyên nhân & cách chặn
+
+**Triệu chứng thật**: chọn người xem xét + phê duyệt → bấm "Cài đặt vị trí ký" → quay lại thì
+**2 ô rỗng**, bấm "Ký & Gửi" bị bắt chọn lại; chọn lại rồi lặp lại y hệt. Không báo lỗi gì.
+
+**Nguyên nhân**: người xem xét/phê duyệt chỉ nằm trong **state React**. `openSendModal()` có lưu
+xuống DB trước khi mở modal, nhưng nút "Cài đặt vị trí ký" lại `router.push` **thẳng** — rời
+trang là mất trắng, quay lại `loadInstance()` đọc DB ra NULL.
+
+**Chặn triệt để**: tách `persistApprovalConfig()` — lưu + nạp lại, trả `null` khi lỗi. **Mọi**
+thao tác rời trang phải gọi nó trước: `openSendModal()` và `goToTemplateSetup()`.
+
+⚠️ Quy tắc cho code sau: trang này giữ cấu hình trong state chứ không auto-save theo từng thay
+đổi. Bất kỳ nút nào điều hướng đi nơi khác đều PHẢI `await persistApprovalConfig()` trước, nếu
+không tái hiện đúng bug này.
+
+### Bắt buộc cài đặt vị trí trước khi gửi ký
+
+`mustSetupTemplate` = hồ sơ PDF **và** `templateExists === false` → khoá nút "Ký & Gửi" + hiện
+banner giải thích. Trước đó vẫn gửi ký được bằng vị trí mặc định, mẫu thành tuỳ chọn.
+
+- Nguồn sự thật là bảng `mau_vi_tri` (query bằng **chính bộ khoá** mà modal ký dùng), KHÔNG dùng
+  cờ tạm/query param — người ký có thể vào từ link trực tiếp, F5 giữa chừng, hoặc mẫu do người
+  khác vẽ từ hồ sơ khác của cùng biểu mẫu.
+- `templateExists === null` (đang kiểm tra / query lỗi) → **KHÔNG chặn**: thà cho gửi còn hơn
+  khoá cứng người dùng ngoài hiện trường vì một lần truy vấn hỏng.
+- File Office không cần mẫu (thay tag, không có khái niệm vị trí).
+
+### Vai trò "Ngày ký" và "Ghi chú" cho ISO
+
+Thêm vào `ISO_ROLE_ORDER` / `ISO_ROLE_DEFS` / `ISO_ROLE_COLORS` (`templates.ts`) → màn cài đặt vị
+trí tự hiện, không phải sửa `ky/mau-vi-tri/page.tsx`.
+
+- Cả 2 **tuỳ chọn**, mặc định KHÔNG bật: biểu mẫu ISO thường đã in sẵn dòng "Ngày … tháng …
+  năm …", bật mặc định sẽ đè chữ.
+- Nội dung tự điền: ngày ký = ngày đóng dấu theo **múi giờ nhà máy** (`formatFactoryDateVN`,
+  không dùng UTC — bài học Văn bản 2026-09-04); ghi chú = `iso_form_instances.ghi_chu`.
+- Vị trí do người soạn thảo đặt → người ký **không kéo được** 2 khối này (khác 3 khối chữ ký/
+  tên/chức vụ), chỉ xem trước.
+- ⚠️ **Mỗi khung chỉ gắn vào placement của ĐÚNG MỘT bước** — ngày ký ở `phe_duyet`, ghi chú ở
+  `soan_thao`. Bước phê duyệt vẽ lại cả 3 placement từ file gốc; gắn vào mọi bước sẽ ra chữ
+  chồng 3 lớp.
+- Hàm vẽ dùng chung `drawMetaTextBoxes()` (`stamp-pdf.ts`): ngày ký dùng `drawTextFit` (1 dòng),
+  ghi chú dùng `drawTextWrapped` (nhiều dòng — `drawTextFit` chỉ vẽ 1 dòng và tràn khung).
+
+**Đã kiểm chứng bằng code thật** (trích PDF bằng pdfjs): ngày ký nằm trong khung; ghi chú xuống
+dòng, không tràn ngang/dọc; vẽ được đồng thời cả 2; và 6 guard (rỗng / null / toàn khoảng trắng /
+thiếu toạ độ / placement cũ) đều không vẽ gì.

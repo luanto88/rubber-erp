@@ -15,6 +15,7 @@ import {
   drawSignPrefix,
   drawExtraPlacements,
   drawChucVu,
+  drawMetaTextBoxes,
   ISO_SIGNER_NAME_STYLE,
 } from "@/lib/signing/stamp-pdf"
 
@@ -46,6 +47,18 @@ type SignPlacement = {
   cvY?: number
   cvWidth?: number
   cvHeight?: number
+  // Khung "Ngày ký" / "Ghi chú" của mẫu vị trí — chỉ gắn vào placement của ĐÚNG một bước
+  // (ngày ký: phê duyệt; ghi chú: soạn thảo), xem comment ở `drawMetaTextBoxes`.
+  ngayKyText?: string | null
+  ngayKyX?: number
+  ngayKyY?: number
+  ngayKyWidth?: number
+  ngayKyHeight?: number
+  ghiChuText?: string | null
+  ghiChuX?: number
+  ghiChuY?: number
+  ghiChuWidth?: number
+  ghiChuHeight?: number
   qrX?: number
   qrY?: number
   qrWidth?: number
@@ -157,6 +170,7 @@ async function stampPdf(
     await drawSignatureImage(pdfDoc, page, sigImg, placement)
     drawSignerName(page, signerName, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
     drawChucVu(page, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
+    drawMetaTextBoxes(page, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
     drawSignPrefix(page, prefixText, placement, signerNameFont)
     await drawExtraPlacements(pdfDoc, placement.extraPlacements, sigImg, signerName, signerNameFont, ISO_SIGNER_NAME_STYLE)
   }

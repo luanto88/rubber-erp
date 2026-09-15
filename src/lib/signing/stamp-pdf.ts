@@ -199,6 +199,66 @@ export function drawChucVu(
   })
 }
 
+/** Khung "Ngày ký" và "Ghi chú" của mẫu vị trí — mọi trường optional để placement cũ vẫn hợp lệ. */
+export type MetaTextBoxes = {
+  ngayKyText?: string | null
+  ngayKyX?: number
+  ngayKyY?: number
+  ngayKyWidth?: number
+  ngayKyHeight?: number
+  ghiChuText?: string | null
+  ghiChuX?: number
+  ghiChuY?: number
+  ghiChuWidth?: number
+  ghiChuHeight?: number
+}
+
+/**
+ * Vẽ "Ngày ký" (1 dòng, canh giữa) và "Ghi chú" (nhiều dòng, tự xuống dòng) theo khung mẫu.
+ *
+ * BỔ SUNG và có điều kiện như `drawChucVu`: placement không mang nhóm trường này thì không vẽ
+ * gì, hồ sơ ký trước khi có tính năng giữ nguyên hình ảnh cũ.
+ *
+ * ⚠️ Nơi gọi phải tự đảm bảo mỗi khung chỉ gắn vào placement của ĐÚNG MỘT bước. Luồng ký ISO
+ * vẽ lại toàn bộ các bước từ file gốc ở lượt cuối — gắn vào mọi bước sẽ ra chữ chồng nhiều lớp.
+ */
+export function drawMetaTextBoxes(
+  page: PDFPage,
+  box: MetaTextBoxes,
+  font: PDFFont | null,
+  style: NameStyle,
+): void {
+  if (!font) return
+
+  const ngay = (box.ngayKyText || "").trim()
+  if (
+    ngay && typeof box.ngayKyX === "number" && typeof box.ngayKyY === "number"
+    && typeof box.ngayKyWidth === "number" && typeof box.ngayKyHeight === "number"
+  ) {
+    drawTextFit(
+      page, ngay,
+      { x: box.ngayKyX, y: box.ngayKyY, width: box.ngayKyWidth, height: box.ngayKyHeight },
+      font,
+      { maxFontSize: style.maxFontSize, minFontSize: style.minFontSize, fontStep: style.fontStep },
+    )
+  }
+
+  const ghiChu = (box.ghiChuText || "").trim()
+  if (
+    ghiChu && typeof box.ghiChuX === "number" && typeof box.ghiChuY === "number"
+    && typeof box.ghiChuWidth === "number" && typeof box.ghiChuHeight === "number"
+  ) {
+    // Ghi chú thường dài vài dòng → dùng bản wrap, KHÔNG dùng drawTextFit (hàm đó chỉ vẽ 1 dòng
+    // và tràn ra ngoài khung khi đã ở cỡ chữ nhỏ nhất).
+    drawTextWrapped(
+      page, ghiChu,
+      { x: box.ghiChuX, y: box.ghiChuY, width: box.ghiChuWidth, height: box.ghiChuHeight },
+      font,
+      { maxFontSize: style.maxFontSize, minFontSize: style.minFontSize, fontStep: style.fontStep },
+    )
+  }
+}
+
 /**
  * Vẽ text canh giữa, tự thu nhỏ cỡ chữ, TRỰC TIẾP vào 1 khung `(x,y,w,h)` — khác
  * `drawSignerName()` (tính vị trí LỆCH so với 1 khung chữ ký khác theo `NameStyle`).

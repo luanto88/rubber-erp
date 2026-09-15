@@ -14,6 +14,7 @@ import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import { formatFactoryDateVN } from "@/lib/date-utils"
 import {
   ResizeHandleIcon,
   RESIZE_HANDLE_CLASS,
@@ -57,6 +58,12 @@ type FullPlacement = {
   showChucVu?: boolean
   chucVuText?: string | null
   cvX?: number; cvY?: number; cvWidth?: number; cvHeight?: number
+  // Ngày ký / Ghi chú — nội dung tự điền theo mẫu, mỗi thứ CHỈ gắn vào placement của ĐÚNG một
+  // bước (ngày ký: phê duyệt; ghi chú: soạn thảo) để bước phê duyệt vẽ lại không chồng 3 lớp.
+  ngayKyText?: string | null
+  ngayKyX?: number; ngayKyY?: number; ngayKyWidth?: number; ngayKyHeight?: number
+  ghiChuText?: string | null
+  ghiChuX?: number; ghiChuY?: number; ghiChuWidth?: number; ghiChuHeight?: number
   qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number
   // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng ở bước Phê duyệt, chỉ áp
   // dụng cho PDF (không có khái niệm tương đương cho DOCX/XLSX).
@@ -221,6 +228,7 @@ function SignPlacementModal({
   signatureUrl,
   userName,
   userChucVu,
+  ghiChuText,
   factoryId,
   templateMa,
   templateLoai,
@@ -237,6 +245,7 @@ function SignPlacementModal({
   signatureUrl: string | null
   userName: string
   userChucVu: string
+  ghiChuText: string
   factoryId: string | null
   templateMa: string | null
   templateLoai: string | null
@@ -295,6 +304,13 @@ function SignPlacementModal({
   // `null` = biểu mẫu chưa có mẫu vị trí → kéo-thả tự do toàn trang như trước.
   const [templateBox, setTemplateBox] = useState<ElemState | null>(null)
   const [templateQrBox, setTemplateQrBox] = useState<ElemState | null>(null)
+  // Khung "Ngày ký" / "Ghi chú" của mẫu — nội dung tự điền, vị trí do người soạn thảo đã đặt nên
+  // người ký KHÔNG chỉnh (khác 3 khối chữ ký/tên/chức vụ). `null` = mẫu không đặt khung này.
+  const [ngayKyBox, setNgayKyBox] = useState<ElemState | null>(null)
+  const [ghiChuBox, setGhiChuBox] = useState<ElemState | null>(null)
+  // Ngày đóng dấu tính theo múi giờ NHÀ MÁY, không theo múi giờ máy chủ — thao tác lúc rạng
+  // sáng ở UTC+7 sẽ bị ghi lùi 1 ngày nếu dùng UTC (bài học module Văn bản 2026-09-04).
+  const ngayKyPreview = formatFactoryDateVN()
   const [extraSigBoxes, setExtraSigBoxes] = useState<Array<{
     id: number
     sigX: number; sigY: number; sigW: number; sigH: number
@@ -459,6 +475,24 @@ function SignPlacementModal({
           setTemplateQrBox(qrRegion)
         }
 
+        // Ngày ký chỉ vẽ ở bước PHÊ DUYỆT (ngày ban hành), Ghi chú chỉ vẽ ở lượt đóng dấu ĐẦU
+        // TIÊN — bước phê duyệt vẽ lại cả 3 placement từ file gốc, gắn vào mọi bước sẽ thành
+        // chồng chữ 3 lớp lên nhau.
+        const ngayKyTmpl = khung.find((k) => k.vai_tro === "ngay_ky" || k.loai === "ngay_ky")
+        if (ngayKyTmpl && action === "phe_duyet") {
+          setNgayKyBox(toCanvas({
+            x: num(ngayKyTmpl.x_pt, 0), y: num(ngayKyTmpl.y_pt, 0),
+            width: num(ngayKyTmpl.w_pt, 120), height: num(ngayKyTmpl.h_pt, 18),
+          }))
+        }
+        const ghiChuTmpl = khung.find((k) => k.vai_tro === "ghi_chu" || k.loai === "ghi_chu")
+        if (ghiChuTmpl && action === "soan_thao") {
+          setGhiChuBox(toCanvas({
+            x: num(ghiChuTmpl.x_pt, 0), y: num(ghiChuTmpl.y_pt, 0),
+            width: num(ghiChuTmpl.w_pt, 200), height: num(ghiChuTmpl.h_pt, 50),
+          }))
+        }
+
         setTemplateApplied(String(best.loai_tai_lieu ?? ""))
       } catch {
         // Không có mẫu / lỗi mạng → giữ nguyên vị trí mặc định, KHÔNG chặn luồng ký.
@@ -612,6 +646,11 @@ function SignPlacementModal({
       const fit = (r: { x: number; y: number; width: number; height: number }) =>
         boxPdf ? clampRectToBox(r, boxPdf) : r
 
+      // Ngày ký / Ghi chú: vẽ NGUYÊN khung mẫu (không kẹp theo `templateBox` của khối ký — đó
+      // là 2 khung độc lập của mẫu).
+      const ngayKyPdf = ngayKyBox ? toPdf(ngayKyBox.x, ngayKyBox.y, ngayKyBox.w, ngayKyBox.h) : null
+      const ghiChuPdf = ghiChuBox ? toPdf(ghiChuBox.x, ghiChuBox.y, ghiChuBox.w, ghiChuBox.h) : null
+
       const sigPdf = fit(toPdf(sigState.x, sigState.y, sigState.w, sigState.h))
       const namePdf = fit(toPdf(nameState.x, nameState.y, nameState.w, nameState.h))
       const cvPdf = fit(toPdf(cvState.x, cvState.y, cvState.w, cvState.h))
@@ -628,6 +667,16 @@ function SignPlacementModal({
         showChucVu: cvOn,
         chucVuText: cvOn ? userChucVu : null,
         cvX: cvPdf.x, cvY: cvPdf.y, cvWidth: cvPdf.width, cvHeight: cvPdf.height,
+        ...(ngayKyPdf ? {
+          ngayKyText: ngayKyPreview,
+          ngayKyX: ngayKyPdf.x, ngayKyY: ngayKyPdf.y,
+          ngayKyWidth: ngayKyPdf.width, ngayKyHeight: ngayKyPdf.height,
+        } : {}),
+        ...(ghiChuPdf && ghiChuText.trim() ? {
+          ghiChuText: ghiChuText.trim(),
+          ghiChuX: ghiChuPdf.x, ghiChuY: ghiChuPdf.y,
+          ghiChuWidth: ghiChuPdf.width, ghiChuHeight: ghiChuPdf.height,
+        } : {}),
       }
 
       if (extraSigBoxes.length > 0) {
@@ -855,6 +904,30 @@ function SignPlacementModal({
                   >
                     <span className="absolute -top-5 left-0 text-[10px] font-bold px-1 rounded bg-white/90 text-sky-700 whitespace-nowrap">
                       Khung theo mẫu — chỉ đặt chữ ký trong vùng này
+                    </span>
+                  </div>
+                )}
+
+                {/* Ngày ký / Ghi chú — nội dung tự điền, vị trí do mẫu quy định nên KHÔNG kéo
+                    được (khác 3 khối chữ ký/tên/chức vụ). Chỉ để người ký thấy trước sẽ in gì,
+                    ở đâu. */}
+                {ngayKyBox && (
+                  <div
+                    className="absolute rounded flex items-center justify-center pointer-events-none border border-dashed border-rose-400 bg-rose-50/70"
+                    style={{ left: ngayKyBox.x, top: ngayKyBox.y, width: ngayKyBox.w, height: ngayKyBox.h, zIndex: 10 }}
+                  >
+                    <span className="text-rose-700 truncate px-1" style={previewTextStyle(ngayKyPreview, ngayKyBox.w)}>
+                      {ngayKyPreview}
+                    </span>
+                  </div>
+                )}
+                {ghiChuBox && (
+                  <div
+                    className="absolute rounded overflow-hidden pointer-events-none border border-dashed border-teal-400 bg-teal-50/70 p-1"
+                    style={{ left: ghiChuBox.x, top: ghiChuBox.y, width: ghiChuBox.w, height: ghiChuBox.h, zIndex: 10 }}
+                  >
+                    <span className="text-teal-800 block leading-tight" style={previewTextStyle(ghiChuText || "Ghi chú", ghiChuBox.w)}>
+                      {ghiChuText || <span className="italic text-teal-500">(Ghi chú của hồ sơ đang để trống)</span>}
                     </span>
                   </div>
                 )}
@@ -1345,6 +1418,11 @@ export default function IsoFormInstancePage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [userName, setUserName] = useState("")
   const [userChucVu, setUserChucVu] = useState("")
+  // Biểu mẫu này đã có mẫu vị trí ký chưa — nguồn sự thật là bảng `mau_vi_tri`, KHÔNG dùng cờ
+  // tạm trong state hay query param: người ký có thể vào trang từ link trực tiếp, F5 giữa
+  // chừng, hoặc mẫu do người khác vẽ từ hồ sơ khác của cùng biểu mẫu.
+  // `null` = đang kiểm tra (chưa biết) → chưa chặn vội, tránh nháy nút.
+  const [templateExists, setTemplateExists] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
 
@@ -1478,6 +1556,35 @@ export default function IsoFormInstancePage() {
     }
   }, [factoryId, loadInstance, loadProfiles])
 
+  // Kiểm tra biểu mẫu đã có mẫu vị trí ký chưa (dùng CHÍNH bộ khoá mà modal ký nạp mẫu, để
+  // "có mẫu" ở đây đúng bằng "modal sẽ đặt được vị trí").
+  useEffect(() => {
+    const ma = template?.ma_tai_lieu
+    const loai = template?.loai_tai_lieu
+    if (!factoryId || (!ma && !loai)) return
+    let alive = true
+    const run = async () => {
+      const keys: string[] = []
+      if (ma) keys.push(`iso:code:${ma}`, `iso:loai:${ma}`, ma)
+      if (loai) keys.push(`iso:loai:${loai}`, `iso:${loai}`, loai)
+      try {
+        const { data } = await supabase
+          .from("mau_vi_tri")
+          .select("id")
+          .eq("factory_id", factoryId)
+          .in("loai_tai_lieu", keys)
+          .limit(1)
+        if (alive) setTemplateExists((data?.length ?? 0) > 0)
+      } catch {
+        // Lỗi mạng → để `null`, KHÔNG chặn gửi ký (thà cho gửi còn hơn khoá cứng người dùng
+        // ngoài hiện trường vì một lần query hỏng).
+        if (alive) setTemplateExists(null)
+      }
+    }
+    void run()
+    return () => { alive = false }
+  }, [factoryId, template?.ma_tai_lieu, template?.loai_tai_lieu])
+
   // ── Upload file ──────────────────────────────────────────────────────────
   const handleUpload = async (file?: File) => {
     const fileToUpload = file ?? uploadFile
@@ -1542,13 +1649,22 @@ export default function IsoFormInstancePage() {
 
   // ── Save config ──────────────────────────────────────────────────────────
   // ── Open sign modal ──────────────────────────────────────────────────────
-  const openSendModal = async () => {
-    if (!instance || !factoryId) return
-    if (cap_tl === "Cấp 1" && !xemXetUserId) { setActionError("Vui lòng chọn người xem xét"); return }
-    if (!pheDuyetUserId) { setActionError("Vui lòng chọn người phê duyệt"); return }
+  /**
+   * Lưu cấu hình phê duyệt xuống DB rồi nạp lại hồ sơ.
+   *
+   * ⚠️ BẮT BUỘC gọi trước MỌI thao tác rời khỏi trang (mở modal ký, hoặc điều hướng sang màn
+   * "Cài đặt vị trí ký"). Người xem xét/phê duyệt đang chỉ nằm trong state React — rời trang mà
+   * chưa lưu là mất trắng, quay lại thấy 2 ô rỗng và bị bắt chọn lại (bug đã gặp thật ở bản
+   * deploy 876c9d1: nút Cài đặt vị trí ký điều hướng thẳng, không lưu).
+   *
+   * Trả về `null` nếu validate/ghi DB thất bại — nơi gọi phải dừng lại, KHÔNG đi tiếp.
+   */
+  const persistApprovalConfig = async (): Promise<IsoFormInstance | null> => {
+    if (!instance || !factoryId) return null
+    if (cap_tl === "Cấp 1" && !xemXetUserId) { setActionError("Vui lòng chọn người xem xét"); return null }
+    if (!pheDuyetUserId) { setActionError("Vui lòng chọn người phê duyệt"); return null }
     setSaving(true)
     setActionError(null)
-    let reloaded: IsoFormInstance | null = null
     try {
       const updates: Record<string, unknown> = {
         cap_tl,
@@ -1565,17 +1681,30 @@ export default function IsoFormInstancePage() {
         updates.xem_xet = null
       }
       const { error } = await supabase.from("iso_form_instances").update(updates).eq("id", instanceId)
-      if (error) { setActionError(error.message); return }
-      reloaded = await loadInstance(factoryId)
+      if (error) { setActionError(error.message); return null }
+      return await loadInstance(factoryId)
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Lỗi lưu cài đặt")
-      return
+      return null
     } finally {
       setSaving(false)
     }
+  }
+
+  const openSendModal = async () => {
+    if (!instance) return
+    const reloaded = await persistApprovalConfig()
+    if (!reloaded) return
     // Dùng URL từ kết quả reload (fresh) thay vì closure cũ để tránh URL cũ (VD: .pdf) khi user vừa thay file
-    const freshFileUrl = reloaded?.draft_file_url ?? instance.draft_file_url
-    setSignModal({ action: "soan_thao", sourceFileUrl: freshFileUrl })
+    setSignModal({ action: "soan_thao", sourceFileUrl: reloaded.draft_file_url ?? instance.draft_file_url })
+  }
+
+  /** Lưu cấu hình TRƯỚC rồi mới sang màn cài đặt vị trí ký — xem cảnh báo ở `persistApprovalConfig`. */
+  const goToTemplateSetup = async () => {
+    if (!templateSignSetupUrl) return
+    const reloaded = await persistApprovalConfig()
+    if (!reloaded) return
+    router.push(templateSignSetupUrl)
   }
 
   const openXemXetModal = () => {
@@ -1753,6 +1882,14 @@ export default function IsoFormInstancePage() {
     : (instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url)
   const isNguoiTao = instance.nguoi_tao === userId
 
+  // Hồ sơ PDF mới có khái niệm "vị trí ký"; file Office thay tag nên không cần mẫu.
+  const needsSignTemplate = instance.draft_file_type === "pdf" || urlIsPdf(instance.draft_file_url)
+  // Chặn gửi ký khi biểu mẫu PDF chưa cài đặt vị trí — nếu không, hồ sơ vẫn ký được bằng vị trí
+  // mặc định và mẫu trở thành tuỳ chọn, mỗi hồ sơ một bố cục.
+  // `templateExists === null` (đang kiểm tra / query lỗi) thì KHÔNG chặn — thà cho gửi còn hơn
+  // khoá cứng người dùng vì một lần truy vấn hỏng.
+  const mustSetupTemplate = needsSignTemplate && templateExists === false
+
   // Đã chọn đủ người ký chưa — điều kiện bắt buộc trước khi cho vào màn cài đặt vị trí.
   // Dùng CHÍNH điều kiện mà `openSendModal()` đang validate để 2 nơi không lệch nhau.
   const signStepsReady = cap_tl === "Cấp 1"
@@ -1809,6 +1946,21 @@ export default function IsoFormInstancePage() {
           </div>
         </div>
 
+        {/* Vì sao nút "Ký & Gửi" đang khoá — nói thẳng thay vì để người dùng bấm mãi không được */}
+        {isEditable && isNguoiTao && mustSetupTemplate && (
+          <div className="flex items-start gap-3 p-4 bg-sky-50 border border-sky-200 rounded-2xl">
+            <LayoutTemplate size={18} className="text-sky-600 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-bold text-sky-800">Biểu mẫu này chưa có mẫu vị trí ký</p>
+              <p className="text-xs text-sky-700 mt-0.5">
+                {signStepsReady
+                  ? "Bấm \"Cài đặt vị trí ký\" để vẽ vị trí chữ ký một lần cho biểu mẫu — mọi hồ sơ lập sau của cùng biểu mẫu sẽ tự áp dụng."
+                  : "Chọn đủ người xem xét / phê duyệt ở \"Cấu hình phê duyệt\", sau đó bấm \"Cài đặt vị trí ký\"."}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ── Workflow stepper + Actions inline ── */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -1817,8 +1969,11 @@ export default function IsoFormInstancePage() {
               {isEditable && isNguoiTao && (
                 <button
                   onClick={openSendModal}
-                  disabled={saving || !instance.draft_file_url}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors"
+                  disabled={saving || !instance.draft_file_url || mustSetupTemplate}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors"
+                  title={mustSetupTemplate
+                    ? "Biểu mẫu này chưa có mẫu vị trí ký — bấm 'Cài đặt vị trí ký' trước"
+                    : undefined}
                 >
                   {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                   {cap_tl === "Cấp 1" ? "Ký & Gửi xem xét" : "Ký & Gửi phê duyệt"}
@@ -1861,8 +2016,8 @@ export default function IsoFormInstancePage() {
                   không xác định được cần đặt khung cho những vai trò nào. */}
               {isEditable && isNguoiTao && templateSignSetupUrl && (
                 <button
-                  onClick={() => router.push(templateSignSetupUrl)}
-                  disabled={!signStepsReady}
+                  onClick={() => void goToTemplateSetup()}
+                  disabled={!signStepsReady || saving}
                   className="flex items-center gap-1.5 px-4 py-2 bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 text-sm font-bold rounded-xl border border-sky-200 transition-colors"
                   title={signStepsReady
                     ? "Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng"
@@ -2295,6 +2450,7 @@ export default function IsoFormInstancePage() {
           signatureUrl={signatureUrl}
           userName={userName}
           userChucVu={userChucVu}
+          ghiChuText={instance.ghi_chu ?? ""}
           factoryId={factoryId}
           templateMa={template?.ma_tai_lieu ?? null}
           templateLoai={template?.loai_tai_lieu ?? null}

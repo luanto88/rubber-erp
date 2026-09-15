@@ -3667,7 +3667,9 @@ export default function IsoDocumentDetailPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Cụm thao tác header: trên mobile mọi mục (Xem / Tải / Phân phối / QR...) chia
+              đều bề rộng màn hình, QR đặt CUỐI; từ sm: trở lên trả về kích thước tự nhiên. */}
+          <div className="flex w-full flex-wrap items-stretch gap-2 sm:w-auto sm:items-center [&>*]:flex-1 [&>*]:basis-0 [&>*]:justify-center sm:[&>*]:flex-none sm:[&>*]:basis-auto">
             {/* Xem / Tải file — PHẢI đặt ở header, KHÔNG phải trong thẻ "File tài liệu".
                 Thẻ file nằm ở CỘT PHẢI, mà trên mobile cột phải xếp xuống dưới toàn bộ cột
                 trái (Nhân sự ký duyệt, form...) nên người dùng phải cuộn rất sâu mới bấm được.
@@ -3698,9 +3700,13 @@ export default function IsoDocumentDetailPage() {
               </>
             )}
 
-            {/* QR code khi đã có mã */}
-            {!isNew && doc?.ma_tai_lieu && (
-              <QRCodeSVG value={recordUrl} size={48} className="rounded-lg border border-slate-200 p-1" />
+            {/* Bản hết hiệu lực + không có quyền xem file: banner phải nằm ở HEADER cùng chỗ
+                với cụm Xem/Tải vừa bị ẩn, không để tận dưới thẻ file (người dùng phải cuộn sâu
+                mới thấy nên tưởng nút bị mất không rõ lý do). */}
+            {!isNew && mainFileUrl && !canOpenThisFile && (
+              <div className="flex min-w-full items-center justify-center sm:min-w-0">
+                <ExpiredFileNotice />
+              </div>
             )}
 
             {/* Luồng Soạn thảo: draft hoặc tra_ve */}
@@ -3851,6 +3857,13 @@ export default function IsoDocumentDetailPage() {
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 {saving ? "Đang lưu..." : "Lưu"}
               </button>
+            )}
+
+            {/* QR code khi đã có mã — luôn là mục CUỐI của cụm thao tác */}
+            {!isNew && doc?.ma_tai_lieu && (
+              <div className="flex items-center justify-center rounded-lg border border-slate-200 p-1">
+                <QRCodeSVG value={recordUrl} size={48} />
+              </div>
             )}
           </div>
         </div>
@@ -4352,29 +4365,8 @@ export default function IsoDocumentDetailPage() {
                 <div className="mb-3 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
                   <CheckCircle2 size={21} className="text-emerald-600 shrink-0" />
                   <span className="flex-1 text-sm font-extrabold text-emerald-800">PDF có chữ ký</span>
-                  {canOpenThisFile ? (
-                    <>
-                      <a
-                        href={doc.file_signed_pdf_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Xem PDF có chữ ký"
-                        className="shrink-0 rounded-xl bg-emerald-600 p-2.5 text-white shadow-sm transition-all hover:bg-emerald-700"
-                      >
-                        <Eye size={18} />
-                      </a>
-                      <a
-                        href={buildStorageDownloadUrl(doc.file_signed_pdf_url, `${doc.ma_tai_lieu || "Tài liệu ISO"} ${doc.ten_tai_lieu || ""}`.trim())}
-                        download
-                        title="Tải PDF có chữ ký"
-                        className="shrink-0 rounded-xl bg-slate-800 p-2.5 text-white shadow-sm transition-all hover:bg-slate-900"
-                      >
-                        <Download size={18} />
-                      </a>
-                    </>
-                  ) : (
-                    <ExpiredFileNotice />
-                  )}
+                  {/* Xem / Tải file nằm ở HEADER (đứng trên cả 2 cột, không phải cuộn sâu trên
+                      mobile) — không nhân bản lại ở đây. */}
                   {isEditable && (
                     <button
                       type="button"
@@ -4394,23 +4386,7 @@ export default function IsoDocumentDetailPage() {
                     <div className="flex items-center gap-2 rounded-xl bg-white/80 p-3">
                       <FileText size={16} className="text-violet-600 shrink-0" />
                       <span className="text-xs text-slate-700 flex-1 truncate">{mainFileName}</span>
-                      {canOpenThisFile ? (
-                        <>
-                          <a href={mainFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-violet-100 rounded-lg" title="Xem file hiện tại">
-                            <Eye size={13} className="text-violet-600" />
-                          </a>
-                          <a
-                            href={buildStorageDownloadUrl(mainFileUrl, `${doc?.ma_tai_lieu || form.ma_tai_lieu || "Tài liệu ISO"} ${doc?.ten_tai_lieu || form.ten_tai_lieu || ""}`.trim())}
-                            download
-                            className="shrink-0 p-1 hover:bg-violet-100 rounded-lg"
-                            title="Tải file hiện tại"
-                          >
-                            <Download size={13} className="text-violet-600" />
-                          </a>
-                        </>
-                      ) : (
-                        <ExpiredFileNotice />
-                      )}
+                      {/* Xem / Tải file nằm ở HEADER — không nhân bản lại ở đây. */}
                     </div>
                     {isEditable && (
                       <button
