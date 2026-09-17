@@ -11,6 +11,11 @@ import {
   buildStaticPlotFeatureMap,
   type ForestPlotRow,
 } from "@/lib/eudr-plot-merge"
+import {
+  sanitizeEudrGeometry,
+  sortFeaturesByPlotCode,
+  calculateGeometryAreaHa,
+} from "@/lib/eudr-geometry-cleaner"
 
 // Port thuần (không phụ thuộc React state) của traceGeoChain trong
 // src/app/dashboard/eudr/EudrClient.tsx — dùng cho route customer-portal chạy server-side
@@ -282,13 +287,18 @@ export async function traceExportOrderGeoChain(
 
   const dbPlotMap = new Map(((plotRows || []) as ForestPlotRow[]).map((plot) => [plot.ten, plot] as const))
 
-  const filteredFeatures = tenList.reduce<FeatureCollection["features"]>((acc, plotCode) => {
+  const rawFeatures = tenList.reduce<FeatureCollection["features"]>((acc, plotCode) => {
     const dbPlot = dbPlotMap.get(plotCode)
     const staticPlot = staticPlotMap.get(plotCode)
-    const geometry =
+    const rawGeometry =
       (dbPlot?.geometry as FeatureCollection["features"][number]["geometry"] | undefined) || staticPlot?.geometry
 
-    if (!geometry) return acc
+    if (!rawGeometry) return acc
+
+    // Sanitize hình học theo chuẩn EUDR: bỏ vòng trong (lỗ), khép vòng, chuẩn hóa 6 số thập phân
+    const geometry = sanitizeEudrGeometry(rawGeometry)
+    const area = calculateGeometryAreaHa(geometry)
+    if (area < 0.001) return acc
 
     acc.push({
       type: "Feature",
@@ -298,6 +308,9 @@ export async function traceExportOrderGeoChain(
 
     return acc
   }, [])
+
+  // Sắp xếp tăng dần cố định theo Ma_lo_2026 cho công cụ Whisp / TRACES
+  const filteredFeatures = sortFeaturesByPlotCode(rawFeatures)
 
   return {
     resolvedAssignments,

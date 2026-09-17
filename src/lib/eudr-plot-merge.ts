@@ -36,6 +36,13 @@ export type EudrPlotProperties = {
   Cao_trinh_max_m?: string | number | null
   Phuong_phap?: string
   ma_lo_full?: string
+  ProducerName?: string
+  ProducerCountry?: string
+  producerCountry?: string
+  ProductionPlace?: string
+  Area?: string | number | null
+  external_id?: string
+  export_date?: string
   [key: string]: unknown
 }
 
@@ -69,6 +76,7 @@ export function mergePlotProperties(
   plotCode: string,
   dbRow?: ForestPlotRow | null,
   reference?: FeatureCollection["features"][number] | null,
+  exportDate?: string,
 ): EudrPlotProperties {
   const refProps = ((reference?.properties as EudrPlotProperties | undefined) || {})
   const normalizedArea = dbRow?.dien_tich_ha ?? refProps.Dtich2026_ha ?? null
@@ -76,12 +84,23 @@ export function mergePlotProperties(
   const normalizedPlantYear = dbRow?.nam_trong ?? refProps.Nam_trong ?? null
   const normalizedOpenYear = dbRow?.nam_cao_up ?? refProps.Nam_mo_cao ?? null
   const areaNumber = parseFiniteNumber(normalizedArea)
+  const canonicalMaLo = toDisplayText(refProps.Ma_lo_2026, dbRow?.ma_lo_full || plotCode)
 
   return {
     ...refProps,
+    // Thuộc tính bắt buộc chuẩn TRACES / Cổng khách hàng EUDR
+    ProducerName: "PHUOC HOA KAMPONG THOM PROCESSING FACTORY",
+    ProducerCountry: "KH",
+    producerCountry: "KH", // Tương thích parser khách hàng yêu cầu chữ thường ký tự đầu
+    ProductionPlace: canonicalMaLo,
+    Area: areaNumber ?? (typeof normalizedArea === "number" ? normalizedArea : parseFloat(String(normalizedArea)) || 0),
+    external_id: canonicalMaLo,
+    export_date: exportDate || new Date().toISOString().split("T")[0],
+
+    // Giữ nguyên 100% toàn bộ thuộc tính nội bộ hiện có
     Ten: plotCode || refProps.Ten || refProps.Ma_lo_2026 || refProps.Ma_lo,
     Ma_lo: toDisplayText(refProps.Ma_lo, dbRow?.ma_lo_full || plotCode),
-    Ma_lo_2026: toDisplayText(refProps.Ma_lo_2026, dbRow?.ma_lo_full || plotCode),
+    Ma_lo_2026: canonicalMaLo,
     Nong_truong: toDisplayText(dbRow?.nong_truong, refProps.Nong_truong || ""),
     Doi_2026: normalizedTeam,
     Giong: toDisplayText(dbRow?.giong, refProps.Giong || ""),

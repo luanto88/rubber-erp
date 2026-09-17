@@ -15,6 +15,12 @@ import {
   type ForestPlotRow,
   type EudrPlotProperties,
 } from "@/lib/eudr-plot-merge"
+import {
+  sanitizeEudrGeometry,
+  sortFeaturesByPlotCode,
+  calculateGeometryAreaHa,
+} from "@/lib/eudr-geometry-cleaner"
+import { validateEudrCollection } from "@/lib/eudr-validator"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -688,27 +694,33 @@ export default function EudrClient() {
         ((plotRows || []) as ForestPlotRow[]).map((plot) => [plot.ten, plot] as const),
       )
 
-      const filteredFeatures = tenList.reduce<FeatureCollection["features"]>((acc, plotCode) => {
+      const rawFeatures = tenList.reduce<FeatureCollection["features"]>((acc, plotCode) => {
         const dbPlot = dbPlotMap.get(plotCode)
         const staticPlot = staticPlotMap.get(plotCode)
-        const geometry =
+        const rawGeometry =
           (dbPlot?.geometry as FeatureCollection["features"][number]["geometry"] | undefined) ||
           staticPlot?.geometry
 
-        if (!geometry) return acc
+        if (!rawGeometry) return acc
+
+        // Sanitize hình học theo chuẩn EUDR: bỏ vòng trong (lỗ), khép kín vòng, chuẩn hóa 6 số thập phân
+        const geometry = sanitizeEudrGeometry(rawGeometry)
+        const area = calculateGeometryAreaHa(geometry)
+        if (area < 0.001) return acc
 
         acc.push({
           type: "Feature",
-          properties: mergePlotProperties(plotCode, dbPlot, staticPlot),
+          properties: mergePlotProperties(plotCode, dbPlot, staticPlot, ord.ngay),
           geometry,
         })
 
         return acc
       }, [])
 
+      // Sắp xếp tăng dần cố định theo Ma_lo_2026 cho công cụ Whisp / TRACES
       const filtered: FeatureCollection = {
         type: "FeatureCollection",
-        features: filteredFeatures,
+        features: sortFeaturesByPlotCode(rawFeatures),
       }
 
       setTraceInfo({ lots: typedLots.length, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })
@@ -917,6 +929,26 @@ export default function EudrClient() {
 
       if (geoData) {
         zip.file(geojsonName, JSON.stringify(geoData, null, 2))
+        // CSV đối chiếu số thứ tự, mã lô, nông trường, đội, diện tích, năm trồng (Phần D.3)
+        const csvRows = [
+          ["STT", "Ma_lo_2026", "Ten", "Nong_truong", "Doi_2026", "Dtich_ha", "Nam_trong"],
+          ...geoData.features.map((f, i) => {
+            const p = (f.properties || {}) as Record<string, unknown>
+            return [
+              i + 1,
+              p.Ma_lo_2026 || p.Ma_lo || "",
+              p.Ten || "",
+              p.Nong_truong || "",
+              p.Doi_2026 || "",
+              p.Area ?? p.Dtich2026_ha ?? "",
+              p.Nam_trong || "",
+            ]
+          }),
+        ]
+        const csvContent = "\uFEFF" + csvRows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n")
+        const csvName = `${safeMaDon}_doi_chieu_lo.csv`
+        usedEntryNames.add(csvName)
+        zip.file(csvName, csvContent)
       }
 
       const currentFiles = normalizeExportOrderFiles(order.files)
@@ -1339,7 +1371,13 @@ export default function EudrClient() {
                     <Map size={13} className="text-emerald-600 shrink-0"/>
                     <span className="flex-1 text-xs text-slate-700 truncate">{sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson</span>
                     <button onClick={() => {
-                      const blob = new Blob([JSON.stringify(geoData,null,2)], { type:"application/json" })
+                      const validation = validateEudrCollection(geoData)
+                      if (!validation.isValid) {
+                        showToast(`Cảnh báo GeoJSON: ${validation.errors[0]}`, false)
+                      } else if (validation.warnings.length > 0) {
+                        showToast(`Lưu ý: ${validation.warnings[0]}`, true)
+                      }
+                      const blob = new Blob([JSON.stringify(geoData, null, 2)], { type: "application/geo+json" })
                       saveAs(blob, `${sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson`)
                     }} className="p-1 hover:bg-emerald-100 rounded text-emerald-600" title="Tải về"><FileDown size={13}/></button>
                   </div>

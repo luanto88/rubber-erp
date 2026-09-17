@@ -373,6 +373,28 @@ export async function buildEudrOrderZipBlob(
       getUniqueZipEntryName(`${order.ma_don}_supply_chain.geojson`, usedNames),
       JSON.stringify(geoData, null, 2),
     )
+    // CSV đối chiếu số thứ tự, mã lô, nông trường, đội, diện tích, năm trồng (Phần D.3)
+    const csvRows = [
+      ["STT", "Ma_lo_2026", "Ten", "Nong_truong", "Doi_2026", "Dtich_ha", "Nam_trong"],
+      ...geoData.features.map((f, i) => {
+        const p = (f.properties || {}) as Record<string, unknown>
+        return [
+          i + 1,
+          p.Ma_lo_2026 || p.Ma_lo || "",
+          p.Ten || "",
+          p.Nong_truong || "",
+          p.Doi_2026 || "",
+          p.Area ?? p.Dtich2026_ha ?? "",
+          p.Nam_trong || "",
+        ]
+      }),
+    ]
+    const csvContent =
+      "\uFEFF" +
+      csvRows
+        .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+        .join("\r\n")
+    zip.file(getUniqueZipEntryName(`${order.ma_don}_doi_chieu_lo.csv`, usedNames), csvContent)
   }
 
   for (const f of files) {

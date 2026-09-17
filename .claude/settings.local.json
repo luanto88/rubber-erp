@@ -29,7 +29,24 @@
       "WebFetch(domain:registry.npmjs.org)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Read(//c/Users/Software/AppData/Local/Temp/claude/c--Users-Software-rubber-erp/9140d962-e7a4-49d1-a930-841a61378148/scratchpad/pades-poc/**)",
-      "Bash(npm ls *)"
+      "Bash(npm ls *)",
+      "Bash(git commit -m '@ *)",
+      "Bash(git commit *)",
+      "Bash(grep -n -o \"\\\\.inset-x-0[^}]*}\\\\|\\\\.left-1\\\\\\\\\\\\\\\\/2[^}]*}\" .next/static/chunks/0-.70pphzwylh.css)",
+      "Bash(python -c ' *)",
+      "Bash(git log *)",
+      "Bash(npx eslint *)",
+      "Bash(netstat -ano)",
+      "Bash(npm run *)",
+      "Bash(cd \"C:/Users/Software/rubber-erp\" && echo \"=== handleSignConfirm \\(forms page\\) ===\" && grep -n \"handleSignConfirm\" \"src/app/dashboard/iso/forms/[id]/page.tsx\" && sed -n '/const handleSignConfirm/,/^  }$/p' \"src/app/dashboard/iso/forms/[id]/page.tsx\" | head -60)",
+      "Bash(node --env-file=.env.local ./_verify-data.mjs)",
+      "Bash(node --env-file=.env.local --experimental-strip-types ./_verify-tmpl-shape.mjs)",
+      "Bash(grep -n \"Nhân bản chữ ký và tên\\\\|Nhân bản chữ ký$\\\\|title=\\\\\"Nhân bản\" \"src/app/dashboard/iso/forms/[id]/page.tsx\")",
+      "Bash(python -)",
+      "Bash(cd \"C:/Users/Software/rubber-erp\" && sed -n '/const openSendModal/,/^  }/p' \"src/app/dashboard/iso/forms/[id]/page.tsx\" | head -50)",
+      "Bash(rm -f \"C:/Users/Software/AppData/Local/Temp/claude/c--Users-Software-rubber-erp/e1f3e354-ee6a-4836-a1e6-a74066b8dc8d/scratchpad/fix_bounds.py\")",
+      "Bash(drawMetaTextBoxes)",
+      "Bash(node --experimental-strip-types ./_verify-meta.ts)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Software\\rubber-erp\\public\\images"
