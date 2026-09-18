@@ -395,6 +395,7 @@ export default function SignTemplateEditorPage() {
   const paramDocLabel = searchParams.get("docLabel") || paramLoai
   const returnTo = searchParams.get("returnTo") || ""
   const docId = searchParams.get("docId") || ""
+  const formInstanceId = searchParams.get("formInstanceId") || ""
 
   const [activePdfUrl, setActivePdfUrl] = useState<string>(paramPdfUrl)
   const [activeLoai, setActiveLoai] = useState<string>(paramLoai)
@@ -740,13 +741,69 @@ export default function SignTemplateEditorPage() {
     return () => { cancelled = true }
   }, [factoryId, activeLoai, numPages, pageDims, boxPctFromTemplate, isIso, isExemptIsoDoc, activeDocId, isoChildDocs])
 
-  // ── Nạp dữ liệu người ký thật của văn bản đang mở (chỉ khi có docId) ──
+  // ── Nạp dữ liệu người ký thật của văn bản đang mở (chỉ khi có docId hoặc formInstanceId) ──
   useEffect(() => {
-    if (!docId || !factoryId) return
+    if ((!docId && !formInstanceId) || !factoryId) return
     let cancelled = false
     const run = async () => {
       try {
         if (isIso) {
+          if (formInstanceId) {
+            const { data: formInst, error: fErr } = await supabase
+              .from("iso_form_instances")
+              .select("id, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, soan_thao, xem_xet, phe_duyet, cap_tl, so_buoc_tong, thu_tu_ky_json")
+              .eq("id", formInstanceId)
+              .eq("factory_id", factoryId)
+              .single()
+
+            if (!cancelled && formInst && !fErr) {
+              let stUid = formInst.nguoi_tao || ""
+              let xxUid = formInst.xem_xet_user_id || ""
+              let pdUid = formInst.phe_duyet_user_id || ""
+              let stName = formInst.soan_thao || ""
+              let xxName = formInst.xem_xet || ""
+              let pdName = formInst.phe_duyet || ""
+
+              if (Array.isArray(formInst.thu_tu_ky_json) && formInst.thu_tu_ky_json.length > 0) {
+                const sList = formInst.thu_tu_ky_json as Array<{ user_id?: string; ten?: string }>
+                if (sList[0]) {
+                  stUid = sList[0].user_id || stUid
+                  stName = sList[0].ten || stName
+                }
+                if (sList.length > 2) {
+                  xxUid = sList[1].user_id || xxUid
+                  xxName = sList[1].ten || xxName
+                }
+                const last = sList[sList.length - 1]
+                if (last) {
+                  pdUid = last.user_id || pdUid
+                  pdName = last.ten || pdName
+                }
+              }
+
+              setIsoDocData({
+                id: formInst.id,
+                ma_tai_lieu: null,
+                ten_tai_lieu: null,
+                loai_tai_lieu: null,
+                cap_tl: formInst.cap_tl,
+                phan_loai_tl: null,
+                soan_thao_user_id: stUid || null,
+                xem_xet_user_id: xxUid || null,
+                phe_duyet_user_id: pdUid || null,
+                soan_thao: stName || null,
+                xem_xet: xxName || null,
+                phe_duyet: pdName || null,
+                file_signed_pdf_url: null,
+                file_goc_url: null,
+              })
+              setDocFetchOk(true)
+              setDocLoaded(true)
+              return
+            }
+          }
+
+          if (!docId) return
           const { data, error: fetchErr } = await supabase
             .from("iso_documents")
             .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, cap_tl, phan_loai_tl, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id, soan_thao, xem_xet, phe_duyet, file_signed_pdf_url, file_goc_url")
@@ -843,7 +900,7 @@ export default function SignTemplateEditorPage() {
     }
     void run()
     return () => { cancelled = true }
-  }, [docId, factoryId, isIso])
+  }, [docId, formInstanceId, factoryId, isIso])
 
   // ── Tra tên/chức vụ thật + xác nhận có ảnh chữ ký cho các user đã chọn ở màn soạn thảo ──
   useEffect(() => {
@@ -1003,7 +1060,7 @@ export default function SignTemplateEditorPage() {
   // chỉ dùng để hiển thị preview, KHÔNG bao giờ lưu vào mau_vi_tri (xem DocSignerInfo).
   const docSignerByRoleId = useMemo(() => {
     const map: Record<string, DocSignerInfo> = {}
-    if (!docId) return map
+    if (!docId && !formInstanceId) return map
 
     if (isIso) {
       if (isoDocData?.soan_thao_user_id) {
@@ -1039,6 +1096,14 @@ export default function SignTemplateEditorPage() {
           hasSignature: info?.hasSignature ?? true,
         }
       }
+
+      // Kế thừa người ký cho các vai trò bản sao (ví dụ phe_duyet__ban2 kế thừa từ phe_duyet)
+      roles.forEach((r) => {
+        if (r.baseId && map[r.baseId] && !map[r.id]) {
+          map[r.id] = map[r.baseId]
+        }
+      })
+
       return map
     }
 
@@ -1079,7 +1144,7 @@ export default function SignTemplateEditorPage() {
       }
     }
     return map
-  }, [docId, docSteps, docPheDuyetUserId, signerInfoById, roles, isIso, isoDocData])
+  }, [docId, formInstanceId, docSteps, docPheDuyetUserId, signerInfoById, roles, isIso, isoDocData])
 
   // Bắt buộc đặt khung khi: (a) vai trò bắt buộc ở cấp MẪU (batBuoc, lưu vào mau_vi_tri),
   // HOẶC (b) đang mở đúng 1 văn bản thật (docId) và vai trò này đại diện 1 người ký thật

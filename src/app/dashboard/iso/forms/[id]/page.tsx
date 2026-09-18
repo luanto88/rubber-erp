@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState, Fragment } from "react"
 import type { CSSProperties, RefObject } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowLeft, Download, Upload, Eye, EyeOff, CheckCircle2, X,
   AlertTriangle, Loader2, FileText, Send, Pen,
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
   ChevronLeft, ChevronRight, Plus, LayoutTemplate,
+  ArrowUp, ArrowDown, Trash2,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
@@ -40,6 +41,9 @@ import {
   type IsoFormInstanceStatus,
   type IsoDocument,
   type SignAsType,
+  type ThuTuKyStep,
+  stepSignerUserId,
+  stepDisplayLabel,
 } from "../../_components/iso-types"
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -99,7 +103,81 @@ function StatusBadge({ status }: { status: IsoFormInstanceStatus }) {
 }
 
 // ─── WorkflowStepper ─────────────────────────────────────────────────────────
-function WorkflowStepper({ cap_tl, trang_thai }: { cap_tl: string; trang_thai: IsoFormInstanceStatus }) {
+function WorkflowStepper({
+  cap_tl,
+  trang_thai,
+  so_buoc_tong,
+  buoc_hien_tai,
+  thu_tu_ky_json,
+}: {
+  cap_tl: string
+  trang_thai: IsoFormInstanceStatus
+  so_buoc_tong?: number
+  buoc_hien_tai?: number
+  thu_tu_ky_json?: ThuTuKyStep[]
+}) {
+  const isReturned = trang_thai === "tra_ve"
+  const isApproved = trang_thai === "da_phe_duyet"
+
+  if ((so_buoc_tong || 0) > 0 && Array.isArray(thu_tu_ky_json) && thu_tu_ky_json.length > 0) {
+    const curIdx = buoc_hien_tai ?? 0
+    const stepItems = [
+      ...thu_tu_ky_json.map((s, idx) => ({
+        key: `step_${idx + 1}`,
+        label: stepDisplayLabel(s) || `Bước ${idx + 1}`,
+      })),
+      { key: "da_phe_duyet", label: "Đã phê duyệt" },
+    ]
+
+    return (
+      <div className="flex items-center gap-0 text-xs min-w-max">
+        {stepItems.map((step, i) => {
+          const isDone = isApproved || (!isReturned && i < curIdx)
+          const isActive = !isReturned && !isApproved && (trang_thai === "draft" ? i === 0 : i === curIdx)
+          return (
+            <div key={step.key} className="flex items-center gap-0">
+              <div className="flex flex-col items-center gap-0.5">
+                <div
+                  className={
+                    "w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] border-2 " +
+                    (isDone
+                      ? "bg-emerald-500 border-emerald-500 text-white"
+                      : isActive
+                        ? "bg-violet-600 border-violet-600 text-white"
+                        : "bg-white border-slate-300 text-slate-400")
+                  }
+                >
+                  {isDone ? "✓" : i + 1}
+                </div>
+                <span
+                  className={
+                    "whitespace-nowrap " +
+                    (isActive
+                      ? "text-violet-700 font-bold"
+                      : isDone
+                        ? "text-emerald-600 font-semibold"
+                        : "text-slate-400")
+                  }
+                >
+                  {step.label}
+                </span>
+              </div>
+              {i < stepItems.length - 1 && (
+                <div className={"h-0.5 w-6 mb-3.5 " + (isDone ? "bg-emerald-400" : "bg-slate-200")} />
+              )}
+            </div>
+          )
+        })}
+        {isReturned && (
+          <div className="ml-2 px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full text-[10px] font-bold">
+            Trả về
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Legacy fallback (so_buoc_tong === 0)
   const stepsC1: { key: IsoFormInstanceStatus; label: string }[] = [
     { key: "draft", label: "Nháp" },
     { key: "cho_xem_xet", label: "Chờ xem xét" },
@@ -112,12 +190,11 @@ function WorkflowStepper({ cap_tl, trang_thai }: { cap_tl: string; trang_thai: I
     { key: "da_phe_duyet", label: "Đã phê duyệt" },
   ]
   const steps = cap_tl === "Cấp 2" ? stepsC2 : stepsC1
-  const isReturned = trang_thai === "tra_ve"
   const activeIdx = steps.findIndex((s) => s.key === trang_thai)
   const effectiveIdx = activeIdx >= 0 ? activeIdx : (isReturned ? 0 : steps.length - 1)
 
   return (
-    <div className="flex items-center gap-0 text-xs">
+    <div className="flex items-center gap-0 text-xs min-w-max">
       {steps.map((step, i) => {
         const isDone = i < effectiveIdx
         const isActive = i === effectiveIdx && !isReturned
@@ -222,6 +299,8 @@ function ExtraDraggableBox({
 // ─── Sign Placement Modal ─────────────────────────────────────────────────────
 function SignPlacementModal({
   action,
+  stepIndex,
+  totalSteps,
   sourceFileUrl,
   fileType,
   autoConvertPdf,
@@ -238,7 +317,9 @@ function SignPlacementModal({
   onConfirm,
   onClose,
 }: {
-  action: "soan_thao" | "xem_xet" | "phe_duyet"
+  action: "soan_thao" | "xem_xet" | "phe_duyet" | "ky_buoc"
+  stepIndex?: number
+  totalSteps?: number
   sourceFileUrl: string | null
   fileType: string | null
   autoConvertPdf: boolean
@@ -252,14 +333,17 @@ function SignPlacementModal({
   instanceId: string
   userId: string
   acting: boolean
-  onConfirm: (pin: string, placement: FullPlacement, signAs: SignAsType) => void
+  onConfirm: (pin: string, placement: FullPlacement, signAs: SignAsType, note?: string) => void
   onClose: () => void
 }) {
   const isPdf = fileType === "pdf" || urlIsPdf(sourceFileUrl)
   const showCanvas = isPdf && !!sourceFileUrl
-  // Ký thay (KT./TM./TL./TUQ.) chỉ áp dụng cho bước Phê duyệt, chỉ có ý nghĩa trên
-  // PDF (vẽ hộp riêng) — DOCX/XLSX không cần (đã xác nhận với người dùng).
-  const showSignAsPicker = action === "phe_duyet" && showCanvas
+
+  const isFirstStep = typeof stepIndex === "number" ? stepIndex === 0 : action === "soan_thao"
+  const isFinalStep = typeof totalSteps === "number" && typeof stepIndex === "number"
+    ? stepIndex + 1 >= totalSteps
+    : action === "phe_duyet"
+  const stepKey = typeof stepIndex === "number" ? `buoc_${stepIndex}` : action
 
   // Luồng ký chia 2 bước: PIN phải xác thực đúng (chặn, gọi /api/sign/verify)
   // TRƯỚC khi hiện canvas PDF đặt vị trí chữ ký — mirror iso/documents/[id]/page.tsx
@@ -270,6 +354,15 @@ function SignPlacementModal({
   const [showPin, setShowPin] = useState(false)
   const [pinVerifying, setPinVerifying] = useState(false)
   const [signAs, setSignAs] = useState<SignAsType>("none")
+  // Cờ ghi nhận mẫu đã định vị vai trò này hay chưa. Khi ĐÃ CÓ MẪU: tiền tố ký thay do mẫu
+  // quyết định (ẩn nhóm radio); khi CHƯA CÓ MẪU: người ký tự chọn qua nhóm radio (tương thích ngược).
+  const [hasTemplateForRole, setHasTemplateForRole] = useState(false)
+  const showSignAsPicker = !hasTemplateForRole && isFinalStep && showCanvas
+
+  // Quy tắc 2 tầng hiển thị: mẫu quyết định "CHO PHÉP hiện", người ký quyết định "có hiện không".
+  // Mặc định true khi CHƯA có mẫu để giữ nguyên chế độ kéo-thả tự do cũ.
+  const [tmplAllowName, setTmplAllowName] = useState(true)
+  const [tmplAllowChucVu, setTmplAllowChucVu] = useState(true)
 
   // Canvas + PDF state
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -278,6 +371,9 @@ function SignPlacementModal({
   const pdfDocRef = useRef<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [numPages, setNumPages] = useState(1)
+  const [thumbnails, setThumbnails] = useState<Record<number, string>>({})
+  const [thumbnailsLoading, setThumbnailsLoading] = useState(false)
+  const [userNote, setUserNote] = useState(ghiChuText || "")
   const [pdfPageH, setPdfPageH] = useState(841.89) // A4 default
   const [pdfScale, setPdfScale] = useState(1.5)
   const [canvasReady, setCanvasReady] = useState(false)
@@ -289,7 +385,6 @@ function SignPlacementModal({
   const [cvState, setCvState] = useState<ElemState>({ x: 60, y: 298, w: 140, h: 22 })
   const [qrState, setQrState] = useState<ElemState>({ x: 0, y: 10, w: 80, h: 80 })
   const [prefixState, setPrefixState] = useState<ElemState>({ x: 220, y: 270, w: 60, h: 24 })
-  const [showSig, setShowSig] = useState(true)
   const [showName, setShowName] = useState(true)
   // Chức vụ mặc định TẮT: nhiều biểu mẫu ISO đã in sẵn chức danh dưới ô ký, bật mặc định sẽ
   // đè chữ lên nhau. Người ký tự bật khi cần (hoặc mẫu vị trí ký bật sẵn hộ).
@@ -402,9 +497,19 @@ function SignPlacementModal({
         if (khung.length === 0) return
 
         const num = (v: unknown, fb: number) => (typeof v === "number" && Number.isFinite(v) ? v : fb)
-        // TUYỆT ĐỐI không fallback sang vai trò khác khi thiếu khung của vai trò đang ký — dùng
-        // khung của người khác sẽ đóng dấu chữ ký người này lên đúng ô dành cho người kia.
-        const roleBox = khung.find((k) => k.vai_tro === action)
+        // Tìm roleBox khớp với bước ký hiện tại (hỗ trợ cả bước động N bước và 3 vai trò mẫu cũ, kể cả vai trò nhân bản như phe_duyet__ban2)
+        const matchingBoxes = khung.filter((k) => {
+          const vt = String(k.vai_tro || "")
+          if (vt === stepKey || vt === action) return true
+          if (isFirstStep && (vt === "soan_thao" || vt.startsWith("soan_thao") || vt === "ky_buoc" || vt.startsWith("ky_buoc"))) return true
+          if (isFinalStep && (vt === "phe_duyet" || vt.startsWith("phe_duyet"))) return true
+          if (!isFirstStep && !isFinalStep && (vt === "xem_xet" || vt.startsWith("xem_xet") || vt === `xem_xet__ban${stepIndex}`)) return true
+          return false
+        })
+        const roleBox = matchingBoxes.find((k) => k.vai_tro === stepKey || k.vai_tro === action)
+          || (isFinalStep ? (matchingBoxes.find((k) => k.vai_tro === "phe_duyet") || matchingBoxes[0]) : null)
+          || (isFirstStep ? (matchingBoxes.find((k) => k.vai_tro === "soan_thao") || matchingBoxes[0]) : null)
+          || matchingBoxes[0]
         const qrBox = khung.find((k) => k.vai_tro === "qr" || k.loai === "qr")
         if (!roleBox && !qrBox) return
 
@@ -430,41 +535,69 @@ function SignPlacementModal({
         })
 
         if (roleBox) {
+          setHasTemplateForRole(true)
           const tmplShowName = typeof roleBox.show_name === "boolean" ? roleBox.show_name : true
           // Mẫu cũ (trước 2026-09-04) chỉ có `show_name` gộp chung — fallback theo đúng quy ước
           // đã ghi ở `SignTemplateBox.show_chuc_vu`.
           const tmplShowCv = typeof roleBox.show_chuc_vu === "boolean"
             ? roleBox.show_chuc_vu
             : tmplShowName
-          const sub = computeDefaultSubLayout(
-            {
-              x: num(roleBox.x_pt, 0),
-              y: num(roleBox.y_pt, 0),
-              width: num(roleBox.w_pt, 160),
-              height: num(roleBox.h_pt, 75),
-            },
-            { withName: tmplShowName, withChucVu: tmplShowCv },
-          )
-          setSigState(toCanvas(sub.sig))
-          if (sub.name) setNameState(toCanvas(sub.name))
-          if (sub.chuc_vu) setCvState(toCanvas(sub.chuc_vu))
+          const tmplSignAs = (typeof roleBox.sign_as === "string" && roleBox.sign_as && roleBox.sign_as !== "none")
+            ? (roleBox.sign_as as SignAsType)
+            : null
+          const withPrefix = isFinalStep && !!tmplSignAs
+
+          // Tầng 1: Mẫu quyết định CHO PHÉP hiển thị
+          setTmplAllowName(tmplShowName)
+          setTmplAllowChucVu(tmplShowCv)
+          // Tầng 2: Trạng thái bật/tắt ban đầu của người ký
           setShowName(tmplShowName)
-          // Không bật khối chức vụ nếu người ký chưa khai chức vụ trong Nhân sự — bật lên sẽ ra
-          // một khung rỗng, người ký tưởng hỏng.
           setShowChucVu(tmplShowCv && !!userChucVu)
-          // Vùng cho phép = CHÍNH khung mẫu của vai trò này. Chỉ đặt khi mẫu có khung cho ĐÚNG
-          // vai trò đang ký — mẫu chỉ có khung QR (hoặc chỉ có vai trò khác) thì vai trò này
-          // chưa được định vị, giữ kéo-thả tự do toàn trang.
-          setTemplateBox(toCanvas({
+          if (isFinalStep) {
+            setSignAs(tmplSignAs ?? "none")
+          }
+
+          const roleBoxPt = {
             x: num(roleBox.x_pt, 0),
             y: num(roleBox.y_pt, 0),
             width: num(roleBox.w_pt, 160),
             height: num(roleBox.h_pt, 75),
-          }))
+          }
+
+          // Tính bố cục theo cờ mẫu
+          const activeSub = computeDefaultSubLayout(
+            roleBoxPt,
+            { withName: tmplShowName, withChucVu: tmplShowCv, withPrefix },
+          )
+          // Bố cục đầy đủ làm toạ độ an toàn dự phòng nếu khối nào bị tắt cờ,
+          // đảm bảo toạ độ ban đầu LUÔN nằm trong khung mẫu, kẹp chặt clampRectToBox,
+          // tuyệt đối không để rơi ra góc dưới-trái (Lỗi 3).
+          const fullSub = computeDefaultSubLayout(
+            roleBoxPt,
+            { withName: true, withChucVu: true, withPrefix },
+          )
+
+          const sigPt = clampRectToBox(activeSub.sig, roleBoxPt)
+          const namePt = clampRectToBox(activeSub.name ?? fullSub.name ?? activeSub.sig, roleBoxPt)
+          const cvPt = clampRectToBox(activeSub.chuc_vu ?? fullSub.chuc_vu ?? activeSub.sig, roleBoxPt)
+
+          setSigState(toCanvas(sigPt))
+          setNameState(toCanvas(namePt))
+          setCvState(toCanvas(cvPt))
+
+          if (withPrefix && (activeSub.prefix || fullSub.prefix)) {
+            const prefixPt = clampRectToBox((activeSub.prefix ?? fullSub.prefix)!, roleBoxPt)
+            setPrefixState(toCanvas(prefixPt))
+          }
+
+          // Vùng cho phép = CHÍNH khung mẫu của vai trò này. Chỉ đặt khi mẫu có khung cho ĐÚNG
+          // vai trò đang ký — mẫu chỉ có khung QR (hoặc chỉ có vai trò khác) thì vai trò này
+          // chưa được định vị, giữ kéo-thả tự do toàn trang.
+          setTemplateBox(toCanvas(roleBoxPt))
         }
 
-        // QR chỉ đặt ở bước soạn thảo (các bước sau dùng lại QR đã chốt của bước đầu).
-        if (qrBox && action === "soan_thao") {
+        // QR chỉ đặt ở bước đầu tiên (các bước sau dùng lại QR đã chốt của bước đầu).
+        if (qrBox && isFirstStep) {
           const qrRegion = toCanvas({
             x: num(qrBox.x_pt, 0),
             y: num(qrBox.y_pt, 0),
@@ -475,18 +608,17 @@ function SignPlacementModal({
           setTemplateQrBox(qrRegion)
         }
 
-        // Ngày ký chỉ vẽ ở bước PHÊ DUYỆT (ngày ban hành), Ghi chú chỉ vẽ ở lượt đóng dấu ĐẦU
-        // TIÊN — bước phê duyệt vẽ lại cả 3 placement từ file gốc, gắn vào mọi bước sẽ thành
-        // chồng chữ 3 lớp lên nhau.
+        // Ngày ký chỉ vẽ ở bước PHÊ DUYỆT (ngày ban hành / bước cuối), Ghi chú chỉ vẽ ở lượt đóng dấu ĐẦU
+        // TIÊN — bước cuối vẽ lại cả N placement từ file gốc, gắn vào mọi bước sẽ thành chồng chữ lên nhau.
         const ngayKyTmpl = khung.find((k) => k.vai_tro === "ngay_ky" || k.loai === "ngay_ky")
-        if (ngayKyTmpl && action === "phe_duyet") {
+        if (ngayKyTmpl && isFinalStep) {
           setNgayKyBox(toCanvas({
             x: num(ngayKyTmpl.x_pt, 0), y: num(ngayKyTmpl.y_pt, 0),
             width: num(ngayKyTmpl.w_pt, 120), height: num(ngayKyTmpl.h_pt, 18),
           }))
         }
         const ghiChuTmpl = khung.find((k) => k.vai_tro === "ghi_chu" || k.loai === "ghi_chu")
-        if (ghiChuTmpl && action === "soan_thao") {
+        if (ghiChuTmpl) {
           setGhiChuBox(toCanvas({
             x: num(ghiChuTmpl.x_pt, 0), y: num(ghiChuTmpl.y_pt, 0),
             width: num(ghiChuTmpl.w_pt, 200), height: num(ghiChuTmpl.h_pt, 50),
@@ -515,6 +647,43 @@ function SignPlacementModal({
 
       pdfDocRef.current = pdf
       setNumPages(pdf.numPages)
+      if (pdf.numPages > 1) {
+        setThumbnailsLoading(true)
+        void (async () => {
+          try {
+            const thumbMap: Record<number, string> = {}
+            for (let p = 1; p <= pdf.numPages; p++) {
+              if (cancelled) return
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const page: any = await pdf.getPage(p)
+                const vp1 = page.getViewport({ scale: 1 })
+                const thumbW = 90
+                const scale = thumbW / (vp1.width || thumbW)
+                const vp = page.getViewport({ scale })
+                const thumbCanvas = document.createElement("canvas")
+                thumbCanvas.width = Math.floor(vp.width)
+                thumbCanvas.height = Math.floor(vp.height)
+                const ctx = thumbCanvas.getContext("2d")
+                if (ctx) {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  await page.render({ canvasContext: ctx, viewport: vp } as any).promise
+                  thumbMap[p] = thumbCanvas.toDataURL("image/webp", 0.7)
+                }
+              } catch (e) {
+                console.warn(`Render thumb p${p} failed`, e)
+              }
+            }
+            if (!cancelled) {
+              setThumbnails(thumbMap)
+              setThumbnailsLoading(false)
+            }
+          } catch (e) {
+            console.warn("Lỗi generate thumbnails:", e)
+            if (!cancelled) setThumbnailsLoading(false)
+          }
+        })()
+      }
       const dims = await renderPdfPage(pdf, 1)
       if (cancelled) return
 
@@ -543,7 +712,7 @@ function SignPlacementModal({
     // ký bên trong effect. Modal ký chỉ mở SAU khi trang cha đã nạp xong hồ sơ + biểu mẫu +
     // phiên đăng nhập, nên trong suốt vòng đời một lần mở modal chúng không đổi — không gây tải
     // lại PDF ngoài ý muốn.
-  }, [showCanvas, sourceFileUrl, step, action, factoryId, templateMa, templateLoai, userChucVu])
+  }, [showCanvas, sourceFileUrl, step, action, factoryId, templateMa, templateLoai, userChucVu, isFinalStep, isFirstStep, stepIndex, stepKey])
 
   const goToPage = (p: number) => {
     if (p < 1 || p > numPages || !pdfDocRef.current) return
@@ -654,16 +823,15 @@ function SignPlacementModal({
       const sigPdf = fit(toPdf(sigState.x, sigState.y, sigState.w, sigState.h))
       const namePdf = fit(toPdf(nameState.x, nameState.y, nameState.w, nameState.h))
       const cvPdf = fit(toPdf(cvState.x, cvState.y, cvState.w, cvState.h))
-      const cvOn = showChucVu && !!userChucVu
+      const cvOn = tmplAllowChucVu && showChucVu && !!userChucVu
 
       placement = {
         page: currentPage,
         x: sigPdf.x, y: sigPdf.y, width: sigPdf.width, height: sigPdf.height,
-        showSignature: showSig,
-        showSignerName: showName,
+        showSignature: true,
+        showSignerName: tmplAllowName && showName,
         nameX: namePdf.x, nameY: namePdf.y, nameWidth: namePdf.width, nameHeight: namePdf.height,
-        // Chỉ gửi khối chức vụ khi thật sự bật VÀ có nội dung — placement của hồ sơ cũ không
-        // có các trường này, route vẽ có điều kiện nên hồ sơ đang luân chuyển dở không đổi.
+        // Chỉ gửi khối chức vụ khi mẫu cho phép, người ký bật VÀ có nội dung
         showChucVu: cvOn,
         chucVuText: cvOn ? userChucVu : null,
         cvX: cvPdf.x, cvY: cvPdf.y, cvWidth: cvPdf.width, cvHeight: cvPdf.height,
@@ -672,8 +840,8 @@ function SignPlacementModal({
           ngayKyX: ngayKyPdf.x, ngayKyY: ngayKyPdf.y,
           ngayKyWidth: ngayKyPdf.width, ngayKyHeight: ngayKyPdf.height,
         } : {}),
-        ...(ghiChuPdf && ghiChuText.trim() ? {
-          ghiChuText: ghiChuText.trim(),
+        ...(ghiChuPdf && (userNote || ghiChuText).trim() ? {
+          ghiChuText: (userNote || ghiChuText).trim(),
           ghiChuX: ghiChuPdf.x, ghiChuY: ghiChuPdf.y,
           ghiChuWidth: ghiChuPdf.width, ghiChuHeight: ghiChuPdf.height,
         } : {}),
@@ -686,14 +854,14 @@ function SignPlacementModal({
           return {
             page: currentPage,
             x: sPdf.x, y: sPdf.y, width: sPdf.width, height: sPdf.height,
-            showSignature: box.showSignature,
+            showSignature: true,
             showSignerName: box.showSignerName,
             nameX: nPdf.x, nameY: nPdf.y, nameWidth: nPdf.width, nameHeight: nPdf.height,
           }
         })
       }
 
-      if (action === "soan_thao") {
+      if (isFirstStep) {
         const qrPdf = toPdf(qrState.x, qrState.y, qrState.w, qrState.h)
         placement.qrX = qrPdf.x
         placement.qrY = qrPdf.y
@@ -701,8 +869,8 @@ function SignPlacementModal({
         placement.qrHeight = qrPdf.height
       }
 
-      if (showSignAsPicker && signAs !== "none") {
-        const prefixPdf = toPdf(prefixState.x, prefixState.y, prefixState.w, prefixState.h)
+      if (isFinalStep && signAs !== "none") {
+        const prefixPdf = fit(toPdf(prefixState.x, prefixState.y, prefixState.w, prefixState.h))
         placement.showPrefix = true
         placement.prefixX = prefixPdf.x
         placement.prefixY = prefixPdf.y
@@ -719,7 +887,8 @@ function SignPlacementModal({
       }
     }
 
-    onConfirm(pin, placement, showSignAsPicker ? signAs : "none")
+    const finalNote = (userNote || ghiChuText).trim()
+    onConfirm(pin, placement, signAs, finalNote || undefined)
   }
 
   const stepTagMap: Record<string, { nameTag: string; sigTag: string }> = {
@@ -727,8 +896,14 @@ function SignPlacementModal({
     xem_xet: { nameTag: "{{TEN_XEM_XET}}", sigTag: "{{CHU_KY_XEM_XET}}" },
     phe_duyet: { nameTag: "{{TEN_PHE_DUYET}}", sigTag: "{{CHU_KY_PHE_DUYET}}" },
   }
-  const { nameTag, sigTag } = stepTagMap[action] ?? { nameTag: "", sigTag: "" }
-  const stepLabel = action === "soan_thao" ? "Ký và gửi hồ sơ" : action === "xem_xet" ? "Ký xem xét" : "Ký phê duyệt"
+  const tagInfo = stepTagMap[action] ?? {
+    nameTag: `{{TEN_BUOC_${(stepIndex ?? 0) + 1}}}`,
+    sigTag: `{{CHU_KY_BUOC_${(stepIndex ?? 0) + 1}}}`,
+  }
+  const { nameTag, sigTag } = tagInfo
+  const stepLabel = typeof stepIndex === "number" && typeof totalSteps === "number"
+    ? `Ký bước ${stepIndex + 1}/${totalSteps}${isFirstStep ? " (Người lập)" : isFinalStep ? " (Phê duyệt)" : ""}`
+    : action === "soan_thao" ? "Ký và gửi hồ sơ" : action === "xem_xet" ? "Ký xem xét" : "Ký phê duyệt"
 
   // Bước 1: chỉ hiện PIN, chưa tải/hiện PDF. Đúng PIN mới chuyển sang bước 2.
   if (step === "pin") {
@@ -864,10 +1039,48 @@ function SignPlacementModal({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto flex items-start p-4 bg-slate-100">
-        {showCanvas ? (
-          <div ref={containerRef} className="relative inline-block shadow-2xl bg-white select-none mx-auto">
-            <canvas ref={canvasRef} className="block" />
+      <div className="flex-1 overflow-hidden flex flex-row bg-slate-100 min-h-0">
+        {/* Left Thumbnail Rail */}
+        {showCanvas && numPages > 1 && (
+          <div className="w-28 shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-y-auto p-2 gap-2 select-none z-10">
+            <div className="text-[10px] uppercase font-bold text-slate-400 text-center tracking-wider mb-1">
+              {numPages} trang
+            </div>
+            {Array.from({ length: numPages }, (_, i) => i + 1).map((pageNum) => {
+              const isCurrent = pageNum === currentPage
+              const thumbUrl = thumbnails[pageNum]
+              return (
+                <button
+                  key={`thumb-${pageNum}`}
+                  type="button"
+                  onClick={() => goToPage(pageNum)}
+                  className={`relative w-full rounded-lg border-2 transition-all p-1 flex flex-col items-center bg-white ${
+                    isCurrent
+                      ? "border-violet-600 shadow-md ring-2 ring-violet-200"
+                      : "border-slate-200 hover:border-slate-400"
+                  }`}
+                >
+                  {thumbUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={thumbUrl} alt={`Trang ${pageNum}`} className="w-full h-auto object-contain rounded shadow-2xs pointer-events-none" />
+                  ) : (
+                    <div className={`w-full aspect-[1/1.4] bg-slate-50 border border-slate-100 rounded flex items-center justify-center text-xs font-bold text-slate-400 ${thumbnailsLoading ? "animate-pulse" : ""}`}>
+                      {pageNum}
+                    </div>
+                  )}
+                  <span className={`text-[10px] font-bold mt-1 ${isCurrent ? "text-violet-700" : "text-slate-500"}`}>
+                    Trang {pageNum}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-auto flex items-start p-4">
+          {showCanvas ? (
+            <div ref={containerRef} className="relative inline-block shadow-2xl bg-white select-none mx-auto">
+              <canvas ref={canvasRef} className="block" />
 
             {!canvasReady && !canvasError && (
               <div className="absolute inset-0 flex items-center justify-center bg-slate-50">
@@ -926,14 +1139,14 @@ function SignPlacementModal({
                     className="absolute rounded overflow-hidden pointer-events-none border border-dashed border-teal-400 bg-teal-50/70 p-1"
                     style={{ left: ghiChuBox.x, top: ghiChuBox.y, width: ghiChuBox.w, height: ghiChuBox.h, zIndex: 10 }}
                   >
-                    <span className="text-teal-800 block leading-tight" style={previewTextStyle(ghiChuText || "Ghi chú", ghiChuBox.w)}>
-                      {ghiChuText || <span className="italic text-teal-500">(Ghi chú của hồ sơ đang để trống)</span>}
+                    <span className="text-teal-800 block leading-tight" style={previewTextStyle((userNote || ghiChuText || "Ghi chú"), ghiChuBox.w)}>
+                      {(userNote || ghiChuText) || <span className="italic text-teal-500">(Ghi chú / Ý kiến xử lý đang để trống)</span>}
                     </span>
                   </div>
                 )}
 
-                {/* QR — only soan_thao */}
-                {action === "soan_thao" && (
+                {/* QR — only first step */}
+                {isFirstStep && (
                   <Draggable
                     nodeRef={qrNodeRef as RefObject<HTMLElement>}
                     position={{ x: qrState.x, y: qrState.y }}
@@ -994,158 +1207,142 @@ function SignPlacementModal({
                       handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                     >
                       <div className="w-full h-full border border-dashed border-emerald-400 bg-emerald-50/60 rounded relative select-none">
-                        {showSig && signatureUrl && (
+                        {signatureUrl ? (
                           <img src={signatureUrl} alt="Chữ ký" className="w-full h-full object-contain opacity-90" />
-                        )}
-                        {showSig && !signatureUrl && (
+                        ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             <span className="text-[10px] text-slate-400">Chữ ký</span>
                           </div>
                         )}
-                        {!showSig && (
-                          <div className="w-full h-full flex items-center justify-center bg-slate-100/80">
-                            <span className="text-[10px] text-slate-400">Ẩn chữ ký</span>
+                        {!templateBox && (
+                          <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const offset = 30 * (extraSigBoxes.length + 1)
+                                setExtraSigBoxes((prev) => [
+                                  ...prev,
+                                  {
+                                    id: Date.now() + Math.random(),
+                                    sigX: sigState.x + offset,
+                                    sigY: sigState.y + offset,
+                                    sigW: sigState.w,
+                                    sigH: sigState.h,
+                                    nameX: nameState.x + offset,
+                                    nameY: nameState.y + offset,
+                                    nameW: nameState.w,
+                                    nameH: nameState.h,
+                                    showSignature: true,
+                                    showSignerName: true,
+                                  },
+                                ])
+                              }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold active:scale-95 transition-transform"
+                              title="Nhân bản chữ ký và tên (+)"
+                            >
+                              <Plus size={12} />
+                            </button>
                           </div>
                         )}
-                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); setShowSig((v) => !v) }}
-                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
-                            title={showSig ? "Ẩn chữ ký" : "Hiện chữ ký"}
-                          >
-                            {showSig ? <Eye size={12} /> : <EyeOff size={12} />}
-                          </button>
-                          {!templateBox && (
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              const offset = 30 * (extraSigBoxes.length + 1)
-                              setExtraSigBoxes((prev) => [
-                                ...prev,
-                                {
-                                  id: Date.now() + Math.random(),
-                                  sigX: sigState.x + offset,
-                                  sigY: sigState.y + offset,
-                                  sigW: sigState.w,
-                                  sigH: sigState.h,
-                                  nameX: nameState.x + offset,
-                                  nameY: nameState.y + offset,
-                                  nameW: nameState.w,
-                                  nameH: nameState.h,
-                                  showSignature: true,
-                                  showSignerName: true,
-                                },
-                              ])
-                            }}
-                            className="w-7 h-7 sm:w-5 sm:h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold active:scale-95 transition-transform"
-                            title="Nhân bản chữ ký và tên (+)"
-                          >
-                            <Plus size={12} />
-                          </button>
-                          )}
-                        </div>
                       </div>
                     </Resizable>
                   </div>
                 </Draggable>
 
                 {/* Name */}
-                <Draggable
-                  nodeRef={nameNodeRef as RefObject<HTMLElement>}
-                  position={{ x: nameState.x, y: nameState.y }}
-                  onStop={(_, d) => setNameState((p) => ({ ...p, x: d.x, y: d.y }))}
-                  bounds={boundsIn(templateBox, nameState.w, nameState.h)}
-                  cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
-                >
-                  <div
-                    ref={nameNodeRef}
-                    className="absolute top-0 left-0 cursor-move"
-                    style={{ zIndex: 11 }}
+                {tmplAllowName && (
+                  <Draggable
+                    nodeRef={nameNodeRef as RefObject<HTMLElement>}
+                    position={{ x: nameState.x, y: nameState.y }}
+                    onStop={(_, d) => setNameState((p) => ({ ...p, x: d.x, y: d.y }))}
+                    bounds={boundsIn(templateBox, nameState.w, nameState.h)}
+                    cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
                   >
-                    <Resizable
-                      size={{ width: nameState.w, height: nameState.h }}
-                      onResizeStop={(_, __, ___, delta) =>
-                        setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                      enable={{ right: true, bottom: true, bottomRight: true }}
-                      minWidth={60} minHeight={16}
-                        {...maxSizeIn(templateBox, nameState)}
-                      handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên" /> }}
-                      handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                      handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                    <div
+                      ref={nameNodeRef}
+                      className="absolute top-0 left-0 cursor-move"
+                      style={{ zIndex: 11 }}
                     >
-                      <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/60 rounded relative select-none flex items-center justify-center">
-                        {showName ? (
-                          <span
-                            className="font-bold text-violet-700 truncate px-1"
-                            style={previewTextStyle(userName || "Người ký", nameState.w)}
-                          >
-                            {userName || "Người ký"}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-slate-400">Ẩn tên</span>
-                        )}
-                        <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); setShowName((v) => !v) }}
-                            className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
-                            title={showName ? "Ẩn tên" : "Hiện tên"}
-                          >
-                            {showName ? <Eye size={12} /> : <EyeOff size={12} />}
-                          </button>
-                          {!templateBox && (
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              const offset = 30 * (extraSigBoxes.length + 1)
-                              setExtraSigBoxes((prev) => [
-                                ...prev,
-                                {
-                                  id: Date.now() + Math.random(),
-                                  sigX: sigState.x + offset,
-                                  sigY: sigState.y + offset,
-                                  sigW: sigState.w,
-                                  sigH: sigState.h,
-                                  nameX: nameState.x + offset,
-                                  nameY: nameState.y + offset,
-                                  nameW: nameState.w,
-                                  nameH: nameState.h,
-                                  showSignature: true,
-                                  showSignerName: true,
-                                },
-                              ])
-                            }}
-                            className="w-7 h-7 sm:w-5 sm:h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold active:scale-95 transition-transform"
-                            title="Nhân bản chữ ký và tên (+)"
-                          >
-                            <Plus size={12} />
-                          </button>
+                      <Resizable
+                        size={{ width: nameState.w, height: nameState.h }}
+                        onResizeStop={(_, __, ___, delta) =>
+                          setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
+                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        minWidth={60} minHeight={16}
+                        {...maxSizeIn(templateBox, nameState)}
+                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên" /> }}
+                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                      >
+                        <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/60 rounded relative select-none flex items-center justify-center">
+                          {showName ? (
+                            <span
+                              className="font-bold text-violet-700 truncate px-1"
+                              style={previewTextStyle(userName || "Người ký", nameState.w)}
+                            >
+                              {userName || "Người ký"}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">Ẩn tên</span>
                           )}
+                          <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => { e.stopPropagation(); setShowName((v) => !v) }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
+                              title={showName ? "Ẩn tên" : "Hiện tên"}
+                            >
+                              {showName ? <Eye size={12} /> : <EyeOff size={12} />}
+                            </button>
+                            {!templateBox && (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                const offset = 30 * (extraSigBoxes.length + 1)
+                                setExtraSigBoxes((prev) => [
+                                  ...prev,
+                                  {
+                                    id: Date.now() + Math.random(),
+                                    sigX: sigState.x + offset,
+                                    sigY: sigState.y + offset,
+                                    sigW: sigState.w,
+                                    sigH: sigState.h,
+                                    nameX: nameState.x + offset,
+                                    nameY: nameState.y + offset,
+                                    nameW: nameState.w,
+                                    nameH: nameState.h,
+                                    showSignature: true,
+                                    showSignerName: true,
+                                  },
+                                ])
+                              }}
+                              className="w-7 h-7 sm:w-5 sm:h-5 bg-emerald-600 border border-emerald-700 text-white rounded-full shadow flex items-center justify-center hover:bg-emerald-700 font-bold active:scale-95 transition-transform"
+                              title="Nhân bản chữ ký và tên (+)"
+                            >
+                              <Plus size={12} />
+                            </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </Resizable>
-                  </div>
-                </Draggable>
+                      </Resizable>
+                    </div>
+                  </Draggable>
+                )}
 
                 {/* Chức vụ — khối kéo-thả thứ 3, ĐỘC LẬP với chữ ký và tên (vị trí riêng, công
-                    tắc riêng). Chỉ dựng khi người ký đã khai chức vụ trong Nhân sự bảo trì —
-                    không có thì khối này vô nghĩa, dựng lên chỉ tổ rối canvas. */}
-                {userChucVu && (
+                    tắc riêng). Chỉ dựng khi mẫu CHO PHÉP và người ký đã khai chức vụ trong Nhân sự bảo trì. */}
+                {tmplAllowChucVu && !!userChucVu && (
                   <Draggable
                     nodeRef={cvNodeRef as RefObject<HTMLElement>}
                     position={{ x: cvState.x, y: cvState.y }}
@@ -1199,13 +1396,13 @@ function SignPlacementModal({
                   </Draggable>
                 )}
 
-                {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước Phê duyệt, chỉ hiện khi đã chọn */}
-                {showSignAsPicker && signAs !== "none" && (
+                {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước cuối Phê duyệt, chỉ hiện khi đã chọn */}
+                {isFinalStep && signAs !== "none" && (
                   <Draggable
                     nodeRef={prefixNodeRef as RefObject<HTMLElement>}
                     position={{ x: prefixState.x, y: prefixState.y }}
                     onStop={(_, d) => setPrefixState((p) => ({ ...p, x: d.x, y: d.y }))}
-                    bounds="parent"
+                    bounds={boundsIn(templateBox, prefixState.w, prefixState.h)}
                     cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
                   >
                     <div ref={prefixNodeRef} className="absolute top-0 left-0 cursor-move" style={{ zIndex: 11 }}>
@@ -1259,17 +1456,6 @@ function SignPlacementModal({
                             </div>
                           )}
                           <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onTouchStart={(e) => e.stopPropagation()}
-                              onTouchEnd={(e) => e.stopPropagation()}
-                              onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignature: !b.showSignature } : b)) }}
-                              className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
-                              title={box.showSignature ? "Ẩn chữ ký bản sao" : "Hiện chữ ký bản sao"}
-                            >
-                              {box.showSignature ? <Eye size={12} /> : <EyeOff size={12} />}
-                            </button>
                             <button
                               type="button"
                               onMouseDown={(e) => e.stopPropagation()}
@@ -1351,7 +1537,7 @@ function SignPlacementModal({
                 <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{nameTag}</span>
                 <span>→ tên người ký</span>
               </div>
-              {action === "soan_thao" && (
+              {isFirstStep && (
                 <div className="flex items-center gap-2">
                   <span className="font-mono bg-sky-100 px-1.5 py-0.5 rounded">{"{{QR}}"}</span>
                   <span>→ mã QR liên kết hồ sơ</span>
@@ -1361,6 +1547,7 @@ function SignPlacementModal({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       <div className="border-t border-slate-100 bg-white px-5 py-4 space-y-3 shrink-0">
@@ -1392,6 +1579,22 @@ function SignPlacementModal({
           </div>
         )}
 
+        {/* Khung nhập Ghi chú / Ý kiến xử lý khi mẫu có khung ghi_chu */}
+        {ghiChuBox && (
+          <div>
+            <label className="text-xs font-bold text-teal-700 block mb-1">
+              Ghi chú / Ý kiến xử lý (sẽ hiển thị vào khung trên tài liệu)
+            </label>
+            <textarea
+              rows={2}
+              value={userNote}
+              onChange={(e) => setUserNote(e.target.value)}
+              placeholder="Nhập ý kiến hoặc ghi chú phê duyệt..."
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 outline-none focus:border-teal-500 focus:bg-white resize-none"
+            />
+          </div>
+        )}
+
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
           <button
@@ -1413,6 +1616,7 @@ export default function IsoFormInstancePage() {
   const params = useParams()
   const instanceId = params.id as string
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
@@ -1423,6 +1627,12 @@ export default function IsoFormInstancePage() {
   // chừng, hoặc mẫu do người khác vẽ từ hồ sơ khác của cùng biểu mẫu.
   // `null` = đang kiểm tra (chưa biết) → chưa chặn vội, tránh nháy nút.
   const [templateExists, setTemplateExists] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    if (searchParams?.get("confirmedSignTemplate") === "1") {
+      setTemplateExists(true)
+    }
+  }, [searchParams])
   const [loading, setLoading] = useState(true)
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
 
@@ -1438,6 +1648,8 @@ export default function IsoFormInstancePage() {
   const [ghiChu, setGhiChu] = useState("")
   const [profilesXemXet, setProfilesXemXet] = useState<ProfileOption[]>([])
   const [profilesPheDuyet, setProfilesPheDuyet] = useState<ProfileOption[]>([])
+  const [allApproverProfiles, setAllApproverProfiles] = useState<ProfileOption[]>([])
+  const [steps, setSteps] = useState<ThuTuKyStep[]>([])
 
   // File upload
   const [uploadFile, setUploadFile] = useState<File | null>(null)
@@ -1452,7 +1664,9 @@ export default function IsoFormInstancePage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [signModal, setSignModal] = useState<{
-    action: "soan_thao" | "xem_xet" | "phe_duyet"
+    action: "soan_thao" | "xem_xet" | "phe_duyet" | "ky_buoc"
+    stepIndex?: number
+    totalSteps?: number
     sourceFileUrl: string | null
   } | null>(null)
   const [showReturnModal, setShowReturnModal] = useState(false)
@@ -1522,6 +1736,25 @@ export default function IsoFormInstancePage() {
     setAutoConvertPdf(row.auto_convert_pdf)
     setGhiChu(row.ghi_chu ?? "")
 
+    if ((row.so_buoc_tong ?? 0) > 0 && Array.isArray(row.thu_tu_ky_json) && row.thu_tu_ky_json.length > 0) {
+      setSteps(row.thu_tu_ky_json as ThuTuKyStep[])
+    } else if (row.trang_thai === "draft" || row.trang_thai === "tra_ve") {
+      const creatorId = row.nguoi_tao || userId || ""
+      const defaultSteps: ThuTuKyStep[] = [
+        { step: 1, type: "ca_nhan", user_id: creatorId, ten: "Người lập" },
+      ]
+      if (row.cap_tl === "Cấp 1" && row.xem_xet_user_id) {
+        defaultSteps.push({ step: 2, type: "ca_nhan", user_id: row.xem_xet_user_id, ten: "Xem xét" })
+      }
+      defaultSteps.push({
+        step: defaultSteps.length + 1,
+        type: "ca_nhan",
+        user_id: row.phe_duyet_user_id || "",
+        ten: "Phê duyệt",
+      })
+      setSteps(defaultSteps)
+    }
+
     const { data: tmpl } = await supabase
       .from("iso_documents")
       .select("id, ten_tai_lieu, ma_tai_lieu, loai_tai_lieu, phong_ban, lan_ban_hanh, file_signed_pdf_url, file_goc_url, mo_ta_tim_kiem")
@@ -1536,7 +1769,7 @@ export default function IsoFormInstancePage() {
       .order("created_at", { ascending: false })
     setLogs((logData ?? []) as LogRow[])
     return row
-  }, [instanceId])
+  }, [instanceId, userId])
 
   const loadProfiles = useCallback(async (fid: string) => {
     const [resX, resP] = await Promise.all([
@@ -1545,9 +1778,49 @@ export default function IsoFormInstancePage() {
     ])
     const dataX = resX.ok ? (await resX.json() as { profiles?: ProfileOption[] }) : {}
     const dataP = resP.ok ? (await resP.json() as { profiles?: ProfileOption[] }) : {}
-    setProfilesXemXet(Array.isArray(dataX.profiles) ? dataX.profiles : [])
-    setProfilesPheDuyet(Array.isArray(dataP.profiles) ? dataP.profiles : [])
+    const px = Array.isArray(dataX.profiles) ? dataX.profiles : []
+    const pp = Array.isArray(dataP.profiles) ? dataP.profiles : []
+    setProfilesXemXet(px)
+    setProfilesPheDuyet(pp)
+
+    const map = new Map<string, ProfileOption>()
+    px.forEach((p) => map.set(p.id, p))
+    pp.forEach((p) => map.set(p.id, p))
+    setAllApproverProfiles(Array.from(map.values()))
   }, [])
+
+  const addStep = () => {
+    setSteps((prev) => [
+      ...prev,
+      {
+        step: prev.length + 1,
+        type: "ca_nhan",
+        user_id: "",
+        ten: `Bước ${prev.length + 1}`,
+      },
+    ])
+  }
+
+  const removeStep = (index: number) => {
+    if (steps.length <= 1) return
+    setSteps((prev) => prev.filter((_, i) => i !== index).map((s, i) => ({ ...s, step: i + 1 })))
+  }
+
+  const moveStep = (index: number, direction: "up" | "down") => {
+    const targetIndex = direction === "up" ? index - 1 : index + 1
+    if (targetIndex < 0 || targetIndex >= steps.length) return
+    setSteps((prev) => {
+      const next = [...prev]
+      const temp = next[index]
+      next[index] = next[targetIndex]
+      next[targetIndex] = temp
+      return next.map((s, i) => ({ ...s, step: i + 1 }))
+    })
+  }
+
+  const updateStep = (index: number, patch: Partial<ThuTuKyStep>) => {
+    setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)))
+  }
 
   useEffect(() => {
     if (factoryId) {
@@ -1653,33 +1926,84 @@ export default function IsoFormInstancePage() {
    * Lưu cấu hình phê duyệt xuống DB rồi nạp lại hồ sơ.
    *
    * ⚠️ BẮT BUỘC gọi trước MỌI thao tác rời khỏi trang (mở modal ký, hoặc điều hướng sang màn
-   * "Cài đặt vị trí ký"). Người xem xét/phê duyệt đang chỉ nằm trong state React — rời trang mà
-   * chưa lưu là mất trắng, quay lại thấy 2 ô rỗng và bị bắt chọn lại (bug đã gặp thật ở bản
-   * deploy 876c9d1: nút Cài đặt vị trí ký điều hướng thẳng, không lưu).
+   * "Cài đặt vị trí ký").
    *
    * Trả về `null` nếu validate/ghi DB thất bại — nơi gọi phải dừng lại, KHÔNG đi tiếp.
    */
   const persistApprovalConfig = async (): Promise<IsoFormInstance | null> => {
     if (!instance || !factoryId) return null
-    if (cap_tl === "Cấp 1" && !xemXetUserId) { setActionError("Vui lòng chọn người xem xét"); return null }
-    if (!pheDuyetUserId) { setActionError("Vui lòng chọn người phê duyệt"); return null }
+    if (isNStep) {
+      if (steps.length === 0) {
+        setActionError("Vui lòng thiết lập ít nhất 1 bước ký")
+        return null
+      }
+      const hasEmpty = steps.some((s) => !stepSignerUserId(s))
+      if (hasEmpty) {
+        setActionError("Vui lòng chọn người ký cho tất cả các bước")
+        return null
+      }
+    } else {
+      if (cap_tl === "Cấp 1" && !xemXetUserId) { setActionError("Vui lòng chọn người xem xét"); return null }
+      if (!pheDuyetUserId) { setActionError("Vui lòng chọn người phê duyệt"); return null }
+    }
+
     setSaving(true)
     setActionError(null)
     try {
       const updates: Record<string, unknown> = {
-        cap_tl,
-        phe_duyet_user_id: pheDuyetUserId || null,
-        phe_duyet: pheDuyetUserId ? profileLabel(profilesPheDuyet.find((p) => p.id === pheDuyetUserId) ?? { id: "", full_name: null, username: null }) : null,
         auto_convert_pdf: autoConvertPdf,
         ghi_chu: ghiChu || null,
       }
-      if (cap_tl === "Cấp 1") {
-        updates.xem_xet_user_id = xemXetUserId || null
-        updates.xem_xet = xemXetUserId ? profileLabel(profilesXemXet.find((p) => p.id === xemXetUserId) ?? { id: "", full_name: null, username: null }) : null
+
+      if (isNStep) {
+        const formattedSteps: ThuTuKyStep[] = steps.map((s, idx) => {
+          const uid = stepSignerUserId(s) || ""
+          const profile = (uid && allApproverProfiles.find((p) => p.id === uid))
+            || (uid && profilesPheDuyet.find((p) => p.id === uid))
+            || (uid && profilesXemXet.find((p) => p.id === uid))
+            || (uid && userId && uid === userId ? { id: uid, full_name: userName, username: userName } : null)
+          return {
+            step: idx + 1,
+            type: "ca_nhan",
+            user_id: uid,
+            ten: s.ten?.trim() || (profile ? profileLabel(profile) : (idx === 0 ? "Người lập" : idx === steps.length - 1 ? "Phê duyệt" : `Xem xét ${idx}`)),
+            chuc_vu: s.chuc_vu,
+          }
+        })
+        updates.thu_tu_ky_json = formattedSteps
+        updates.so_buoc_tong = formattedSteps.length
+        if (formattedSteps.length > 0) {
+          const lastStep = formattedSteps[formattedSteps.length - 1]
+          const lastUid = stepSignerUserId(lastStep) || null
+          updates.phe_duyet_user_id = lastUid
+          const lastProfile = lastUid ? allApproverProfiles.find((p) => p.id === lastUid) : null
+          updates.phe_duyet = lastProfile ? profileLabel(lastProfile) : lastStep.ten || null
+          if (formattedSteps.length > 2) {
+            updates.cap_tl = "Cấp 1"
+            const revStep = formattedSteps[1]
+            const revUid = stepSignerUserId(revStep) || null
+            updates.xem_xet_user_id = revUid
+            const revProfile = revUid ? allApproverProfiles.find((p) => p.id === revUid) : null
+            updates.xem_xet = revProfile ? profileLabel(revProfile) : revStep.ten || null
+          } else {
+            updates.cap_tl = "Cấp 2"
+            updates.xem_xet_user_id = null
+            updates.xem_xet = null
+          }
+        }
       } else {
-        updates.xem_xet_user_id = null
-        updates.xem_xet = null
+        updates.cap_tl = cap_tl
+        updates.phe_duyet_user_id = pheDuyetUserId || null
+        updates.phe_duyet = pheDuyetUserId ? profileLabel(profilesPheDuyet.find((p) => p.id === pheDuyetUserId) ?? { id: "", full_name: null, username: null }) : null
+        if (cap_tl === "Cấp 1") {
+          updates.xem_xet_user_id = xemXetUserId || null
+          updates.xem_xet = xemXetUserId ? profileLabel(profilesXemXet.find((p) => p.id === xemXetUserId) ?? { id: "", full_name: null, username: null }) : null
+        } else {
+          updates.xem_xet_user_id = null
+          updates.xem_xet = null
+        }
       }
+
       const { error } = await supabase.from("iso_form_instances").update(updates).eq("id", instanceId)
       if (error) { setActionError(error.message); return null }
       return await loadInstance(factoryId)
@@ -1692,11 +2016,45 @@ export default function IsoFormInstancePage() {
   }
 
   const openSendModal = async () => {
-    if (!instance) return
+    if (!instance || !factoryId) return
     const reloaded = await persistApprovalConfig()
     if (!reloaded) return
-    // Dùng URL từ kết quả reload (fresh) thay vì closure cũ để tránh URL cũ (VD: .pdf) khi user vừa thay file
-    setSignModal({ action: "soan_thao", sourceFileUrl: reloaded.draft_file_url ?? instance.draft_file_url })
+    const fileSrc = reloaded.draft_file_url ?? instance.draft_file_url
+
+    if ((reloaded.so_buoc_tong ?? 0) > 0) {
+      const firstStep = reloaded.thu_tu_ky_json?.[0]
+      const firstSignerId = firstStep ? stepSignerUserId(firstStep) : null
+      if (firstSignerId === userId) {
+        setSignModal({
+          action: (reloaded.so_buoc_tong ?? 1) === 1 ? "phe_duyet" : "ky_buoc",
+          stepIndex: 0,
+          totalSteps: reloaded.so_buoc_tong ?? 1,
+          sourceFileUrl: fileSrc,
+        })
+      } else {
+        setSaving(true)
+        try {
+          const nextStatus = (reloaded.so_buoc_tong ?? 1) > 1 ? "cho_xem_xet" : "cho_phe_duyet"
+          const { error } = await supabase.from("iso_form_instances").update({
+            trang_thai: nextStatus,
+            buoc_hien_tai: 0,
+          }).eq("id", instanceId)
+          if (error) { setActionError(error.message); return }
+          await supabase.from("iso_form_instance_logs").insert({
+            instance_id: instanceId, factory_id: factoryId, user_id: userId,
+            action: "gui_ho_so", note: "Gửi hồ sơ bắt đầu luồng ký",
+          })
+          setActionSuccess("Đã gửi hồ sơ")
+          setTimeout(() => setActionSuccess(null), 3000)
+          if (firstSignerId) sendNotify("ky_buoc", [firstSignerId])
+          if (factoryId) void loadInstance(factoryId)
+        } finally {
+          setSaving(false)
+        }
+      }
+    } else {
+      setSignModal({ action: "soan_thao", sourceFileUrl: fileSrc })
+    }
   }
 
   /** Lưu cấu hình TRƯỚC rồi mới sang màn cài đặt vị trí ký — xem cảnh báo ở `persistApprovalConfig`. */
@@ -1705,6 +2063,23 @@ export default function IsoFormInstancePage() {
     const reloaded = await persistApprovalConfig()
     if (!reloaded) return
     router.push(templateSignSetupUrl)
+  }
+
+  const openSignStepModal = () => {
+    if (!instance) return
+    const isDraftPdf = instance.draft_file_type === "pdf"
+    const curIdx = instance.buoc_hien_tai ?? 0
+    const total = instance.so_buoc_tong ?? 1
+    const isFinalStep = curIdx + 1 >= total
+    const src = isDraftPdf
+      ? (instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
+      : (instance.soan_thao_signed_url || instance.draft_file_url)
+    setSignModal({
+      action: isFinalStep ? "phe_duyet" : "ky_buoc",
+      stepIndex: curIdx,
+      totalSteps: total,
+      sourceFileUrl: src,
+    })
   }
 
   const openXemXetModal = () => {
@@ -1753,9 +2128,11 @@ export default function IsoFormInstancePage() {
       })
       setActionSuccess("Đã trả về")
       setTimeout(() => setActionSuccess(null), 3000)
-      // Notify phù hợp theo trạng thái và cấp
+
       const recipients: string[] = []
-      if (prevTrangThai === "cho_xem_xet") {
+      if ((instance.so_buoc_tong ?? 0) > 0) {
+        if (instance.nguoi_tao) recipients.push(instance.nguoi_tao)
+      } else if (prevTrangThai === "cho_xem_xet") {
         if (instance.nguoi_tao) recipients.push(instance.nguoi_tao)
       } else if (prevTrangThai === "cho_phe_duyet") {
         if (prevCapTl === "Cấp 1" && instance.xem_xet_user_id) recipients.push(instance.xem_xet_user_id)
@@ -1769,12 +2146,16 @@ export default function IsoFormInstancePage() {
   }
 
   // ── Sign confirm ─────────────────────────────────────────────────────────
-  const handleSignConfirm = async (pin: string, placement: FullPlacement, signAs: SignAsType) => {
+  const handleSignConfirm = async (pin: string, placement: FullPlacement, signAs: SignAsType, note?: string) => {
     if (!factoryId || !userId || !signModal || !instance) return
 
     setSignLoading(true)
     setActionError(null)
     try {
+      if (note && note !== instance.ghi_chu) {
+        await supabase.from("iso_form_instances").update({ ghi_chu: note }).eq("id", instanceId)
+        setGhiChu(note)
+      }
       const { data: sessionData } = await supabase.auth.getSession()
       const accessToken = sessionData.session?.access_token
       if (!accessToken) {
@@ -1803,6 +2184,7 @@ export default function IsoFormInstancePage() {
         body: JSON.stringify({
           token: verifyJson.token,
           action: signModal.action,
+          step_index: signModal.stepIndex,
           placement,
           cap_tl: instance.cap_tl,
           sign_as: signAs,
@@ -1815,26 +2197,44 @@ export default function IsoFormInstancePage() {
       }
 
       const completedAction = signModal.action
+      const isNStepCompleted = typeof signModal.stepIndex === "number" && (instance.so_buoc_tong ?? 0) > 0
+      const isFinal = isNStepCompleted
+        ? (signModal.stepIndex! + 1 >= (instance.so_buoc_tong ?? 0))
+        : completedAction === "phe_duyet"
+
       setSignModal(null)
-      const successMsg = completedAction === "phe_duyet"
+      const successMsg = isFinal
         ? "Đã phê duyệt hồ sơ"
-        : completedAction === "xem_xet"
-          ? "Đã ký xem xét"
-          : "Đã ký và gửi hồ sơ"
+        : isNStepCompleted
+          ? `Đã ký bước ${(signModal.stepIndex ?? 0) + 1}`
+          : completedAction === "xem_xet"
+            ? "Đã ký xem xét"
+            : "Đã ký và gửi hồ sơ"
       setActionSuccess(successMsg)
       setTimeout(() => setActionSuccess(null), 4000)
-      // Notify theo từng action
-      const notifyRecipients: string[] = []
-      if (completedAction === "soan_thao") {
-        if (instance.cap_tl === "Cấp 1" && instance.xem_xet_user_id) notifyRecipients.push(instance.xem_xet_user_id)
-        else if (instance.phe_duyet_user_id) notifyRecipients.push(instance.phe_duyet_user_id)
-      } else if (completedAction === "xem_xet") {
-        if (instance.phe_duyet_user_id) notifyRecipients.push(instance.phe_duyet_user_id)
-      } else if (completedAction === "phe_duyet") {
-        if (instance.nguoi_tao) notifyRecipients.push(instance.nguoi_tao)
-        if (instance.xem_xet_user_id) notifyRecipients.push(instance.xem_xet_user_id)
+
+      if (isNStepCompleted) {
+        const nextIdx = signModal.stepIndex! + 1
+        if (nextIdx < (instance.so_buoc_tong ?? 0)) {
+          const nextStep = instance.thu_tu_ky_json?.[nextIdx]
+          const nextSigner = nextStep ? stepSignerUserId(nextStep) : null
+          if (nextSigner) sendNotify("ky_buoc", [nextSigner])
+        } else {
+          if (instance.nguoi_tao) sendNotify("phe_duyet", [instance.nguoi_tao])
+        }
+      } else {
+        const notifyRecipients: string[] = []
+        if (completedAction === "soan_thao") {
+          if (instance.cap_tl === "Cấp 1" && instance.xem_xet_user_id) notifyRecipients.push(instance.xem_xet_user_id)
+          else if (instance.phe_duyet_user_id) notifyRecipients.push(instance.phe_duyet_user_id)
+        } else if (completedAction === "xem_xet") {
+          if (instance.phe_duyet_user_id) notifyRecipients.push(instance.phe_duyet_user_id)
+        } else if (completedAction === "phe_duyet") {
+          if (instance.nguoi_tao) notifyRecipients.push(instance.nguoi_tao)
+          if (instance.xem_xet_user_id) notifyRecipients.push(instance.xem_xet_user_id)
+        }
+        sendNotify(completedAction, notifyRecipients)
       }
-      sendNotify(completedAction, notifyRecipients)
       void loadInstance(factoryId)
     } finally {
       setSignLoading(false)
@@ -1868,15 +2268,24 @@ export default function IsoFormInstancePage() {
   }
 
   const isEditable = instance.trang_thai === "draft" || instance.trang_thai === "tra_ve"
-  const isXemXet = instance.trang_thai === "cho_xem_xet" && instance.xem_xet_user_id === userId
-  const isPheDuyet = instance.trang_thai === "cho_phe_duyet" && instance.phe_duyet_user_id === userId
-  const canReturn =
-    (instance.trang_thai === "cho_xem_xet" && instance.xem_xet_user_id === userId) ||
-    (instance.trang_thai === "cho_phe_duyet" && instance.phe_duyet_user_id === userId)
+  const isNStepRecord = (instance.so_buoc_tong ?? 0) > 0
+  const isNStep = isNStepRecord || (isEditable && steps.length > 0)
+  const buocHienTai = instance.buoc_hien_tai ?? 0
+  const currentStep = isNStepRecord && Array.isArray(instance.thu_tu_ky_json)
+    ? instance.thu_tu_ky_json[buocHienTai]
+    : null
+  const currentStepSignerId = currentStep ? stepSignerUserId(currentStep) : null
+  const canSignCurrentStep = isNStepRecord
+    ? (instance.trang_thai === "cho_xem_xet" || instance.trang_thai === "cho_phe_duyet") && currentStepSignerId === userId
+    : false
+
+  const isXemXet = !isNStepRecord && instance.trang_thai === "cho_xem_xet" && instance.xem_xet_user_id === userId
+  const isPheDuyet = !isNStepRecord && instance.trang_thai === "cho_phe_duyet" && instance.phe_duyet_user_id === userId
+  const canReturn = isNStepRecord
+    ? canSignCurrentStep && buocHienTai > 0
+    : ((instance.trang_thai === "cho_xem_xet" && instance.xem_xet_user_id === userId) ||
+       (instance.trang_thai === "cho_phe_duyet" && instance.phe_duyet_user_id === userId))
   const isDone = instance.trang_thai === "da_phe_duyet"
-  // Khi hồ sơ đang ở draft/tra_ve, file ký (soan_thao_signed_url/final_pdf_url...) của vòng ký
-  // TRƯỚC đó (đã bị trả về) không còn hiệu lực — luôn ưu tiên draft_file_url mới nhất (kể cả
-  // sau khi người soạn thảo thay file khác), tránh "Xem file"/"Tải xuống" hiện nhầm PDF cũ.
   const fileUrl = isEditable
     ? instance.draft_file_url
     : (instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url)
@@ -1884,23 +2293,13 @@ export default function IsoFormInstancePage() {
 
   // Hồ sơ PDF mới có khái niệm "vị trí ký"; file Office thay tag nên không cần mẫu.
   const needsSignTemplate = instance.draft_file_type === "pdf" || urlIsPdf(instance.draft_file_url)
-  // Chặn gửi ký khi biểu mẫu PDF chưa cài đặt vị trí — nếu không, hồ sơ vẫn ký được bằng vị trí
-  // mặc định và mẫu trở thành tuỳ chọn, mỗi hồ sơ một bố cục.
-  // `templateExists === null` (đang kiểm tra / query lỗi) thì KHÔNG chặn — thà cho gửi còn hơn
-  // khoá cứng người dùng vì một lần truy vấn hỏng.
   const mustSetupTemplate = needsSignTemplate && templateExists === false
 
-  // Đã chọn đủ người ký chưa — điều kiện bắt buộc trước khi cho vào màn cài đặt vị trí.
-  // Dùng CHÍNH điều kiện mà `openSendModal()` đang validate để 2 nơi không lệch nhau.
-  const signStepsReady = cap_tl === "Cấp 1"
-    ? !!xemXetUserId && !!pheDuyetUserId
-    : !!pheDuyetUserId
+  const signStepsReady = isNStep
+    ? steps.length > 0 && steps.every((s) => !!stepSignerUserId(s))
+    : (cap_tl === "Cấp 1" ? !!xemXetUserId && !!pheDuyetUserId : !!pheDuyetUserId)
 
   // ── Link sang màn "Cài đặt vị trí ký" ─────────────────────────────────────────
-  // Mẫu vị trí gắn với BIỂU MẪU (mã tài liệu của template), không gắn với từng hồ sơ thực
-  // hiện — vẽ 1 lần, mọi hồ sơ lập sau của cùng biểu mẫu tự áp dụng. KHÔNG truyền `docId`:
-  // tham số đó của màn cài đặt trỏ vào bảng `iso_documents`, còn đây là `iso_form_instances`
-  // (bảng khác) — truyền vào sẽ tra nhầm bản ghi.
   const templateSignSetupPdf = [
     urlIsPdf(instance.draft_file_url) ? instance.draft_file_url : null,
     urlIsPdf(template?.file_signed_pdf_url ?? null) ? template?.file_signed_pdf_url ?? null : null,
@@ -1915,7 +2314,8 @@ export default function IsoFormInstancePage() {
     ? `/dashboard/ky/mau-vi-tri?modun=iso&loai=${encodeURIComponent(templateSignSetupKey)}`
       + `&pdfUrl=${encodeURIComponent(templateSignSetupPdf)}`
       + `&docLabel=${encodeURIComponent(template?.ma_tai_lieu || template?.ten_tai_lieu || instance.tieu_de)}`
-      + `&returnTo=${encodeURIComponent(`/dashboard/iso/forms/${instanceId}`)}`
+      + `&formInstanceId=${encodeURIComponent(instanceId)}`
+      + `&returnTo=${encodeURIComponent(`/dashboard/iso/forms/${instanceId}?confirmedSignTemplate=1`)}`
     : null
 
   return (
@@ -1955,7 +2355,7 @@ export default function IsoFormInstancePage() {
               <p className="text-xs text-sky-700 mt-0.5">
                 {signStepsReady
                   ? "Bấm \"Cài đặt vị trí ký\" để vẽ vị trí chữ ký một lần cho biểu mẫu — mọi hồ sơ lập sau của cùng biểu mẫu sẽ tự áp dụng."
-                  : "Chọn đủ người xem xét / phê duyệt ở \"Cấu hình phê duyệt\", sau đó bấm \"Cài đặt vị trí ký\"."}
+                  : "Chọn đủ người ký ở \"Cấu hình phê duyệt\", sau đó bấm \"Cài đặt vị trí ký\"."}
               </p>
             </div>
           </div>
@@ -1963,37 +2363,64 @@ export default function IsoFormInstancePage() {
 
         {/* ── Workflow stepper + Actions inline ── */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <WorkflowStepper cap_tl={cap_tl} trang_thai={instance.trang_thai} />
-            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="overflow-x-auto min-w-0 max-w-full pb-1 sm:pb-0">
+              <WorkflowStepper
+                cap_tl={cap_tl}
+                trang_thai={instance.trang_thai}
+                so_buoc_tong={instance.so_buoc_tong}
+                buoc_hien_tai={instance.buoc_hien_tai}
+                thu_tu_ky_json={instance.thu_tu_ky_json}
+              />
+            </div>
+            <div className="flex items-center gap-2 shrink-0 flex-wrap w-full sm:w-auto">
               {isEditable && isNguoiTao && (
                 <button
                   onClick={openSendModal}
                   disabled={saving || !instance.draft_file_url || mustSetupTemplate}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors"
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors flex-1 sm:flex-none"
                   title={mustSetupTemplate
                     ? "Biểu mẫu này chưa có mẫu vị trí ký — bấm 'Cài đặt vị trí ký' trước"
                     : undefined}
                 >
                   {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                  {cap_tl === "Cấp 1" ? "Ký & Gửi xem xét" : "Ký & Gửi phê duyệt"}
+                  {isNStepRecord || steps.length > 0
+                    ? "Ký & Gửi hồ sơ"
+                    : (cap_tl === "Cấp 1" ? "Ký & Gửi xem xét" : "Ký & Gửi phê duyệt")}
                 </button>
               )}
-              {isXemXet && (
+              {isNStepRecord && canSignCurrentStep && (
+                <button
+                  onClick={openSignStepModal}
+                  disabled={signLoading}
+                  className={
+                    "flex items-center justify-center gap-1.5 px-4 py-2 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors flex-1 sm:flex-none " +
+                    (buocHienTai + 1 >= (instance.so_buoc_tong ?? 0)
+                      ? "bg-emerald-600 hover:bg-emerald-700"
+                      : "bg-amber-500 hover:bg-amber-600")
+                  }
+                >
+                  {signLoading ? <Loader2 size={13} className="animate-spin" /> : <Pen size={13} />}
+                  {buocHienTai + 1 >= (instance.so_buoc_tong ?? 0)
+                    ? "Ký phê duyệt"
+                    : `Ký bước ${buocHienTai + 1}: ${stepDisplayLabel(currentStep)}`}
+                </button>
+              )}
+              {!isNStepRecord && isXemXet && (
                 <button
                   onClick={openXemXetModal}
                   disabled={signLoading}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors"
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors flex-1 sm:flex-none"
                 >
                   {signLoading ? <Loader2 size={13} className="animate-spin" /> : <Pen size={13} />}
                   Ký xem xét
                 </button>
               )}
-              {isPheDuyet && (
+              {!isNStepRecord && isPheDuyet && (
                 <button
                   onClick={openPheDuyetModal}
                   disabled={signLoading}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors"
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors flex-1 sm:flex-none"
                 >
                   {signLoading ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                   Phê duyệt
@@ -2002,23 +2429,16 @@ export default function IsoFormInstancePage() {
               {canReturn && (
                 <button
                   onClick={() => setShowReturnModal(true)}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-sm font-bold rounded-xl border border-rose-200 transition-colors"
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-sm font-bold rounded-xl border border-rose-200 transition-colors flex-1 sm:flex-none"
                 >
                   <RotateCcw size={13} /> Trả về
                 </button>
               )}
-              {/* Cài đặt vị trí ký — vẽ 1 lần cho MẪU biểu mẫu (theo mã tài liệu của template),
-                  mọi hồ sơ thực hiện sau của cùng biểu mẫu sẽ tự đặt sẵn vị trí.
-                  CHỈ hiện ở bước soạn thảo và chỉ cho người soạn thảo: đây là thao tác cấu hình
-                  MỘT LẦN cho biểu mẫu, không phải việc của người xem xét/phê duyệt — trước đây
-                  hiện ở MỌI bước khiến ai cũng tưởng mình phải đặt lại vị trí.
-                  Bắt buộc chọn xong người ký trước: vẽ mẫu khi chưa biết có mấy bước ký thì
-                  không xác định được cần đặt khung cho những vai trò nào. */}
               {isEditable && isNguoiTao && templateSignSetupUrl && (
                 <button
                   onClick={() => void goToTemplateSetup()}
                   disabled={!signStepsReady || saving}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 text-sm font-bold rounded-xl border border-sky-200 transition-colors"
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 text-sm font-bold rounded-xl border border-sky-200 transition-colors flex-1 sm:flex-none"
                   title={signStepsReady
                     ? "Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng"
                     : "Chọn đủ người ký ở 'Cấu hình phê duyệt' trước khi cài đặt vị trí ký"}
@@ -2028,7 +2448,7 @@ export default function IsoFormInstancePage() {
               )}
               <button
                 onClick={() => factoryId && void loadInstance(factoryId)}
-                className="flex items-center gap-1.5 px-3 py-2 text-slate-400 hover:text-slate-600 text-xs rounded-xl hover:bg-slate-50"
+                className="flex items-center gap-1.5 px-3 py-2 text-slate-400 hover:text-slate-600 text-xs rounded-xl hover:bg-slate-50 shrink-0"
                 title="Làm mới"
               >
                 <RefreshCcw size={12} />
@@ -2260,57 +2680,95 @@ export default function IsoFormInstancePage() {
                 </h2>
 
                 <div className="space-y-3">
-                  {/* Cấp phê duyệt */}
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Cấp phê duyệt</label>
-                    <div className="flex gap-2">
-                      {["Cấp 1", "Cấp 2"].map((cap) => (
-                        <button
-                          key={cap}
-                          onClick={() => setCapTl(cap)}
-                          className={
-                            "flex-1 py-2 rounded-xl text-xs font-bold border transition-colors " +
-                            (cap_tl === cap
-                              ? "bg-violet-100 text-violet-700 border-violet-300"
-                              : "text-slate-500 border-slate-200 hover:bg-slate-50")
-                          }
-                        >
-                          {cap}
-                        </button>
-                      ))}
-                    </div>
+                  {/* Header with step count and add button */}
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-600">
+                      Thứ tự ký ({steps.length} bước)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={addStep}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg border border-violet-200 transition-colors"
+                    >
+                      <Plus size={12} /> Thêm bước
+                    </button>
                   </div>
 
-                  {/* Người xem xét (Cấp 1) */}
-                  {cap_tl === "Cấp 1" && (
-                    <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Người xem xét</label>
-                      <select
-                        value={xemXetUserId}
-                        onChange={(e) => setXemXetUserId(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400"
-                      >
-                        <option value="">— Chọn người xem xét —</option>
-                        {profilesXemXet.filter((p) => p.id !== userId).map((p) => (
-                          <option key={p.id} value={p.id}>{profileLabel(p)}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  {/* Steps list */}
+                  <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                    {steps.map((s, idx) => {
+                      const isFirst = idx === 0
+                      const isLast = idx === steps.length - 1
+                      const signerId = stepSignerUserId(s)
+                      return (
+                        <div
+                          key={`step_${s.step || idx + 1}_${idx}`}
+                          className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="w-5 h-5 rounded-full bg-violet-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <input
+                                type="text"
+                                value={s.ten || ""}
+                                onChange={(e) => updateStep(idx, { ten: e.target.value })}
+                                placeholder={isFirst ? "Người lập" : isLast ? "Phê duyệt" : `Bước ${idx + 1}`}
+                                className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:border-violet-400"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => moveStep(idx, "up")}
+                                disabled={isFirst}
+                                className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-white disabled:opacity-20 disabled:cursor-not-allowed"
+                                title="Di chuyển lên"
+                              >
+                                <ArrowUp size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => moveStep(idx, "down")}
+                                disabled={isLast}
+                                className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-white disabled:opacity-20 disabled:cursor-not-allowed"
+                                title="Di chuyển xuống"
+                              >
+                                <ArrowDown size={12} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removeStep(idx)}
+                                disabled={steps.length <= 1}
+                                className="p-1 rounded text-rose-400 hover:text-rose-600 hover:bg-white disabled:opacity-20 disabled:cursor-not-allowed"
+                                title="Xóa bước này"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
 
-                  {/* Người phê duyệt */}
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Người phê duyệt</label>
-                    <select
-                      value={pheDuyetUserId}
-                      onChange={(e) => setPheDuyetUserId(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400"
-                    >
-                      <option value="">— Chọn người phê duyệt —</option>
-                      {profilesPheDuyet.filter((p) => p.id !== userId && p.id !== xemXetUserId).map((p) => (
-                        <option key={p.id} value={p.id}>{profileLabel(p)}</option>
-                      ))}
-                    </select>
+                          <select
+                            value={signerId || ""}
+                            onChange={(e) => updateStep(idx, { user_id: e.target.value })}
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-violet-400"
+                          >
+                            <option value="">— Chọn người ký —</option>
+                            {userId && userName && (
+                              <option value={userId}>{userName} (Bạn)</option>
+                            )}
+                            {allApproverProfiles
+                              .filter((p) => p.id !== userId)
+                              .map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {profileLabel(p)}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      )
+                    })}
                   </div>
 
                   {/* Auto convert PDF */}
@@ -2357,60 +2815,91 @@ export default function IsoFormInstancePage() {
             )}
 
             {/* Tiến trình & Lịch sử (always shown when there is data) */}
-            {(instance.soan_thao || instance.xem_xet || instance.phe_duyet || logs.length > 0) && (
+            {(isNStepRecord || instance.soan_thao || instance.xem_xet || instance.phe_duyet || logs.length > 0) && (
               <div className="lg:flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
                 <h2 className="text-sm font-extrabold text-slate-700 mb-3 flex items-center gap-2">
                   <Clock size={14} className="text-slate-400" />
                   Tiến trình &amp; Lịch sử
                 </h2>
 
-                {/* Signing timeline */}
-                {(instance.soan_thao || instance.xem_xet || instance.phe_duyet) && (
+                {/* Dynamic N-step signing timeline */}
+                {isNStepRecord && Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0 ? (
                   <div className="space-y-2 text-xs">
                     <div className="flex justify-between items-center">
-                      <span className="text-slate-400">Cấp</span>
-                      <span className="font-semibold text-slate-700">{instance.cap_tl}</span>
+                      <span className="text-slate-400">Số bước ký</span>
+                      <span className="font-semibold text-slate-700">{instance.so_buoc_tong} bước</span>
                     </div>
-                    {instance.soan_thao && (
-                      <div className="flex justify-between items-start">
-                        <span className="text-slate-400 shrink-0 mr-2">Soạn thảo</span>
-                        <div className="text-right">
-                          <span className={`font-semibold ${instance.ky_soan_thao_at ? "text-emerald-600" : "text-slate-700"}`}>
-                            {instance.soan_thao}{instance.ky_soan_thao_at ? " ✓" : ""}
-                          </span>
-                          {instance.ky_soan_thao_at && (
-                            <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_soan_thao_at)}</div>
-                          )}
+                    {instance.thu_tu_ky_json.map((step, i) => {
+                      const stepKey = `buoc_${i}`
+                      const signerInfo = instance.nguoi_ky?.[stepKey]
+                      const signedAt = signerInfo?.ky_at
+                      const isDoneStep = !!signedAt
+                      const isCurrent = instance.buoc_hien_tai === i && instance.trang_thai !== "da_phe_duyet" && instance.trang_thai !== "tra_ve"
+                      const displayName = signerInfo?.ten || step.ten || (step.user_id ? (allApproverProfiles.find((p) => p.id === step.user_id)?.full_name || step.user_id) : "Chưa chọn")
+                      return (
+                        <div key={`timeline_${step.step || i + 1}_${i}`} className="flex justify-between items-start">
+                          <span className="text-slate-400 shrink-0 mr-2">{stepDisplayLabel(step)}</span>
+                          <div className="text-right">
+                            <span className={`font-semibold ${isDoneStep ? "text-emerald-600" : isCurrent ? "text-violet-600 font-bold" : "text-slate-700"}`}>
+                              {displayName}{isDoneStep ? " ✓" : isCurrent ? " (Đang xử lý)" : ""}
+                            </span>
+                            {signedAt && (
+                              <div className="text-[10px] text-slate-400">{fmtDate(signedAt)}</div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {instance.xem_xet && (
-                      <div className="flex justify-between items-start">
-                        <span className="text-slate-400 shrink-0 mr-2">Xem xét</span>
-                        <div className="text-right">
-                          <span className={`font-semibold ${instance.ky_xem_xet_at ? "text-emerald-600" : "text-slate-700"}`}>
-                            {instance.xem_xet}{instance.ky_xem_xet_at ? " ✓" : ""}
-                          </span>
-                          {instance.ky_xem_xet_at && (
-                            <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_xem_xet_at)}</div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    {instance.phe_duyet && (
-                      <div className="flex justify-between items-start">
-                        <span className="text-slate-400 shrink-0 mr-2">Phê duyệt</span>
-                        <div className="text-right">
-                          <span className={`font-semibold ${instance.ky_phe_duyet_at ? "text-emerald-600" : "text-slate-700"}`}>
-                            {signAsPrefixLabel(instance.phe_duyet_sign_as)}{instance.phe_duyet}{instance.ky_phe_duyet_at ? " ✓" : ""}
-                          </span>
-                          {instance.ky_phe_duyet_at && (
-                            <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_phe_duyet_at)}</div>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                      )
+                    })}
                   </div>
+                ) : (
+                  /* Legacy timeline */
+                  (instance.soan_thao || instance.xem_xet || instance.phe_duyet) && (
+                    <div className="space-y-2 text-xs">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-400">Cấp</span>
+                        <span className="font-semibold text-slate-700">{instance.cap_tl}</span>
+                      </div>
+                      {instance.soan_thao && (
+                        <div className="flex justify-between items-start">
+                          <span className="text-slate-400 shrink-0 mr-2">Soạn thảo</span>
+                          <div className="text-right">
+                            <span className={`font-semibold ${instance.ky_soan_thao_at ? "text-emerald-600" : "text-slate-700"}`}>
+                              {instance.soan_thao}{instance.ky_soan_thao_at ? " ✓" : ""}
+                            </span>
+                            {instance.ky_soan_thao_at && (
+                              <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_soan_thao_at)}</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {instance.xem_xet && (
+                        <div className="flex justify-between items-start">
+                          <span className="text-slate-400 shrink-0 mr-2">Xem xét</span>
+                          <div className="text-right">
+                            <span className={`font-semibold ${instance.ky_xem_xet_at ? "text-emerald-600" : "text-slate-700"}`}>
+                              {instance.xem_xet}{instance.ky_xem_xet_at ? " ✓" : ""}
+                            </span>
+                            {instance.ky_xem_xet_at && (
+                              <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_xem_xet_at)}</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {instance.phe_duyet && (
+                        <div className="flex justify-between items-start">
+                          <span className="text-slate-400 shrink-0 mr-2">Phê duyệt</span>
+                          <div className="text-right">
+                            <span className={`font-semibold ${instance.ky_phe_duyet_at ? "text-emerald-600" : "text-slate-700"}`}>
+                              {signAsPrefixLabel(instance.phe_duyet_sign_as)}{instance.phe_duyet}{instance.ky_phe_duyet_at ? " ✓" : ""}
+                            </span>
+                            {instance.ky_phe_duyet_at && (
+                              <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_phe_duyet_at)}</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
                 )}
 
                 {/* Log history */}
@@ -2444,6 +2933,8 @@ export default function IsoFormInstancePage() {
       {signModal && userId && (
         <SignPlacementModal
           action={signModal.action}
+          stepIndex={signModal.stepIndex}
+          totalSteps={signModal.totalSteps}
           sourceFileUrl={signModal.sourceFileUrl}
           fileType={instance.draft_file_type}
           autoConvertPdf={instance.auto_convert_pdf}

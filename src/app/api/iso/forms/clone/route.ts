@@ -75,9 +75,13 @@ export async function POST(req: NextRequest) {
       !sourceUrl ||
       (sourceUrl.split("?")[0].toLowerCase().endsWith(".pdf") && !template.file_signed_office_url)
 
-    // Khi chỉ có PDF: tạo instance không có draft file, user sẽ tự upload
+    // Khi chỉ có PDF: copy PDF mẫu sang draft.pdf của instance để người dùng ký được ngay
     if (isPdfOnly) {
       const templatePdfUrl = (template.file_signed_pdf_url as string | null) || sourceUrl || null
+      const initialSteps = [
+        { step: 1, type: "ca_nhan", user_id: userId, ten: "Người lập" },
+        { step: 2, type: "ca_nhan", user_id: "", ten: "Phê duyệt" },
+      ]
 
       const { data: inserted, error: insErr } = await supabaseAdmin
         .from("iso_form_instances")
@@ -87,10 +91,13 @@ export async function POST(req: NextRequest) {
           tieu_de: tieu_de.trim(),
           nguoi_tao: userId,
           trang_thai: "draft",
-          cap_tl: "Cấp 1",
+          cap_tl: "Cấp 2",
           auto_convert_pdf: false,
+          so_buoc_tong: 2,
+          buoc_hien_tai: 0,
+          thu_tu_ky_json: initialSteps,
           draft_file_url: null,
-          draft_file_type: null,
+          draft_file_type: "pdf",
         })
         .select("id")
         .single()
@@ -100,6 +107,23 @@ export async function POST(req: NextRequest) {
       }
 
       const instanceId = inserted.id as string
+      let draftUrl = templatePdfUrl
+      if (templatePdfUrl) {
+        const srcPath = getStorageRelPath(templatePdfUrl)
+        if (srcPath) {
+          const dstPath = `${factoryId}/iso/instances/${instanceId}/draft.pdf`
+          const { error: copyErr } = await supabaseAdmin.storage.from(BUCKET).copy(srcPath, dstPath)
+          if (!copyErr) {
+            const { data: urlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(dstPath)
+            if (urlData?.publicUrl) draftUrl = urlData.publicUrl
+          }
+        }
+      }
+
+      if (draftUrl) {
+        await supabaseAdmin.from("iso_form_instances").update({ draft_file_url: draftUrl }).eq("id", instanceId)
+      }
+
       await supabaseAdmin.from("iso_form_instance_logs").insert({
         instance_id: instanceId,
         factory_id: factoryId,
@@ -108,7 +132,7 @@ export async function POST(req: NextRequest) {
         note: `Tạo từ template PDF: ${template.ten_tai_lieu}`,
       })
 
-      return NextResponse.json({ instanceId, isPdfOnly: true, templatePdfUrl })
+      return NextResponse.json({ instanceId, isPdfOnly: true, templatePdfUrl: draftUrl })
     }
 
     const ext = template.file_signed_office_type ||
@@ -128,8 +152,14 @@ export async function POST(req: NextRequest) {
         tieu_de: tieu_de.trim(),
         nguoi_tao: userId,
         trang_thai: "draft",
-        cap_tl: "Cấp 1",
+        cap_tl: "Cấp 2",
         auto_convert_pdf: false,
+        so_buoc_tong: 2,
+        buoc_hien_tai: 0,
+        thu_tu_ky_json: [
+          { step: 1, type: "ca_nhan", user_id: userId, ten: "Người lập" },
+          { step: 2, type: "ca_nhan", user_id: "", ten: "Phê duyệt" },
+        ],
         draft_file_type: ext,
       })
       .select("id")

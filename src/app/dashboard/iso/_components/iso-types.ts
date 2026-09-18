@@ -1,5 +1,11 @@
 // Types và constants cho module Quản lý ISO
 
+import type { ThuTuKyStep } from "@/app/dashboard/documents/_components/documents-types"
+import { stepSignerUserId, canSignStep, stepDisplayLabel } from "@/app/dashboard/documents/_components/documents-types"
+
+export type { ThuTuKyStep }
+export { stepSignerUserId, canSignStep, stepDisplayLabel }
+
 // Chữ viết tắt ký thay, chọn ngay lúc ký (SignPlacementModal) — chỉ áp dụng cho bước
 // Phê duyệt cuối (phe_duyet_sign_as), ở cả Soạn thảo ISO (iso_documents) lẫn Thực hiện
 // hồ sơ ISO (iso_form_instances). Mirror đúng SignAsType của module Văn bản nội bộ
@@ -339,6 +345,12 @@ export interface IsoFormInstance {
   xem_xet_placement: Record<string, number> | null
   phe_duyet_placement: Record<string, number> | null
   phe_duyet_sign_as?: SignAsType | null
+  // N bước ký động (mirror mô hình van_ban_documents)
+  thu_tu_ky_json?: ThuTuKyStep[]
+  buoc_hien_tai?: number
+  so_buoc_tong?: number
+  nguoi_ky?: Record<string, { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: SignAsType }>
+  placement_ky?: Record<string, unknown>
   auto_convert_pdf: boolean
   ghi_chu: string | null
   ly_do_tra_ve: string | null

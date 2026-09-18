@@ -6,7 +6,8 @@ import fontkit from "@pdf-lib/fontkit"
 import QRCode from "qrcode"
 import JSZip from "jszip"
 import { convertOfficeUrlToPdfDocumentWithRetry } from "@/app/api/sign/_lib/cloud-convert"
-import { SIGN_AS_OPTIONS, type SignAsType } from "@/app/dashboard/iso/_components/iso-types"
+import { SIGN_AS_OPTIONS, type SignAsType, type ThuTuKyStep, stepSignerUserId, type IsoFormInstanceStatus } from "@/app/dashboard/iso/_components/iso-types"
+import { clampRectToBox } from "@/lib/signing/template-layout"
 import { getSignatureImage } from "@/lib/signing/signature-image"
 import {
   loadSignerNameFont,
@@ -237,6 +238,7 @@ async function replaceFormTags(
     mediaFilename: string,
     _contentType: string,
   ): Promise<void> {
+    void _contentType
     // Lấy tất cả XML trong word/ có thể chứa tag (body, headers, footers)
     const candidatePaths: string[] = []
     zip.forEach((relPath) => {
@@ -389,7 +391,335 @@ export async function POST(
     }
 
     const factoryId = instance.factory_id as string
+    const soBuocTong = (instance.so_buoc_tong as number) || 0
 
+    // =========================================================================
+    // N-BƯỚC KÝ ĐỘNG (Dynamic N-step workflow khi so_buoc_tong > 0)
+    // =========================================================================
+    if (soBuocTong > 0) {
+      const thuTuKy = (instance.thu_tu_ky_json as ThuTuKyStep[]) || []
+      const buocHienTai = (instance.buoc_hien_tai as number) || 0
+
+      const currentStep = thuTuKy[buocHienTai]
+      if (!currentStep) {
+        return NextResponse.json({ error: "Không tìm thấy bước ký hiện tại" }, { status: 400 })
+      }
+
+      // 1. Kiểm tra quyền ký bước này
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name, username, role")
+        .eq("id", userId)
+        .single()
+      const isAdmin = profile?.role === "admin"
+      const signerId = stepSignerUserId(currentStep)
+      if (!isAdmin && signerId && signerId !== userId) {
+        return NextResponse.json({ error: "Bạn không phải người được chỉ định ký bước này" }, { status: 403 })
+      }
+
+      const signerName = profile?.full_name || profile?.username || ""
+      const stepKey = String(buocHienTai + 1)
+      const isFinalStep = buocHienTai + 1 >= soBuocTong
+
+      // 2. Kẹp toạ độ server-side nếu có mẫu vị trí
+      const effectivePlacement: SignPlacement = { ...placement }
+      try {
+        const templateDocId = instance.template_doc_id as string
+        const { data: tmplDoc } = await supabaseAdmin
+          .from("iso_documents")
+          .select("ma_tai_lieu, loai_tai_lieu")
+          .eq("id", templateDocId)
+          .maybeSingle()
+        if (tmplDoc) {
+          const ma = tmplDoc.ma_tai_lieu
+          const loai = tmplDoc.loai_tai_lieu
+          const keys: string[] = []
+          if (ma) keys.push(`iso:code:${ma}`, `iso:loai:${ma}`, ma)
+          if (loai) keys.push(`iso:loai:${loai}`, `iso:${loai}`, loai)
+          const { data: mauRows } = await supabaseAdmin
+            .from("mau_vi_tri")
+            .select("khung")
+            .eq("factory_id", factoryId)
+            .in("loai_tai_lieu", keys)
+            .order("phien_ban", { ascending: false })
+            .limit(1)
+          const khung = (mauRows?.[0]?.khung as Array<Record<string, unknown>>) || []
+          if (khung.length > 0) {
+            const roleBox = khung.find((k) =>
+              k.vai_tro === stepKey ||
+              (buocHienTai === 0 && (k.vai_tro === "soan_thao" || k.vai_tro === "ky_buoc")) ||
+              (isFinalStep && k.vai_tro === "phe_duyet") ||
+              (!isFinalStep && buocHienTai > 0 && (k.vai_tro === "xem_xet" || (typeof k.vai_tro === "string" && k.vai_tro.startsWith("xem_xet__ban"))))
+            )
+            if (roleBox && typeof roleBox.x_pt === "number") {
+              const boxPt = {
+                x: roleBox.x_pt as number,
+                y: roleBox.y_pt as number,
+                width: (roleBox.w_pt as number) || 160,
+                height: (roleBox.h_pt as number) || 75,
+              }
+              const clampedSig = clampRectToBox({
+                x: effectivePlacement.x,
+                y: effectivePlacement.y,
+                width: effectivePlacement.width,
+                height: effectivePlacement.height,
+              }, boxPt)
+              effectivePlacement.x = clampedSig.x
+              effectivePlacement.y = clampedSig.y
+              effectivePlacement.width = clampedSig.width
+              effectivePlacement.height = clampedSig.height
+
+              if (typeof effectivePlacement.nameX === "number") {
+                const clampedName = clampRectToBox({
+                  x: effectivePlacement.nameX,
+                  y: effectivePlacement.nameY ?? boxPt.y,
+                  width: effectivePlacement.nameWidth ?? 120,
+                  height: effectivePlacement.nameHeight ?? 20,
+                }, boxPt)
+                effectivePlacement.nameX = clampedName.x
+                effectivePlacement.nameY = clampedName.y
+                effectivePlacement.nameWidth = clampedName.width
+                effectivePlacement.nameHeight = clampedName.height
+              }
+
+              if (typeof effectivePlacement.cvX === "number") {
+                const clampedCv = clampRectToBox({
+                  x: effectivePlacement.cvX,
+                  y: effectivePlacement.cvY ?? boxPt.y,
+                  width: effectivePlacement.cvWidth ?? 120,
+                  height: effectivePlacement.cvHeight ?? 20,
+                }, boxPt)
+                effectivePlacement.cvX = clampedCv.x
+                effectivePlacement.cvY = clampedCv.y
+                effectivePlacement.cvWidth = clampedCv.width
+                effectivePlacement.cvHeight = clampedCv.height
+              }
+            }
+          }
+        }
+      } catch (clampErr) {
+        console.warn("[finalize N-step] Clamp coordinates warning:", clampErr)
+      }
+
+      // 3. Xử lý tiền tố ký thay
+      const signAsChosen: SignAsType = isValidSignAs(sign_as) ? sign_as : "none"
+
+      // 4. Cập nhật nguoi_ky và placement_ky
+      const prevNguoiKy = (instance.nguoi_ky as Record<string, unknown>) || {}
+      const prevPlacementKy = (instance.placement_ky as Record<string, unknown>) || {}
+
+      const newNguoiKy = {
+        ...prevNguoiKy,
+        [stepKey]: {
+          ten: signerName,
+          chuc_vu: effectivePlacement.chucVuText || currentStep.chuc_vu || "",
+          ky_at: new Date().toISOString(),
+          sign_as: signAsChosen === "none" ? undefined : signAsChosen,
+        },
+      }
+
+      const newPlacementKy: Record<string, unknown> = {
+        ...prevPlacementKy,
+        [stepKey]: effectivePlacement,
+      }
+      if (typeof effectivePlacement.qrX === "number") {
+        newPlacementKy.qr = {
+          x: effectivePlacement.qrX,
+          y: effectivePlacement.qrY,
+          width: effectivePlacement.qrWidth ?? 54,
+          height: effectivePlacement.qrHeight ?? 54,
+          page: effectivePlacement.page ?? 1,
+        }
+      }
+
+      const draftExt = (instance.draft_file_type as string | null) ?? "docx"
+      const draftUrl = instance.draft_file_url as string | null
+      if (!draftUrl) {
+        return NextResponse.json({ error: "Hồ sơ chưa có file gốc" }, { status: 400 })
+      }
+
+      const originFromReq = req.headers.get("origin") || (req.headers.get("host") ? `${req.headers.get("x-forwarded-proto") || "https"}://${req.headers.get("host")}` : "")
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || originFromReq || "https://qlsxkpt.vercel.app"
+      const qrUrl = `${appUrl}/dashboard/iso/forms/${instanceId}`
+      const qrPlacement = (newPlacementKy.qr as { x: number; y: number; width: number; height: number; page: number } | undefined) ?? null
+
+      if (!isFinalStep) {
+        // ── Ký bước trung gian ──
+        let signedBytes: Uint8Array
+        let signedExt = draftExt
+
+        if (draftExt === "pdf") {
+          // Stamp các bước từ 0 đến buocHienTai lên file gốc
+          const fileBytes = await downloadFile(draftUrl)
+          const placementsToStamp: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }> = []
+          for (let i = 0; i <= buocHienTai; i++) {
+            const sk = String(i + 1)
+            const p = (i === buocHienTai ? effectivePlacement : newPlacementKy[sk]) as SignPlacement
+            const nk = (i === buocHienTai ? newNguoiKy[sk] : prevNguoiKy[sk]) as { ten?: string; sign_as?: SignAsType }
+            const stp = thuTuKy[i]
+            const uId = (i === buocHienTai ? userId : (stp?.user_id || instance.nguoi_tao)) as string
+            const pfx = nk?.sign_as && nk.sign_as !== "none" ? `${nk.sign_as}.` : null
+            if (p) {
+              placementsToStamp.push({
+                userId: uId,
+                placement: p,
+                signerName: nk?.ten || "",
+                prefixText: pfx,
+              })
+            }
+          }
+          signedBytes = await stampPdf(fileBytes, placementsToStamp, factoryId, qrUrl, qrPlacement)
+          signedExt = "pdf"
+        } else {
+          // Office: thay tag
+          const sourceUrl = (instance.soan_thao_signed_url as string | null) || draftUrl
+          const fileBytes = await downloadFile(sourceUrl)
+          const sigImgBuf = await getSignatureImage(factoryId, userId)
+          signedBytes = await replaceFormTags(fileBytes, draftExt, {
+            step: buocHienTai === 0 ? "soan_thao" : "xem_xet",
+            signerName,
+            sigImgBuf,
+            qrUrl: buocHienTai === 0 ? qrUrl : null,
+          })
+          signedExt = draftExt
+        }
+
+        const signedPath = `${factoryId}/iso/instances/${instanceId}/step_${stepKey}_signed.${signedExt}`
+        const mimeType = signedExt === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        await supabaseAdmin.storage.from(BUCKET).upload(signedPath, new Blob([Buffer.from(signedBytes)], { type: mimeType }), { upsert: true })
+        const { data: signedUrlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(signedPath)
+
+        const nextBuoc = buocHienTai + 1
+        const nextStatus: IsoFormInstanceStatus = (nextBuoc === soBuocTong - 1) ? "cho_phe_duyet" : "cho_xem_xet"
+
+        const updates: Record<string, unknown> = {
+          trang_thai: nextStatus,
+          buoc_hien_tai: nextBuoc,
+          nguoi_ky: newNguoiKy,
+          placement_ky: newPlacementKy,
+          soan_thao_signed_url: signedUrlData?.publicUrl,
+        }
+        if (signedExt === "pdf") {
+          updates.final_pdf_url = signedUrlData?.publicUrl
+        }
+
+        await supabaseAdmin.from("iso_form_instances").update(updates).eq("id", instanceId)
+
+        await supabaseAdmin.from("iso_form_instance_logs").insert({
+          instance_id: instanceId,
+          factory_id: factoryId,
+          user_id: userId,
+          action: `ky_buoc_${stepKey}`,
+          note: lyDo || null,
+        })
+
+        return NextResponse.json({
+          success: true,
+          trang_thai: nextStatus,
+          buoc_hien_tai: nextBuoc,
+          fileUrl: signedUrlData?.publicUrl,
+        })
+      } else {
+        // ── Bước phê duyệt cuối cùng ──
+        let finalBytes: Uint8Array
+        let finalExt = draftExt
+
+        if (draftExt === "pdf") {
+          // Vẽ lại TẤT CẢ placement từ file gốc
+          const fileBytes = await downloadFile(draftUrl)
+          const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }> = []
+          for (let i = 0; i < soBuocTong; i++) {
+            const sk = String(i + 1)
+            const p = (i === buocHienTai ? effectivePlacement : newPlacementKy[sk]) as SignPlacement
+            const nk = (i === buocHienTai ? newNguoiKy[sk] : prevNguoiKy[sk]) as { ten?: string; sign_as?: SignAsType }
+            const stp = thuTuKy[i]
+            const uId = (i === buocHienTai ? userId : (stp?.user_id || instance.nguoi_tao)) as string
+            const pfx = nk?.sign_as && nk.sign_as !== "none" ? `${nk.sign_as}.` : null
+            if (p) {
+              allPlacements.push({
+                userId: uId,
+                placement: p,
+                signerName: nk?.ten || "",
+                prefixText: pfx,
+              })
+            }
+          }
+          finalBytes = await stampPdf(fileBytes, allPlacements, factoryId, qrUrl, qrPlacement)
+          finalExt = "pdf"
+        } else {
+          // Office: thay tag bước phê duyệt
+          const sourceUrl = (instance.soan_thao_signed_url as string | null) || draftUrl
+          const fileBytes = await downloadFile(sourceUrl)
+          const sigImgBuf = await getSignatureImage(factoryId, userId)
+          finalBytes = await replaceFormTags(fileBytes, draftExt, {
+            step: "phe_duyet",
+            signerName,
+            sigImgBuf,
+            qrUrl: null,
+          })
+          finalExt = draftExt
+
+          if (instance.auto_convert_pdf) {
+            try {
+              const tempPath = `${factoryId}/iso/instances/${instanceId}/temp_final.${draftExt}`
+              const mime = draftExt === "xlsx"
+                ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              await supabaseAdmin.storage.from(BUCKET).upload(tempPath, new Blob([Buffer.from(finalBytes)], { type: mime }), { upsert: true })
+              const { data: tempUrlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(tempPath)
+              const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(tempUrlData.publicUrl)
+              const pdfBuf = await pdfDoc.save()
+              finalBytes = new Uint8Array(pdfBuf)
+              finalExt = "pdf"
+            } catch (convErr) {
+              console.error("[finalize N-step] CloudConvert lỗi:", convErr)
+            }
+          }
+        }
+
+        const finalPath = `${factoryId}/iso/instances/${instanceId}/final.${finalExt}`
+        const finalMime = finalExt === "pdf" ? "application/pdf" : "application/octet-stream"
+        await supabaseAdmin.storage.from(BUCKET).upload(finalPath, new Blob([Buffer.from(finalBytes)], { type: finalMime }), { upsert: true })
+        const { data: finalUrlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(finalPath)
+
+        const updates: Record<string, unknown> = {
+          trang_thai: "da_phe_duyet" as IsoFormInstanceStatus,
+          buoc_hien_tai: soBuocTong,
+          nguoi_ky: newNguoiKy,
+          placement_ky: newPlacementKy,
+          phe_duyet: signerName,
+          ky_phe_duyet_at: new Date().toISOString(),
+          phe_duyet_sign_as: signAsChosen === "none" ? null : signAsChosen,
+        }
+        if (finalExt === "pdf") {
+          updates.final_pdf_url = finalUrlData?.publicUrl
+        } else {
+          updates.final_office_url = finalUrlData?.publicUrl
+        }
+
+        await supabaseAdmin.from("iso_form_instances").update(updates).eq("id", instanceId)
+
+        await supabaseAdmin.from("iso_form_instance_logs").insert({
+          instance_id: instanceId,
+          factory_id: factoryId,
+          user_id: userId,
+          action: "phe_duyet",
+          note: lyDo || null,
+        })
+
+        return NextResponse.json({
+          success: true,
+          trang_thai: "da_phe_duyet",
+          buoc_hien_tai: soBuocTong,
+          finalUrl: finalUrlData?.publicUrl,
+        })
+      }
+    }
+
+    // =========================================================================
+    // LEGACY PATH: 3 vai trò cố định (Cấp 1 / Cấp 2, so_buoc_tong === 0)
+    // Giữ nguyên 100% không đổi một nét cho các hồ sơ lịch sử.
+    // =========================================================================
     // Kiểm tra quyền action
     if (action === "soan_thao" && instance.nguoi_tao !== userId) {
       return NextResponse.json({ error: "Bạn không phải người tạo hồ sơ này" }, { status: 403 })
