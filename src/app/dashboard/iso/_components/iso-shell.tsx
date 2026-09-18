@@ -7,6 +7,7 @@ import { FileText, LayoutDashboard, ClipboardCheck, FolderEdit, Archive, type Lu
 import type { ReactNode } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import { stepSignerUserId, type ThuTuKyStep } from "@/app/dashboard/iso/_components/iso-types"
 
 type NavTab = {
   href: string
@@ -76,15 +77,22 @@ export function IsoShell({ children }: IsoShellProps) {
         return
       }
 
-      const { data } = await supabase
-        .from("iso_documents")
-        .select("id, parent_doc_id, trang_thai, xem_xet_user_id, phe_duyet_user_id, soan_thao_user_id")
-        .eq("factory_id", fid)
-        .or(`xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid},soan_thao_user_id.eq.${uid}`)
-        .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet", "tra_ve"])
+      const [{ data: docData }, { data: formData }] = await Promise.all([
+        supabase
+          .from("iso_documents")
+          .select("id, parent_doc_id, trang_thai, xem_xet_user_id, phe_duyet_user_id, soan_thao_user_id")
+          .eq("factory_id", fid)
+          .or(`xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid},soan_thao_user_id.eq.${uid}`)
+          .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet", "tra_ve"]),
+        supabase
+          .from("iso_form_instances")
+          .select("id, trang_thai, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, so_buoc_tong, buoc_hien_tai, thu_tu_ky_json")
+          .eq("factory_id", fid)
+          .in("trang_thai", ["draft", "cho_xem_xet", "cho_phe_duyet", "tra_ve"]),
+      ])
 
       const taskKeys = new Set<string>()
-      ;(data || []).filter((doc) =>
+      ;(docData || []).filter((doc) =>
         (doc.trang_thai === "cho_xem_xet" && doc.xem_xet_user_id === uid) ||
         (doc.trang_thai === "cho_phe_duyet" && doc.phe_duyet_user_id === uid) ||
         (doc.trang_thai === "bi_tu_choi_phe_duyet" && doc.xem_xet_user_id === uid) ||
@@ -92,12 +100,42 @@ export function IsoShell({ children }: IsoShellProps) {
       ).forEach((doc) => {
         taskKeys.add(doc.parent_doc_id || doc.id)
       })
-      if (alive) setPendingTaskCount(taskKeys.size)
+
+      type FormRow = {
+        trang_thai: string
+        nguoi_tao: string | null
+        xem_xet_user_id: string | null
+        phe_duyet_user_id: string | null
+        so_buoc_tong?: number | null
+        buoc_hien_tai?: number | null
+        thu_tu_ky_json?: ThuTuKyStep[] | null
+      }
+      const formCount = ((formData || []) as FormRow[]).filter((inst) => {
+        if ((inst.so_buoc_tong ?? 0) > 0 && Array.isArray(inst.thu_tu_ky_json)) {
+          const firstStep = inst.thu_tu_ky_json[0]
+          const firstUid = firstStep ? stepSignerUserId(firstStep) : null
+          if (inst.trang_thai === "tra_ve") return inst.nguoi_tao === uid || firstUid === uid
+          if (inst.trang_thai === "draft") return inst.nguoi_tao === uid || firstUid === uid
+          const curStep = inst.thu_tu_ky_json[inst.buoc_hien_tai ?? 0]
+          const curUid = curStep ? stepSignerUserId(curStep) : null
+          return curUid === uid
+        }
+        if (inst.trang_thai === "draft") return inst.nguoi_tao === uid
+        if (inst.trang_thai === "cho_xem_xet") return inst.xem_xet_user_id === uid
+        if (inst.trang_thai === "cho_phe_duyet") return inst.phe_duyet_user_id === uid
+        if (inst.trang_thai === "tra_ve") return true
+        return false
+      }).length
+
+      if (alive) setPendingTaskCount(taskKeys.size + formCount)
 
       if (!alive || channel) return
       channel = supabase
         .channel(`iso-task-count-${fid}-${uid}-${Date.now()}`)
         .on("postgres_changes", { event: "*", schema: "public", table: "iso_documents", filter: `factory_id=eq.${fid}` }, () => {
+          void loadPendingTasks()
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "iso_form_instances", filter: `factory_id=eq.${fid}` }, () => {
           void loadPendingTasks()
         })
         .subscribe()

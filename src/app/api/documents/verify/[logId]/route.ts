@@ -32,11 +32,11 @@ type LogRow = {
   pades_error?: string | null
 }
 
-const SUPPORTED_DOC_TYPES = new Set(["van_ban", "iso"])
+const SUPPORTED_DOC_TYPES = new Set(["van_ban", "iso", "iso_form"])
 
 /** "Ký bước 2" / "Phê duyệt" — nhãn hiển thị cho người xem, không phải mã nội bộ. */
 function buocLabel(row: LogRow): string {
-  if (row.doc_type === "iso") {
+  if (row.doc_type === "iso" || row.doc_type === "iso_form") {
     // ISO chỉ niêm phong đúng 1 lần lúc phê duyệt (xem generate-pdf/route.ts's shouldSealPades);
     // dòng log không kèm chữ ký số là các lượt đóng dấu soạn thảo/xem xét.
     return row.pades_sig_index === null || row.pades_sig_index === undefined
@@ -75,11 +75,96 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     }
 
     const isIso = log.doc_type === "iso"
+    const isIsoForm = log.doc_type === "iso_form"
+
+    const profilePromise = log.user_id
+      ? supabase.from("profiles").select("full_name, username").eq("id", log.user_id).maybeSingle()
+      : Promise.resolve({ data: null })
+
+    let docRow: Record<string, unknown> | null = null
+    let trangThai: string | null = null
+    let maTaiLieu: string | null = null
+    let tenTaiLieu: string | null = null
+    let fileSignedPdfUrl: string | null = null
+
+    if (isIsoForm) {
+      const [{ data: profile }, { data: formInst }] = await Promise.all([
+        profilePromise,
+        supabase
+          .from("iso_form_instances")
+          .select("id, tieu_de, trang_thai, final_pdf_url, template_doc_id")
+          .eq("id", log.doc_id)
+          .maybeSingle(),
+      ])
+      let tmplDoc: { ma_tai_lieu: string | null; ten_tai_lieu: string | null } | null = null
+      if (formInst?.template_doc_id) {
+        const { data: tmpl } = await supabase
+          .from("iso_documents")
+          .select("ma_tai_lieu, ten_tai_lieu")
+          .eq("id", formInst.template_doc_id)
+          .maybeSingle()
+        tmplDoc = tmpl
+      }
+      docRow = (formInst ?? null) as Record<string, unknown> | null
+      trangThai = formInst?.trang_thai === "da_phe_duyet" ? "co_hieu_luc" : (formInst?.trang_thai || null)
+      maTaiLieu = tmplDoc?.ma_tai_lieu || formInst?.tieu_de || null
+      tenTaiLieu = tmplDoc?.ten_tai_lieu || formInst?.tieu_de || null
+      fileSignedPdfUrl = (formInst?.final_pdf_url as string) || null
+
+      const base = {
+        docType: log.doc_type,
+        signerName: (profile?.full_name as string) || (profile?.username as string) || "Không rõ",
+        buoc: buocLabel(log),
+        kyLuc: log.created_at,
+        maTaiLieu,
+        tenTaiLieu,
+        trangThai,
+        contentHash: log.content_hash,
+      }
+
+      const severityFor = (valid: boolean): "ok" | "warn" | "error" => {
+        if (valid) return "ok"
+        if (trangThai === "het_hieu_luc") return "warn"
+        return "error"
+      }
+
+      if (log.pades_sig_index === null || log.pades_sig_index === undefined) {
+        return NextResponse.json({
+          ...base,
+          valid: false,
+          severity: severityFor(false),
+          reason: log.pades_error
+            ? `Bước ký này không có chữ ký số (chỉ có con dấu hình ảnh) — ${log.pades_error}`
+            : "Bước ký này không có chữ ký số (chỉ có con dấu hình ảnh)",
+        })
+      }
+
+      if (!fileSignedPdfUrl) {
+        return NextResponse.json({
+          ...base,
+          valid: false,
+          severity: severityFor(false),
+          reason: "Không tìm thấy file đã ký để xác thực",
+        })
+      }
+
+      const fileRes = await fetch(fileSignedPdfUrl)
+      if (!fileRes.ok) {
+        return NextResponse.json({
+          ...base,
+          valid: false,
+          severity: severityFor(false),
+          reason: "Không tải được file để xác thực",
+        })
+      }
+      const pdfBytes = Buffer.from(await fileRes.arrayBuffer())
+      const result = verifyPadesSignature(pdfBytes, log.pades_sig_index as number)
+
+      return NextResponse.json({ ...base, ...result, severity: severityFor(result.valid) })
+    }
 
     const [{ data: profile }, { data: doc }] = await Promise.all([
-      log.user_id
-        ? supabase.from("profiles").select("full_name, username").eq("id", log.user_id).maybeSingle()
-        : Promise.resolve({ data: null }),
+      profilePromise,
       isIso
         ? supabase
             .from("iso_documents")
@@ -93,8 +178,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
             .maybeSingle(),
     ])
 
-    const docRow = (doc ?? null) as Record<string, unknown> | null
-    const trangThai = (docRow?.trang_thai as string) || null
+    docRow = (doc ?? null) as Record<string, unknown> | null
+    trangThai = (docRow?.trang_thai as string) || null
+    fileSignedPdfUrl = (docRow?.file_signed_pdf_url as string) || null
 
     const base = {
       docType: log.doc_type,

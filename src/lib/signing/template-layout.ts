@@ -207,18 +207,18 @@ export function computeDefaultSubLayout(
   const name: LayoutRect | null = withName
     ? {
         x: box.x,
-        y: withChucVu ? box.y + innerH * 0.26 : box.y + innerH * 0.1,
+        y: box.y,
         width: box.width,
-        height: innerH * 0.24,
+        height: withChucVu ? innerH * 0.22 : innerH * 0.26,
       }
     : null
 
   const chuc_vu: LayoutRect | null = withChucVu
     ? {
         x: box.x,
-        y: box.y,
+        y: withName ? box.y + innerH * 0.22 : box.y,
         width: box.width,
-        height: innerH * (withName ? 0.22 : 0.26),
+        height: withName ? innerH * 0.23 : innerH * 0.26,
       }
     : null
 
@@ -450,3 +450,128 @@ export function resolveEffectiveQrRect(box: TemplateQrBox): LayoutRect {
   if (box.layout) return clampRectToBox(box.layout, box)
   return { x: box.x, y: box.y, width: box.width, height: box.height }
 }
+
+/**
+ * Tìm khung mẫu (`mau_vi_tri.khung`) tương ứng với bước ký hiện tại.
+ * Dùng chung giữa frontend (`SignPlacementModal`) và backend (`api/iso/forms/[id]/finalize`).
+ *
+ * Quy tắc khớp:
+ * 1. Bước đầu (Soạn thảo): `nhan` khớp `stepName`, hoặc `vai_tro` là `soan_thao`/`ky_buoc`/`buoc_0`.
+ * 2. Bước cuối (Phê duyệt): `nhan` khớp `stepName`, hoặc `vai_tro` là `phe_duyet`/`stepKey`.
+ * 3. Bước trung gian (N bước):
+ *    - Lọc các khung trung gian (loại bỏ `soan_thao`, `phe_duyet`, `qr`, `ngay_ky`, `ghi_chu`).
+ *    - Sắp xếp thứ tự: theo số trang -> clone index (`__banX`) -> tọa độ X (trái sang phải) -> Y.
+ *    - Ưu tiên 1: `nhan` khớp `stepName` (vd nhan: "Giám sát" khớp stepName: "Giám sát").
+ *    - Ưu tiên 2: `vai_tro` khớp `targetRoleKeys` (vd `xem_xet__ban2`, `ky_buoc__ban2`, `buoc_2`).
+ *    - Ưu tiên 3: Vị trí tương ứng trong danh sách đã sắp xếp `intermediateBoxes[intermediateIdx]`.
+ */
+export function findRoleBoxForStep(
+  khung: Array<Record<string, unknown>>,
+  opts: {
+    stepIndex: number
+    totalSteps: number
+    stepName?: string | null
+    stepKey?: string | null
+    action?: string | null
+  }
+): Record<string, unknown> | null {
+  if (!Array.isArray(khung) || khung.length === 0) return null
+
+  const { stepIndex, totalSteps, stepName, stepKey, action } = opts
+  const isFirstStep = stepIndex === 0
+  const isFinalStep = totalSteps > 0 && stepIndex + 1 >= totalSteps
+
+  const isNonSig = (vt: string, loai?: unknown) => {
+    const l = String(loai || "")
+    return l === "qr" || l === "ngay_ky" || l === "ghi_chu" || vt === "qr" || vt === "ngay_ky" || vt === "ghi_chu"
+  }
+
+  const getRoleCloneIndex = (vaiTro: string): number => {
+    if (vaiTro === "xem_xet" || vaiTro === "ky_buoc" || vaiTro === "soan_thao" || vaiTro === "phe_duyet") return 1
+    const m = /__ban(\d+)$/.exec(vaiTro)
+    if (m) return parseInt(m[1], 10)
+    const b = /buoc_(\d+)$/.exec(vaiTro)
+    if (b) return parseInt(b[1], 10)
+    return 1
+  }
+
+  const num = (v: unknown, fb: number) => (typeof v === "number" && Number.isFinite(v) ? v : fb)
+
+  if (isFirstStep) {
+    const firstStepBoxes = khung.filter((k) => {
+      const vt = String(k.vai_tro || "")
+      const cloneOf = String(k.clone_of || "")
+      if (isNonSig(vt, k.loai)) return false
+      if (vt === "soan_thao" || vt.startsWith("soan_thao") || cloneOf === "soan_thao") return true
+      if (vt === "buoc_0" || (stepKey && vt === stepKey)) return true
+      if (vt === "ky_buoc" || vt.startsWith("ky_buoc") || cloneOf === "ky_buoc") return true
+      return false
+    })
+    return (stepName ? firstStepBoxes.find((k) => k.nhan && String(k.nhan).trim().toLowerCase() === stepName.trim().toLowerCase()) : null)
+      || firstStepBoxes.find((k) => k.vai_tro === "soan_thao")
+      || firstStepBoxes.find((k) => (stepKey && k.vai_tro === stepKey) || (action && k.vai_tro === action))
+      || firstStepBoxes[0]
+      || null
+  }
+
+  if (isFinalStep) {
+    const finalStepBoxes = khung.filter((k) => {
+      const vt = String(k.vai_tro || "")
+      const cloneOf = String(k.clone_of || "")
+      if (isNonSig(vt, k.loai)) return false
+      if (vt === "phe_duyet" || vt.startsWith("phe_duyet") || cloneOf === "phe_duyet") return true
+      if ((stepKey && vt === stepKey) || (action && vt === action)) return true
+      return false
+    })
+    return (stepName ? finalStepBoxes.find((k) => k.nhan && String(k.nhan).trim().toLowerCase() === stepName.trim().toLowerCase()) : null)
+      || finalStepBoxes.find((k) => k.vai_tro === "phe_duyet")
+      || finalStepBoxes.find((k) => (stepKey && k.vai_tro === stepKey) || (action && k.vai_tro === action))
+      || finalStepBoxes[0]
+      || null
+  }
+
+  // Intermediate steps: Thực hiện (idx 0), Giám sát (idx 1), etc.
+  const intermediateIdx = Math.max(0, stepIndex - 1)
+  const intermediateBoxes = khung.filter((k) => {
+    const vt = String(k.vai_tro || "")
+    const cloneOf = String(k.clone_of || "")
+    if (isNonSig(vt, k.loai)) return false
+    if (vt === "soan_thao" || vt.startsWith("soan_thao") || cloneOf === "soan_thao") return false
+    if (vt === "phe_duyet" || vt.startsWith("phe_duyet") || cloneOf === "phe_duyet") return false
+    if (vt === "xem_xet" || vt.startsWith("xem_xet") || cloneOf === "xem_xet") return true
+    if (vt === "ky_buoc" || vt.startsWith("ky_buoc") || cloneOf === "ky_buoc") return true
+    if ((stepKey && vt === stepKey) || (action && vt === action)) return true
+    if (vt.startsWith("buoc_")) return true
+    return false
+  })
+
+  // Sắp xếp: trang -> clone index -> tọa độ X (trái qua phải) -> tọa độ Y
+  intermediateBoxes.sort((a, b) => {
+    const pA = num(a.so_trang, 1)
+    const pB = num(b.so_trang, 1)
+    if (pA !== pB) return pA - pB
+    const cA = getRoleCloneIndex(String(a.vai_tro || ""))
+    const cB = getRoleCloneIndex(String(b.vai_tro || ""))
+    if (cA !== cB) return cA - cB
+    const xA = num(a.x_pt, 0)
+    const xB = num(b.x_pt, 0)
+    if (Math.abs(xA - xB) > 1) return xA - xB
+    return num(a.y_pt, 0) - num(b.y_pt, 0)
+  })
+
+  const targetRoleKeys: string[] = []
+  if (stepIndex === 1 || intermediateIdx === 0) {
+    targetRoleKeys.push("xem_xet", "xem_xet__ban1", "ky_buoc", "ky_buoc__ban1", "buoc_1")
+  } else {
+    targetRoleKeys.push(`xem_xet__ban${stepIndex}`, `ky_buoc__ban${stepIndex}`, `buoc_${stepIndex}`)
+    targetRoleKeys.push(`xem_xet__ban${intermediateIdx + 1}`, `ky_buoc__ban${intermediateIdx + 1}`)
+  }
+  if (stepKey) targetRoleKeys.push(stepKey)
+
+  return (stepName ? intermediateBoxes.find((k) => k.nhan && String(k.nhan).trim().toLowerCase() === stepName.trim().toLowerCase()) : null)
+    || intermediateBoxes.find((k) => targetRoleKeys.includes(String(k.vai_tro || "")))
+    || intermediateBoxes[intermediateIdx]
+    || intermediateBoxes[intermediateBoxes.length - 1]
+    || null
+}
+

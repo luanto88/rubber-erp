@@ -5,10 +5,13 @@ import { PDFDocument } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import QRCode from "qrcode"
 import JSZip from "jszip"
+import { randomUUID } from "crypto"
 import { convertOfficeUrlToPdfDocumentWithRetry } from "@/app/api/sign/_lib/cloud-convert"
 import { SIGN_AS_OPTIONS, type SignAsType, type ThuTuKyStep, stepSignerUserId, type IsoFormInstanceStatus } from "@/app/dashboard/iso/_components/iso-types"
-import { clampRectToBox } from "@/lib/signing/template-layout"
+import { clampRectToBox, findRoleBoxForStep } from "@/lib/signing/template-layout"
 import { getSignatureImage } from "@/lib/signing/signature-image"
+import { computeIntegrityHash } from "@/lib/signing/hash"
+import { sealPdfWithVerifyLink, type VerifyLinkTarget } from "@/lib/signing/verify-link"
 import {
   loadSignerNameFont,
   drawSignatureImage,
@@ -19,6 +22,8 @@ import {
   drawMetaTextBoxes,
   ISO_SIGNER_NAME_STYLE,
 } from "@/lib/signing/stamp-pdf"
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -55,11 +60,16 @@ type SignPlacement = {
   ngayKyY?: number
   ngayKyWidth?: number
   ngayKyHeight?: number
+  ghiChuTat?: boolean
   ghiChuText?: string | null
   ghiChuX?: number
   ghiChuY?: number
   ghiChuWidth?: number
   ghiChuHeight?: number
+  kyNhayX?: number
+  kyNhayY?: number
+  kyNhayWidth?: number
+  kyNhayHeight?: number
   qrX?: number
   qrY?: number
   qrWidth?: number
@@ -171,7 +181,7 @@ async function stampPdf(
     await drawSignatureImage(pdfDoc, page, sigImg, placement)
     drawSignerName(page, signerName, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
     drawChucVu(page, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
-    drawMetaTextBoxes(page, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
+    await drawMetaTextBoxes(page, placement, signerNameFont, ISO_SIGNER_NAME_STYLE, { pdfDoc, sigImg })
     drawSignPrefix(page, prefixText, placement, signerNameFont)
     await drawExtraPlacements(pdfDoc, placement.extraPlacements, sigImg, signerName, signerNameFont, ISO_SIGNER_NAME_STYLE)
   }
@@ -350,13 +360,14 @@ export async function POST(
     const { id: instanceId } = await params
     const body = await req.json() as {
       token: string
-      action: "soan_thao" | "xem_xet" | "phe_duyet"
+      action: "soan_thao" | "xem_xet" | "phe_duyet" | "ky_buoc"
+      step_index?: number
       placement: SignPlacement
       lyDo?: string
       cap_tl?: string
       sign_as?: SignAsType
     }
-    const { token, action, placement, lyDo, cap_tl, sign_as } = body
+    const { token, action, step_index, placement, lyDo, cap_tl, sign_as } = body
 
     if (!token || !action || !placement) {
       return NextResponse.json({ error: "Thiếu token, action hoặc placement" }, { status: 400 })
@@ -398,7 +409,14 @@ export async function POST(
     // =========================================================================
     if (soBuocTong > 0) {
       const thuTuKy = (instance.thu_tu_ky_json as ThuTuKyStep[]) || []
-      const buocHienTai = (instance.buoc_hien_tai as number) || 0
+      let buocHienTai = (instance.buoc_hien_tai as number) || 0
+
+      // Nếu hồ sơ đang ở trạng thái trả về (tra_ve), nháp (draft) hoặc client ký bước 0 / soạn thảo:
+      // Bước ký BẮT BUỘC là bước 0 (Người lập / Soạn thảo)
+      const isResubmitOrDraft = instance.trang_thai === "tra_ve" || instance.trang_thai === "draft" || step_index === 0 || action === "soan_thao"
+      if (isResubmitOrDraft) {
+        buocHienTai = 0
+      }
 
       const currentStep = thuTuKy[buocHienTai]
       if (!currentStep) {
@@ -413,7 +431,10 @@ export async function POST(
         .single()
       const isAdmin = profile?.role === "admin"
       const signerId = stepSignerUserId(currentStep)
-      if (!isAdmin && signerId && signerId !== userId) {
+      const isCreator = instance.nguoi_tao === userId
+      const isStepSigner = signerId ? signerId === userId : isCreator
+
+      if (!isAdmin && !isStepSigner && (buocHienTai > 0 || !isCreator)) {
         return NextResponse.json({ error: "Bạn không phải người được chỉ định ký bước này" }, { status: 403 })
       }
 
@@ -445,12 +466,13 @@ export async function POST(
             .limit(1)
           const khung = (mauRows?.[0]?.khung as Array<Record<string, unknown>>) || []
           if (khung.length > 0) {
-            const roleBox = khung.find((k) =>
-              k.vai_tro === stepKey ||
-              (buocHienTai === 0 && (k.vai_tro === "soan_thao" || k.vai_tro === "ky_buoc")) ||
-              (isFinalStep && k.vai_tro === "phe_duyet") ||
-              (!isFinalStep && buocHienTai > 0 && (k.vai_tro === "xem_xet" || (typeof k.vai_tro === "string" && k.vai_tro.startsWith("xem_xet__ban"))))
-            )
+            const roleBox = findRoleBoxForStep(khung, {
+              stepIndex: buocHienTai,
+              totalSteps: soBuocTong,
+              stepName: currentStep?.ten || null,
+              stepKey,
+              action,
+            })
             if (roleBox && typeof roleBox.x_pt === "number") {
               const boxPt = {
                 x: roleBox.x_pt as number,
@@ -469,13 +491,20 @@ export async function POST(
               effectivePlacement.width = clampedSig.width
               effectivePlacement.height = clampedSig.height
 
+              const extendedBox = {
+                x: boxPt.x - 15,
+                y: Math.max(0, boxPt.y - 45),
+                width: boxPt.width + 30,
+                height: boxPt.height + 70,
+              }
+
               if (typeof effectivePlacement.nameX === "number") {
                 const clampedName = clampRectToBox({
                   x: effectivePlacement.nameX,
                   y: effectivePlacement.nameY ?? boxPt.y,
                   width: effectivePlacement.nameWidth ?? 120,
                   height: effectivePlacement.nameHeight ?? 20,
-                }, boxPt)
+                }, extendedBox)
                 effectivePlacement.nameX = clampedName.x
                 effectivePlacement.nameY = clampedName.y
                 effectivePlacement.nameWidth = clampedName.width
@@ -488,7 +517,7 @@ export async function POST(
                   y: effectivePlacement.cvY ?? boxPt.y,
                   width: effectivePlacement.cvWidth ?? 120,
                   height: effectivePlacement.cvHeight ?? 20,
-                }, boxPt)
+                }, extendedBox)
                 effectivePlacement.cvX = clampedCv.x
                 effectivePlacement.cvY = clampedCv.y
                 effectivePlacement.cvWidth = clampedCv.width
@@ -505,8 +534,9 @@ export async function POST(
       const signAsChosen: SignAsType = isValidSignAs(sign_as) ? sign_as : "none"
 
       // 4. Cập nhật nguoi_ky và placement_ky
-      const prevNguoiKy = (instance.nguoi_ky as Record<string, unknown>) || {}
-      const prevPlacementKy = (instance.placement_ky as Record<string, unknown>) || {}
+      // Nếu là bước 0 (Soạn thảo / Người lập lại sau khi trả về): xoá sạch chữ ký cũ của các vòng trước
+      const prevNguoiKy = (buocHienTai === 0 ? {} : (instance.nguoi_ky as Record<string, unknown>)) || {}
+      const prevPlacementKy = (buocHienTai === 0 ? {} : (instance.placement_ky as Record<string, unknown>)) || {}
 
       const newNguoiKy = {
         ...prevNguoiKy,
@@ -598,6 +628,7 @@ export async function POST(
           nguoi_ky: newNguoiKy,
           placement_ky: newPlacementKy,
           soan_thao_signed_url: signedUrlData?.publicUrl,
+          ly_do_tra_ve: null,
         }
         if (signedExt === "pdf") {
           updates.final_pdf_url = signedUrlData?.publicUrl
@@ -613,6 +644,25 @@ export async function POST(
           note: lyDo || null,
         })
 
+        const nextSignerUserId = thuTuKy[nextBuoc]?.user_id
+        if (nextSignerUserId) {
+          try {
+            await supabaseAdmin.from("notifications").insert({
+              factory_id: factoryId,
+              user_id: nextSignerUserId,
+              type: "cho_ky",
+              doc_id: instanceId,
+              doc_type: "iso_form",
+              title: "[ISO Forms] Hồ sơ ISO cần ký duyệt",
+              body: `Hồ sơ "${instance.tieu_de || "Biểu mẫu ISO"}" đã được chuyển đến bạn để ký bước ${nextBuoc + 1} (${thuTuKy[nextBuoc]?.ten || `Bước ${nextBuoc + 1}`}).`,
+              is_read: false,
+              link: `${appUrl}/dashboard/iso/forms/${instanceId}`,
+            })
+          } catch (notifErr) {
+            console.warn("[finalize] Notification error:", notifErr)
+          }
+        }
+
         return NextResponse.json({
           success: true,
           trang_thai: nextStatus,
@@ -623,11 +673,11 @@ export async function POST(
         // ── Bước phê duyệt cuối cùng ──
         let finalBytes: Uint8Array
         let finalExt = draftExt
+        const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }> = []
 
         if (draftExt === "pdf") {
           // Vẽ lại TẤT CẢ placement từ file gốc
           const fileBytes = await downloadFile(draftUrl)
-          const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }> = []
           for (let i = 0; i < soBuocTong; i++) {
             const sk = String(i + 1)
             const p = (i === buocHienTai ? effectivePlacement : newPlacementKy[sk]) as SignPlacement
@@ -677,6 +727,64 @@ export async function POST(
           }
         }
 
+        let padesSigIndex: number | null = null
+        let padesError: string | null = null
+        const logId = randomUUID()
+
+        if (finalExt === "pdf") {
+          try {
+            const linkTargets: VerifyLinkTarget[] = []
+            for (const item of allPlacements) {
+              const p = item.placement
+              if (!p) continue
+              const pageIdx = (p.page ?? 1) - 1
+              if (pageIdx >= 0) {
+                linkTargets.push({
+                  pageIndex: pageIdx,
+                  x: p.x,
+                  y: p.y,
+                  width: p.width,
+                  height: p.height,
+                })
+              }
+              for (const extra of p.extraPlacements ?? []) {
+                const extraIdx = (extra.page ?? 1) - 1
+                if (extraIdx >= 0) {
+                  linkTargets.push({
+                    pageIndex: extraIdx,
+                    x: extra.x,
+                    y: extra.y,
+                    width: extra.width,
+                    height: extra.height,
+                  })
+                }
+              }
+            }
+
+            const { data: userProfile } = await supabaseAdmin
+              .from("profiles")
+              .select("auth_email")
+              .eq("id", userId)
+              .maybeSingle()
+
+            const sealSignerName = signerName || "Người phê duyệt"
+            const verifyUrl = `${APP_URL}/van-ban-verify/${logId}`
+            const sealedBuf = await sealPdfWithVerifyLink(
+              Buffer.from(finalBytes),
+              linkTargets,
+              verifyUrl,
+              sealSignerName,
+              (userProfile?.auth_email as string) || "",
+            )
+            finalBytes = new Uint8Array(sealedBuf)
+            padesSigIndex = 0
+          } catch (sealErr) {
+            console.warn("[finalize N-step] sealPdfWithVerifyLink warning:", sealErr)
+            padesError = sealErr instanceof Error ? sealErr.message : "Lỗi niêm phong chữ ký số"
+          }
+        }
+
+        const signedContentHash = computeIntegrityHash(finalBytes)
         const finalPath = `${factoryId}/iso/instances/${instanceId}/final.${finalExt}`
         const finalMime = finalExt === "pdf" ? "application/pdf" : "application/octet-stream"
         await supabaseAdmin.storage.from(BUCKET).upload(finalPath, new Blob([Buffer.from(finalBytes)], { type: finalMime }), { upsert: true })
@@ -699,6 +807,18 @@ export async function POST(
 
         await supabaseAdmin.from("iso_form_instances").update(updates).eq("id", instanceId)
 
+        await supabaseAdmin.from("doc_approval_log").insert({
+          id: logId,
+          factory_id: factoryId,
+          doc_id: instanceId,
+          doc_type: "iso_form",
+          user_id: userId,
+          action: "phe_duyet",
+          content_hash: signedContentHash,
+          pades_sig_index: padesSigIndex,
+          pades_error: padesError,
+        })
+
         await supabaseAdmin.from("iso_form_instance_logs").insert({
           instance_id: instanceId,
           factory_id: factoryId,
@@ -706,6 +826,24 @@ export async function POST(
           action: "phe_duyet",
           note: lyDo || null,
         })
+
+        if (instance.nguoi_tao && instance.nguoi_tao !== userId) {
+          try {
+            await supabaseAdmin.from("notifications").insert({
+              factory_id: factoryId,
+              user_id: instance.nguoi_tao,
+              type: "cho_ky",
+              doc_id: instanceId,
+              doc_type: "iso_form",
+              title: "[ISO Forms] Hồ sơ đã được phê duyệt",
+              body: `Hồ sơ "${instance.tieu_de || "Biểu mẫu ISO"}" đã được ${signerName} phê duyệt hoàn tất.`,
+              is_read: false,
+              link: `${appUrl}/dashboard/iso/forms/${instanceId}`,
+            })
+          } catch (notifErr) {
+            console.warn("[finalize] Notification error:", notifErr)
+          }
+        }
 
         return NextResponse.json({
           success: true,
@@ -721,22 +859,24 @@ export async function POST(
     // Giữ nguyên 100% không đổi một nét cho các hồ sơ lịch sử.
     // =========================================================================
     // Kiểm tra quyền action
-    if (action === "soan_thao" && instance.nguoi_tao !== userId) {
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, username, role")
+      .eq("id", userId)
+      .single()
+    const isAdmin = profile?.role === "admin"
+
+    if (action === "soan_thao" && !isAdmin && instance.nguoi_tao !== userId) {
       return NextResponse.json({ error: "Bạn không phải người tạo hồ sơ này" }, { status: 403 })
     }
-    if (action === "xem_xet" && instance.xem_xet_user_id !== userId) {
+    if (action === "xem_xet" && !isAdmin && instance.xem_xet_user_id !== userId) {
       return NextResponse.json({ error: "Bạn không phải người xem xét hồ sơ này" }, { status: 403 })
     }
-    if (action === "phe_duyet" && instance.phe_duyet_user_id !== userId) {
+    if (action === "phe_duyet" && !isAdmin && instance.phe_duyet_user_id !== userId) {
       return NextResponse.json({ error: "Bạn không phải người phê duyệt hồ sơ này" }, { status: 403 })
     }
 
     // Lấy tên người ký
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("full_name, username")
-      .eq("id", userId)
-      .single()
     const signerName = profile?.full_name || profile?.username || ""
 
     const draftExt = (instance.draft_file_type as string | null) ?? "docx"
@@ -810,6 +950,7 @@ export async function POST(
         soan_thao_placement: placement,
         soan_thao_signed_url: signedUrlData?.publicUrl,
         ky_soan_thao_at: new Date().toISOString(),
+        ly_do_tra_ve: null,
       }
       if (signedExt === "pdf") {
         updates.final_pdf_url = signedUrlData?.publicUrl
@@ -976,6 +1117,64 @@ export async function POST(
         }
       }
 
+      let padesSigIndex: number | null = null
+      let padesError: string | null = null
+      const logId = randomUUID()
+
+      if (finalExt === "pdf") {
+        try {
+          const linkTargets: VerifyLinkTarget[] = []
+          for (const item of allPlacements) {
+            const p = item.placement
+            if (!p) continue
+            const pageIdx = (p.page ?? 1) - 1
+            if (pageIdx >= 0) {
+              linkTargets.push({
+                pageIndex: pageIdx,
+                x: p.x,
+                y: p.y,
+                width: p.width,
+                height: p.height,
+              })
+            }
+            for (const extra of p.extraPlacements ?? []) {
+              const extraIdx = (extra.page ?? 1) - 1
+              if (extraIdx >= 0) {
+                linkTargets.push({
+                  pageIndex: extraIdx,
+                  x: extra.x,
+                  y: extra.y,
+                  width: extra.width,
+                  height: extra.height,
+                })
+              }
+            }
+          }
+
+          const { data: userProfile } = await supabaseAdmin
+            .from("profiles")
+            .select("auth_email")
+            .eq("id", userId)
+            .maybeSingle()
+
+          const sealSignerName = signerName || "Người phê duyệt"
+          const verifyUrl = `${APP_URL}/van-ban-verify/${logId}`
+          const sealedBuf = await sealPdfWithVerifyLink(
+            Buffer.from(finalBytes),
+            linkTargets,
+            verifyUrl,
+            sealSignerName,
+            (userProfile?.auth_email as string) || "",
+          )
+          finalBytes = new Uint8Array(sealedBuf)
+          padesSigIndex = 0
+        } catch (sealErr) {
+          console.warn("[finalize 3-step] sealPdfWithVerifyLink warning:", sealErr)
+          padesError = sealErr instanceof Error ? sealErr.message : "Lỗi niêm phong chữ ký số"
+        }
+      }
+
+      const signedContentHash = computeIntegrityHash(finalBytes)
       const finalPath = `${factoryId}/iso/instances/${instanceId}/final.${finalExt}`
       const finalBlob = new Blob([Buffer.from(finalBytes)], {
         type: finalExt === "pdf" ? "application/pdf" : "application/octet-stream",
@@ -997,6 +1196,18 @@ export async function POST(
       }
 
       await supabaseAdmin.from("iso_form_instances").update(updates).eq("id", instanceId)
+
+      await supabaseAdmin.from("doc_approval_log").insert({
+        id: logId,
+        factory_id: factoryId,
+        doc_id: instanceId,
+        doc_type: "iso_form",
+        user_id: userId,
+        action: "phe_duyet",
+        content_hash: signedContentHash,
+        pades_sig_index: padesSigIndex,
+        pades_error: padesError,
+      })
 
       await supabaseAdmin.from("iso_form_instance_logs").insert({
         instance_id: instanceId,

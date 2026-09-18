@@ -90,9 +90,12 @@ export function loadSignerNameFont(): Buffer | null {
  * `drawSignerName()` trực tiếp được).
  */
 export function computeNameSlot(box: SignatureBox, style: NameStyle) {
+  const nameH = typeof box.nameHeight === "number" ? box.nameHeight : 20
   return {
     xCenter: typeof box.nameX === "number" ? box.nameX + (box.nameWidth ?? box.width) / 2 : box.x + box.width / 2,
     y: typeof box.nameY === "number" ? box.nameY : Math.max(box.y - style.belowOffset, style.minY),
+    nameH,
+    isExplicitNameY: typeof box.nameY === "number",
     maxWidth: Math.max(
       typeof box.nameWidth === "number" ? box.nameWidth : box.width + style.extraWidth,
       style.minMaxWidth,
@@ -100,7 +103,7 @@ export function computeNameSlot(box: SignatureBox, style: NameStyle) {
   }
 }
 
-/** Vẽ ảnh chữ ký vào 1 khung — `embedPng` với fallback `embedJpg`, bỏ qua êm nếu lỗi. */
+/** Vẽ ảnh chữ ký vào 1 khung — giữ đúng tỉ lệ khung hình (aspect ratio) và căn giữa như object-contain của canvas */
 export async function drawSignatureImage(
   pdfDoc: PDFDocument,
   page: PDFPage,
@@ -111,7 +114,20 @@ export async function drawSignatureImage(
   if (box.showSignature === false) return
   try {
     const embedded = await pdfDoc.embedPng(sigBytes).catch(() => pdfDoc.embedJpg(sigBytes))
-    page.drawImage(embedded, { x: box.x, y: box.y, width: box.width, height: box.height, opacity })
+    const imgAspect = embedded.width / embedded.height
+    const boxAspect = box.width / Math.max(box.height, 1)
+    let drawW = box.width
+    let drawH = box.height
+    if (imgAspect > boxAspect) {
+      drawW = box.width
+      drawH = box.width / imgAspect
+    } else {
+      drawH = box.height
+      drawW = box.height * imgAspect
+    }
+    const drawX = box.x + (box.width - drawW) / 2
+    const drawY = box.y + (box.height - drawH) / 2
+    page.drawImage(embedded, { x: drawX, y: drawY, width: drawW, height: drawH, opacity })
   } catch { /* bỏ qua nếu embed thất bại */ }
 }
 
@@ -131,9 +147,14 @@ export function drawSignerName(
       fontSize -= style.fontStep
     }
     const textWidth = font.widthOfTextAtSize(signerName, fontSize)
+    // Nếu có toạ độ nameY của hộp, căn giữa theo chiều dọc hộp để khớp flex items-center của canvas
+    const drawY = slot.isExplicitNameY
+      ? slot.y + Math.max(0, (slot.nameH - fontSize) / 2) + fontSize * 0.15
+      : slot.y
+
     page.drawText(signerName, {
       x: slot.xCenter - textWidth / 2,
-      y: slot.y,
+      y: drawY,
       size: fontSize,
       font,
       color: rgb(0, 0, 0),
@@ -199,6 +220,63 @@ export function drawChucVu(
   })
 }
 
+/** Màu sắc chuẩn cho tick xanh và text ngày ký (đồng bộ với module Văn bản) */
+export const TICK_COLOR = rgb(0.06, 0.6, 0.35)
+export const DATE_TEXT_COLOR = rgb(0.45, 0.45, 0.45)
+
+/**
+ * Vẽ dấu tick bằng 2 đoạn thẳng (`drawLine`) thay vì ký tự `✓` — font TimesNewRoman.ttf đang
+ * dùng có thể thiếu glyph này, thiếu glyph sẽ ra ô vuông hoặc mất hẳn ký tự.
+ */
+export function drawTick(page: PDFPage, x: number, y: number, size: number): void {
+  const thickness = Math.max(1, size * 0.12)
+  page.drawLine({
+    start: { x: x + size * 0.16, y: y + size * 0.52 },
+    end: { x: x + size * 0.42, y: y + size * 0.24 },
+    thickness,
+    color: TICK_COLOR,
+  })
+  page.drawLine({
+    start: { x: x + size * 0.42, y: y + size * 0.24 },
+    end: { x: x + size * 0.86, y: y + size * 0.78 },
+    thickness,
+    color: TICK_COLOR,
+  })
+}
+
+/** "✓ Văn bản được ký dd/mm/yyyy hh:mm:ss" hoặc "✓ Hồ sơ được ký dd/mm/yyyy hh:mm:ss" — tick xanh, chữ xám mờ, canh giữa khung. */
+export function drawNgayKyTag(
+  page: PDFPage,
+  box: { x: number; y: number; width: number; height: number },
+  text: string,
+  font: PDFFont | null,
+): void {
+  if (!font || !text) return
+  try {
+    const tickSize = Math.min(box.height * 0.8, 11)
+    const gap = tickSize * 0.35
+    const maxTextW = Math.max(box.width - tickSize - gap, 1)
+
+    let fontSize = Math.min(9, box.height * 0.7)
+    while (fontSize > 5 && font.widthOfTextAtSize(text, fontSize) > maxTextW) {
+      fontSize -= 0.25
+    }
+    const textW = font.widthOfTextAtSize(text, fontSize)
+    const groupW = tickSize + gap + textW
+    const startX = box.x + Math.max(0, (box.width - groupW) / 2)
+    const centerY = box.y + box.height / 2
+
+    drawTick(page, startX, centerY - tickSize / 2, tickSize)
+    page.drawText(text, {
+      x: startX + tickSize + gap,
+      y: centerY - fontSize * 0.36,
+      size: fontSize,
+      font,
+      color: DATE_TEXT_COLOR,
+    })
+  } catch { /* bỏ qua nếu vẽ tag ngày ký thất bại */ }
+}
+
 /** Khung "Ngày ký" và "Ghi chú" của mẫu vị trí — mọi trường optional để placement cũ vẫn hợp lệ. */
 export type MetaTextBoxes = {
   ngayKyText?: string | null
@@ -206,15 +284,20 @@ export type MetaTextBoxes = {
   ngayKyY?: number
   ngayKyWidth?: number
   ngayKyHeight?: number
+  ghiChuTat?: boolean
   ghiChuText?: string | null
   ghiChuX?: number
   ghiChuY?: number
   ghiChuWidth?: number
   ghiChuHeight?: number
+  kyNhayX?: number
+  kyNhayY?: number
+  kyNhayWidth?: number
+  kyNhayHeight?: number
 }
 
 /**
- * Vẽ "Ngày ký" (1 dòng, canh giữa) và "Ghi chú" (nhiều dòng, tự xuống dòng) theo khung mẫu.
+ * Vẽ "Ngày ký" (tick xanh + text hoặc 1 dòng canh giữa) và "Ghi chú" (nhiều dòng + chữ ký nháy).
  *
  * BỔ SUNG và có điều kiện như `drawChucVu`: placement không mang nhóm trường này thì không vẽ
  * gì, hồ sơ ký trước khi có tính năng giữ nguyên hình ảnh cũ.
@@ -222,12 +305,16 @@ export type MetaTextBoxes = {
  * ⚠️ Nơi gọi phải tự đảm bảo mỗi khung chỉ gắn vào placement của ĐÚNG MỘT bước. Luồng ký ISO
  * vẽ lại toàn bộ các bước từ file gốc ở lượt cuối — gắn vào mọi bước sẽ ra chữ chồng nhiều lớp.
  */
-export function drawMetaTextBoxes(
+export async function drawMetaTextBoxes(
   page: PDFPage,
   box: MetaTextBoxes,
   font: PDFFont | null,
   style: NameStyle,
-): void {
+  opts?: {
+    pdfDoc?: PDFDocument | null
+    sigImg?: Buffer | Uint8Array | null
+  },
+): Promise<void> {
   if (!font) return
 
   const ngay = (box.ngayKyText || "").trim()
@@ -235,19 +322,46 @@ export function drawMetaTextBoxes(
     ngay && typeof box.ngayKyX === "number" && typeof box.ngayKyY === "number"
     && typeof box.ngayKyWidth === "number" && typeof box.ngayKyHeight === "number"
   ) {
-    drawTextFit(
-      page, ngay,
-      { x: box.ngayKyX, y: box.ngayKyY, width: box.ngayKyWidth, height: box.ngayKyHeight },
-      font,
-      { maxFontSize: style.maxFontSize, minFontSize: style.minFontSize, fontStep: style.fontStep },
-    )
+    if (ngay.includes("được ký")) {
+      // Dạng tag ngày ký có tick xanh giống module Văn bản: "✓ Hồ sơ được ký..." / "✓ Văn bản được ký..."
+      drawNgayKyTag(
+        page,
+        { x: box.ngayKyX, y: box.ngayKyY, width: box.ngayKyWidth, height: box.ngayKyHeight },
+        ngay,
+        font,
+      )
+    } else {
+      drawTextFit(
+        page, ngay,
+        { x: box.ngayKyX, y: box.ngayKyY, width: box.ngayKyWidth, height: box.ngayKyHeight },
+        font,
+        { maxFontSize: style.maxFontSize, minFontSize: style.minFontSize, fontStep: style.fontStep },
+      )
+    }
   }
+
+  // Khung ghi chú: nếu ghiChuTat = true thì không vẽ gì
+  if (box.ghiChuTat) return
 
   const ghiChu = (box.ghiChuText || "").trim()
   if (
     ghiChu && typeof box.ghiChuX === "number" && typeof box.ghiChuY === "number"
     && typeof box.ghiChuWidth === "number" && typeof box.ghiChuHeight === "number"
   ) {
+    // Vẽ chữ ký nháy nếu có toạ độ và có ảnh chữ ký
+    if (
+      opts?.pdfDoc && opts?.sigImg &&
+      typeof box.kyNhayX === "number" && typeof box.kyNhayY === "number" &&
+      typeof box.kyNhayWidth === "number" && typeof box.kyNhayHeight === "number"
+    ) {
+      await drawSignatureImage(opts.pdfDoc, page, opts.sigImg, {
+        x: box.kyNhayX,
+        y: box.kyNhayY,
+        width: box.kyNhayWidth,
+        height: box.kyNhayHeight,
+      })
+    }
+
     // Ghi chú thường dài vài dòng → dùng bản wrap, KHÔNG dùng drawTextFit (hàm đó chỉ vẽ 1 dòng
     // và tràn ra ngoài khung khi đã ở cỡ chữ nhỏ nhất).
     drawTextWrapped(
@@ -284,7 +398,7 @@ export function drawTextFit(
     const textWidth = font.widthOfTextAtSize(text, fontSize)
     page.drawText(text, {
       x: box.x + (box.width - textWidth) / 2,
-      y: box.y + Math.max(0, (box.height - fontSize) / 2),
+      y: box.y + Math.max(0, (box.height - fontSize) / 2) + fontSize * 0.15,
       size: fontSize,
       font,
       color: rgb(0, 0, 0),

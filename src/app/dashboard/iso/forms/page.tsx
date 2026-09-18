@@ -156,9 +156,19 @@ function TemplateCard({
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: IsoFormInstanceStatus }) {
-  const label = FORM_INSTANCE_STATUS_LABEL[status] ?? status
-  const color = FORM_INSTANCE_STATUS_COLOR[status] ?? "bg-slate-100 text-slate-600"
+function StatusBadge({ status, inst }: { status: IsoFormInstanceStatus; inst?: IsoFormInstance }) {
+  let label = FORM_INSTANCE_STATUS_LABEL[status] ?? status
+  let color = FORM_INSTANCE_STATUS_COLOR[status] ?? "bg-slate-100 text-slate-600"
+  if (inst && (inst.so_buoc_tong ?? 0) > 0) {
+    if (status === "cho_xem_xet" && (inst.so_buoc_tong ?? 0) > 3) {
+      const cur = inst.buoc_hien_tai ?? 0
+      const stepName = inst.thu_tu_ky_json?.[cur]?.ten || `Bước ${cur + 1}`
+      label = `Chờ ký bước ${cur + 1}: ${stepName}`
+    } else if (status === "cho_phe_duyet") {
+      label = "Chờ phê duyệt"
+      color = "bg-orange-100 text-orange-700"
+    }
+  }
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${color}`}>
       {label}
@@ -417,18 +427,15 @@ export default function IsoFormsPage() {
     void bootstrap()
   }, [])
 
-  const loadInstances = useCallback(async (fid: string, uid: string, role = "") => {
+  const loadInstances = useCallback(async (fid: string) => {
     setInstLoading(true)
     try {
-      let query = supabase
+      const query = supabase
         .from("iso_form_instances")
         .select("*")
         .eq("factory_id", fid)
         .order("created_at", { ascending: false })
         .limit(100)
-      if (role !== "admin") {
-        query = query.or(`nguoi_tao.eq.${uid},xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
-      }
       const { data } = await query
       setInstances((data ?? []) as IsoFormInstance[])
     } finally {
@@ -437,14 +444,14 @@ export default function IsoFormsPage() {
   }, [])
 
   useEffect(() => {
-    if (factoryId && userId) void loadInstances(factoryId, userId, userRole)
-  }, [factoryId, userId, userRole, loadInstances])
+    if (factoryId) void loadInstances(factoryId)
+  }, [factoryId, loadInstances])
 
   const handleDeleteInst = async (instId: string) => {
     if (!factoryId || !userId) return
     await supabase.from("iso_form_instances").delete().eq("id", instId)
     setDelConfirm(null)
-    void loadInstances(factoryId, userId, userRole)
+    void loadInstances(factoryId)
   }
 
   const handleSearch = async () => {
@@ -661,26 +668,38 @@ export default function IsoFormsPage() {
                 {filteredInstances.map((inst) => {
                   const isAdmin = userRole === "admin"
                   const isCreator = inst.nguoi_tao === userId
-                  const canEditInst = (inst.trang_thai === "draft" && isCreator) || isAdmin
+                  const isDrafter = (inst.thu_tu_ky_json as Array<{ user_id?: string }>)?.[0]?.user_id === userId
+                  const canEditInst = (inst.trang_thai === "draft" && (isCreator || isDrafter)) || isAdmin
                   const canDeleteInst = (inst.trang_thai === "draft" && isCreator) || isAdmin
+                  const drafterName = (inst.thu_tu_ky_json as Array<{ ten?: string }>)?.[0]?.ten || inst.soan_thao || ""
+                  const approverName = (inst.thu_tu_ky_json as Array<{ ten?: string }>)?.[((inst.so_buoc_tong ?? 2) - 1)]?.ten || inst.phe_duyet || ""
                   return (
                     <tr
                       key={inst.id}
                       onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
                       className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors"
                     >
-                      <td className="px-4 py-3 max-w-[220px]">
+                      <td className="px-4 py-3 max-w-[260px]">
                         <div className="font-semibold text-slate-800 truncate">{inst.tieu_de}</div>
+                        {(drafterName || approverName) && (
+                          <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                            {drafterName && <span>Lập: {drafterName}</span>}
+                            {drafterName && approverName && <span> &middot; </span>}
+                            {approverName && <span>Duyệt: {approverName}</span>}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={inst.trang_thai} />
+                        <StatusBadge status={inst.trang_thai} inst={inst} />
                         {inst.trang_thai === "tra_ve" && inst.ly_do_tra_ve && (
                           <div className="text-[10px] text-rose-500 mt-0.5 line-clamp-1">{inst.ly_do_tra_ve}</div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(inst.created_at)}</td>
                       <td className="px-4 py-3">
-                        <span className="text-xs text-slate-500">{inst.cap_tl}</span>
+                        <span className="text-xs text-slate-500">
+                          {(inst.so_buoc_tong ?? 0) > 0 ? `${inst.so_buoc_tong} bước` : inst.cap_tl}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {(() => {

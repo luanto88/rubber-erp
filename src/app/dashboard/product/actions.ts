@@ -151,7 +151,7 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
 
     const { data: matchingLots, error: findLotError } = await supabase
       .from("lots")
-      .select("id, factory_id, ma_lo, trang_thai, tong_banh, created_at, updated_at")
+      .select("id, factory_id, ma_lo, trang_thai, tong_banh, created_at, updated_at, loai_csr, loai_banh, boc")
       .eq("factory_id", lot.factory_id)
       .eq("ma_lo", maLo);
 
@@ -208,11 +208,33 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
       const normalizedStatus = normalizeLotStatus(existingLot.trang_thai);
       if (isEditingExistingTransaction) {
         // Allow editing an existing transaction on in-progress and completed lots.
-      } else
-      if (normalizedStatus !== "Dở dang") {
-        throw new Error(
-          `Lo ${maLo} dang o trang thai "${existingLot.trang_thai}", khong the nhap them giao dich.`,
-        );
+      } else {
+        if (normalizedStatus !== "Dở dang") {
+          throw new Error(
+            `Lo ${maLo} dang o trang thai "${existingLot.trang_thai}", khong the nhap them giao dich.`,
+          );
+        }
+        // Kiểm tra tính đồng nhất của lô: Cùng 1 lô, tất cả kiện phải cùng Chủng loại, Loại bọc, Loại bành
+        if (existingLot.loai_csr && lot.loai_csr && existingLot.loai_csr !== lot.loai_csr) {
+          throw new Error(
+            `Cùng lô ${maLo} không thể khác Chủng loại (đã có: "${existingLot.loai_csr}", đang nhập: "${lot.loai_csr}").`,
+          );
+        }
+        if (
+          existingLot.loai_banh &&
+          lot.loai_banh &&
+          Number(existingLot.loai_banh) !== Number(lot.loai_banh)
+        ) {
+          throw new Error(
+            `Cùng lô ${maLo} không thể khác Loại bành (đã có: ${existingLot.loai_banh}kg, đang nhập: ${lot.loai_banh}kg).`,
+          );
+        }
+        const effectiveBoc = transaction.boc || lot.boc;
+        if (existingLot.boc && effectiveBoc && existingLot.boc !== effectiveBoc) {
+          throw new Error(
+            `Cùng lô ${maLo} không thể khác Loại bọc (đã có: "${existingLot.boc}", đang nhập: "${effectiveBoc}").`,
+          );
+        }
       }
     }
 
@@ -236,6 +258,7 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
       }
     }
 
+    const effectiveBoc = transaction.boc ?? lot.boc;
     const { data: savedTransaction, error: saveTransactionError } = await supabase
       .from("lot_transactions")
       .upsert(
@@ -252,9 +275,9 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
           so_banh: transaction.so_banh,
           so_kg: transaction.so_kg,
           ...(transaction.created_by ? { created_by: transaction.created_by } : {}),
-          ...(transaction.boc !== undefined ? { boc: transaction.boc } : {}),
-          ...(transaction.pallet !== undefined ? { pallet: transaction.pallet } : {}),
-          ...(transaction.chi_thi !== undefined ? { chi_thi: transaction.chi_thi } : {}),
+          ...(effectiveBoc !== undefined ? { boc: effectiveBoc } : {}),
+          ...(transaction.pallet !== undefined ? { pallet: transaction.pallet } : lot.pallet !== undefined ? { pallet: lot.pallet } : {}),
+          ...(transaction.chi_thi !== undefined ? { chi_thi: transaction.chi_thi } : lot.chi_thi !== undefined ? { chi_thi: lot.chi_thi } : {}),
         },
         { onConflict: "id" },
       )
@@ -265,6 +288,14 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
 
     if (saveTransactionError) {
       throw new Error(`Khong luu duoc giao dich cua lo ${maLo}: ${saveTransactionError.message}`);
+    }
+
+    // Đảm bảo tất cả transactions của cùng lô được đồng bộ bọc đồng nhất với lô
+    if (effectiveBoc) {
+      await supabase
+        .from("lot_transactions")
+        .update({ boc: effectiveBoc })
+        .eq("lot_id", lotId);
     }
 
     const snapshot = await syncLotMasterSnapshot(lotId);

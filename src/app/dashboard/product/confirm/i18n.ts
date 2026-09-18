@@ -96,6 +96,10 @@ const DICT: Record<Lang, Record<string, string>> = {
     kienBocPalletMismatchBody:
       "Kiện {kien} được phép khác Ca SX/Số chỉ thị/Ngày SX giữa các lần nhập, nhưng bắt buộc CÙNG Bọc và Loại pallet. Giá trị đã ghi nhận trước đó: {boc} · {pallet}.",
     resetToKienValue: "Đặt lại đúng giá trị",
+    lotPropsMismatchTitle: "Không đồng nhất thuộc tính lô",
+    lotPropsMismatchBody:
+      "Cùng lô {maLo}, tất cả các kiện bắt buộc phải cùng Chủng loại ({csr}), Loại bọc ({boc}) và Loại bành ({banh}kg).",
+    resetToLotValue: "Dùng lại bọc của lô",
     editEntry: "Sửa",
     editEntryTitle: "Sửa giao dịch",
     editSaving: "Đang lưu...",
@@ -219,6 +223,10 @@ const DICT: Record<Lang, Record<string, string>> = {
     kienBocPalletMismatchBody:
       "ឡាំង {kien} អាចខុសគ្នាបាននៅវេនផលិត/លេខការណែនាំ/ថ្ងៃផលិត ប៉ុន្តែត្រូវតែដូចគ្នាទាំងស្រោប និងប្រភេទប៉ាឡែត។ តម្លៃដែលបានកត់ត្រាពីមុន៖ {boc} · {pallet}។",
     resetToKienValue: "កំណត់ត្រឡប់ទៅតម្លៃត្រឹមត្រូវ",
+    lotPropsMismatchTitle: "លក្ខណៈសម្បត្តិឡូត៍មិនត្រូវគ្នា",
+    lotPropsMismatchBody:
+      "ក្នុងឡូត៍តែមួយ {maLo} គ្រប់ឡាំងត្រូវតែមានប្រភេទដូចគ្នា ({csr}) ស្រោប ({boc}) និងទម្ងន់ ({banh}kg)។",
+    resetToLotValue: "ប្រើស្រោបរបស់ឡូត៍ឡើងវិញ",
     editEntry: "កែសម្រួល",
     editEntryTitle: "កែសម្រួលប្រតិបត្តិការ",
     editSaving: "កំពុងរក្សាទុក...",

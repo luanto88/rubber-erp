@@ -13,7 +13,7 @@ import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react"
 type Severity = "ok" | "warn" | "error"
 
 type VerifyResponse = {
-  docType: "van_ban" | "iso"
+  docType: "van_ban" | "iso" | "iso_form"
   signerName: string
   buoc: string
   kyLuc: string | null
@@ -49,6 +49,15 @@ const TRANG_THAI_LABEL: Record<string, Record<string, string>> = {
     het_hieu_luc: "Hết hiệu lực",
     tra_ve: "Trả về",
     bi_tu_choi_phe_duyet: "Phê duyệt từ chối",
+  },
+  iso_form: {
+    draft: "Nháp",
+    cho_xem_xet: "Chờ xem xét",
+    cho_phe_duyet: "Chờ phê duyệt",
+    co_hieu_luc: "Có hiệu lực",
+    da_phe_duyet: "Có hiệu lực",
+    tra_ve: "Trả về",
+    tu_choi: "Từ chối",
   },
 }
 

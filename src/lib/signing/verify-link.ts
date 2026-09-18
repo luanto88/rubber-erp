@@ -1,5 +1,5 @@
 import { PDFDocument, PDFArray, PDFName, PDFNumber, PDFString } from "@cantoo/pdf-lib"
-import { applyPadesSignatureToDoc } from "./pades"
+import { applyPadesSignatureToDoc, hasPadesRootCa } from "./pades"
 
 /**
  * Link "xem bằng chứng xác minh" phủ trên ô con dấu chữ ký — dùng CHUNG cho mọi module có ký số
@@ -77,7 +77,13 @@ export async function sealPdfWithVerifyLink(
   signerName: string,
   contactEmail: string,
 ): Promise<Buffer> {
+  if (!hasPadesRootCa()) {
+    const doc = await PDFDocument.load(pdfBytes)
+    addVerifyLinkAnnotations(doc, targets, verifyUrl)
+    return Buffer.from(await doc.save())
+  }
   const doc = await PDFDocument.load(pdfBytes, { forIncrementalUpdate: true })
   addVerifyLinkAnnotations(doc, targets, verifyUrl)
   return applyPadesSignatureToDoc(doc, signerName, contactEmail)
 }
+

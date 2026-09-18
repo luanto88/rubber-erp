@@ -344,6 +344,10 @@ function roleCloneIndex(role: EditorRole): number {
 // giữ nguyên đúng 1 màu cố định trong ROLE_COLORS kể cả khi bị nhân bản.
 function getRoleColor(role: EditorRole, isIso = false): { fg: string; bg: string } {
   if (isIso && (role.baseId in ISO_ROLE_COLORS)) {
+    if (role.baseId === "xem_xet" && role.isClone) {
+      const idx = roleCloneIndex(role) - 1
+      return KY_BUOC_CLONE_PALETTE[idx % KY_BUOC_CLONE_PALETTE.length]
+    }
     return ISO_ROLE_COLORS[role.baseId as IsoSignRoleId]
   }
   if (role.baseId !== "ky_buoc") return ROLE_COLORS[role.baseId] ?? { fg: "#059669", bg: "rgba(5,150,105,.14)" }
@@ -420,6 +424,8 @@ export default function SignTemplateEditorPage() {
     phe_duyet: string | null
     file_signed_pdf_url: string | null
     file_goc_url: string | null
+    so_buoc_tong?: number | null
+    thu_tu_ky_json?: Array<{ user_id?: string; ten?: string }> | null
   } | null>(null)
 
   // Kiểm tra tài liệu hiện tại có được miễn trừ quy tắc ký đủ 3 khung (Biểu mẫu F, Phụ lục HD/PL, hồ sơ con)
@@ -568,7 +574,16 @@ export default function SignTemplateEditorPage() {
             import.meta.url,
           ).toString()
         }
-        const pdf = await pdfjsLib.getDocument(activePdfUrl).promise
+        const freshFetchUrl = activePdfUrl.includes("?")
+          ? `${activePdfUrl}&_nocache=${Date.now()}`
+          : `${activePdfUrl}?_nocache=${Date.now()}`
+        const pdf = await pdfjsLib.getDocument({
+          url: freshFetchUrl,
+          httpHeaders: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+          },
+        }).promise
         if (cancelled) return
         setNumPages(pdf.numPages)
         const dims: Record<number, { w: number; h: number }> = {}
@@ -751,12 +766,17 @@ export default function SignTemplateEditorPage() {
           if (formInstanceId) {
             const { data: formInst, error: fErr } = await supabase
               .from("iso_form_instances")
-              .select("id, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, soan_thao, xem_xet, phe_duyet, cap_tl, so_buoc_tong, thu_tu_ky_json")
+              .select("id, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, soan_thao, xem_xet, phe_duyet, cap_tl, so_buoc_tong, thu_tu_ky_json, draft_file_url")
               .eq("id", formInstanceId)
               .eq("factory_id", factoryId)
               .single()
-
             if (!cancelled && formInst && !fErr) {
+              if (formInst.draft_file_url) {
+                const freshDraft = formInst.draft_file_url.includes("?")
+                  ? `${formInst.draft_file_url}&_cb=${Date.now()}`
+                  : `${formInst.draft_file_url}?_cb=${Date.now()}`
+                setActivePdfUrl(freshDraft)
+              }
               let stUid = formInst.nguoi_tao || ""
               let xxUid = formInst.xem_xet_user_id || ""
               let pdUid = formInst.phe_duyet_user_id || ""
@@ -796,6 +816,8 @@ export default function SignTemplateEditorPage() {
                 phe_duyet: pdName || null,
                 file_signed_pdf_url: null,
                 file_goc_url: null,
+                so_buoc_tong: formInst.so_buoc_tong ?? null,
+                thu_tu_ky_json: (formInst.thu_tu_ky_json as Array<{ user_id?: string; ten?: string }>) || null,
               })
               setDocFetchOk(true)
               setDocLoaded(true)
@@ -908,11 +930,25 @@ export default function SignTemplateEditorPage() {
     let ids: string[] = []
     if (isIso) {
       if (!isoDocData) return
-      ids = [
-        isoDocData.soan_thao_user_id,
-        isoDocData.cap_tl === "Cấp 2" ? null : isoDocData.xem_xet_user_id,
-        isoDocData.phe_duyet_user_id,
-      ].filter((id): id is string => !!id)
+      if (Array.isArray(isoDocData.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0) {
+        ids = Array.from(
+          new Set(
+            isoDocData.thu_tu_ky_json
+              .map((s: { user_id?: string }) => s.user_id)
+              .filter((id): id is string => !!id),
+          ),
+        )
+      } else {
+        const isTwoSteps =
+          isoDocData.cap_tl === "Cấp 2" ||
+          isoDocData.so_buoc_tong === 2 ||
+          (Array.isArray(isoDocData.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length === 2)
+        ids = [
+          isoDocData.soan_thao_user_id,
+          isTwoSteps ? null : isoDocData.xem_xet_user_id,
+          isoDocData.phe_duyet_user_id,
+        ].filter((id): id is string => !!id)
+      }
     } else {
       ids = Array.from(
         new Set([
@@ -969,18 +1005,113 @@ export default function SignTemplateEditorPage() {
   useEffect(() => {
     if (!templateLoaded || !docLoaded || reconciledRef.current) return
     reconciledRef.current = true
-    if (!docId || !docFetchOk) return
+    if ((!docId && !formInstanceId) || !docFetchOk) return
     if (isIso) {
-      if (isoDocData?.cap_tl === "Cấp 2") {
-        setRoles((prev) => prev.map((r) => r.baseId === "xem_xet" ? { ...r, hiddenForDoc: true } : r))
-      }
+      const steps = Array.isArray(isoDocData?.thu_tu_ky_json) ? isoDocData.thu_tu_ky_json : null
+      const totalSteps = isoDocData?.so_buoc_tong || (steps ? steps.length : 0)
+      const isTwoSteps =
+        isoDocData?.cap_tl === "Cấp 2" ||
+        totalSteps === 2 ||
+        (steps && steps.length === 2)
+
+      setRoles((prev) => {
+        cloneSeqRef.current.xem_xet = 1
+
+        let soanThaoRole = prev.find((r) => r.baseId === "soan_thao")
+        if (!soanThaoRole) {
+          soanThaoRole = makeBaseRole("soan_thao", true)
+        }
+        const step0Ten = steps ? steps[0]?.ten?.trim() : undefined
+        if (step0Ten) {
+          soanThaoRole = { ...soanThaoRole, label: step0Ten, hiddenForDoc: false }
+        }
+
+        let pheDuyetRole = prev.find((r) => r.baseId === "phe_duyet")
+        if (!pheDuyetRole) {
+          pheDuyetRole = makeBaseRole("phe_duyet", true)
+        }
+        const lastStepTen = steps && totalSteps > 1 ? steps[totalSteps - 1]?.ten?.trim() : undefined
+        if (lastStepTen) {
+          pheDuyetRole = { ...pheDuyetRole, label: lastStepTen, hiddenForDoc: false }
+        }
+
+        const otherNonReviewRoles = prev.filter(
+          (r) => r.baseId !== "soan_thao" && r.baseId !== "phe_duyet" && r.baseId !== "xem_xet",
+        )
+
+        let reviewFamily: EditorRole[] = []
+        if (isTwoSteps) {
+          reviewFamily = prev
+            .filter((r) => r.baseId === "xem_xet")
+            .map((r) => ({ ...r, hiddenForDoc: true }))
+        } else {
+          const reviewCount = Math.max(1, totalSteps > 2 ? totalSteps - 2 : 1)
+          const existingXemXet = prev
+            .filter((r) => r.baseId === "xem_xet")
+            .slice()
+            .sort((a, b) => {
+              const diff = roleCloneIndex(a) - roleCloneIndex(b)
+              if (diff !== 0) return diff
+              return (a.box?.xPct ?? 0) - (b.box?.xPct ?? 0)
+            })
+
+          const baseXemXet = existingXemXet[0] || makeBaseRole("xem_xet", true)
+          const sourceBox =
+            baseXemXet.box ??
+            (ISO_ROLE_DEFS as unknown as Record<string, { defaultBox: PctBox }>).xem_xet.defaultBox
+
+          reviewFamily.push({
+            ...baseXemXet,
+            label: (steps && steps[1]?.ten?.trim()) || baseXemXet.label || "Xem xét",
+            hiddenForDoc: false,
+          })
+
+          for (let i = 1; i < reviewCount; i++) {
+            cloneSeqRef.current.xem_xet = (cloneSeqRef.current.xem_xet || 1) + 1
+            const cloneNum = cloneSeqRef.current.xem_xet
+            const stepIdx = i + 1
+            const stepLabel = (steps && steps[stepIdx]?.ten?.trim()) || `Bước ${stepIdx + 1}`
+
+            let cloneRole = existingXemXet[i]
+            if (!cloneRole) {
+              const offsetBox = {
+                ...sourceBox,
+                xPct: Math.min(74, sourceBox.xPct + i * 4),
+              }
+              cloneRole = makeCloneRole("xem_xet", cloneNum, offsetBox, true)
+            }
+            reviewFamily.push({
+              ...cloneRole,
+              label: stepLabel,
+              hiddenForDoc: false,
+            })
+          }
+
+          for (let i = reviewCount; i < existingXemXet.length; i++) {
+            reviewFamily.push({
+              ...existingXemXet[i],
+              hiddenForDoc: true,
+            })
+          }
+        }
+
+        const next = [
+          soanThaoRole,
+          ...reviewFamily.filter((r) => !r.hiddenForDoc),
+          pheDuyetRole,
+          ...otherNonReviewRoles,
+          ...reviewFamily.filter((r) => r.hiddenForDoc),
+        ]
+        setInitialSnapshot(JSON.stringify(next))
+        return next
+      })
       return
     }
     const result = reconcileForDoc(roles, docSteps, cloneSeqRef)
     setRoles(result)
     setInitialSnapshot(JSON.stringify(result))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateLoaded, docLoaded, docId, docFetchOk, docSteps, isIso, isoDocData])
+  }, [templateLoaded, docLoaded, docId, formInstanceId, docFetchOk, docSteps, isIso, isoDocData])
 
   const handleSwitchIsoDoc = async (
     targetDocId: string,
@@ -1063,37 +1194,95 @@ export default function SignTemplateEditorPage() {
     if (!docId && !formInstanceId) return map
 
     if (isIso) {
-      if (isoDocData?.soan_thao_user_id) {
-        const info = signerInfoById[isoDocData.soan_thao_user_id]
-        map["soan_thao"] = {
-          kind: "ca_nhan",
-          userId: isoDocData.soan_thao_user_id,
-          fullName: info?.fullName || isoDocData.soan_thao || "",
-          chucVu: info?.chucVu || "",
-          chucVuByKey: info?.chucVuByKey,
-          hasSignature: info?.hasSignature ?? true,
+      const steps = Array.isArray(isoDocData?.thu_tu_ky_json) ? isoDocData.thu_tu_ky_json : null
+
+      if (steps && steps.length > 0) {
+        // Step 0: soan_thao
+        const step0 = steps[0]
+        if (step0?.user_id) {
+          const info = signerInfoById[step0.user_id]
+          map["soan_thao"] = {
+            kind: "ca_nhan",
+            userId: step0.user_id,
+            fullName: info?.fullName || step0.ten || isoDocData?.soan_thao || "",
+            chucVu: info?.chucVu || "",
+            chucVuByKey: info?.chucVuByKey,
+            hasSignature: info?.hasSignature ?? true,
+          }
         }
-      }
-      if (isoDocData?.xem_xet_user_id && isoDocData.cap_tl !== "Cấp 2") {
-        const info = signerInfoById[isoDocData.xem_xet_user_id]
-        map["xem_xet"] = {
-          kind: "ca_nhan",
-          userId: isoDocData.xem_xet_user_id,
-          fullName: info?.fullName || isoDocData.xem_xet || "",
-          chucVu: info?.chucVu || "",
-          chucVuByKey: info?.chucVuByKey,
-          hasSignature: info?.hasSignature ?? true,
+
+        // Final step: phe_duyet
+        const lastStep = steps[steps.length - 1]
+        if (lastStep?.user_id) {
+          const info = signerInfoById[lastStep.user_id]
+          map["phe_duyet"] = {
+            kind: "ca_nhan",
+            userId: lastStep.user_id,
+            fullName: info?.fullName || lastStep.ten || isoDocData?.phe_duyet || "",
+            chucVu: info?.chucVu || "",
+            chucVuByKey: info?.chucVuByKey,
+            hasSignature: info?.hasSignature ?? true,
+          }
         }
-      }
-      if (isoDocData?.phe_duyet_user_id) {
-        const info = signerInfoById[isoDocData.phe_duyet_user_id]
-        map["phe_duyet"] = {
-          kind: "ca_nhan",
-          userId: isoDocData.phe_duyet_user_id,
-          fullName: info?.fullName || isoDocData.phe_duyet || "",
-          chucVu: info?.chucVu || "",
-          chucVuByKey: info?.chucVuByKey,
-          hasSignature: info?.hasSignature ?? true,
+
+        // Review steps: intermediate steps between step 0 and last step
+        // Matched 1-to-1 with xemXetFamily sorted by roleCloneIndex
+        const xemXetFamily = roles
+          .filter((r) => r.baseId === "xem_xet" && !r.hiddenForDoc)
+          .slice()
+          .sort((a, b) => {
+            const diff = roleCloneIndex(a) - roleCloneIndex(b)
+            if (diff !== 0) return diff
+            return (a.box?.xPct ?? 0) - (b.box?.xPct ?? 0)
+          })
+
+        xemXetFamily.forEach((role, idx) => {
+          const step = steps[idx + 1]
+          if (step?.user_id) {
+            const info = signerInfoById[step.user_id]
+            map[role.id] = {
+              kind: "ca_nhan",
+              userId: step.user_id,
+              fullName: info?.fullName || step.ten || "",
+              chucVu: info?.chucVu || "",
+              chucVuByKey: info?.chucVuByKey,
+              hasSignature: info?.hasSignature ?? true,
+            }
+          }
+        })
+      } else {
+        if (isoDocData?.soan_thao_user_id) {
+          const info = signerInfoById[isoDocData.soan_thao_user_id]
+          map["soan_thao"] = {
+            kind: "ca_nhan",
+            userId: isoDocData.soan_thao_user_id,
+            fullName: info?.fullName || isoDocData.soan_thao || "",
+            chucVu: info?.chucVu || "",
+            chucVuByKey: info?.chucVuByKey,
+            hasSignature: info?.hasSignature ?? true,
+          }
+        }
+        if (isoDocData?.xem_xet_user_id && isoDocData.cap_tl !== "Cấp 2") {
+          const info = signerInfoById[isoDocData.xem_xet_user_id]
+          map["xem_xet"] = {
+            kind: "ca_nhan",
+            userId: isoDocData.xem_xet_user_id,
+            fullName: info?.fullName || isoDocData.xem_xet || "",
+            chucVu: info?.chucVu || "",
+            chucVuByKey: info?.chucVuByKey,
+            hasSignature: info?.hasSignature ?? true,
+          }
+        }
+        if (isoDocData?.phe_duyet_user_id) {
+          const info = signerInfoById[isoDocData.phe_duyet_user_id]
+          map["phe_duyet"] = {
+            kind: "ca_nhan",
+            userId: isoDocData.phe_duyet_user_id,
+            fullName: info?.fullName || isoDocData.phe_duyet || "",
+            chucVu: info?.chucVu || "",
+            chucVuByKey: info?.chucVuByKey,
+            hasSignature: info?.hasSignature ?? true,
+          }
         }
       }
 
@@ -1154,9 +1343,9 @@ export default function SignTemplateEditorPage() {
   const isRequiredForConfirm = useCallback(
     (role: EditorRole) => {
       if (isExemptIsoDoc) return false
-      return role.batBuoc || (!!docId && !!docSignerByRoleId[role.id])
+      return role.batBuoc || ((!!docId || !!formInstanceId) && !!docSignerByRoleId[role.id])
     },
-    [isExemptIsoDoc, docId, docSignerByRoleId],
+    [isExemptIsoDoc, docId, formInstanceId, docSignerByRoleId],
   )
   const missingRequired = useMemo(
     () => roles.filter((r) => isRequiredForConfirm(r) && !r.placed && !r.hiddenForDoc),

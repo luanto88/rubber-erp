@@ -58,6 +58,11 @@ export type ConfirmKienLookup = {
   // UI dùng 2 field này để pre-fill và cảnh báo khi người dùng chọn khác đi.
   existingKienBoc: string | null;
   existingKienPallet: string[] | null;
+  // Thuộc tính đã ghi nhận của lô (từ lots hoặc nháp trước đó) — dùng để kiểm tra tính đồng nhất
+  // Quy tắc: Trong cùng 1 lô, tất cả các kiện bắt buộc cùng Chủng loại, Loại bọc và Loại bành.
+  existingLotCsr: string | null;
+  existingLotBanh: number | null;
+  existingLotBoc: string | null;
 };
 
 function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
@@ -86,6 +91,9 @@ function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
     pendingDraftBy: [],
     existingKienBoc: null,
     existingKienPallet: null,
+    existingLotCsr: null,
+    existingLotBanh: null,
+    existingLotBoc: null,
   };
 }
 
@@ -199,6 +207,29 @@ export async function resolveKienForConfirm(
     dayChuyenFromBatch = batch?.day_chuyen ?? null;
   }
 
+  // Tra cứu xem lô này đã có kiện nào được ghi nhận trước đó hay chưa (kể cả trong nháp)
+  // Quy tắc nghiệp vụ: tất cả các kiện của cùng 1 lô bắt buộc phải cùng Chủng loại, Bọc, Loại bành.
+  let existingLotCsr: string | null = lot?.loai_csr ?? null;
+  let existingLotBanh: number | null = lot?.loai_banh ? Number(lot.loai_banh) : null;
+  let existingLotBoc: string | null = lot?.boc ?? null;
+
+  if (!existingLotCsr || !existingLotBoc || !existingLotBanh) {
+    const { data: siblingDraft } = await supabase
+      .from("product_confirm_drafts")
+      .select("loai_csr, loai_banh, boc")
+      .eq("factory_id", factoryId)
+      .eq("ma_lo", maLo)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (siblingDraft) {
+      if (!existingLotCsr) existingLotCsr = siblingDraft.loai_csr;
+      if (!existingLotBanh) existingLotBanh = Number(siblingDraft.loai_banh);
+      if (!existingLotBoc) existingLotBoc = siblingDraft.boc;
+    }
+  }
+
   if (lot) {
     // nganIdForPartial không phụ thuộc lot_transactions — tính được ngay từ dữ liệu đã có, nên
     // có thể prefetch song song với truy vấn lot_transactions thay vì đợi tuần tự. Chỉ cần tra
@@ -268,6 +299,9 @@ export async function resolveKienForConfirm(
         pendingDraftBy: pendingAgg.byNames,
         existingKienBoc,
         existingKienPallet,
+        existingLotCsr,
+        existingLotBanh,
+        existingLotBoc,
       };
     }
 
@@ -300,6 +334,9 @@ export async function resolveKienForConfirm(
         pendingDraftBy: pendingAgg.byNames,
         existingKienBoc,
         existingKienPallet,
+        existingLotCsr,
+        existingLotBanh,
+        existingLotBoc,
       };
     }
 
@@ -317,9 +354,8 @@ export async function resolveKienForConfirm(
       loaiCsr: lot.loai_csr,
       loaiBanh: lot.loai_banh,
       dayChuyen: lot.day_chuyen ?? dayChuyenFromBatch,
-      // Kiện đã có một phần: pre-fill đúng bọc/pallet của CHÍNH kiện đó (không phải lot.boc/pallet
-      // — giá trị đó chỉ là "gần nhất của cả lô", có thể đến từ kiện KHÁC đã scan sau kiện này).
-      boc: isPartialKien ? existingKienBoc ?? lot.boc : lot.boc,
+      // Kiện đã có một phần hoặc lô đã có bọc chuẩn: ưu tiên existingLotBoc để toàn lô đồng nhất
+      boc: existingLotBoc ?? (isPartialKien ? existingKienBoc ?? lot.boc : lot.boc),
       tham: lot.tham,
       pallet: isPartialKien ? existingKienPallet ?? lot.pallet : lot.pallet,
       chiThi: lot.chi_thi,
@@ -335,6 +371,9 @@ export async function resolveKienForConfirm(
       pendingDraftBy: pendingAgg.byNames,
       existingKienBoc,
       existingKienPallet,
+      existingLotCsr,
+      existingLotBanh,
+      existingLotBoc,
     };
   }
 
@@ -357,7 +396,7 @@ export async function resolveKienForConfirm(
         loaiCsr: predicted.loai_csr,
         loaiBanh: predicted.loai_banh,
         dayChuyen: dayChuyenFromBatch,
-        boc: pendingAgg.lastBoc ?? predicted.boc,
+        boc: existingLotBoc ?? pendingAgg.lastBoc ?? predicted.boc,
         tham: predicted.tham,
         pallet: pendingAgg.lastPallet,
         chiThi,
@@ -373,6 +412,9 @@ export async function resolveKienForConfirm(
         pendingDraftBy: pendingAgg.byNames,
         existingKienBoc: pendingAgg.lastBoc,
         existingKienPallet: pendingAgg.lastPallet,
+        existingLotCsr,
+        existingLotBanh,
+        existingLotBoc,
       };
     }
 
@@ -387,7 +429,7 @@ export async function resolveKienForConfirm(
       loaiCsr: predicted.loai_csr,
       loaiBanh: predicted.loai_banh,
       dayChuyen: dayChuyenFromBatch,
-      boc: pendingAgg.lastBoc ?? predicted.boc,
+      boc: existingLotBoc ?? pendingAgg.lastBoc ?? predicted.boc,
       tham: predicted.tham,
       pallet: pendingAgg.lastPallet,
       chiThi,
@@ -403,6 +445,9 @@ export async function resolveKienForConfirm(
       pendingDraftBy: pendingAgg.byNames,
       existingKienBoc: pendingAgg.lastBoc,
       existingKienPallet: pendingAgg.lastPallet,
+      existingLotCsr,
+      existingLotBanh,
+      existingLotBoc,
     };
   }
 
@@ -1241,6 +1286,15 @@ export async function editShiftHistoryEntry(input: EditShiftHistoryInput): Promi
       .eq("id", input.transactionId);
     if (updateError) return { success: false, error: updateError.message };
 
+    if (input.boc) {
+      // Khi sửa bọc của 1 giao dịch, cập nhật đồng bộ toàn bộ các giao dịch của lô và bảng lots
+      // để đảm bảo tính đồng nhất 100% cho cả lô.
+      await Promise.all([
+        supabase.from("lots").update({ boc: input.boc }).eq("id", lotInfo.id),
+        supabase.from("lot_transactions").update({ boc: input.boc }).eq("lot_id", lotInfo.id),
+      ]);
+    }
+
     const { error: rpcError } = await supabase.rpc("sync_lot_master_snapshot", { p_lot_id: lotInfo.id });
     if (rpcError) return { success: false, error: `Không đồng bộ được lô sau khi sửa: ${rpcError.message}` };
 
@@ -1410,7 +1464,10 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string): Pr
     const rowChiThi = row.chi_thi || lotInfo?.chi_thi || "";
     if (rowChiThi) chiThiSet.add(rowChiThi);
 
-    const rowBoc = row.boc || lotInfo?.boc || "";
+    // Bọc của lô là thuộc tính chung toàn lô. Ưu tiên lots.boc (master snapshot) trước
+    // để khi admin sửa bọc ở bảng lots thì phiếu thành phẩm PDF lập tức cập nhật chính xác,
+    // fallback về row.boc của từng giao dịch nếu lotInfo.boc chưa có.
+    const rowBoc = lotInfo?.boc || row.boc || "";
     const rowPalletArr = row.pallet && row.pallet.length > 0 ? row.pallet : lotInfo?.pallet || [];
     const rowPallet = rowPalletArr.length > 0 ? rowPalletArr.join(", ") : "";
     const key = `${row.ca}||${maLo}||${rowBoc}||${rowPallet}||${row.ngan_id || ""}`;
@@ -1564,10 +1621,52 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
     // BẤT KỲ ai khác cho đúng (ma_lo, kiện) này, để "ca sau" không thể nhập vượt số còn lại dù
     // "ca trước" chưa Gửi (mục đích chính của tính năng này).
     const kienKey = KIEN_LOWER[input.kien];
-    const [{ data: existingLot }, pendingAgg] = await Promise.all([
-      supabase.from("lots").select("id").eq("factory_id", input.factoryId).eq("ma_lo", maLo).maybeSingle(),
+    const [{ data: existingLot }, { data: siblingDrafts }, pendingAgg] = await Promise.all([
+      supabase
+        .from("lots")
+        .select("id, loai_csr, loai_banh, boc")
+        .eq("factory_id", input.factoryId)
+        .eq("ma_lo", maLo)
+        .maybeSingle(),
+      supabase
+        .from("product_confirm_drafts")
+        .select("loai_csr, loai_banh, boc, kien")
+        .eq("factory_id", input.factoryId)
+        .eq("ma_lo", maLo)
+        .order("created_at", { ascending: true })
+        .limit(1),
       loadPendingDraftAggregateForKien(input.factoryId, maLo, input.kien),
     ]);
+
+    // Đồng nhất thuộc tính toàn lô: Nếu kiện A chủng loại gì, loại bọc gì, loại bành gì thì
+    // các kiện còn lại khác KHÔNG THỂ LƯU.
+    const refCsr = existingLot?.loai_csr || siblingDrafts?.[0]?.loai_csr;
+    const refBanh = existingLot?.loai_banh
+      ? Number(existingLot.loai_banh)
+      : siblingDrafts?.[0]?.loai_banh
+      ? Number(siblingDrafts[0].loai_banh)
+      : null;
+    const refBoc = existingLot?.boc || siblingDrafts?.[0]?.boc;
+
+    if (refCsr && refCsr !== input.loaiCsr) {
+      return {
+        success: false,
+        error: `Cùng lô ${maLo} không thể khác Chủng loại (kiện trước là "${refCsr}", đang chọn "${input.loaiCsr}").`,
+      };
+    }
+    if (refBanh && Number(refBanh) !== Number(input.loaiBanh)) {
+      return {
+        success: false,
+        error: `Cùng lô ${maLo} không thể khác Loại bành (kiện trước là ${refBanh}kg, đang chọn ${input.loaiBanh}kg).`,
+      };
+    }
+    if (refBoc && input.boc && refBoc !== input.boc) {
+      return {
+        success: false,
+        error: `Cùng lô ${maLo} không thể khác Loại bọc (kiện trước là "${refBoc}", đang chọn "${input.boc}").`,
+      };
+    }
+
     let committedBanh = 0;
     if (existingLot) {
       const { data: txRows } = await supabase
@@ -1764,8 +1863,15 @@ export async function updateDraftKien(input: UpdateDraftKienInput): Promise<Upda
     const config = getLoaiBanhConfig(draft.loai_csr, Number(draft.loai_banh));
     const soKg = Math.round(input.soBanh * Number(draft.loai_banh) * 100) / 100;
 
-    const [{ data: existingLot }, { data: otherDraftRows }] = await Promise.all([
-      supabase.from("lots").select("id").eq("factory_id", input.factoryId).eq("ma_lo", draft.ma_lo).maybeSingle(),
+    const [{ data: existingLot }, { data: siblingDrafts }, { data: otherDraftRows }] = await Promise.all([
+      supabase.from("lots").select("id, boc, loai_csr, loai_banh").eq("factory_id", input.factoryId).eq("ma_lo", draft.ma_lo).maybeSingle(),
+      supabase
+        .from("product_confirm_drafts")
+        .select("boc")
+        .eq("factory_id", input.factoryId)
+        .eq("ma_lo", draft.ma_lo)
+        .neq("id", input.draftId)
+        .limit(1),
       supabase
         .from("product_confirm_drafts")
         .select("so_banh")
@@ -1774,6 +1880,14 @@ export async function updateDraftKien(input: UpdateDraftKienInput): Promise<Upda
         .eq("kien", kien)
         .neq("id", input.draftId),
     ]);
+
+    const refBoc = existingLot?.boc || siblingDrafts?.[0]?.boc;
+    if (refBoc && input.boc && refBoc !== input.boc) {
+      return {
+        success: false,
+        error: `Cùng lô ${draft.ma_lo} không thể khác Loại bọc (đã có: "${refBoc}", đang chọn "${input.boc}").`,
+      };
+    }
     let committedBanh = 0;
     if (existingLot) {
       const kienKey = KIEN_LOWER[kien];

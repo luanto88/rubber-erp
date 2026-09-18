@@ -349,8 +349,8 @@ export interface IsoFormInstance {
   thu_tu_ky_json?: ThuTuKyStep[]
   buoc_hien_tai?: number
   so_buoc_tong?: number
-  nguoi_ky?: Record<string, { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: SignAsType }>
-  placement_ky?: Record<string, unknown>
+  nguoi_ky?: Record<string, { ten: string; chuc_vu: string; ky_at: string; is_kt?: boolean; sign_as?: SignAsType }> | null
+  placement_ky?: Record<string, unknown> | null
   auto_convert_pdf: boolean
   ghi_chu: string | null
   ly_do_tra_ve: string | null

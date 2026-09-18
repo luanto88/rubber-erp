@@ -385,7 +385,7 @@ export default function ConfirmKienProductionPage() {
           setSoBanh(result.status === "partial_kien" ? Math.max(1, result.remainingBanh || 1) : result.maxPerKien || 36);
           setNgaySx(getDefaultNgaySx(new Date()));
           setCa(getDefaultCa());
-          setBoc(result.boc || "");
+          setBoc(result.existingLotBoc || result.boc || "");
           setPallet(result.pallet || []);
           setChiThi(result.chiThi || "");
           setGhiChu("");
@@ -437,16 +437,30 @@ export default function ConfirmKienProductionPage() {
     !sameStringSet(pallet, lookup.existingKienPallet);
   const kienMismatch = bocMismatch || palletMismatch;
 
+  // Kiểm tra tính đồng nhất của toàn lô: Nếu kiện A chủng loại gì, loại bọc gì, loại bành gì thì
+  // các kiện còn lại khác KHÔNG THỂ LƯU.
+  const lotCsrMismatch = !!lookup?.existingLotCsr && !!lookup.loaiCsr && lookup.loaiCsr !== lookup.existingLotCsr;
+  const lotBanhMismatch =
+    !!lookup?.existingLotBanh &&
+    !!lookup.loaiBanh &&
+    Number(lookup.loaiBanh) !== Number(lookup.existingLotBanh);
+  const lotBocMismatch = !!lookup?.existingLotBoc && !!boc && boc !== lookup.existingLotBoc;
+  const lotPropsMismatch = lotCsrMismatch || lotBanhMismatch || lotBocMismatch;
+
   const resetToKienValue = () => {
     if (!lookup) return;
     if (lookup.existingKienBoc) setBoc(lookup.existingKienBoc);
     if (lookup.existingKienPallet) setPallet(lookup.existingKienPallet);
   };
 
-  // Điều kiện cho phép "Lưu tạm" — chỉ check field bắt buộc + !kienMismatch, KHÔNG check tồn
-  // kho/capacity (110% ngăn) vì đó là validate atomic dành riêng cho lúc "Gửi tất cả" qua RPC
-  // submit_confirm_draft_batch (xem confirm/actions.ts). stepperMax vẫn giữ vì nó là clamp
-  // max_per_kien phía client, không phải capacity check.
+  const resetToLotValue = () => {
+    if (!lookup) return;
+    if (lookup.existingLotBoc) setBoc(lookup.existingLotBoc);
+  };
+
+  // Điều kiện cho phép "Lưu tạm" — chỉ check field bắt buộc + !kienMismatch + !lotPropsMismatch,
+  // KHÔNG check tồn kho/capacity (110% ngăn) vì đó là validate atomic dành riêng cho lúc "Gửi tất cả"
+  // qua RPC submit_confirm_draft_batch (xem confirm/actions.ts).
   const canSaveDraft =
     !!lookup &&
     (lookup.status === "predicted" || lookup.status === "partial" || lookup.status === "partial_kien") &&
@@ -457,7 +471,8 @@ export default function ConfirmKienProductionPage() {
     !!ca &&
     !!boc &&
     pallet.length > 0 &&
-    !kienMismatch;
+    !kienMismatch &&
+    !lotPropsMismatch;
 
   const handleDecoded = useCallback(
     (text: string) => {
@@ -1160,6 +1175,36 @@ export default function ConfirmKienProductionPage() {
                         >
                           {tt("resetToKienValue")}
                         </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {lotPropsMismatch && (
+                  <div className="rounded-xl border-2 border-red-300 bg-red-50 px-3.5 py-3">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-extrabold text-red-700">
+                          {tt("lotPropsMismatchTitle")}
+                        </div>
+                        <div className="mt-1 text-xs font-semibold text-red-600">
+                          {tt("lotPropsMismatchBody", {
+                            maLo: lookup.maLo,
+                            csr: lookup.existingLotCsr || lookup.loaiCsr || "—",
+                            boc: lookup.existingLotBoc || "—",
+                            banh: lookup.existingLotBanh || lookup.loaiBanh || "—",
+                          })}
+                        </div>
+                        {lotBocMismatch && lookup.existingLotBoc && (
+                          <button
+                            type="button"
+                            onClick={resetToLotValue}
+                            className="mt-2 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-700"
+                          >
+                            {tt("resetToLotValue")}
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

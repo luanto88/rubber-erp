@@ -516,12 +516,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       .catch(() => {})
   }, [isPublicStorageLookup, user?.id, user?.factory_id])
 
-  // count > 0 ở module hiện tại → chỉ hiện section module, ẩn "Thông báo chung" (quyết định đã chốt)
+  // count > 0 ở module hiện tại → có đầu việc theo module
   const hasModuleTasks = !!moduleTasks && moduleTasks.items.some((i) => i.count > 0)
 
   const goToNotification = (link: string | null) => {
     setNotifOpen(false)
-    if (link) router.push(link)
+    if (!link) return
+    let target = link
+    try {
+      if (target.startsWith("http://") || target.startsWith("https://")) {
+        const url = new URL(target)
+        target = `${url.pathname}${url.search}${url.hash}`
+      }
+    } catch { /* use raw link */ }
+    router.push(target)
   }
 
   const visibleNav: NavItem[] = NAV.flatMap((item) => {
@@ -862,10 +870,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 >
                   <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
                     <span className="text-sm font-bold text-slate-700">
-                      {hasModuleTasks ? `${tc("tasksToDoPrefix")} — ${moduleTasks!.moduleLabel}` : tc("notifications")}
+                      {tc("notifications")}
                     </span>
                     <div className="flex items-center gap-3">
-                      {!hasModuleTasks && unreadCount > 0 && (
+                      {unreadCount > 0 && (
                         <button
                           onClick={async () => {
                             const ids = notifications.filter((n) => !n.is_read).map((n) => n.id)
@@ -888,55 +896,73 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </div>
                   </div>
                   <div className="max-h-[65dvh] overflow-y-auto md:max-h-80">
-                    {hasModuleTasks ? (
-                      moduleTasks!.items.map((item) => (
-                        <button
-                          key={item.label}
-                          onClick={() => goToNotification(item.link)}
-                          disabled={item.count === 0}
-                          className="w-full flex items-center justify-between gap-3 text-left px-4 py-3 border-b border-slate-50 transition-colors hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent"
-                        >
-                          <span className="text-sm font-semibold text-slate-700">{item.label}</span>
-                          <span
+                    {/* 1. Đầu việc cần làm theo module hiện tại */}
+                    {hasModuleTasks && (
+                      <div className="border-b border-slate-100 bg-slate-50/60">
+                        <div className="px-4 pt-2.5 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                          {tc("tasksToDoPrefix")} — {moduleTasks!.moduleLabel}
+                        </div>
+                        {moduleTasks!.items.map((item) => (
+                          <button
+                            key={item.label}
+                            onClick={() => goToNotification(item.link)}
+                            disabled={item.count === 0}
+                            className="w-full flex items-center justify-between gap-3 text-left px-4 py-2.5 border-b border-slate-100/70 transition-colors hover:bg-slate-100/70 disabled:opacity-40 disabled:hover:bg-transparent"
+                          >
+                            <span className="text-xs font-semibold text-slate-700">{item.label}</span>
+                            <span
+                              className={
+                                "shrink-0 min-w-5 rounded-full px-2 py-0.5 text-center text-[11px] font-bold " +
+                                (item.count > 0 ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-400")
+                              }
+                            >
+                              {item.count}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 2. Danh sách thông báo in-app gần đây */}
+                    {notifications.length === 0 ? (
+                      !hasModuleTasks ? (
+                        <div className="py-8 text-center text-sm text-slate-400">{tc("noNotifications")}</div>
+                      ) : null
+                    ) : (
+                      <>
+                        {hasModuleTasks && (
+                          <div className="px-4 pt-2.5 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 bg-white">
+                            {tc("notifications")}
+                          </div>
+                        )}
+                        {notifications.map((n) => (
+                          <button
+                            key={n.id}
+                            onClick={async () => {
+                              if (!n.is_read) {
+                                await supabase.from("notifications").update({ is_read: true }).eq("id", n.id)
+                                setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x))
+                              }
+                              goToNotification(n.link)
+                            }}
                             className={
-                              "shrink-0 min-w-6 rounded-full px-2 py-0.5 text-center text-xs font-bold " +
-                              (item.count > 0 ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-400")
+                              "w-full text-left px-4 py-3 border-b border-slate-50 transition-colors hover:bg-slate-50 " +
+                              (n.is_read ? "opacity-60" : "")
                             }
                           >
-                            {item.count}
-                          </span>
-                        </button>
-                      ))
-                    ) : notifications.length === 0 ? (
-                      <div className="py-8 text-center text-sm text-slate-400">{tc("noNotifications")}</div>
-                    ) : (
-                      notifications.map((n) => (
-                        <button
-                          key={n.id}
-                          onClick={async () => {
-                            if (!n.is_read) {
-                              await supabase.from("notifications").update({ is_read: true }).eq("id", n.id)
-                              setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, is_read: true } : x))
-                            }
-                            goToNotification(n.link)
-                          }}
-                          className={
-                            "w-full text-left px-4 py-3 border-b border-slate-50 transition-colors hover:bg-slate-50 " +
-                            (n.is_read ? "opacity-60" : "")
-                          }
-                        >
-                          <div className="flex items-start gap-2">
-                            {!n.is_read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />}
-                            <div className={!n.is_read ? "" : "pl-4"}>
-                              <p className="text-xs font-bold text-slate-800 line-clamp-1">{n.title}</p>
-                              {n.body && <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{n.body}</p>}
-                              <p className="text-[10px] text-slate-400 mt-1">
-                                {new Date(n.created_at).toLocaleDateString(chromeLang === "en" ? "en-US" : "vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                              </p>
+                            <div className="flex items-start gap-2">
+                              {!n.is_read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-emerald-500" />}
+                              <div className={!n.is_read ? "" : "pl-4"}>
+                                <p className="text-xs font-bold text-slate-800 line-clamp-1">{n.title}</p>
+                                {n.body && <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{n.body}</p>}
+                                <p className="text-[10px] text-slate-400 mt-1">
+                                  {new Date(n.created_at).toLocaleDateString(chromeLang === "en" ? "en-US" : "vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        </button>
-                      ))
+                          </button>
+                        ))}
+                      </>
                     )}
                   </div>
                 </div>

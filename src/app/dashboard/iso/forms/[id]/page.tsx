@@ -8,14 +8,14 @@ import {
   AlertTriangle, Loader2, FileText, Send, Pen,
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
   ChevronLeft, ChevronRight, Plus, LayoutTemplate,
-  ArrowUp, ArrowDown, Trash2,
+  ArrowUp, ArrowDown, Trash2, Save, UserCheck,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
-import { formatFactoryDateVN } from "@/lib/date-utils"
+import { formatFactoryDateVN, formatFactoryDateTimeVN } from "@/lib/date-utils"
 import {
   ResizeHandleIcon,
   RESIZE_HANDLE_CLASS,
@@ -26,8 +26,13 @@ import {
   SIGN_TEXT_FONT_SIZE_PT,
   SIGN_TEXT_MIN_FONT_SIZE_PT,
   computeDefaultSubLayout,
+  computeDefaultNoteLayout,
   clampRectToBox,
+  findRoleBoxForStep,
+  type LayoutRect,
+  type NoteSubLayout,
 } from "@/lib/signing/template-layout"
+import { computeSnugBoxSize } from "@/lib/signing/text-fit"
 import { IsoShell } from "../../_components/iso-shell"
 import { ModalShell } from "../../../_components/modal-shell"
 import {
@@ -37,6 +42,7 @@ import {
   FORM_INSTANCE_STATUS_COLOR,
   SIGN_AS_OPTIONS,
   SIGN_AS_LABEL,
+  PHONG_BAN_OPTIONS,
   type IsoFormInstance,
   type IsoFormInstanceStatus,
   type IsoDocument,
@@ -66,8 +72,10 @@ type FullPlacement = {
   // bước (ngày ký: phê duyệt; ghi chú: soạn thảo) để bước phê duyệt vẽ lại không chồng 3 lớp.
   ngayKyText?: string | null
   ngayKyX?: number; ngayKyY?: number; ngayKyWidth?: number; ngayKyHeight?: number
+  ghiChuTat?: boolean
   ghiChuText?: string | null
   ghiChuX?: number; ghiChuY?: number; ghiChuWidth?: number; ghiChuHeight?: number
+  kyNhayX?: number; kyNhayY?: number; kyNhayWidth?: number; kyNhayHeight?: number
   qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number
   // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng ở bước Phê duyệt, chỉ áp
   // dụng cho PDF (không có khái niệm tương đương cho DOCX/XLSX).
@@ -264,6 +272,186 @@ function ReturnModal({ onConfirm, onClose }: { onConfirm: (lyDo: string) => void
   )
 }
 
+// ─── Đổi người ký Modal ───────────────────────────────────────────────────────
+function DoiNguoiKyModal({
+  steps,
+  currentStepIndex,
+  factoryId,
+  allProfiles,
+  onConfirm,
+  onClose,
+  saving,
+}: {
+  steps: ThuTuKyStep[]
+  currentStepIndex: number
+  factoryId: string
+  allProfiles: ProfileOption[]
+  onConfirm: (stepIndex: number, newUserId: string, newName: string, reason: string) => Promise<void>
+  onClose: () => void
+  saving: boolean
+}) {
+  // Chỉ cho phép đổi các bước từ currentStepIndex trở đi
+  const editableSteps = steps
+    .map((s, idx) => ({ step: s, idx }))
+    .filter(({ idx }) => idx >= currentStepIndex)
+
+  const [selectedStepIdx, setSelectedStepIdx] = useState<number>(editableSteps[0]?.idx ?? currentStepIndex)
+  const [selectedDept, setSelectedDept] = useState<string>("")
+  const [deptProfiles, setDeptProfiles] = useState<ProfileOption[]>([])
+  const [loadingDept, setLoadingDept] = useState(false)
+  const [selectedUserId, setSelectedUserId] = useState<string>("")
+  const [reason, setReason] = useState<string>("")
+  const [err, setErr] = useState<string>("")
+
+  // Khi selectedDept đổi, fetch nhân sự phòng ban đó
+  useEffect(() => {
+    if (!selectedDept) {
+      setDeptProfiles(allProfiles)
+      return
+    }
+    let alive = true
+    setLoadingDept(true)
+    fetch(`/api/documents/dept-users?factoryId=${factoryId}&dept=${encodeURIComponent(selectedDept)}&leadership=false`)
+      .then((res) => res.json())
+      .then((data: ProfileOption[]) => {
+        if (alive && Array.isArray(data)) {
+          setDeptProfiles(data)
+        }
+      })
+      .catch((e) => console.error("Lỗi tải danh sách theo phòng ban:", e))
+      .finally(() => {
+        if (alive) setLoadingDept(false)
+      })
+    return () => { alive = false }
+  }, [factoryId, selectedDept, allProfiles])
+
+  const targetStep = steps[selectedStepIdx]
+  const currentSignerName = targetStep?.ten || (targetStep?.user_id ? (allProfiles.find((p) => p.id === targetStep.user_id)?.full_name || targetStep.user_id) : "Chưa chỉ định")
+
+  const handleSubmit = async () => {
+    if (!selectedUserId) {
+      setErr("Vui lòng chọn người ký thay thế")
+      return
+    }
+    if (!reason.trim()) {
+      setErr("Vui lòng nhập lý do thay đổi người ký")
+      return
+    }
+    const profile = deptProfiles.find((p) => p.id === selectedUserId) || allProfiles.find((p) => p.id === selectedUserId)
+    const newName = profile ? profileLabel(profile) : "Người ký mới"
+    await onConfirm(selectedStepIdx, selectedUserId, newName, reason.trim())
+  }
+
+  return (
+    <ModalShell
+      title="Đổi người ký duyệt"
+      onClose={onClose}
+      maxWidth="md"
+      footer={
+        <>
+          <button onClick={onClose} disabled={saving} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">
+            Hủy
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <UserCheck size={14} />}
+            {saving ? "Đang xử lý..." : "Xác nhận đổi người ký"}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {err && (
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-center gap-2">
+            <AlertTriangle size={13} className="shrink-0" />
+            <span>{err}</span>
+          </div>
+        )}
+
+        {/* Chọn bước muốn thay đổi */}
+        <div>
+          <label className="text-xs font-bold text-slate-700 block mb-1">Bước ký cần thay đổi</label>
+          <select
+            value={selectedStepIdx}
+            onChange={(e) => {
+              const idx = Number(e.target.value)
+              setSelectedStepIdx(idx)
+              setSelectedUserId("")
+            }}
+            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:border-violet-500"
+          >
+            {editableSteps.map(({ step, idx }) => (
+              <option key={idx} value={idx}>
+                {stepDisplayLabel(step)} (Bước {idx + 1}) — Hiện tại: {step.ten || "Chưa có"}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Người ký hiện tại: <span className="font-semibold text-slate-700">{currentSignerName}</span>
+          </p>
+        </div>
+
+        {/* Chọn phòng ban */}
+        <div>
+          <label className="text-xs font-bold text-slate-700 block mb-1">Lọc theo phòng ban</label>
+          <select
+            value={selectedDept}
+            onChange={(e) => {
+              setSelectedDept(e.target.value)
+              setSelectedUserId("")
+            }}
+            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:border-violet-500"
+          >
+            <option value="">— Tất cả phòng ban —</option>
+            {PHONG_BAN_OPTIONS.map((dept) => (
+              <option key={dept} value={dept}>Phòng ban {dept}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Chọn người ký mới */}
+        <div>
+          <label className="text-xs font-bold text-slate-700 block mb-1">
+            Người ký thay thế {loadingDept && <span className="text-[11px] text-violet-600 font-normal">(Đang tải danh sách...)</span>}
+          </label>
+          <select
+            value={selectedUserId}
+            onChange={(e) => setSelectedUserId(e.target.value)}
+            disabled={loadingDept}
+            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:border-violet-500 disabled:opacity-50"
+          >
+            <option value="">— Chọn nhân sự thay thế —</option>
+            {deptProfiles
+              .filter((p) => p.id !== targetStep?.user_id)
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {profileLabel(p)} {p.username ? `(@${p.username})` : ""}
+                </option>
+              ))}
+          </select>
+        </div>
+
+        {/* Lý do thay đổi */}
+        <div>
+          <label className="text-xs font-bold text-slate-700 block mb-1">
+            Lý do thay đổi người ký <span className="text-rose-500">*</span>
+          </label>
+          <textarea
+            rows={2}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Nhập lý do thay đổi (ví dụ: Người ký đi vắng, ủy quyền xử lý gấp...)"
+            className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 outline-none focus:border-violet-500 resize-none"
+          />
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
 function ExtraDraggableBox({
   position,
   onDrag,
@@ -301,6 +489,7 @@ function SignPlacementModal({
   action,
   stepIndex,
   totalSteps,
+  stepName,
   sourceFileUrl,
   fileType,
   autoConvertPdf,
@@ -311,15 +500,18 @@ function SignPlacementModal({
   factoryId,
   templateMa,
   templateLoai,
+  hasTemplate,
   instanceId,
   userId,
   acting,
+  errorMessage,
   onConfirm,
   onClose,
 }: {
   action: "soan_thao" | "xem_xet" | "phe_duyet" | "ky_buoc"
   stepIndex?: number
   totalSteps?: number
+  stepName?: string
   sourceFileUrl: string | null
   fileType: string | null
   autoConvertPdf: boolean
@@ -330,10 +522,12 @@ function SignPlacementModal({
   factoryId: string | null
   templateMa: string | null
   templateLoai: string | null
+  hasTemplate?: boolean
   instanceId: string
   userId: string
   acting: boolean
-  onConfirm: (pin: string, placement: FullPlacement, signAs: SignAsType, note?: string) => void
+  errorMessage?: string | null
+  onConfirm: (pin: string, placement: FullPlacement, signAs: SignAsType, note?: string) => Promise<{ success: boolean; error?: string } | void> | void
   onClose: () => void
 }) {
   const isPdf = fileType === "pdf" || urlIsPdf(sourceFileUrl)
@@ -356,8 +550,11 @@ function SignPlacementModal({
   const [signAs, setSignAs] = useState<SignAsType>("none")
   // Cờ ghi nhận mẫu đã định vị vai trò này hay chưa. Khi ĐÃ CÓ MẪU: tiền tố ký thay do mẫu
   // quyết định (ẩn nhóm radio); khi CHƯA CÓ MẪU: người ký tự chọn qua nhóm radio (tương thích ngược).
-  const [hasTemplateForRole, setHasTemplateForRole] = useState(false)
-  const showSignAsPicker = !hasTemplateForRole && isFinalStep && showCanvas
+  // Khởi tạo từ `hasTemplate` và chỉ hiển thị sau khi đã tải/kiểm tra xong mẫu (`templateLoaded`),
+  // tránh nháy banner ký thay cũ 0.5s rồi mới ẩn đi.
+  const [hasTemplateForRole, setHasTemplateForRole] = useState(hasTemplate ?? false)
+  const [templateLoaded, setTemplateLoaded] = useState(hasTemplate ?? false)
+  const showSignAsPicker = templateLoaded && !hasTemplateForRole && isFinalStep && showCanvas
 
   // Quy tắc 2 tầng hiển thị: mẫu quyết định "CHO PHÉP hiện", người ký quyết định "có hiện không".
   // Mặc định true khi CHƯA có mẫu để giữ nguyên chế độ kéo-thả tự do cũ.
@@ -379,10 +576,12 @@ function SignPlacementModal({
   const [canvasReady, setCanvasReady] = useState(false)
   const [canvasError, setCanvasError] = useState<string | null>(null)
 
-  // Element states (canvas pixels)
+  // Element states (canvas pixels) — tính toán kích thước vừa khít text (Auto-Fit Snug Box)
+  const initialSnugName = computeSnugBoxSize(userName, "name", 1.5)
+  const initialSnugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.5)
   const [sigState, setSigState] = useState<ElemState>({ x: 60, y: 200, w: 140, h: 60 })
-  const [nameState, setNameState] = useState<ElemState>({ x: 60, y: 270, w: 140, h: 24 })
-  const [cvState, setCvState] = useState<ElemState>({ x: 60, y: 298, w: 140, h: 22 })
+  const [nameState, setNameState] = useState<ElemState>({ x: 60, y: 270, w: initialSnugName.w, h: initialSnugName.h })
+  const [cvState, setCvState] = useState<ElemState>({ x: 60, y: 298, w: initialSnugCv.w, h: initialSnugCv.h })
   const [qrState, setQrState] = useState<ElemState>({ x: 0, y: 10, w: 80, h: 80 })
   const [prefixState, setPrefixState] = useState<ElemState>({ x: 220, y: 270, w: 60, h: 24 })
   const [showName, setShowName] = useState(true)
@@ -403,15 +602,38 @@ function SignPlacementModal({
   // người ký KHÔNG chỉnh (khác 3 khối chữ ký/tên/chức vụ). `null` = mẫu không đặt khung này.
   const [ngayKyBox, setNgayKyBox] = useState<ElemState | null>(null)
   const [ghiChuBox, setGhiChuBox] = useState<ElemState | null>(null)
-  // Ngày đóng dấu tính theo múi giờ NHÀ MÁY, không theo múi giờ máy chủ — thao tác lúc rạng
-  // sáng ở UTC+7 sẽ bị ghi lùi 1 ngày nếu dùng UTC (bài học module Văn bản 2026-09-04).
-  const ngayKyPreview = formatFactoryDateVN()
+  const [ghiChuOff, setGhiChuOff] = useState(false)
+  const [noteLayout, setNoteLayout] = useState<{
+    text: ElemState
+    ky_nhay: ElemState | null
+  } | null>(null)
+  const [confirmError, setConfirmError] = useState("")
+  // Ngày đóng dấu chuẩn ISO: tick xanh + "Hồ sơ được ký dd/mm/yyyy hh:mm:ss"
+  const [ngayKyPreview] = useState(() => `Hồ sơ được ký ${formatFactoryDateTimeVN(new Date())}`)
   const [extraSigBoxes, setExtraSigBoxes] = useState<Array<{
     id: number
     sigX: number; sigY: number; sigW: number; sigH: number
     nameX: number; nameY: number; nameW: number; nameH: number
     showSignature: boolean; showSignerName: boolean
   }>>([])
+
+  // Cập nhật toạ độ và kích thước 2 khối con bên trong khung Ghi chú (ô text và chữ ký nháy)
+  const setNoteRect = (which: "text" | "ky_nhay", x: number, y: number, w: number, h: number) => {
+    if (!ghiChuBox) return
+    const minW = which === "text" ? 40 : 20
+    const minH = which === "text" ? 12 : 10
+    const clampedW = Math.min(Math.max(w, minW), ghiChuBox.w)
+    const clampedH = Math.min(Math.max(h, minH), ghiChuBox.h)
+    const clampedX = Math.min(Math.max(x, ghiChuBox.x), ghiChuBox.x + ghiChuBox.w - clampedW)
+    const clampedY = Math.min(Math.max(y, ghiChuBox.y), ghiChuBox.y + ghiChuBox.h - clampedH)
+    setNoteLayout((prev) => {
+      if (!prev) return null
+      return {
+        ...prev,
+        [which]: { x: clampedX, y: clampedY, w: clampedW, h: clampedH },
+      }
+    })
+  }
 
   // nodeRefs for react-draggable (React 19 requirement)
   const sigNodeRef = useRef<HTMLDivElement>(null)
@@ -469,12 +691,18 @@ function SignPlacementModal({
       pageH: number,
       isCancelled: () => boolean,
     ) => {
-      if (!factoryId) return
+      if (!factoryId) {
+        if (!isCancelled()) setHasTemplateForRole(false)
+        return
+      }
       try {
         const keys: string[] = []
         if (templateMa) keys.push(`iso:code:${templateMa}`, `iso:loai:${templateMa}`, templateMa)
         if (templateLoai) keys.push(`iso:loai:${templateLoai}`, `iso:${templateLoai}`, templateLoai)
-        if (!keys.length) return
+        if (!keys.length) {
+          if (!isCancelled()) setHasTemplateForRole(false)
+          return
+        }
 
         const { data: rows } = await supabase
           .from("mau_vi_tri")
@@ -482,7 +710,10 @@ function SignPlacementModal({
           .eq("factory_id", factoryId)
           .in("loai_tai_lieu", keys)
           .order("phien_ban", { ascending: false })
-        if (isCancelled() || !rows || rows.length === 0) return
+        if (isCancelled() || !rows || rows.length === 0) {
+          if (!isCancelled()) setHasTemplateForRole(false)
+          return
+        }
 
         // Ưu tiên mẫu đặt riêng cho ĐÚNG mã biểu mẫu; chỉ khi không có mới dùng mẫu chung theo loại.
         const codeRow = templateMa
@@ -497,21 +728,20 @@ function SignPlacementModal({
         if (khung.length === 0) return
 
         const num = (v: unknown, fb: number) => (typeof v === "number" && Number.isFinite(v) ? v : fb)
-        // Tìm roleBox khớp với bước ký hiện tại (hỗ trợ cả bước động N bước và 3 vai trò mẫu cũ, kể cả vai trò nhân bản như phe_duyet__ban2)
-        const matchingBoxes = khung.filter((k) => {
-          const vt = String(k.vai_tro || "")
-          if (vt === stepKey || vt === action) return true
-          if (isFirstStep && (vt === "soan_thao" || vt.startsWith("soan_thao") || vt === "ky_buoc" || vt.startsWith("ky_buoc"))) return true
-          if (isFinalStep && (vt === "phe_duyet" || vt.startsWith("phe_duyet"))) return true
-          if (!isFirstStep && !isFinalStep && (vt === "xem_xet" || vt.startsWith("xem_xet") || vt === `xem_xet__ban${stepIndex}`)) return true
-          return false
+
+        // Tìm roleBox khớp với bước ký hiện tại (dùng chung helper findRoleBoxForStep với backend)
+        const roleBox = findRoleBoxForStep(khung, {
+          stepIndex: typeof stepIndex === "number" ? stepIndex : (action === "soan_thao" ? 0 : 1),
+          totalSteps: typeof totalSteps === "number" ? totalSteps : (action === "phe_duyet" ? 3 : 2),
+          stepName,
+          stepKey,
+          action,
         })
-        const roleBox = matchingBoxes.find((k) => k.vai_tro === stepKey || k.vai_tro === action)
-          || (isFinalStep ? (matchingBoxes.find((k) => k.vai_tro === "phe_duyet") || matchingBoxes[0]) : null)
-          || (isFirstStep ? (matchingBoxes.find((k) => k.vai_tro === "soan_thao") || matchingBoxes[0]) : null)
-          || matchingBoxes[0]
         const qrBox = khung.find((k) => k.vai_tro === "qr" || k.loai === "qr")
-        if (!roleBox && !qrBox) return
+        if (!roleBox && !qrBox) {
+          if (!isCancelled()) setHasTemplateForRole(false)
+          return
+        }
 
         let curScale = scale
         let curPageH = pageH
@@ -581,9 +811,32 @@ function SignPlacementModal({
           const namePt = clampRectToBox(activeSub.name ?? fullSub.name ?? activeSub.sig, roleBoxPt)
           const cvPt = clampRectToBox(activeSub.chuc_vu ?? fullSub.chuc_vu ?? activeSub.sig, roleBoxPt)
 
+          const roleCanvas = toCanvas(roleBoxPt)
+          const nameCanvas = toCanvas(namePt)
+          const cvCanvas = toCanvas(cvPt)
+
+          const snugName = computeSnugBoxSize(userName, "name", curScale)
+          const snugCv = computeSnugBoxSize(userChucVu, "chuc_vu", curScale)
+
+          const snugNameW = Math.min(roleCanvas.w, snugName.w)
+          const snugCvW = Math.min(roleCanvas.w, snugCv.w)
+
+          const snugNameX = Math.max(roleCanvas.x, roleCanvas.x + Math.round((roleCanvas.w - snugNameW) / 2))
+          const snugCvX = Math.max(roleCanvas.x, roleCanvas.x + Math.round((roleCanvas.w - snugCvW) / 2))
+
           setSigState(toCanvas(sigPt))
-          setNameState(toCanvas(namePt))
-          setCvState(toCanvas(cvPt))
+          setNameState({
+            x: snugNameX,
+            y: nameCanvas.y,
+            w: snugNameW,
+            h: snugName.h,
+          })
+          setCvState({
+            x: snugCvX,
+            y: cvCanvas.y,
+            w: snugCvW,
+            h: snugCv.h,
+          })
 
           if (withPrefix && (activeSub.prefix || fullSub.prefix)) {
             const prefixPt = clampRectToBox((activeSub.prefix ?? fullSub.prefix)!, roleBoxPt)
@@ -618,16 +871,27 @@ function SignPlacementModal({
           }))
         }
         const ghiChuTmpl = khung.find((k) => k.vai_tro === "ghi_chu" || k.loai === "ghi_chu")
-        if (ghiChuTmpl) {
-          setGhiChuBox(toCanvas({
+        if (ghiChuTmpl && isFinalStep) {
+          const gBoxPt = {
             x: num(ghiChuTmpl.x_pt, 0), y: num(ghiChuTmpl.y_pt, 0),
             width: num(ghiChuTmpl.w_pt, 200), height: num(ghiChuTmpl.h_pt, 50),
-          }))
+          }
+          setGhiChuBox(toCanvas(gBoxPt))
+          const defNoteSub = computeDefaultNoteLayout(gBoxPt, { withKyNhay: true })
+          setNoteLayout({
+            text: toCanvas(defNoteSub.text),
+            ky_nhay: defNoteSub.ky_nhay ? toCanvas(defNoteSub.ky_nhay) : null,
+          })
         }
 
         setTemplateApplied(String(best.loai_tai_lieu ?? ""))
       } catch {
         // Không có mẫu / lỗi mạng → giữ nguyên vị trí mặc định, KHÔNG chặn luồng ký.
+        if (!isCancelled()) setHasTemplateForRole(false)
+      } finally {
+        if (!isCancelled()) {
+          setTemplateLoaded(true)
+        }
       }
     }
 
@@ -641,7 +905,16 @@ function SignPlacementModal({
         ).toString()
       }
 
-      const task = pdfjsLib.getDocument(sourceFileUrl)
+      const freshUrl = sourceFileUrl.includes("?")
+        ? `${sourceFileUrl}&_nocache=${Date.now()}`
+        : `${sourceFileUrl}?_nocache=${Date.now()}`
+      const task = pdfjsLib.getDocument({
+        url: freshUrl,
+        httpHeaders: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+        },
+      })
       const pdf = await task.promise
       if (cancelled) return
 
@@ -690,10 +963,10 @@ function SignPlacementModal({
       const cH = canvasRef.current?.height || 0
       const cW = canvasRef.current?.width || 0
 
-      // Set default positions based on canvas size
+      // Set default positions based on canvas size (Chức danh ở TRÊN, Tên ở DƯỚI)
       setSigState({ x: 60, y: cH - 150, w: 140, h: 60 })
-      setNameState({ x: 60, y: cH - 85, w: 140, h: 24 })
-      setCvState({ x: 60, y: cH - 57, w: 140, h: 22 })
+      setCvState({ x: 60, y: cH - 85, w: 140, h: 22 })
+      setNameState({ x: 60, y: cH - 57, w: 140, h: 24 })
       setQrState({ x: cW - 100, y: 10, w: 80, h: 80 })
       setPrefixState({ x: 220, y: cH - 85, w: 60, h: 24 })
       setCanvasReady(true)
@@ -701,18 +974,25 @@ function SignPlacementModal({
       // ── Áp mẫu vị trí ký (nếu biểu mẫu này đã có mẫu) ──────────────────────
       // Mẫu chỉ GỢI Ý vị trí ban đầu — người ký vẫn kéo/chỉnh tự do trước khi ký, khác
       // "vị trí CỨNG" của module Văn bản. Lỗi nạp mẫu không được chặn luồng ký.
-      if (dims) await applyTemplate(pdf, dims.scale, dims.pageH, () => cancelled)
+      if (dims) {
+        await applyTemplate(pdf, dims.scale, dims.pageH, () => cancelled)
+      } else {
+        if (!cancelled) setTemplateLoaded(true)
+      }
     }
 
     loadPdf().catch(() => {
-      if (!cancelled) setCanvasError("Không tải được file PDF để hiển thị. Chữ ký sẽ đặt ở vị trí mặc định.")
+      if (!cancelled) {
+        setCanvasError("Không tải được file PDF để hiển thị. Chữ ký sẽ đặt ở vị trí mặc định.")
+        setTemplateLoaded(true)
+      }
     })
     return () => { cancelled = true }
     // `action`/`factoryId`/`templateMa`/`templateLoai`/`userChucVu` phục vụ việc nạp mẫu vị trí
     // ký bên trong effect. Modal ký chỉ mở SAU khi trang cha đã nạp xong hồ sơ + biểu mẫu +
     // phiên đăng nhập, nên trong suốt vòng đời một lần mở modal chúng không đổi — không gây tải
     // lại PDF ngoài ý muốn.
-  }, [showCanvas, sourceFileUrl, step, action, factoryId, templateMa, templateLoai, userChucVu, isFinalStep, isFirstStep, stepIndex, stepKey])
+  }, [showCanvas, sourceFileUrl, step, action, factoryId, templateMa, templateLoai, userChucVu, isFinalStep, isFirstStep, stepIndex, stepKey, stepName])
 
   const goToPage = (p: number) => {
     if (p < 1 || p > numPages || !pdfDocRef.current) return
@@ -801,8 +1081,13 @@ function SignPlacementModal({
     }
   }
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!pin.trim()) { setStep("pin"); setPinError("Vui lòng nhập lại PIN"); return }
+
+    if (isFinalStep && ghiChuBox && !ghiChuOff && !userNote.trim()) {
+      setConfirmError("Mẫu hồ sơ này có khung Ghi chú. Vui lòng nhập ý kiến chỉ đạo, hoặc bấm “Không ghi ý kiến” nếu không cần.")
+      return
+    }
 
     let placement: FullPlacement
     if (showCanvas && canvasReady) {
@@ -840,10 +1125,23 @@ function SignPlacementModal({
           ngayKyX: ngayKyPdf.x, ngayKyY: ngayKyPdf.y,
           ngayKyWidth: ngayKyPdf.width, ngayKyHeight: ngayKyPdf.height,
         } : {}),
-        ...(ghiChuPdf && (userNote || ghiChuText).trim() ? {
-          ghiChuText: (userNote || ghiChuText).trim(),
-          ghiChuX: ghiChuPdf.x, ghiChuY: ghiChuPdf.y,
-          ghiChuWidth: ghiChuPdf.width, ghiChuHeight: ghiChuPdf.height,
+        ...(isFinalStep && ghiChuBox ? {
+          ghiChuTat: ghiChuOff,
+          ...(ghiChuOff ? {} : (() => {
+            const textPdf = noteLayout?.text ? toPdf(noteLayout.text.x, noteLayout.text.y, noteLayout.text.w, noteLayout.text.h) : ghiChuPdf
+            const kyNhayPdf = noteLayout?.ky_nhay ? toPdf(noteLayout.ky_nhay.x, noteLayout.ky_nhay.y, noteLayout.ky_nhay.w, noteLayout.ky_nhay.h) : null
+            return {
+              ghiChuText: userNote.trim(),
+              ghiChuX: textPdf?.x,
+              ghiChuY: textPdf?.y,
+              ghiChuWidth: textPdf?.width,
+              ghiChuHeight: textPdf?.height,
+              kyNhayX: kyNhayPdf?.x,
+              kyNhayY: kyNhayPdf?.y,
+              kyNhayWidth: kyNhayPdf?.width,
+              kyNhayHeight: kyNhayPdf?.height,
+            }
+          })()),
         } : {}),
       }
 
@@ -887,8 +1185,11 @@ function SignPlacementModal({
       }
     }
 
-    const finalNote = (userNote || ghiChuText).trim()
-    onConfirm(pin, placement, signAs, finalNote || undefined)
+    const finalNote = isFinalStep ? (!ghiChuOff ? (userNote || ghiChuText).trim() : "") : undefined
+    const res = await onConfirm(pin, placement, signAs, finalNote || undefined)
+    if (res && !res.success && res.error) {
+      setConfirmError(res.error)
+    }
   }
 
   const stepTagMap: Record<string, { nameTag: string; sigTag: string }> = {
@@ -1060,14 +1361,27 @@ function SignPlacementModal({
                       : "border-slate-200 hover:border-slate-400"
                   }`}
                 >
-                  {thumbUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumbUrl} alt={`Trang ${pageNum}`} className="w-full h-auto object-contain rounded shadow-2xs pointer-events-none" />
-                  ) : (
-                    <div className={`w-full aspect-[1/1.4] bg-slate-50 border border-slate-100 rounded flex items-center justify-center text-xs font-bold text-slate-400 ${thumbnailsLoading ? "animate-pulse" : ""}`}>
-                      {pageNum}
-                    </div>
-                  )}
+                  <div className="relative w-full overflow-hidden rounded">
+                    {thumbUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={thumbUrl} alt={`Trang ${pageNum}`} className="w-full h-auto object-contain rounded shadow-2xs pointer-events-none block" />
+                    ) : (
+                      <div className={`w-full aspect-[1/1.4] bg-slate-50 border border-slate-100 rounded flex items-center justify-center text-xs font-bold text-slate-400 ${thumbnailsLoading ? "animate-pulse" : ""}`}>
+                        {pageNum}
+                      </div>
+                    )}
+                    {isCurrent && canvasRef.current && canvasRef.current.width > 0 && canvasRef.current.height > 0 && (
+                      <span
+                        className="absolute pointer-events-none rounded-[1px] border border-violet-600 bg-violet-600/30"
+                        style={{
+                          left: `${Math.max(0, Math.min(100, ((templateBox ? templateBox.x : sigState.x) / canvasRef.current.width) * 100))}%`,
+                          top: `${Math.max(0, Math.min(100, ((templateBox ? templateBox.y : sigState.y) / canvasRef.current.height) * 100))}%`,
+                          width: `${Math.max(4, Math.min(100, ((templateBox ? templateBox.w : sigState.w) / canvasRef.current.width) * 100))}%`,
+                          height: `${Math.max(3, Math.min(100, ((templateBox ? templateBox.h : sigState.h) / canvasRef.current.height) * 100))}%`,
+                        }}
+                      />
+                    )}
+                  </div>
                   <span className={`text-[10px] font-bold mt-1 ${isCurrent ? "text-violet-700" : "text-slate-500"}`}>
                     Trang {pageNum}
                   </span>
@@ -1121,29 +1435,97 @@ function SignPlacementModal({
                   </div>
                 )}
 
-                {/* Ngày ký / Ghi chú — nội dung tự điền, vị trí do mẫu quy định nên KHÔNG kéo
-                    được (khác 3 khối chữ ký/tên/chức vụ). Chỉ để người ký thấy trước sẽ in gì,
-                    ở đâu. */}
+                {/* Ngày ký — tick xanh và text theo chuẩn ISO: "✓ Hồ sơ được ký dd/mm/yyyy hh:mm:ss" */}
                 {ngayKyBox && (
                   <div
-                    className="absolute rounded flex items-center justify-center pointer-events-none border border-dashed border-rose-400 bg-rose-50/70"
+                    className="absolute rounded flex items-center justify-center pointer-events-none border border-dashed border-emerald-400 bg-emerald-50/60 px-1 overflow-hidden"
                     style={{ left: ngayKyBox.x, top: ngayKyBox.y, width: ngayKyBox.w, height: ngayKyBox.h, zIndex: 10 }}
                   >
-                    <span className="text-rose-700 truncate px-1" style={previewTextStyle(ngayKyPreview, ngayKyBox.w)}>
+                    <span className="flex items-center gap-1 text-[10px] text-slate-600 font-medium whitespace-nowrap">
+                      <svg className="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
                       {ngayKyPreview}
                     </span>
                   </div>
                 )}
-                {ghiChuBox && (
-                  <div
-                    className="absolute rounded overflow-hidden pointer-events-none border border-dashed border-teal-400 bg-teal-50/70 p-1"
-                    style={{ left: ghiChuBox.x, top: ghiChuBox.y, width: ghiChuBox.w, height: ghiChuBox.h, zIndex: 10 }}
-                  >
-                    <span className="text-teal-800 block leading-tight" style={previewTextStyle((userNote || ghiChuText || "Ghi chú"), ghiChuBox.w)}>
-                      {(userNote || ghiChuText) || <span className="italic text-teal-500">(Ghi chú / Ý kiến xử lý đang để trống)</span>}
-                    </span>
-                  </div>
-                )}
+
+                {/* Ghi chú — vùng cho phép chứa 2 khối con (text ý kiến + chữ ký nháy) kéo/co giãn được */}
+                {isFinalStep && ghiChuBox && (() => {
+                  const off = ghiChuOff || !userNote.trim()
+                  const textCan = noteLayout?.text
+                  const kyNhayCan = noteLayout?.ky_nhay
+                  return (
+                    <div
+                      className={`absolute border-2 border-dashed rounded ${off ? "border-slate-300 bg-slate-100/50" : "border-teal-500 bg-teal-50/25"}`}
+                      style={{ left: ghiChuBox.x, top: ghiChuBox.y, width: ghiChuBox.w, height: ghiChuBox.h, zIndex: 8 }}
+                    >
+                      <span className="absolute -top-5 left-0 text-[10px] font-bold text-teal-700 bg-white/90 px-1 rounded whitespace-nowrap">
+                        Vùng ý kiến chỉ đạo / Ghi chú
+                      </span>
+
+                      {off ? (
+                        <p className="text-[9px] text-slate-400 italic p-1">
+                          {ghiChuOff ? "Không ghi ý kiến" : "Nhập ý kiến ở khung bên dưới..."}
+                        </p>
+                      ) : (
+                        <>
+                          {textCan && (
+                            <ExtraDraggableBox
+                              position={{ x: textCan.x - ghiChuBox.x, y: textCan.y - ghiChuBox.y }}
+                              onStop={(_, d) => setNoteRect("text", ghiChuBox.x + d.x, ghiChuBox.y + d.y, textCan.w, textCan.h)}
+                              zIndex={12}
+                            >
+                              <Resizable
+                                size={{ width: textCan.w, height: textCan.h }}
+                                onResizeStop={(_, __, ___, delta) =>
+                                  setNoteRect("text", textCan.x, textCan.y, textCan.w + delta.width, textCan.h + delta.height)}
+                                enable={{ right: true, bottom: true, bottomRight: true }}
+                                minWidth={40} minHeight={12}
+                                handleComponent={{ bottomRight: <ResizeHandleIcon color="#0d9488" title="Kéo để co giãn ô ý kiến chỉ đạo" /> }}
+                                handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                                handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                              >
+                                <div className="w-full h-full border border-teal-600 bg-teal-50/90 rounded overflow-hidden px-1 py-0.5">
+                                  <p className="text-[9px] leading-tight text-slate-800 whitespace-pre-wrap break-words">
+                                    {userNote}
+                                  </p>
+                                </div>
+                              </Resizable>
+                            </ExtraDraggableBox>
+                          )}
+
+                          {kyNhayCan && (
+                            <ExtraDraggableBox
+                              position={{ x: kyNhayCan.x - ghiChuBox.x, y: kyNhayCan.y - ghiChuBox.y }}
+                              onStop={(_, d) => setNoteRect("ky_nhay", ghiChuBox.x + d.x, ghiChuBox.y + d.y, kyNhayCan.w, kyNhayCan.h)}
+                              zIndex={13}
+                            >
+                              <Resizable
+                                size={{ width: kyNhayCan.w, height: kyNhayCan.h }}
+                                onResizeStop={(_, __, ___, delta) =>
+                                  setNoteRect("ky_nhay", kyNhayCan.x, kyNhayCan.y, kyNhayCan.w + delta.width, kyNhayCan.h + delta.height)}
+                                enable={{ right: true, bottom: true, bottomRight: true }}
+                                minWidth={20} minHeight={10}
+                                handleComponent={{ bottomRight: <ResizeHandleIcon color="#d97706" title="Kéo để co giãn chữ ký nháy" /> }}
+                                handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                                handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                              >
+                                <div className="w-full h-full border border-amber-500 bg-amber-50/85 rounded flex items-center justify-center overflow-hidden">
+                                  {signatureUrl ? (
+                                    <img src={signatureUrl} alt="Chữ ký nháy" className="w-full h-full object-contain" />
+                                  ) : (
+                                    <span className="text-[9px] text-amber-700 font-bold">Ký nháy</span>
+                                  )}
+                                </div>
+                              </Resizable>
+                            </ExtraDraggableBox>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* QR — only first step */}
                 {isFirstStep && (
@@ -1272,7 +1654,7 @@ function SignPlacementModal({
                         onResizeStop={(_, __, ___, delta) =>
                           setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                         enable={{ right: true, bottom: true, bottomRight: true }}
-                        minWidth={60} minHeight={16}
+                        minWidth={50} minHeight={16}
                         {...maxSizeIn(templateBox, nameState)}
                         handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên" /> }}
                         handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
@@ -1360,7 +1742,7 @@ function SignPlacementModal({
                         onResizeStop={(_, __, ___, delta) =>
                           setCvState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
                         enable={{ right: true, bottom: true, bottomRight: true }}
-                        minWidth={60} minHeight={14}
+                        minWidth={45} minHeight={14}
                         {...maxSizeIn(templateBox, cvState)}
                         handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ" /> }}
                         handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
@@ -1481,7 +1863,7 @@ function SignPlacementModal({
                         onResizeStop={(_, __, ___, delta) =>
                           setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
                         enable={{ right: true, bottom: true, bottomRight: true }}
-                        minWidth={60} minHeight={16}
+                        minWidth={50} minHeight={16}
                         handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên bản sao" /> }}
                         handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                         handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
@@ -1579,19 +1961,45 @@ function SignPlacementModal({
           </div>
         )}
 
-        {/* Khung nhập Ghi chú / Ý kiến xử lý khi mẫu có khung ghi_chu */}
-        {ghiChuBox && (
-          <div>
-            <label className="text-xs font-bold text-teal-700 block mb-1">
-              Ghi chú / Ý kiến xử lý (sẽ hiển thị vào khung trên tài liệu)
-            </label>
-            <textarea
-              rows={2}
-              value={userNote}
-              onChange={(e) => setUserNote(e.target.value)}
-              placeholder="Nhập ý kiến hoặc ghi chú phê duyệt..."
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-800 outline-none focus:border-teal-500 focus:bg-white resize-none"
-            />
+        {/* Khung nhập Ghi chú / Ý kiến xử lý khi mẫu có khung ghi_chu (chỉ ở bước phê duyệt) */}
+        {isFinalStep && ghiChuBox && (
+          <div className={`rounded-xl border px-3 py-2.5 ${ghiChuOff ? "border-slate-200 bg-slate-50" : "border-teal-200 bg-teal-50/60"}`}>
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <label className="text-xs font-bold text-slate-700">
+                Ý kiến chỉ đạo / Ghi chú <span className="text-red-500">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => { setGhiChuOff((v) => !v); setConfirmError("") }}
+                className={`text-[11px] font-bold px-2 py-1 rounded-lg border transition-colors ${ghiChuOff ? "bg-white border-teal-300 text-teal-700 hover:bg-teal-50" : "bg-white border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+              >
+                {ghiChuOff ? "Bật lại khung Ghi chú" : "Không ghi ý kiến"}
+              </button>
+            </div>
+            {ghiChuOff ? (
+              <p className="text-[11px] text-slate-500 italic">
+                Khung Ghi chú sẽ bị bỏ trống — không đóng dấu ý kiến lẫn chữ ký nháy lên hồ sơ.
+              </p>
+            ) : (
+              <>
+                <textarea
+                  rows={2}
+                  value={userNote}
+                  onChange={(e) => { setUserNote(e.target.value); setConfirmError("") }}
+                  placeholder="Nhập ý kiến chỉ đạo hoặc ghi chú xử lý..."
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-800 outline-none focus:border-teal-500 resize-y"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Nội dung sẽ được đóng vào khung Ghi chú trên hồ sơ, kèm chữ ký nháy của bạn ở góc trên-phải khung.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
+        {(confirmError || errorMessage) && (
+          <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <AlertTriangle size={13} className="shrink-0 mt-0.5" /> <span>{confirmError || errorMessage}</span>
           </div>
         )}
 
@@ -1621,6 +2029,7 @@ export default function IsoFormInstancePage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [userName, setUserName] = useState("")
+  const [userRole, setUserRole] = useState<string | null>(null)
   const [userChucVu, setUserChucVu] = useState("")
   // Biểu mẫu này đã có mẫu vị trí ký chưa — nguồn sự thật là bảng `mau_vi_tri`, KHÔNG dùng cờ
   // tạm trong state hay query param: người ký có thể vào trang từ link trực tiếp, F5 giữa
@@ -1650,6 +2059,16 @@ export default function IsoFormInstancePage() {
   const [profilesPheDuyet, setProfilesPheDuyet] = useState<ProfileOption[]>([])
   const [allApproverProfiles, setAllApproverProfiles] = useState<ProfileOption[]>([])
   const [steps, setSteps] = useState<ThuTuKyStep[]>([])
+  const stepsRef = useRef<ThuTuKyStep[]>(steps)
+  stepsRef.current = steps
+
+  // Cache danh sách nhân sự theo phòng ban
+  const [deptUsersCache, setDeptUsersCache] = useState<Record<string, ProfileOption[]>>({})
+  const [deptUsersLoading, setDeptUsersLoading] = useState<Record<string, boolean>>({})
+
+  // Đổi người ký
+  const [doiNguoiKyOpen, setDoiNguoiKyOpen] = useState(false)
+  const [doiNguoiKySaving, setDoiNguoiKySaving] = useState(false)
 
   // File upload
   const [uploadFile, setUploadFile] = useState<File | null>(null)
@@ -1683,14 +2102,15 @@ export default function IsoFormInstancePage() {
         if (!uid) { setLoading(false); return }
         setFactoryId(fid)
         setUserId(uid)
-        // Load user profile for full name
+        // Load user profile for full name & role
         const { data: profile } = await supabase
           .from("profiles")
-          .select("full_name, username")
+          .select("full_name, username, role")
           .eq("id", uid)
           .single()
         if (profile) {
           setUserName((profile.full_name as string) || (profile.username as string) || "")
+          setUserRole((profile.role as string) || null)
         }
         // Chức vụ để đóng dấu — nguồn chuẩn của toàn app là hồ sơ Nhân sự bảo trì (liên kết
         // tài khoản qua `profile_id`), KHÔNG phải `profiles`. Ưu tiên chức vụ chính quyền,
@@ -1719,6 +2139,24 @@ export default function IsoFormInstancePage() {
     void bootstrap()
   }, [])
 
+  const loadDeptUsers = useCallback(async (deptCode: string) => {
+    if (!factoryId || !deptCode) return
+    setDeptUsersLoading((prev) => ({ ...prev, [deptCode]: true }))
+    try {
+      const res = await fetch(`/api/documents/dept-users?factoryId=${factoryId}&dept=${encodeURIComponent(deptCode)}&leadership=false`)
+      if (res.ok) {
+        const data = await res.json() as ProfileOption[]
+        if (Array.isArray(data)) {
+          setDeptUsersCache((prev) => ({ ...prev, [deptCode]: data }))
+        }
+      }
+    } catch (err) {
+      console.error("Lỗi tải nhân sự theo phòng ban:", err)
+    } finally {
+      setDeptUsersLoading((prev) => ({ ...prev, [deptCode]: false }))
+    }
+  }, [factoryId])
+
   const loadInstance = useCallback(async (fid: string): Promise<IsoFormInstance | null> => {
     const { data: inst } = await supabase
       .from("iso_form_instances")
@@ -1738,6 +2176,10 @@ export default function IsoFormInstancePage() {
 
     if ((row.so_buoc_tong ?? 0) > 0 && Array.isArray(row.thu_tu_ky_json) && row.thu_tu_ky_json.length > 0) {
       setSteps(row.thu_tu_ky_json as ThuTuKyStep[])
+      const depts = Array.from(new Set(row.thu_tu_ky_json.map((s: ThuTuKyStep) => s.phong_ban_code).filter(Boolean))) as string[]
+      depts.forEach((d) => void loadDeptUsers(d))
+    } else if (stepsRef.current.length > 0) {
+      // Đang có danh sách bước hợp lệ trên state (ví dụ vừa upload file hoặc đang chỉnh dở) -> bảo lưu, không reset về defaultSteps
     } else if (row.trang_thai === "draft" || row.trang_thai === "tra_ve") {
       const creatorId = row.nguoi_tao || userId || ""
       const defaultSteps: ThuTuKyStep[] = [
@@ -1769,7 +2211,7 @@ export default function IsoFormInstancePage() {
       .order("created_at", { ascending: false })
     setLogs((logData ?? []) as LogRow[])
     return row
-  }, [instanceId, userId])
+  }, [instanceId, userId, loadDeptUsers])
 
   const loadProfiles = useCallback(async (fid: string) => {
     const [resX, resP] = await Promise.all([
@@ -1822,6 +2264,30 @@ export default function IsoFormInstancePage() {
     setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)))
   }
 
+  const handleStepDeptChange = (index: number, deptCode: string) => {
+    updateStep(index, {
+      phong_ban_code: deptCode || undefined,
+      type: deptCode ? "phong_ban" : "ca_nhan",
+    })
+    if (deptCode) {
+      void loadDeptUsers(deptCode)
+    }
+  }
+
+  const handleStepSignerChange = (index: number, newUserId: string) => {
+    const step = steps[index]
+    const deptList = step?.phong_ban_code ? deptUsersCache[step.phong_ban_code] : undefined
+    const profile = (deptList && deptList.find((p) => p.id === newUserId))
+      || allApproverProfiles.find((p) => p.id === newUserId)
+      || (newUserId === userId ? { id: newUserId, full_name: userName, username: userName } : null)
+
+    const currentTen = (step?.ten || "").trim()
+    updateStep(index, {
+      user_id: newUserId,
+      ten: currentTen ? currentTen : (profile ? profileLabel(profile) : undefined),
+    })
+  }
+
   useEffect(() => {
     if (factoryId) {
       void loadInstance(factoryId)
@@ -1871,18 +2337,101 @@ export default function IsoFormInstancePage() {
       } else {
         setAutoConvertPdf(false)
       }
-      const storagePath = `${factoryId}/iso/instances/${instanceId}/draft.${ext}`
+      // Đặt storage path versioned kèm timestamp để loại trừ triệt để lỗi dính HTTP Cache của trình duyệt / CDN
+      const timestamp = Date.now()
+      const storagePath = `${factoryId}/iso/instances/${instanceId}/draft_${timestamp}.${ext}`
       const { error } = await supabase.storage.from("iso-documents").upload(storagePath, fileToUpload, { upsert: true })
       if (error) { setUploadError(error.message); return }
       const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(storagePath)
-      const updateData: Record<string, unknown> = { draft_file_url: urlData.publicUrl, draft_file_type: ext }
+      const freshDraftUrl = `${urlData.publicUrl}?v=${timestamp}`
+
+      // Khi thay file mới: BẮT BUỘC reset toàn bộ các trường file đã ký và con dấu của lần trước
+      // để modal ký và màn cài đặt vị trí không bị nạp nhầm file cũ.
+      const updateData: Record<string, unknown> = {
+        draft_file_url: freshDraftUrl,
+        draft_file_type: ext,
+        soan_thao_signed_url: null,
+        final_pdf_url: null,
+        final_office_url: null,
+        placement_ky: {},
+        nguoi_ky: {},
+        buoc_hien_tai: 0,
+      }
       updateData.auto_convert_pdf = ext === "pdf"
+
+      // Đóng gói toàn bộ cấu hình phê duyệt hiện có trên UI để không bị reset khi nạp lại
+      updateData.ghi_chu = ghiChu || null
+      const currentSteps = stepsRef.current.length > 0 ? stepsRef.current : steps
+      if (currentSteps.length > 0) {
+        const formattedSteps: ThuTuKyStep[] = currentSteps.map((s, idx) => {
+          const uid = stepSignerUserId(s) || ""
+          const deptList = s.phong_ban_code ? deptUsersCache[s.phong_ban_code] : undefined
+          const profile = (deptList && deptList.find((p) => p.id === uid))
+            || (uid && allApproverProfiles.find((p) => p.id === uid))
+            || (uid && profilesPheDuyet.find((p) => p.id === uid))
+            || (uid && profilesXemXet.find((p) => p.id === uid))
+            || (uid && userId && uid === userId ? { id: uid, full_name: userName, username: userName } : null)
+          return {
+            step: idx + 1,
+            type: s.phong_ban_code ? "phong_ban" : "ca_nhan",
+            phong_ban_code: s.phong_ban_code,
+            phong_ban_name: s.phong_ban_name,
+            user_id: uid,
+            ten: s.ten?.trim() || (profile ? profileLabel(profile) : (idx === 0 ? "Người lập" : idx === currentSteps.length - 1 ? "Phê duyệt" : `Xem xét ${idx}`)),
+            chuc_vu: s.chuc_vu,
+          }
+        })
+        updateData.thu_tu_ky_json = formattedSteps
+        updateData.so_buoc_tong = formattedSteps.length
+        if (formattedSteps.length > 0) {
+          const lastStep = formattedSteps[formattedSteps.length - 1]
+          const lastUid = stepSignerUserId(lastStep) || null
+          updateData.phe_duyet_user_id = lastUid
+          const lastProfile = lastUid ? allApproverProfiles.find((p) => p.id === lastUid) : null
+          updateData.phe_duyet = lastProfile ? profileLabel(lastProfile) : lastStep.ten || null
+          if (formattedSteps.length > 2) {
+            updateData.cap_tl = "Cấp 1"
+            const revStep = formattedSteps[1]
+            const revUid = stepSignerUserId(revStep) || null
+            updateData.xem_xet_user_id = revUid
+            const revProfile = revUid ? allApproverProfiles.find((p) => p.id === revUid) : null
+            updateData.xem_xet = revProfile ? profileLabel(revProfile) : revStep.ten || null
+          } else {
+            updateData.cap_tl = "Cấp 2"
+            updateData.xem_xet_user_id = null
+            updateData.xem_xet = null
+          }
+        }
+      } else {
+        updateData.cap_tl = cap_tl
+        updateData.phe_duyet_user_id = pheDuyetUserId || null
+        updateData.phe_duyet = pheDuyetUserId ? profileLabel(profilesPheDuyet.find((p) => p.id === pheDuyetUserId) ?? { id: "", full_name: null, username: null }) : null
+        if (cap_tl === "Cấp 1") {
+          updateData.xem_xet_user_id = xemXetUserId || null
+          updateData.xem_xet = xemXetUserId ? profileLabel(profilesXemXet.find((p) => p.id === xemXetUserId) ?? { id: "", full_name: null, username: null }) : null
+        } else {
+          updateData.xem_xet_user_id = null
+          updateData.xem_xet = null
+        }
+      }
+
       const { error: upErr } = await supabase.from("iso_form_instances")
         .update(updateData)
         .eq("id", instanceId)
       if (upErr) { setUploadError(upErr.message); return }
       setUploadFile(null)
-      void loadInstance(factoryId)
+      setInstance((prev) => prev ? {
+        ...prev,
+        draft_file_url: freshDraftUrl,
+        draft_file_type: ext,
+        soan_thao_signed_url: null,
+        final_pdf_url: null,
+        final_office_url: null,
+        placement_ky: null,
+        nguoi_ky: null,
+        buoc_hien_tai: 0,
+      } : null)
+      await loadInstance(factoryId)
       if (ext === "docx") void loadDocxPreview(fileToUpload)
     } finally {
       setUploading(false)
@@ -1920,6 +2469,18 @@ export default function IsoFormInstancePage() {
     }
   }
 
+  // ── Send notify (fire-and-forget) ────────────────────────────────────────
+  const sendNotify = (action: string, recipientUserIds: string[], lyDo?: string) => {
+    if (!factoryId || !userId) return
+    const ids = recipientUserIds.filter(Boolean)
+    if (!ids.length) return
+    void fetch("/api/iso/forms/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instanceId, factoryId, action, recipientUserIds: ids, lyDo, actorUserId: userId }),
+    }).catch(() => {})
+  }
+
   // ── Save config ──────────────────────────────────────────────────────────
   // ── Open sign modal ──────────────────────────────────────────────────────
   /**
@@ -1954,17 +2515,24 @@ export default function IsoFormInstancePage() {
         auto_convert_pdf: autoConvertPdf,
         ghi_chu: ghiChu || null,
       }
+      if (instance.trang_thai === "tra_ve" || instance.trang_thai === "draft") {
+        updates.buoc_hien_tai = 0
+      }
 
       if (isNStep) {
         const formattedSteps: ThuTuKyStep[] = steps.map((s, idx) => {
           const uid = stepSignerUserId(s) || ""
-          const profile = (uid && allApproverProfiles.find((p) => p.id === uid))
+          const deptList = s.phong_ban_code ? deptUsersCache[s.phong_ban_code] : undefined
+          const profile = (deptList && deptList.find((p) => p.id === uid))
+            || (uid && allApproverProfiles.find((p) => p.id === uid))
             || (uid && profilesPheDuyet.find((p) => p.id === uid))
             || (uid && profilesXemXet.find((p) => p.id === uid))
             || (uid && userId && uid === userId ? { id: uid, full_name: userName, username: userName } : null)
           return {
             step: idx + 1,
-            type: "ca_nhan",
+            type: s.phong_ban_code ? "phong_ban" : "ca_nhan",
+            phong_ban_code: s.phong_ban_code,
+            phong_ban_name: s.phong_ban_name,
             user_id: uid,
             ten: s.ten?.trim() || (profile ? profileLabel(profile) : (idx === 0 ? "Người lập" : idx === steps.length - 1 ? "Phê duyệt" : `Xem xét ${idx}`)),
             chuc_vu: s.chuc_vu,
@@ -2006,12 +2574,98 @@ export default function IsoFormInstancePage() {
 
       const { error } = await supabase.from("iso_form_instances").update(updates).eq("id", instanceId)
       if (error) { setActionError(error.message); return null }
+
+      // Gửi thông báo phân công cho Người soạn thảo (bước 1) nếu được gán cho người khác
+      if (instance.trang_thai === "draft" && isNStep && Array.isArray(updates.thu_tu_ky_json)) {
+        const fSteps = updates.thu_tu_ky_json as ThuTuKyStep[]
+        const newStep1Uid = fSteps[0]?.user_id
+        const prevStep1Uid = (instance.thu_tu_ky_json as ThuTuKyStep[])?.[0]?.user_id
+        if (newStep1Uid && newStep1Uid !== userId && (newStep1Uid !== prevStep1Uid || !prevStep1Uid)) {
+          sendNotify("phan_cong_soan_thao", [newStep1Uid])
+        }
+      }
+
       return await loadInstance(factoryId)
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Lỗi lưu cài đặt")
       return null
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleManualSaveConfig = async () => {
+    const reloaded = await persistApprovalConfig()
+    if (reloaded) {
+      setActionSuccess("Đã lưu cấu hình phê duyệt thành công")
+      setTimeout(() => setActionSuccess(null), 3000)
+    }
+  }
+
+  const handleConfirmDoiNguoiKy = async (stepIndex: number, newUserId: string, newName: string, reason: string) => {
+    if (!instance || !factoryId || !userId) return
+    setDoiNguoiKySaving(true)
+    setActionError(null)
+    try {
+      const curSteps: ThuTuKyStep[] = Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0
+        ? [...instance.thu_tu_ky_json]
+        : [...steps]
+
+      if (stepIndex < 0 || stepIndex >= curSteps.length) {
+        setActionError("Bước ký không hợp lệ")
+        return
+      }
+
+      const prevStep = curSteps[stepIndex]
+      const prevName = prevStep.ten || prevStep.user_id || "Người ký cũ"
+
+      curSteps[stepIndex] = {
+        ...prevStep,
+        user_id: newUserId,
+        ten: newName,
+      }
+
+      const updates: Record<string, unknown> = {
+        thu_tu_ky_json: curSteps,
+      }
+
+      if (stepIndex === curSteps.length - 1) {
+        updates.phe_duyet_user_id = newUserId
+        updates.phe_duyet = newName
+      }
+      if (curSteps.length > 2 && stepIndex === 1) {
+        updates.xem_xet_user_id = newUserId
+        updates.xem_xet = newName
+      }
+
+      const { error: upErr } = await supabase
+        .from("iso_form_instances")
+        .update(updates)
+        .eq("id", instanceId)
+
+      if (upErr) {
+        setActionError(upErr.message)
+        return
+      }
+
+      await supabase.from("iso_form_instance_logs").insert({
+        instance_id: instanceId,
+        factory_id: factoryId,
+        user_id: userId,
+        action: "doi_nguoi_ky",
+        note: `Đổi người ký bước ${stepIndex + 1} (${stepDisplayLabel(prevStep)}) từ "${prevName}" sang "${newName}". Lý do: ${reason}`,
+      })
+
+      sendNotify("ky_buoc", [newUserId])
+
+      setDoiNguoiKyOpen(false)
+      setActionSuccess(`Đã đổi người ký bước ${stepIndex + 1} thành công`)
+      setTimeout(() => setActionSuccess(null), 3500)
+      void loadInstance(factoryId)
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Lỗi đổi người ký")
+    } finally {
+      setDoiNguoiKySaving(false)
     }
   }
 
@@ -2022,36 +2676,12 @@ export default function IsoFormInstancePage() {
     const fileSrc = reloaded.draft_file_url ?? instance.draft_file_url
 
     if ((reloaded.so_buoc_tong ?? 0) > 0) {
-      const firstStep = reloaded.thu_tu_ky_json?.[0]
-      const firstSignerId = firstStep ? stepSignerUserId(firstStep) : null
-      if (firstSignerId === userId) {
-        setSignModal({
-          action: (reloaded.so_buoc_tong ?? 1) === 1 ? "phe_duyet" : "ky_buoc",
-          stepIndex: 0,
-          totalSteps: reloaded.so_buoc_tong ?? 1,
-          sourceFileUrl: fileSrc,
-        })
-      } else {
-        setSaving(true)
-        try {
-          const nextStatus = (reloaded.so_buoc_tong ?? 1) > 1 ? "cho_xem_xet" : "cho_phe_duyet"
-          const { error } = await supabase.from("iso_form_instances").update({
-            trang_thai: nextStatus,
-            buoc_hien_tai: 0,
-          }).eq("id", instanceId)
-          if (error) { setActionError(error.message); return }
-          await supabase.from("iso_form_instance_logs").insert({
-            instance_id: instanceId, factory_id: factoryId, user_id: userId,
-            action: "gui_ho_so", note: "Gửi hồ sơ bắt đầu luồng ký",
-          })
-          setActionSuccess("Đã gửi hồ sơ")
-          setTimeout(() => setActionSuccess(null), 3000)
-          if (firstSignerId) sendNotify("ky_buoc", [firstSignerId])
-          if (factoryId) void loadInstance(factoryId)
-        } finally {
-          setSaving(false)
-        }
-      }
+      setSignModal({
+        action: (reloaded.so_buoc_tong ?? 1) === 1 ? "phe_duyet" : "ky_buoc",
+        stepIndex: 0,
+        totalSteps: reloaded.so_buoc_tong ?? 1,
+        sourceFileUrl: fileSrc,
+      })
     } else {
       setSignModal({ action: "soan_thao", sourceFileUrl: fileSrc })
     }
@@ -2059,10 +2689,21 @@ export default function IsoFormInstancePage() {
 
   /** Lưu cấu hình TRƯỚC rồi mới sang màn cài đặt vị trí ký — xem cảnh báo ở `persistApprovalConfig`. */
   const goToTemplateSetup = async () => {
-    if (!templateSignSetupUrl) return
     const reloaded = await persistApprovalConfig()
     if (!reloaded) return
-    router.push(templateSignSetupUrl)
+    const rawPdf = [
+      urlIsPdf(reloaded.draft_file_url) ? reloaded.draft_file_url : null,
+      urlIsPdf(template?.file_signed_pdf_url ?? null) ? template?.file_signed_pdf_url ?? null : null,
+      urlIsPdf(template?.file_goc_url ?? null) ? template?.file_goc_url ?? null : null,
+    ].find(Boolean) ?? null
+    if (!rawPdf || !templateSignSetupKey) return
+    const freshPdf = rawPdf.includes("?") ? `${rawPdf}&_t=${Date.now()}` : `${rawPdf}?_t=${Date.now()}`
+    const targetUrl = `/dashboard/ky/mau-vi-tri?modun=iso&loai=${encodeURIComponent(templateSignSetupKey)}`
+      + `&pdfUrl=${encodeURIComponent(freshPdf)}`
+      + `&docLabel=${encodeURIComponent(template?.ma_tai_lieu || template?.ten_tai_lieu || reloaded.tieu_de)}`
+      + `&formInstanceId=${encodeURIComponent(instanceId)}`
+      + `&returnTo=${encodeURIComponent(`/dashboard/iso/forms/${instanceId}?confirmedSignTemplate=1`)}`
+    router.push(targetUrl)
   }
 
   const openSignStepModal = () => {
@@ -2071,9 +2712,14 @@ export default function IsoFormInstancePage() {
     const curIdx = instance.buoc_hien_tai ?? 0
     const total = instance.so_buoc_tong ?? 1
     const isFinalStep = curIdx + 1 >= total
-    const src = isDraftPdf
-      ? (instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
-      : (instance.soan_thao_signed_url || instance.draft_file_url)
+    // Nếu đang ở bước 0 hoặc hồ sơ đang ở draft/tra_ve, nguồn ký BẮT BUỘC là file draft vừa thay mới
+    const isFirstStepOrDraft = curIdx === 0 || instance.trang_thai === "draft" || instance.trang_thai === "tra_ve"
+    const rawSrc = isFirstStepOrDraft
+      ? instance.draft_file_url
+      : isDraftPdf
+        ? (instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
+        : (instance.soan_thao_signed_url || instance.draft_file_url)
+    const src = rawSrc ? (rawSrc.includes("?") ? `${rawSrc}&_ts=${Date.now()}` : `${rawSrc}?_ts=${Date.now()}`) : null
     setSignModal({
       action: isFinalStep ? "phe_duyet" : "ky_buoc",
       stepIndex: curIdx,
@@ -2084,29 +2730,19 @@ export default function IsoFormInstancePage() {
 
   const openXemXetModal = () => {
     if (!instance) return
-    const src = instance.soan_thao_signed_url || instance.draft_file_url
+    const rawSrc = instance.soan_thao_signed_url || instance.draft_file_url
+    const src = rawSrc ? (rawSrc.includes("?") ? `${rawSrc}&_ts=${Date.now()}` : `${rawSrc}?_ts=${Date.now()}`) : null
     setSignModal({ action: "xem_xet", sourceFileUrl: src })
   }
 
   const openPheDuyetModal = () => {
     if (!instance) return
     const isDraftPdf = instance.draft_file_type === "pdf"
-    const src = isDraftPdf
+    const rawSrc = isDraftPdf
       ? (instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
       : (instance.soan_thao_signed_url || instance.draft_file_url)
+    const src = rawSrc ? (rawSrc.includes("?") ? `${rawSrc}&_ts=${Date.now()}` : `${rawSrc}?_ts=${Date.now()}`) : null
     setSignModal({ action: "phe_duyet", sourceFileUrl: src })
-  }
-
-  // ── Send notify (fire-and-forget) ────────────────────────────────────────
-  const sendNotify = (action: string, recipientUserIds: string[], lyDo?: string) => {
-    if (!factoryId || !userId) return
-    const ids = recipientUserIds.filter(Boolean)
-    if (!ids.length) return
-    void fetch("/api/iso/forms/notify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instanceId, factoryId, action, recipientUserIds: ids, lyDo, actorUserId: userId }),
-    }).catch(() => {})
   }
 
   // ── Return ───────────────────────────────────────────────────────────────
@@ -2119,7 +2755,15 @@ export default function IsoFormInstancePage() {
     setActionError(null)
     try {
       const { error } = await supabase.from("iso_form_instances")
-        .update({ trang_thai: "tra_ve" as IsoFormInstanceStatus, ly_do_tra_ve: lyDo })
+        .update({
+          trang_thai: "tra_ve" as IsoFormInstanceStatus,
+          ly_do_tra_ve: lyDo,
+          buoc_hien_tai: 0,
+          nguoi_ky: {},
+          soan_thao_signed_url: null,
+          final_pdf_url: null,
+          final_office_url: null,
+        })
         .eq("id", instanceId)
       if (error) { setActionError(error.message); return }
       await supabase.from("iso_form_instance_logs").insert({
@@ -2146,8 +2790,15 @@ export default function IsoFormInstancePage() {
   }
 
   // ── Sign confirm ─────────────────────────────────────────────────────────
-  const handleSignConfirm = async (pin: string, placement: FullPlacement, signAs: SignAsType, note?: string) => {
-    if (!factoryId || !userId || !signModal || !instance) return
+  const handleSignConfirm = async (
+    pin: string,
+    placement: FullPlacement,
+    signAs: SignAsType,
+    note?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!factoryId || !userId || !signModal || !instance) {
+      return { success: false, error: "Thiếu thông tin người ký hoặc hồ sơ" }
+    }
 
     setSignLoading(true)
     setActionError(null)
@@ -2159,8 +2810,9 @@ export default function IsoFormInstancePage() {
       const { data: sessionData } = await supabase.auth.getSession()
       const accessToken = sessionData.session?.access_token
       if (!accessToken) {
-        setActionError("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại")
-        return
+        const err = "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại"
+        setActionError(err)
+        return { success: false, error: err }
       }
       // 1. Verify PIN
       const verifyRes = await fetch("/api/sign/verify", {
@@ -2173,8 +2825,9 @@ export default function IsoFormInstancePage() {
       })
       const verifyJson = await verifyRes.json() as { token?: string; error?: string }
       if (!verifyRes.ok) {
-        setActionError(verifyJson.error ?? "PIN không đúng")
-        return
+        const err = verifyJson.error ?? "PIN không đúng"
+        setActionError(err)
+        return { success: false, error: err }
       }
 
       // 2. Finalize
@@ -2192,8 +2845,9 @@ export default function IsoFormInstancePage() {
       })
       const finalizeJson = await finalizeRes.json() as { success?: boolean; trang_thai?: string; error?: string }
       if (!finalizeRes.ok) {
-        setActionError(finalizeJson.error ?? "Lỗi ký số")
-        return
+        const err = finalizeJson.error ?? "Lỗi ký số"
+        setActionError(err)
+        return { success: false, error: err }
       }
 
       const completedAction = signModal.action
@@ -2236,6 +2890,11 @@ export default function IsoFormInstancePage() {
         sendNotify(completedAction, notifyRecipients)
       }
       void loadInstance(factoryId)
+      return { success: true }
+    } catch (e) {
+      const err = e instanceof Error ? e.message : "Lỗi hệ thống khi ký số"
+      setActionError(err)
+      return { success: false, error: err }
     } finally {
       setSignLoading(false)
     }
@@ -2290,6 +2949,18 @@ export default function IsoFormInstancePage() {
     ? instance.draft_file_url
     : (instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url)
   const isNguoiTao = instance.nguoi_tao === userId
+
+  // Kiểm tra vai trò soạn thảo / tạo lập / admin
+  const firstStep = (isNStepRecord && Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0)
+    ? instance.thu_tu_ky_json[0]
+    : (steps.length > 0 ? steps[0] : null)
+  const firstStepSignerId = firstStep ? stepSignerUserId(firstStep) : null
+  const isDrafter = firstStepSignerId === userId
+  const canManageDraft = isEditable && (isNguoiTao || isDrafter || userRole === "admin")
+  const canSignStep1 = isEditable && (isDrafter || userRole === "admin")
+  const canChangeSigner = !isEditable && !isDone && instance.trang_thai !== "tra_ve" && (
+    isNguoiTao || isDrafter || userRole === "admin"
+  )
 
   // Hồ sơ PDF mới có khái niệm "vị trí ký"; file Office thay tag nên không cần mẫu.
   const needsSignTemplate = instance.draft_file_type === "pdf" || urlIsPdf(instance.draft_file_url)
@@ -2347,7 +3018,7 @@ export default function IsoFormInstancePage() {
         </div>
 
         {/* Vì sao nút "Ký & Gửi" đang khoá — nói thẳng thay vì để người dùng bấm mãi không được */}
-        {isEditable && isNguoiTao && mustSetupTemplate && (
+        {isEditable && canManageDraft && mustSetupTemplate && (
           <div className="flex items-start gap-3 p-4 bg-sky-50 border border-sky-200 rounded-2xl">
             <LayoutTemplate size={18} className="text-sky-600 shrink-0 mt-0.5" />
             <div className="text-sm">
@@ -2374,7 +3045,7 @@ export default function IsoFormInstancePage() {
               />
             </div>
             <div className="flex items-center gap-2 shrink-0 flex-wrap w-full sm:w-auto">
-              {isEditable && isNguoiTao && (
+              {canSignStep1 && (
                 <button
                   onClick={openSendModal}
                   disabled={saving || !instance.draft_file_url || mustSetupTemplate}
@@ -2385,7 +3056,7 @@ export default function IsoFormInstancePage() {
                 >
                   {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                   {isNStepRecord || steps.length > 0
-                    ? "Ký & Gửi hồ sơ"
+                    ? (steps.length === 2 ? "Ký & Gửi phê duyệt" : steps.length > 2 ? "Ký & Gửi xem xét" : "Ký & Gửi hồ sơ")
                     : (cap_tl === "Cấp 1" ? "Ký & Gửi xem xét" : "Ký & Gửi phê duyệt")}
                 </button>
               )}
@@ -2434,7 +3105,27 @@ export default function IsoFormInstancePage() {
                   <RotateCcw size={13} /> Trả về
                 </button>
               )}
-              {isEditable && isNguoiTao && templateSignSetupUrl && (
+              {canChangeSigner && (
+                <button
+                  onClick={() => setDoiNguoiKyOpen(true)}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-violet-50 hover:bg-violet-100 text-violet-700 text-sm font-bold rounded-xl border border-violet-200 transition-colors flex-1 sm:flex-none"
+                  title="Thay đổi người ký nếu người ký hiện tại vắng mặt"
+                >
+                  <UserCheck size={13} /> Đổi người ký
+                </button>
+              )}
+              {isEditable && canManageDraft && (
+                <button
+                  onClick={handleManualSaveConfig}
+                  disabled={saving}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-700 text-sm font-bold rounded-xl border border-emerald-200 transition-colors flex-1 sm:flex-none"
+                  title="Lưu các thay đổi về người ký và thứ tự phê duyệt"
+                >
+                  {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                  Lưu cấu hình
+                </button>
+              )}
+              {isEditable && canManageDraft && templateSignSetupUrl && (
                 <button
                   onClick={() => void goToTemplateSetup()}
                   disabled={!signStepsReady || saving}
@@ -2455,7 +3146,7 @@ export default function IsoFormInstancePage() {
               </button>
             </div>
           </div>
-          {isEditable && isNguoiTao && !instance.draft_file_url && (
+          {isEditable && canManageDraft && !instance.draft_file_url && (
             <div className="mt-2 flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
               <AlertTriangle size={12} className="shrink-0 mt-0.5" />
               <span>Cần tải lên file hồ sơ trước khi gửi.</span>
@@ -2576,7 +3267,7 @@ export default function IsoFormInstancePage() {
                   >
                     <Download size={14} />
                   </button>
-                  {isEditable && (
+                  {canManageDraft && (
                     <button
                       onClick={() => fileInputRef.current?.click()}
                       className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50 rounded-lg"
@@ -2614,7 +3305,7 @@ export default function IsoFormInstancePage() {
               )}
 
               {/* Upload zone (only when editable and not currently uploading) */}
-              {isEditable && !uploading && (
+              {canManageDraft && !uploading && (
                 <div>
                   <input
                     ref={fileInputRef}
@@ -2672,7 +3363,7 @@ export default function IsoFormInstancePage() {
           <div className="lg:col-span-2 flex flex-col gap-5">
 
             {/* Config panel (editable only) */}
-            {isEditable && (
+            {canManageDraft && (
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
                 <h2 className="text-sm font-extrabold text-slate-700 mb-3 flex items-center gap-2">
                   <Settings size={14} className="text-slate-500" />
@@ -2695,7 +3386,7 @@ export default function IsoFormInstancePage() {
                   </div>
 
                   {/* Steps list */}
-                  <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                  <div className="space-y-2.5 max-h-[680px] overflow-y-auto pr-1">
                     {steps.map((s, idx) => {
                       const isFirst = idx === 0
                       const isLast = idx === steps.length - 1
@@ -2749,23 +3440,48 @@ export default function IsoFormInstancePage() {
                             </div>
                           </div>
 
-                          <select
-                            value={signerId || ""}
-                            onChange={(e) => updateStep(idx, { user_id: e.target.value })}
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-violet-400"
-                          >
-                            <option value="">— Chọn người ký —</option>
-                            {userId && userName && (
-                              <option value={userId}>{userName} (Bạn)</option>
-                            )}
-                            {allApproverProfiles
-                              .filter((p) => p.id !== userId)
-                              .map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {profileLabel(p)}
-                                </option>
-                              ))}
-                          </select>
+                          {/* Lọc 2 cấp: Phòng ban -> Người ký đích danh */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-100">
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Phòng ban</label>
+                              <select
+                                value={s.phong_ban_code || ""}
+                                onChange={(e) => handleStepDeptChange(idx, e.target.value)}
+                                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-violet-400 font-medium"
+                              >
+                                <option value="">— Tất cả phòng ban —</option>
+                                {PHONG_BAN_OPTIONS.map((pb) => (
+                                  <option key={pb} value={pb}>
+                                    Phòng ban {pb}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 block mb-0.5">
+                                Người ký đích danh {s.phong_ban_code && deptUsersLoading[s.phong_ban_code] && <span className="text-violet-600 font-normal">(đang tải...)</span>}
+                              </label>
+                              <select
+                                value={signerId || ""}
+                                onChange={(e) => handleStepSignerChange(idx, e.target.value)}
+                                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-violet-400 font-medium"
+                              >
+                                <option value="">— Chọn người ký —</option>
+                                {(() => {
+                                  const list = s.phong_ban_code ? (deptUsersCache[s.phong_ban_code] || []) : allApproverProfiles
+                                  const listWithCurrent = (signerId && !list.some((p) => p.id === signerId))
+                                    ? [...list, allApproverProfiles.find((p) => p.id === signerId) || { id: signerId, full_name: s.ten || signerId, username: null }]
+                                    : list
+
+                                  return listWithCurrent.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {profileLabel(p)} {p.id === userId ? "(Bạn)" : ""}
+                                    </option>
+                                  ))
+                                })()}
+                              </select>
+                            </div>
+                          </div>
                         </div>
                       )
                     })}
@@ -2809,7 +3525,19 @@ export default function IsoFormInstancePage() {
                     />
                   </div>
 
-                  <p className="text-[11px] text-slate-400 text-center">Cài đặt sẽ được lưu tự động khi ký &amp; gửi</p>
+                  {/* Nút lưu cấu hình phê duyệt */}
+                  <div className="pt-2 flex items-center justify-between border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={handleManualSaveConfig}
+                      disabled={saving}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded-xl border border-violet-200 transition-colors disabled:opacity-50"
+                    >
+                      {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                      Lưu cấu hình phê duyệt
+                    </button>
+                    <p className="text-[11px] text-slate-400">Tự động lưu khi ký &amp; gửi</p>
+                  </div>
                 </div>
               </div>
             )}
@@ -2935,6 +3663,11 @@ export default function IsoFormInstancePage() {
           action={signModal.action}
           stepIndex={signModal.stepIndex}
           totalSteps={signModal.totalSteps}
+          stepName={
+            typeof signModal.stepIndex === "number" && Array.isArray(instance.thu_tu_ky_json)
+              ? instance.thu_tu_ky_json[signModal.stepIndex]?.ten
+              : undefined
+          }
           sourceFileUrl={signModal.sourceFileUrl}
           fileType={instance.draft_file_type}
           autoConvertPdf={instance.auto_convert_pdf}
@@ -2945,9 +3678,11 @@ export default function IsoFormInstancePage() {
           factoryId={factoryId}
           templateMa={template?.ma_tai_lieu ?? null}
           templateLoai={template?.loai_tai_lieu ?? null}
+          hasTemplate={templateExists === true}
           instanceId={instanceId}
           userId={userId}
           acting={signLoading}
+          errorMessage={actionError}
           onConfirm={handleSignConfirm}
           onClose={() => setSignModal(null)}
         />
@@ -2958,6 +3693,19 @@ export default function IsoFormInstancePage() {
         <ReturnModal
           onConfirm={handleReturn}
           onClose={() => setShowReturnModal(false)}
+        />
+      )}
+
+      {/* Doi Nguoi Ky Modal */}
+      {doiNguoiKyOpen && factoryId && (
+        <DoiNguoiKyModal
+          steps={Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0 ? instance.thu_tu_ky_json : steps}
+          currentStepIndex={instance.buoc_hien_tai ?? 0}
+          factoryId={factoryId}
+          allProfiles={allApproverProfiles}
+          onConfirm={handleConfirmDoiNguoiKy}
+          onClose={() => setDoiNguoiKyOpen(false)}
+          saving={doiNguoiKySaving}
         />
       )}
     </IsoShell>

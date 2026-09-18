@@ -40,6 +40,11 @@ const ACTION_LABELS: Record<string, ActionLabel> = {
     body: (tieu_de, actor) =>
       `Hồ sơ "${tieu_de}" đã được ${actor} ký và chuyển đến bạn để ký tiếp.`,
   },
+  phan_cong_soan_thao: {
+    title: "Hồ sơ ISO cần bạn soạn thảo / ký duyệt",
+    body: (tieu_de, actor) =>
+      `Hồ sơ "${tieu_de}" đã được ${actor} tạo và chỉ định bạn soạn thảo / ký bước 1.`,
+  },
 }
 
 export async function POST(req: NextRequest) {

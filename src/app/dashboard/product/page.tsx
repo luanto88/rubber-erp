@@ -2979,6 +2979,23 @@ export default function ProductPage() {
               hasError = true;
               break;
             }
+            if (draft.is_continuation && duplicateLot) {
+              if (duplicateLot.loai_csr && block.loai_csr && duplicateLot.loai_csr !== block.loai_csr) {
+                setSaveError(`Lô ${ma_lo} đã có chủng loại là ${duplicateLot.loai_csr}, không thể chọn ${block.loai_csr}.`);
+                hasError = true;
+                break;
+              }
+              if (duplicateLot.loai_banh && block.loai_banh && Number(duplicateLot.loai_banh) !== Number(block.loai_banh)) {
+                setSaveError(`Lô ${ma_lo} đã có loại bành là ${duplicateLot.loai_banh}kg, không thể chọn ${block.loai_banh}kg.`);
+                hasError = true;
+                break;
+              }
+              if (duplicateLot.boc && block.boc && duplicateLot.boc !== block.boc) {
+                setSaveError(`Lô ${ma_lo} đã có bọc là "${duplicateLot.boc}", không thể chọn "${block.boc}".`);
+                hasError = true;
+                break;
+              }
+            }
 
             const tb = draft.kien_a + draft.kien_b + draft.kien_c + draft.kien_d;
             const trang_thai = autoTrangThai(tb, blockCfg.lo_tron, "D\u1edf dang");
@@ -3017,6 +3034,9 @@ export default function ProductPage() {
                 kien_d: deltaD,
                 so_banh: added_banh,
                 so_kg: addedKg,
+                boc: block.boc,
+                pallet: block.pallet,
+                chi_thi: session.chi_thi,
               },
               actorUserId: currentUser?.id ?? null,
             });
@@ -3591,6 +3611,9 @@ export default function ProductPage() {
           kien_d: editForm.kien_d,
           so_banh: editForm.tong_banh,
           so_kg: nextTransactionKg,
+          boc: editForm.boc,
+          pallet: editForm.pallet,
+          chi_thi: editForm.chi_thi,
         },
         actorUserId: currentUser?.id ?? null,
       });
@@ -3625,6 +3648,14 @@ export default function ProductPage() {
       if (updateError) {
         setSaveError(`L\u1ed7i c\u1eadp nh\u1eadt l\u00f4: ${updateError.message}`);
         return;
+      }
+
+      // Đồng bộ bọc cho tất cả transactions của lô này
+      if (editForm.boc) {
+        await supabase
+          .from("lot_transactions")
+          .update({ boc: editForm.boc })
+          .eq("lot_id", editId);
       }
       const affectedNganIds = Array.from(
         new Set([dbLot.ngan_id, targetTx.ngan_id, editForm.ngan_id].filter(Boolean) as string[]),

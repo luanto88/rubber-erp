@@ -128,9 +128,8 @@ export async function getIsoTasks(factoryId: string, userId: string): Promise<Mo
       .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet", "tra_ve"]),
     supabase
       .from("iso_form_instances")
-      .select("id, trang_thai, nguoi_tao, xem_xet_user_id, phe_duyet_user_id")
+      .select("id, trang_thai, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, so_buoc_tong, buoc_hien_tai, thu_tu_ky_json")
       .eq("factory_id", factoryId)
-      .or(`nguoi_tao.eq.${userId},xem_xet_user_id.eq.${userId},phe_duyet_user_id.eq.${userId}`)
       .in("trang_thai", ["draft", "cho_xem_xet", "cho_phe_duyet", "tra_ve"]),
   ])
 
@@ -143,8 +142,25 @@ export async function getIsoTasks(factoryId: string, userId: string): Promise<Mo
       (d.trang_thai === "tra_ve" && d.soan_thao_user_id === userId),
   ).length
 
-  type IsoFormRow = { trang_thai: string; nguoi_tao: string | null; xem_xet_user_id: string | null; phe_duyet_user_id: string | null }
+  type IsoFormRow = {
+    trang_thai: string
+    nguoi_tao: string | null
+    xem_xet_user_id: string | null
+    phe_duyet_user_id: string | null
+    so_buoc_tong?: number | null
+    buoc_hien_tai?: number | null
+    thu_tu_ky_json?: Array<{ user_id?: string }> | null
+  }
   const formCount = ((forms || []) as IsoFormRow[]).filter((f) => {
+    if ((f.so_buoc_tong ?? 0) > 0 && Array.isArray(f.thu_tu_ky_json)) {
+      const firstStep = f.thu_tu_ky_json[0] as { user_id?: string; id?: string } | undefined
+      const firstUid = firstStep?.user_id || firstStep?.id
+      if (f.trang_thai === "tra_ve") return f.nguoi_tao === userId || firstUid === userId
+      if (f.trang_thai === "draft") return f.nguoi_tao === userId || firstUid === userId
+      const curStep = f.thu_tu_ky_json[f.buoc_hien_tai ?? 0] as { user_id?: string; id?: string } | undefined
+      const curUid = curStep?.user_id || curStep?.id
+      return curUid === userId
+    }
     if (f.trang_thai === "draft") return f.nguoi_tao === userId
     if (f.trang_thai === "cho_xem_xet") return f.xem_xet_user_id === userId
     if (f.trang_thai === "cho_phe_duyet") return f.phe_duyet_user_id === userId
