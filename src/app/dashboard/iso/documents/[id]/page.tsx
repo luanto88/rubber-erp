@@ -33,6 +33,8 @@ import {
 } from "../../_components/iso-types"
 import { canOpenIsoFile, EXPIRED_FILE_HINT } from "../../_components/iso-file-access"
 import { IsoBatchSignModal } from "../../_components/iso-batch-sign-modal"
+import { findRoleBoxForStep } from "@/lib/signing/template-layout"
+import { computeSnugBoxSize } from "@/lib/signing/text-fit"
 import {
   ArrowLeft,
   Save,
@@ -481,6 +483,7 @@ export default function IsoDocumentDetailPage() {
     prefixY: number
     prefixW: number
     prefixH: number
+    showPrefix?: boolean
     extraSigBoxes: Array<{
       id: number
       sigX: number; sigY: number; sigW: number; sigH: number
@@ -494,6 +497,7 @@ export default function IsoDocumentDetailPage() {
   // doc lẫn các file phụ/hồ sơ con trong cùng một lượt phê duyệt.
   const [signAs, setSignAs] = useState<SignAsType>("none")
   const prefixNodeRef = useRef<HTMLDivElement>(null)
+  const qrNodeRef = useRef<HTMLDivElement>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
   const sigInnerNodeRef = useRef<HTMLDivElement>(null)
   const nameInnerNodeRef = useRef<HTMLDivElement>(null)
@@ -926,14 +930,16 @@ export default function IsoDocumentDetailPage() {
           sigInnerY = 4
         }
         if (typeof nameInnerW !== "number" || nameInnerW <= 0) {
-          nameInnerW = Math.max(40, Math.min(frameCanvasW - 8, 120))
-          nameInnerH = 22
+          const snugName = computeSnugBoxSize(prev.signerName, "name")
+          nameInnerW = Math.max(40, Math.min(frameCanvasW - 8, snugName.w))
+          nameInnerH = snugName.h
           nameInnerX = Math.max(0, (frameCanvasW - nameInnerW) / 2)
           nameInnerY = Math.max(10, frameCanvasH - (prev.showChucVu ? 46 : 24))
         }
         if (typeof cvInnerW !== "number" || cvInnerW <= 0) {
-          cvInnerW = Math.max(40, Math.min(frameCanvasW - 8, 120))
-          cvInnerH = 20
+          const snugCv = computeSnugBoxSize(prev.signerChucVu, "chuc_vu")
+          cvInnerW = Math.max(40, Math.min(frameCanvasW - 8, snugCv.w))
+          cvInnerH = snugCv.h
           cvInnerX = Math.max(0, (frameCanvasW - cvInnerW) / 2)
           cvInnerY = Math.max(26, frameCanvasH - 22)
         }
@@ -989,14 +995,23 @@ export default function IsoDocumentDetailPage() {
         ? isCon
         : childDocs.some((c) => c.id === placementModal.docId && (c.phan_loai_tl === "con" || c.loai_tai_lieu === "F"))
     : false
+  const isAdmin = user?.role === "admin"
   // Phải là đúng người được chỉ định VÀ có quyền
   const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
   const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
+
+  const isNguoiTao = !!userId && (userId === doc?.created_by || isNew)
+  const isDrafter = !!userId && userId === (doc?.soan_thao_user_id || form.soan_thao_user_id)
+
+  // Quản lý/chỉnh sửa form nháp & trả về: cả người tạo, người soạn thảo, hoặc admin
+  const canManageDraft = isNew || ((trangThai === "draft" || trangThai === "tra_ve") && (isNguoiTao || isDrafter || isAdmin))
+  const isEditable = canManageDraft || (trangThai === "bi_tu_choi_phe_duyet" && canXemXet)
+
+  // Ký bước 1 (Soạn thảo): chỉ người được chỉ định là người soạn thảo hoặc admin
+  const canSignStep1 = !isNew && (trangThai === "draft" || trangThai === "tra_ve") && (isDrafter || isAdmin)
   // Người soạn thảo của tài liệu này (hoặc đang tạo mới)
   const isSoanThao = isNew || (!!userId && userId === doc?.soan_thao_user_id)
-  // draft/tra_ve chỉ cho phép soạn thảo chỉnh sửa; bi_tu_choi chỉ cho xem xét
-  const isEditable = isNew || ((trangThai === "draft" || trangThai === "tra_ve") && isSoanThao) || (trangThai === "bi_tu_choi_phe_duyet" && canXemXet)
-  const canToggleAutoConvert = (trangThai === "draft" || trangThai === "tra_ve") && !!userId && userId === doc?.soan_thao_user_id
+  const canToggleAutoConvert = (trangThai === "draft" || trangThai === "tra_ve") && (isDrafter || isNguoiTao || isAdmin)
   // Mở/tải file của CHÍNH bản ghi này. Bản hết hiệu lực cần quyền iso.view_het_hieu_luc —
   // thông tin chi tiết vẫn xem bình thường, chỉ nội dung file bị khoá.
   const canOpenThisFile = canOpenIsoFile(trangThai, user)
@@ -1572,6 +1587,19 @@ export default function IsoDocumentDetailPage() {
         const insertedIds = (insertedRows || []).map((r) => r.id)
         await Promise.all(insertedIds.map((id) => saveStandards(id)))
         setChildReviewRows([])
+        if (form.soan_thao_user_id && form.soan_thao_user_id !== session?.user?.id && insertedIds.length > 0) {
+          void fetch("/api/iso/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              docId: insertedIds[0],
+              factoryId,
+              action: "giao_soan_thao",
+              recipientUserIds: [form.soan_thao_user_id],
+              actorUserId: session?.user?.id,
+            }),
+          }).catch(console.error)
+        }
         showToast(true, `Đã tạo ${insertedIds.length} hồ sơ soát xét`)
         router.replace(`/dashboard/iso/documents/${insertedIds[0]}`)
         return
@@ -1590,6 +1618,23 @@ export default function IsoDocumentDetailPage() {
         const createdIds = await saveChildDraftRecords(data.id)
         if (!createdIds) return
         void loadEffectiveDocs(factoryId)
+
+        // Gửi thông báo phân công nếu người soạn thảo khác người tạo
+        const currentUserId = session?.user?.id
+        if (form.soan_thao_user_id && form.soan_thao_user_id !== currentUserId) {
+          void fetch("/api/iso/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              docId: data.id,
+              factoryId,
+              action: "giao_soan_thao",
+              recipientUserIds: [form.soan_thao_user_id],
+              actorUserId: currentUserId,
+            }),
+          }).catch(console.error)
+        }
+
         showToast(true, "Đã tạo tài liệu")
         router.replace(`/dashboard/iso/documents/${data.id}`)
       } else {
@@ -1605,6 +1650,27 @@ export default function IsoDocumentDetailPage() {
         const createdIds = await saveChildDraftRecords(docId)
         if (!createdIds) return
         void loadEffectiveDocs(factoryId)
+
+        // Gửi thông báo phân công nếu đổi người soạn thảo khác người hiện tại và khác người cũ
+        const currentUserId = session?.user?.id
+        if (
+          form.soan_thao_user_id &&
+          form.soan_thao_user_id !== currentUserId &&
+          form.soan_thao_user_id !== doc?.soan_thao_user_id
+        ) {
+          void fetch("/api/iso/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              docId,
+              factoryId,
+              action: "giao_soan_thao",
+              recipientUserIds: [form.soan_thao_user_id],
+              actorUserId: currentUserId,
+            }),
+          }).catch(console.error)
+        }
+
         showToast(true, "Đã lưu thay đổi")
         void loadDoc(docId, factoryId)
       }
@@ -2364,7 +2430,13 @@ export default function IsoDocumentDetailPage() {
 
             if (bestRow && Array.isArray(bestRow.khung)) {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const soanThaoBox = bestRow.khung.find((k: any) => k.vai_tro === "soan_thao")
+              const soanThaoBox = findRoleBoxForStep(bestRow.khung as Array<Record<string, unknown>>, {
+                stepIndex: 0,
+                totalSteps: form.cap_tl === "Cấp 2" ? 2 : 3,
+                stepName: "Người soạn thảo",
+                stepKey: "soan_thao",
+                action: "gui_xem_xet",
+              }) || bestRow.khung.find((k: any) => k.vai_tro === "soan_thao")
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const qrBox = bestRow.khung.find((k: any) => k.vai_tro === "qr" || k.la_qr)
 
@@ -2591,28 +2663,13 @@ export default function IsoDocumentDetailPage() {
       height = Math.min(st.h_pt - innerY_pt, innerH_pt)
       y = st.y_pt + st.h_pt - innerY_pt - height
 
-      // Tên
-      const nameInnerX = typeof placementModal.nameInnerX === "number" ? placementModal.nameInnerX : (boxW - 120) / 2
-      const nameInnerY = typeof placementModal.nameInnerY === "number" ? placementModal.nameInnerY : (boxH - (placementModal.showChucVu ? 46 : 24))
-      const nameInnerW = typeof placementModal.nameInnerW === "number" && placementModal.nameInnerW > 0 ? placementModal.nameInnerW : Math.min(boxW - 8, 120)
-      const nameInnerH = typeof placementModal.nameInnerH === "number" && placementModal.nameInnerH > 0 ? placementModal.nameInnerH : 22
-
-      const nameX_pt = (nameInnerX / boxW) * st.w_pt
-      const nameY_pt = (nameInnerY / boxH) * st.h_pt
-      const nameW_pt = (nameInnerW / boxW) * st.w_pt
-      const nameH_pt = (nameInnerH / boxH) * st.h_pt
-
-      nameX = st.x_pt + nameX_pt
-      nameWidth = Math.min(st.w_pt - nameX_pt, nameW_pt)
-      nameHeight = Math.min(st.h_pt - nameY_pt, nameH_pt)
-      nameY = st.y_pt + st.h_pt - nameY_pt - nameHeight
-
-      // Chức vụ
+      // Chức vụ (TRÊN Họ tên)
       if (placementModal.showChucVu) {
-        const cvInnerX = typeof placementModal.cvInnerX === "number" ? placementModal.cvInnerX : (boxW - 120) / 2
-        const cvInnerY = typeof placementModal.cvInnerY === "number" ? placementModal.cvInnerY : (boxH - 22)
-        const cvInnerW = typeof placementModal.cvInnerW === "number" && placementModal.cvInnerW > 0 ? placementModal.cvInnerW : Math.min(boxW - 8, 120)
-        const cvInnerH = typeof placementModal.cvInnerH === "number" && placementModal.cvInnerH > 0 ? placementModal.cvInnerH : 20
+        const snugCv = computeSnugBoxSize(placementModal.signerChucVu, "chuc_vu")
+        const cvInnerW = typeof placementModal.cvInnerW === "number" && placementModal.cvInnerW > 0 ? placementModal.cvInnerW : Math.min(boxW - 8, snugCv.w)
+        const cvInnerH = typeof placementModal.cvInnerH === "number" && placementModal.cvInnerH > 0 ? placementModal.cvInnerH : snugCv.h
+        const cvInnerX = typeof placementModal.cvInnerX === "number" ? placementModal.cvInnerX : (boxW - cvInnerW) / 2
+        const cvInnerY = typeof placementModal.cvInnerY === "number" ? placementModal.cvInnerY : Math.max(4, boxH - (placementModal.showSignerName ? 44 : 22))
 
         const cvX_pt = (cvInnerX / boxW) * st.w_pt
         const cvY_pt = (cvInnerY / boxH) * st.h_pt
@@ -2624,19 +2681,36 @@ export default function IsoDocumentDetailPage() {
         chucVuHeight = Math.min(st.h_pt - cvY_pt, cvH_pt)
         chucVuY = st.y_pt + st.h_pt - cvY_pt - chucVuHeight
       }
+
+      // Họ tên (DƯỚI Chức vụ)
+      const snugName = computeSnugBoxSize(placementModal.signerName, "name")
+      const nameInnerW = typeof placementModal.nameInnerW === "number" && placementModal.nameInnerW > 0 ? placementModal.nameInnerW : Math.min(boxW - 8, snugName.w)
+      const nameInnerH = typeof placementModal.nameInnerH === "number" && placementModal.nameInnerH > 0 ? placementModal.nameInnerH : snugName.h
+      const nameInnerX = typeof placementModal.nameInnerX === "number" ? placementModal.nameInnerX : (boxW - nameInnerW) / 2
+      const nameInnerY = typeof placementModal.nameInnerY === "number" ? placementModal.nameInnerY : Math.max(18, boxH - 22)
+
+      const nameX_pt = (nameInnerX / boxW) * st.w_pt
+      const nameY_pt = (nameInnerY / boxH) * st.h_pt
+      const nameW_pt = (nameInnerW / boxW) * st.w_pt
+      const nameH_pt = (nameInnerH / boxH) * st.h_pt
+
+      nameX = st.x_pt + nameX_pt
+      nameWidth = Math.min(st.w_pt - nameX_pt, nameW_pt)
+      nameHeight = Math.min(st.h_pt - nameY_pt, nameH_pt)
+      nameY = st.y_pt + st.h_pt - nameY_pt - nameHeight
     }
 
     const qrX = placementModal.showQrPlacement
-      ? (qrTmpl ? qrTmpl.x_pt : placementModal.qrX / canvasScale)
+      ? (placementModal.qrX / canvasScale)
       : undefined
     const qrY = placementModal.showQrPlacement
-      ? (qrTmpl ? qrTmpl.y_pt : pdfPageHeight - (placementModal.qrY / canvasScale) - (placementModal.qrH / canvasScale))
+      ? (pdfPageHeight - (placementModal.qrY / canvasScale) - (placementModal.qrH / canvasScale))
       : undefined
     const qrWidth = placementModal.showQrPlacement
-      ? (qrTmpl ? qrTmpl.w_pt : placementModal.qrW / canvasScale)
+      ? (placementModal.qrW / canvasScale)
       : undefined
     const qrHeight = placementModal.showQrPlacement
-      ? (qrTmpl ? qrTmpl.h_pt : placementModal.qrH / canvasScale)
+      ? (placementModal.qrH / canvasScale)
       : undefined
 
     const placement: SignPlacement = {
@@ -2662,7 +2736,7 @@ export default function IsoDocumentDetailPage() {
       qrY,
       qrWidth,
       qrHeight,
-      showPrefix: action === "phe_duyet" && signAs !== "none" ? true : undefined,
+      showPrefix: action === "phe_duyet" && signAs !== "none" && placementModal.showPrefix !== false ? true : undefined,
       prefixX: action === "phe_duyet" && signAs !== "none" ? (placementModal.prefixX / canvasScale) : undefined,
       prefixY: action === "phe_duyet" && signAs !== "none"
         ? (pdfPageHeight - (placementModal.prefixY / canvasScale) - (placementModal.prefixH / canvasScale))
@@ -3667,14 +3741,9 @@ export default function IsoDocumentDetailPage() {
             </div>
           </div>
 
-          {/* Cụm thao tác header: trên mobile mọi mục (Xem / Tải / Phân phối / QR...) chia
-              đều bề rộng màn hình, QR đặt CUỐI; từ sm: trở lên trả về kích thước tự nhiên. */}
-          <div className="flex w-full flex-wrap items-stretch gap-2 sm:w-auto sm:items-center [&>*]:flex-1 [&>*]:basis-0 [&>*]:justify-center sm:[&>*]:flex-none sm:[&>*]:basis-auto">
-            {/* Xem / Tải file — PHẢI đặt ở header, KHÔNG phải trong thẻ "File tài liệu".
-                Thẻ file nằm ở CỘT PHẢI, mà trên mobile cột phải xếp xuống dưới toàn bộ cột
-                trái (Nhân sự ký duyệt, form...) nên người dùng phải cuộn rất sâu mới bấm được.
-                `order-first` của thẻ đó chỉ sắp xếp trong nội bộ cột phải, không thể nhảy lên
-                trên cột trái được — header là nơi duy nhất đứng trên cả 2 cột. */}
+          {/* Cụm thao tác header: trên mobile các nút co giãn đều, desktop kích thước chuẩn h-10 đồng bộ */}
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+            {/* Xem / Tải file */}
             {!isNew && mainFileUrl && canOpenThisFile && (
               <>
                 <a
@@ -3682,7 +3751,7 @@ export default function IsoDocumentDetailPage() {
                   target="_blank"
                   rel="noreferrer"
                   title="Xem file"
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold shadow-sm transition-all"
+                  className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-sm font-semibold shadow-2xs transition-all"
                 >
                   <Eye size={15} /> <span className="hidden sm:inline">Xem file</span>
                 </a>
@@ -3693,16 +3762,14 @@ export default function IsoDocumentDetailPage() {
                   )}
                   download
                   title="Tải file"
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold shadow-sm transition-all"
+                  className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 text-sm font-semibold shadow-2xs transition-all"
                 >
                   <Download size={15} /> <span className="hidden sm:inline">Tải file</span>
                 </a>
               </>
             )}
 
-            {/* Bản hết hiệu lực + không có quyền xem file: banner phải nằm ở HEADER cùng chỗ
-                với cụm Xem/Tải vừa bị ẩn, không để tận dưới thẻ file (người dùng phải cuộn sâu
-                mới thấy nên tưởng nút bị mất không rõ lý do). */}
+            {/* Bản hết hiệu lực + không có quyền xem file */}
             {!isNew && mainFileUrl && !canOpenThisFile && (
               <div className="flex min-w-full items-center justify-center sm:min-w-0">
                 <ExpiredFileNotice />
@@ -3710,7 +3777,7 @@ export default function IsoDocumentDetailPage() {
             )}
 
             {/* Luồng Soạn thảo: draft hoặc tra_ve */}
-            {!isNew && (trangThai === "draft" || trangThai === "tra_ve") && isSoanThao && (
+            {!isNew && (trangThai === "draft" || trangThai === "tra_ve") && canManageDraft && (
               <>
                 {/* Nếu chưa xác nhận vị trí trên màn mau-vi-tri (và có file PDF/upload) */}
                 {(doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl) && !templateConfirmed ? (
@@ -3724,12 +3791,11 @@ export default function IsoDocumentDetailPage() {
                       router.push(url)
                     }}
                     disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
-                    style={{ background: "#d97706" }}
-                    className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all hover:opacity-90 shadow-xs"
+                    className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 text-sm font-semibold shadow-2xs transition-all disabled:opacity-50"
                     title="Cài đặt mẫu vị trí ký cho quy trình và các biểu mẫu trước khi gửi duyệt"
                   >
-                    <FileSignature size={15} />
-                    Cài đặt vị trí ký
+                    <FileSignature size={15} className="text-amber-700" />
+                    <span>Cài đặt vị trí ký</span>
                   </button>
                 ) : (
                   <>
@@ -3743,31 +3809,45 @@ export default function IsoDocumentDetailPage() {
                           const url = `/dashboard/ky/mau-vi-tri?modun=iso&docId=${docId}&loaiTaiLieu=${encodeURIComponent(loai)}&pdfUrl=${encodeURIComponent(pdfToUse)}&docLabel=${encodeURIComponent(label)}&returnTo=${encodeURIComponent(`/dashboard/iso/documents/${docId}`)}`
                           router.push(url)
                         }}
-                        className="flex items-center gap-2 px-3.5 py-2 text-emerald-800 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-sm font-semibold rounded-xl transition-all shadow-xs"
+                        className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 text-sm font-semibold shadow-2xs transition-all"
                         title="Chỉnh sửa lại vị trí ký đã cài đặt"
                       >
-                        <FileSignature size={15} className="text-emerald-700" />
-                        Chỉnh sửa vị trí ký
+                        <FileSignature size={15} className="text-slate-600" />
+                        <span>Chỉnh sửa vị trí ký</span>
                       </button>
                     )}
-                    <button
-                      onClick={() => {
-                        const label = form.cap_tl === "Cấp 2"
-                          ? (trangThai === "tra_ve" ? "Xác nhận ký & gửi phê duyệt lại" : "Xác nhận ký & gửi phê duyệt")
-                          : (trangThai === "tra_ve" ? "Xác nhận ký & gửi xem xét lại" : "Xác nhận ký & gửi xem xét")
-                        setPinModal({ action: "gui_xem_xet", label })
-                        setPin("")
-                        setPinError("")
-                      }}
-                      disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
-                      style={{ background: "#d97706" }}
-                      className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all hover:opacity-90"
-                    >
-                      <Send size={14} />
-                      {form.cap_tl === "Cấp 2"
-                        ? (trangThai === "tra_ve" ? "Ký & Gửi phê duyệt lại" : "Ký & Gửi phê duyệt")
-                        : (trangThai === "tra_ve" ? "Ký & Gửi xem xét lại" : "Ký & Gửi xem xét")}
-                    </button>
+                    {canSignStep1 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const label = form.cap_tl === "Cấp 2"
+                            ? (trangThai === "tra_ve" ? "Xác nhận ký & gửi phê duyệt lại" : "Xác nhận ký & gửi phê duyệt")
+                            : (trangThai === "tra_ve" ? "Xác nhận ký & gửi xem xét lại" : "Xác nhận ký & gửi xem xét")
+                          setPinModal({ action: "gui_xem_xet", label })
+                          setPin("")
+                          setPinError("")
+                        }}
+                        disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
+                        className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-sm font-bold shadow-sm disabled:opacity-50 transition-all active:scale-[0.98]"
+                      >
+                        <Send size={14} />
+                        <span>
+                          {form.cap_tl === "Cấp 2"
+                            ? (trangThai === "tra_ve" ? "Ký & Gửi phê duyệt lại" : "Ký & Gửi phê duyệt")
+                            : (trangThai === "tra_ve" ? "Ký & Gửi xem xét lại" : "Ký & Gửi xem xét")}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-slate-200 bg-slate-100 text-slate-400 text-sm font-semibold shadow-2xs cursor-not-allowed opacity-70"
+                        title="Chỉ người soạn thảo được chỉ định mới có quyền ký và gửi bước này"
+                      >
+                        <Send size={14} />
+                        <span>Chờ người soạn thảo ký</span>
+                      </button>
+                    )}
                   </>
                 )}
               </>
@@ -3776,9 +3856,9 @@ export default function IsoDocumentDetailPage() {
             {/* Xem xét → gửi phê duyệt */}
             {!isNew && trangThai === "cho_xem_xet" && canXemXet && (
               <button
+                type="button"
                 onClick={() => setBatchSignModal({ open: true, action: "gui_phe_duyet" })}
-                style={{ background: "#ea580c" }}
-                className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
+                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-sm font-bold shadow-sm transition-all active:scale-[0.98]"
               >
                 <Send size={14} /> Ký xem xét & Gửi phê duyệt
               </button>
@@ -3787,9 +3867,9 @@ export default function IsoDocumentDetailPage() {
             {/* Từ chối xem xét */}
             {!isNew && trangThai === "cho_xem_xet" && canXemXet && (
               <button
+                type="button"
                 onClick={() => { setPinModal({ action: "khong_xem_xet", label: "Từ chối xem xét" }); setPin(""); setPinError("") }}
-                style={{ background: "#e11d48" }}
-                className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-sm font-semibold shadow-2xs transition-all active:scale-[0.98]"
               >
                 <X size={14} /> Từ chối
               </button>
@@ -3798,20 +3878,20 @@ export default function IsoDocumentDetailPage() {
             {/* Phê duyệt */}
             {!isNew && (trangThai === "cho_phe_duyet") && canApprove && (
               <button
+                type="button"
                 onClick={() => setBatchSignModal({ open: true, action: "phe_duyet" })}
-                style={{ background: "#16a34a" }}
-                className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
+                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-sm font-bold shadow-sm transition-all active:scale-[0.98]"
               >
                 <CheckCircle2 size={14} /> Phê duyệt & Ban hành
               </button>
             )}
 
-            {/* Không phê duyệt (từ cho_phe_duyet — chỉ canApprove, không dùng cho cho_xem_xet) */}
+            {/* Không phê duyệt */}
             {!isNew && trangThai === "cho_phe_duyet" && canApprove && (
               <button
+                type="button"
                 onClick={() => { setPinModal({ action: "tu_choi_phe_duyet", label: "Không phê duyệt" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
-                style={{ background: "#e11d48" }}
-                className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-sm font-semibold shadow-2xs transition-all active:scale-[0.98]"
               >
                 <X size={14} /> Không phê duyệt
               </button>
@@ -3821,16 +3901,16 @@ export default function IsoDocumentDetailPage() {
             {!isNew && trangThai === "bi_tu_choi_phe_duyet" && canXemXet && (
               <>
                 <button
+                  type="button"
                   onClick={() => setBatchSignModal({ open: true, action: "gui_lai_phe_duyet" })}
-                  style={{ background: "#ea580c" }}
-                  className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
+                  className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-sm font-bold shadow-sm transition-all active:scale-[0.98]"
                 >
                   <Send size={14} /> Ký xem xét & Gửi phê duyệt lại
                 </button>
                 <button
+                  type="button"
                   onClick={() => { setPinModal({ action: "tra_ve_nhap", label: "Trả về Nháp" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
-                  style={{ background: "#64748b" }}
-                  className="flex items-center gap-2 px-4 py-2 text-white text-sm font-bold rounded-xl transition-all hover:opacity-90"
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-semibold shadow-2xs transition-all"
                 >
                   <RotateCcw size={14} /> Trả về Nháp
                 </button>
@@ -3840,8 +3920,9 @@ export default function IsoDocumentDetailPage() {
             {/* Nút phân phối — chỉ khi tài liệu đã có hiệu lực */}
             {!isNew && canDistribute && doc?.trang_thai === "co_hieu_luc" && (
               <button
+                type="button"
                 onClick={() => setShowDistributeModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-all"
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 text-sm font-semibold shadow-2xs transition-all"
               >
                 <Share2 size={14} /> Phân phối
               </button>
@@ -3850,19 +3931,23 @@ export default function IsoDocumentDetailPage() {
             {/* Nút lưu */}
             {isEditable && (
               <button
+                type="button"
                 onClick={() => void handleSave()}
                 disabled={saving}
-                className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50 transition-all"
+                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-sm font-bold shadow-sm disabled:opacity-50 transition-all active:scale-[0.98]"
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                {saving ? "Đang lưu..." : "Lưu"}
+                <span>{saving ? "Đang lưu..." : "Lưu"}</span>
               </button>
             )}
 
-            {/* QR code khi đã có mã — luôn là mục CUỐI của cụm thao tác */}
+            {/* QR code khi đã có mã */}
             {!isNew && doc?.ma_tai_lieu && (
-              <div className="flex items-center justify-center rounded-lg border border-slate-200 p-1">
-                <QRCodeSVG value={recordUrl} size={48} />
+              <div
+                className="h-10 w-10 shrink-0 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs flex items-center justify-center hover:border-slate-300 transition-all"
+                title="Mã QR tra cứu tài liệu"
+              >
+                <QRCodeSVG value={recordUrl} size={32} />
               </div>
             )}
           </div>
@@ -3894,30 +3979,28 @@ export default function IsoDocumentDetailPage() {
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-700 mb-4">Nhân sự ký duyệt</h2>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* Soạn thảo — auto-set, read-only */}
+                {/* Soạn thảo */}
                 <div>
                   <label className="text-xs font-bold text-slate-600 flex items-center gap-1 mb-1.5">
                     Người soạn thảo
-                    {isNew && <Lock size={10} className="text-slate-400" />}
+                    {!isEditable || !!doc?.ky_soan_thao_at ? <Lock size={10} className="text-slate-400" /> : null}
                   </label>
                   <div className="relative">
                     <select
                       value={form.soan_thao_user_id}
                       onChange={(e) => {
-                        if (!isNew) {
-                          const uid = e.target.value
-                          setForm((f) => ({
-                            ...f,
-                            soan_thao_user_id: uid,
-                            soan_thao: profileName(uid),
-                            xem_xet_user_id: f.xem_xet_user_id === uid ? "" : f.xem_xet_user_id,
-                            xem_xet: f.xem_xet_user_id === uid ? "" : f.xem_xet,
-                            phe_duyet_user_id: f.phe_duyet_user_id === uid ? "" : f.phe_duyet_user_id,
-                            phe_duyet: f.phe_duyet_user_id === uid ? "" : f.phe_duyet,
-                          }))
-                        }
+                        const uid = e.target.value
+                        setForm((f) => ({
+                          ...f,
+                          soan_thao_user_id: uid,
+                          soan_thao: profileName(uid),
+                          xem_xet_user_id: f.xem_xet_user_id === uid ? "" : f.xem_xet_user_id,
+                          xem_xet: f.xem_xet_user_id === uid ? "" : f.xem_xet,
+                          phe_duyet_user_id: f.phe_duyet_user_id === uid ? "" : f.phe_duyet_user_id,
+                          phe_duyet: f.phe_duyet_user_id === uid ? "" : f.phe_duyet,
+                        }))
                       }}
-                      disabled={!isEditable || isNew}
+                      disabled={!isEditable || !!doc?.ky_soan_thao_at}
                       className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                     >
                       <option value="">— Chọn người —</option>
@@ -4888,31 +4971,6 @@ export default function IsoDocumentDetailPage() {
                   <Lock size={12} className="text-emerald-600" />
                   Đã khóa vị trí theo mẫu
                 </span>
-                {placementModal.action === "phe_duyet" && (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-slate-400">Ký thay:</span>
-                    <label className="flex items-center gap-1 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="iso-doc-sign-as"
-                        checked={signAs === "none"}
-                        onChange={() => setSignAs("none")}
-                      />
-                      Trực tiếp
-                    </label>
-                    {SIGN_AS_OPTIONS.map((opt) => (
-                      <label key={opt} className="flex items-center gap-1 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="iso-doc-sign-as"
-                          checked={signAs === opt}
-                          onChange={() => setSignAs(opt)}
-                        />
-                        {SIGN_AS_LABEL[opt]}
-                      </label>
-                    ))}
-                  </div>
-                )}
               </div>
               <div className="flex gap-2">
                 <button
@@ -5041,15 +5099,17 @@ export default function IsoDocumentDetailPage() {
                       const sigInnerX = Math.max(0, Math.min(frameW - sigInnerW, placementModal.sigInnerX ?? Math.max(0, (frameW - sigInnerW) / 2)))
                       const sigInnerY = Math.max(0, Math.min(frameH - sigInnerH, placementModal.sigInnerY ?? 4))
 
-                      const nameInnerW = Math.min(frameW, Math.max(40, placementModal.nameInnerW || Math.min(frameW - 8, 120)))
-                      const nameInnerH = placementModal.nameInnerH || 22
-                      const nameInnerX = Math.max(0, Math.min(frameW - nameInnerW, placementModal.nameInnerX ?? Math.max(0, (frameW - nameInnerW) / 2)))
-                      const nameInnerY = Math.max(0, Math.min(frameH - nameInnerH, placementModal.nameInnerY ?? Math.max(10, frameH - (placementModal.showChucVu ? 46 : 24))))
-
-                      const cvInnerW = Math.min(frameW, Math.max(40, placementModal.cvInnerW || Math.min(frameW - 8, 120)))
-                      const cvInnerH = placementModal.cvInnerH || 20
+                      const snugCv = computeSnugBoxSize(placementModal.signerChucVu, "chuc_vu")
+                      const cvInnerW = Math.min(frameW, Math.max(40, placementModal.cvInnerW || Math.min(frameW - 8, snugCv.w)))
+                      const cvInnerH = placementModal.cvInnerH || snugCv.h
                       const cvInnerX = Math.max(0, Math.min(frameW - cvInnerW, placementModal.cvInnerX ?? Math.max(0, (frameW - cvInnerW) / 2)))
-                      const cvInnerY = Math.max(0, Math.min(frameH - cvInnerH, placementModal.cvInnerY ?? Math.max(26, frameH - 22)))
+                      const cvInnerY = Math.max(0, Math.min(frameH - cvInnerH, placementModal.cvInnerY ?? Math.max(4, frameH - (placementModal.showSignerName ? 44 : 22))))
+
+                      const snugName = computeSnugBoxSize(placementModal.signerName, "name")
+                      const nameInnerW = Math.min(frameW, Math.max(40, placementModal.nameInnerW || Math.min(frameW - 8, snugName.w)))
+                      const nameInnerH = placementModal.nameInnerH || snugName.h
+                      const nameInnerX = Math.max(0, Math.min(frameW - nameInnerW, placementModal.nameInnerX ?? Math.max(0, (frameW - nameInnerW) / 2)))
+                      const nameInnerY = Math.max(0, Math.min(frameH - nameInnerH, placementModal.nameInnerY ?? Math.max(18, frameH - 22)))
 
                       return (
                         <div
@@ -5072,7 +5132,7 @@ export default function IsoDocumentDetailPage() {
                             Khung của bạn (Người soạn thảo)
                           </div>
 
-                          {/* 1. Khối Chữ ký con: di chuyển và co giãn bằng mũi tên 2 chiều nhưng giới hạn trong khung */}
+                          {/* 1. Khối Chữ ký: di chuyển và co giãn bằng mũi tên 2 chiều */}
                           <Draggable
                             nodeRef={sigInnerNodeRef as RefObject<HTMLElement>}
                             position={{ x: sigInnerX, y: sigInnerY }}
@@ -5107,7 +5167,7 @@ export default function IsoDocumentDetailPage() {
                                 </span>
                               )}
 
-                              {/* Handle co giãn 2 chiều ở góc dưới bên phải (chuẩn mũi tên Tây Bắc - Đông Nam ↖ ↘) */}
+                              {/* Handle co giãn 2 chiều NWSE */}
                               <div
                                 className="resize-handle absolute -bottom-2 -right-2 w-7 h-7 sm:w-5 sm:h-5 bg-amber-600 hover:bg-amber-700 text-white rounded-full flex items-center justify-center shadow-md cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
                                 title="Kéo để co giãn kích thước chữ ký trong khung"
@@ -5146,11 +5206,99 @@ export default function IsoDocumentDetailPage() {
                             </div>
                           </Draggable>
 
-                          {/* 2. Khối Họ tên con: di chuyển độc lập trong khung, font Times New Roman 13px chữ đứng, Title Case */}
+                          {/* 2. Khối Chức vụ con (TRÊN Họ tên) */}
+                          <Draggable
+                            nodeRef={cvInnerNodeRef as RefObject<HTMLElement>}
+                            position={{ x: cvInnerX, y: cvInnerY }}
+                            bounds="parent"
+                            cancel=".resize-handle"
+                            onStop={(_, d) => setPlacementModal((p) => p ? { ...p, cvInnerX: d.x, cvInnerY: d.y } : null)}
+                          >
+                            <div
+                              ref={cvInnerNodeRef}
+                              style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: cvInnerW,
+                                height: cvInnerH,
+                                cursor: "move",
+                                userSelect: "none",
+                                fontFamily: "'Times New Roman', Times, serif",
+                              }}
+                              className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-tight font-normal flex items-center justify-center relative transition-all touch-none ${
+                                placementModal.showChucVu
+                                  ? "border-violet-400 bg-violet-50/90 text-violet-950 text-[13px] hover:border-violet-600"
+                                  : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-[13px] opacity-60"
+                              }`}
+                              title={placementModal.showChucVu ? "Kéo để di chuyển vị trí chức vụ trong khung" : "Chức vụ đang ẩn — Bấm icon mắt để hiện lại"}
+                            >
+                              <span className={`truncate w-full ${placementModal.showChucVu ? "" : "line-through"}`}>
+                                {placementModal.signerChucVu || "Người soạn thảo"}
+                              </span>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                touch-action="none"
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onTouchEnd={(e) => e.stopPropagation()}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setPlacementModal((p) => p ? { ...p, showChucVu: !p.showChucVu } : null)
+                                }}
+                                className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
+                                  placementModal.showChucVu ? "text-violet-600 hover:text-violet-900" : "text-slate-400 hover:text-slate-700"
+                                }`}
+                                title={placementModal.showChucVu ? "Ẩn chức vụ" : "Hiện lại chức vụ"}
+                              >
+                                {placementModal.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
+                              </button>
+
+                              <div
+                                className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-violet-600 hover:bg-violet-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+                                title="Kéo để co giãn kích thước chức vụ"
+                                onPointerDown={(e) => {
+                                  e.stopPropagation()
+                                  e.preventDefault()
+                                  const startX = e.clientX
+                                  const startY = e.clientY
+                                  const startW = cvInnerW
+                                  const startH = cvInnerH
+                                  const curX = cvInnerX
+                                  const curY = cvInnerY
+
+                                  const onMove = (ev: PointerEvent) => {
+                                    const dx = ev.clientX - startX
+                                    const dy = ev.clientY - startY
+                                    const newW = Math.max(30, Math.min(frameW - curX, startW + dx))
+                                    const newH = Math.max(12, Math.min(frameH - curY, startH + dy))
+                                    setPlacementModal((p) => p ? { ...p, cvInnerW: newW, cvInnerH: newH } : null)
+                                  }
+                                  const onUp = () => {
+                                    window.removeEventListener("pointermove", onMove)
+                                    window.removeEventListener("pointerup", onUp)
+                                  }
+                                  window.addEventListener("pointermove", onMove)
+                                  window.addEventListener("pointerup", onUp)
+                                }}
+                              >
+                                <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="9 3 3 3 3 9" />
+                                  <polyline points="15 21 21 21 21 15" />
+                                  <line x1="3" y1="3" x2="10" y2="10" />
+                                  <line x1="21" y1="21" x2="14" y2="14" />
+                                </svg>
+                              </div>
+                            </div>
+                          </Draggable>
+
+                          {/* 3. Khối Họ tên con (DƯỚI Chức vụ) */}
                           <Draggable
                             nodeRef={nameInnerNodeRef as RefObject<HTMLElement>}
                             position={{ x: nameInnerX, y: nameInnerY }}
                             bounds="parent"
+                            cancel=".resize-handle"
                             onStop={(_, d) => setPlacementModal((p) => p ? { ...p, nameInnerX: d.x, nameInnerY: d.y } : null)}
                           >
                             <div
@@ -5192,55 +5340,42 @@ export default function IsoDocumentDetailPage() {
                               >
                                 {placementModal.showSignerName ? <Eye size={12} /> : <EyeOff size={12} />}
                               </button>
-                            </div>
-                          </Draggable>
 
-                          {/* 3. Khối Chức vụ con: di chuyển độc lập trong khung, font Times New Roman 13px chữ đứng */}
-                          <Draggable
-                            nodeRef={cvInnerNodeRef as RefObject<HTMLElement>}
-                            position={{ x: cvInnerX, y: cvInnerY }}
-                            bounds="parent"
-                            onStop={(_, d) => setPlacementModal((p) => p ? { ...p, cvInnerX: d.x, cvInnerY: d.y } : null)}
-                          >
-                            <div
-                              ref={cvInnerNodeRef}
-                              style={{
-                                position: "absolute",
-                                top: 0,
-                                left: 0,
-                                width: cvInnerW,
-                                height: cvInnerH,
-                                cursor: "move",
-                                userSelect: "none",
-                                fontFamily: "'Times New Roman', Times, serif",
-                              }}
-                              className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-tight font-normal flex items-center justify-center relative transition-all touch-none ${
-                                placementModal.showChucVu
-                                  ? "border-violet-400 bg-violet-50/90 text-violet-950 text-[13px] hover:border-violet-600"
-                                  : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-[13px] opacity-60"
-                              }`}
-                              title={placementModal.showChucVu ? "Kéo để di chuyển vị trí chức vụ trong khung" : "Chức vụ đang ẩn — Bấm icon mắt để hiện lại"}
-                            >
-                              <span className={`truncate w-full ${placementModal.showChucVu ? "" : "line-through"}`}>
-                                {placementModal.signerChucVu || "Người soạn thảo"}
-                              </span>
-                              <button
-                                type="button"
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onTouchStart={(e) => e.stopPropagation()}
-                                onTouchEnd={(e) => e.stopPropagation()}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                onClick={(e) => {
+                              <div
+                                className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-sky-600 hover:bg-sky-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+                                title="Kéo để co giãn kích thước họ tên"
+                                onPointerDown={(e) => {
                                   e.stopPropagation()
-                                  setPlacementModal((p) => p ? { ...p, showChucVu: !p.showChucVu } : null)
+                                  e.preventDefault()
+                                  const startX = e.clientX
+                                  const startY = e.clientY
+                                  const startW = nameInnerW
+                                  const startH = nameInnerH
+                                  const curX = nameInnerX
+                                  const curY = nameInnerY
+
+                                  const onMove = (ev: PointerEvent) => {
+                                    const dx = ev.clientX - startX
+                                    const dy = ev.clientY - startY
+                                    const newW = Math.max(30, Math.min(frameW - curX, startW + dx))
+                                    const newH = Math.max(12, Math.min(frameH - curY, startH + dy))
+                                    setPlacementModal((p) => p ? { ...p, nameInnerW: newW, nameInnerH: newH } : null)
+                                  }
+                                  const onUp = () => {
+                                    window.removeEventListener("pointermove", onMove)
+                                    window.removeEventListener("pointerup", onUp)
+                                  }
+                                  window.addEventListener("pointermove", onMove)
+                                  window.addEventListener("pointerup", onUp)
                                 }}
-                                className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
-                                  placementModal.showChucVu ? "text-violet-600 hover:text-violet-900" : "text-slate-400 hover:text-slate-700"
-                                }`}
-                                title={placementModal.showChucVu ? "Ẩn chức vụ" : "Hiện lại chức vụ"}
                               >
-                                {placementModal.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
-                              </button>
+                                <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="9 3 3 3 3 9" />
+                                  <polyline points="15 21 21 21 21 15" />
+                                  <line x1="3" y1="3" x2="10" y2="10" />
+                                  <line x1="21" y1="21" x2="14" y2="14" />
+                                </svg>
+                              </div>
                             </div>
                           </Draggable>
                         </div>
@@ -5248,70 +5383,195 @@ export default function IsoDocumentDetailPage() {
                     })()
                   )}
 
-                  {/* QR CODE BOX (Cố định vị trí theo mẫu vị trí) */}
-                  {placementModal.showQrPlacement && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: placementModal.qrX,
-                        top: placementModal.qrY,
-                        width: placementModal.qrW,
-                        height: placementModal.qrH,
-                        border: "2px dashed #0ea5e9",
-                        background: "rgba(255,255,255,0.92)",
-                        borderRadius: 6,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-                        zIndex: 10,
-                      }}
-                    >
-                      <div
-                        className="absolute -top-5 left-0 flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap bg-white/95 text-sky-700 pointer-events-none"
-                      >
-                        <Lock size={10} className="text-emerald-600" />
-                        Mã QR xác thực
-                      </div>
-                      <QRCodeSVG
-                        value={recordUrl}
-                        size={Math.max(Math.min(placementModal.qrW, placementModal.qrH) - 8, 20)}
-                        className="m-1"
-                      />
-                    </div>
-                  )}
+                  {/* QR CODE BOX (Di chuyển và co giãn được giới hạn trong khung mẫu hoặc mép trang) */}
+                  {placementModal.showQrPlacement && (() => {
+                    const templateQr = placementModal.rawTemplate?.qr
+                    const isQrOnThisPage = templateQr && (templateQr.so_trang === placementModal.currentPage || templateQr.so_trang === 0)
+                    const templateQrRegion = isQrOnThisPage
+                      ? {
+                          x: templateQr.x_pt * placementModal.canvasScale,
+                          y: (placementModal.pdfPageHeight - templateQr.y_pt - templateQr.h_pt) * placementModal.canvasScale,
+                          w: templateQr.w_pt * placementModal.canvasScale,
+                          h: templateQr.h_pt * placementModal.canvasScale,
+                        }
+                      : null
+
+                    const canvasEl = pdfCanvasRef.current
+                    const canvasW = canvasEl?.width || 800
+                    const canvasH = canvasEl?.height || 1130
+
+                    const qrBounds = templateQrRegion
+                      ? {
+                          left: templateQrRegion.x,
+                          top: templateQrRegion.y,
+                          right: Math.max(templateQrRegion.x, templateQrRegion.x + templateQrRegion.w - placementModal.qrW),
+                          bottom: Math.max(templateQrRegion.y, templateQrRegion.y + templateQrRegion.h - placementModal.qrH),
+                        }
+                      : {
+                          left: 0,
+                          top: 0,
+                          right: Math.max(0, canvasW - placementModal.qrW),
+                          bottom: Math.max(0, canvasH - placementModal.qrH),
+                        }
+
+                    return (
+                      <Fragment>
+                        {/* Khung viền mốc nét đứt của QR nếu có template đã cài đặt */}
+                        {templateQrRegion && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              left: templateQrRegion.x,
+                              top: templateQrRegion.y,
+                              width: templateQrRegion.w,
+                              height: templateQrRegion.h,
+                              border: "1.5px dashed rgba(14, 165, 233, 0.45)",
+                              backgroundColor: "rgba(14, 165, 233, 0.04)",
+                              borderRadius: 6,
+                              pointerEvents: "none",
+                              zIndex: 4,
+                            }}
+                          >
+                            <span className="text-[9px] font-bold text-sky-600/80 absolute -top-4 left-1 select-none">
+                              Vùng QR theo mẫu
+                            </span>
+                          </div>
+                        )}
+
+                        <Draggable
+                          nodeRef={qrNodeRef as RefObject<HTMLElement>}
+                          position={{ x: placementModal.qrX, y: placementModal.qrY }}
+                          bounds={qrBounds}
+                          cancel=".resize-handle"
+                          onStop={(_, d) => setPlacementModal((p) => p ? { ...p, qrX: d.x, qrY: d.y } : null)}
+                        >
+                          <div
+                            ref={qrNodeRef}
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: placementModal.qrW,
+                              height: placementModal.qrH,
+                              border: "2px dashed #0ea5e9",
+                              background: "rgba(255,255,255,0.92)",
+                              borderRadius: 6,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                              zIndex: 10,
+                              cursor: "move",
+                            }}
+                            className="relative group select-none"
+                          >
+                            <div
+                              className="absolute -top-5 left-0 flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap bg-white/95 text-sky-700 pointer-events-none"
+                            >
+                              <Lock size={10} className="text-emerald-600" />
+                              Mã QR xác thực
+                            </div>
+                            <QRCodeSVG
+                              value={recordUrl}
+                              size={Math.max(Math.min(placementModal.qrW, placementModal.qrH) - 8, 20)}
+                              className="m-1 pointer-events-none"
+                            />
+                            {/* Handle co giãn 2 chiều NWSE cho QR */}
+                            <div
+                              className="resize-handle absolute -bottom-2 -right-2 w-7 h-7 sm:w-5 sm:h-5 bg-sky-600 hover:bg-sky-700 text-white rounded-full flex items-center justify-center shadow-md cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+                              title="Kéo để co giãn kích thước mã QR"
+                              onPointerDown={(e) => {
+                                e.stopPropagation()
+                                e.preventDefault()
+                                const startX = e.clientX
+                                const startY = e.clientY
+                                const startW = placementModal.qrW
+                                const startH = placementModal.qrH
+                                const curX = placementModal.qrX
+                                const curY = placementModal.qrY
+
+                                const maxW = templateQrRegion
+                                  ? Math.max(32, templateQrRegion.x + templateQrRegion.w - curX)
+                                  : Math.max(32, canvasW - curX)
+                                const maxH = templateQrRegion
+                                  ? Math.max(32, templateQrRegion.y + templateQrRegion.h - curY)
+                                  : Math.max(32, canvasH - curY)
+
+                                const onMove = (ev: PointerEvent) => {
+                                  const dx = ev.clientX - startX
+                                  const dy = ev.clientY - startY
+                                  const newW = Math.max(32, Math.min(maxW, startW + dx))
+                                  const newH = Math.max(32, Math.min(maxH, startH + dy))
+                                  setPlacementModal((p) => p ? { ...p, qrW: newW, qrH: newH } : null)
+                                }
+                                const onUp = () => {
+                                  window.removeEventListener("pointermove", onMove)
+                                  window.removeEventListener("pointerup", onUp)
+                                }
+                                window.addEventListener("pointermove", onMove)
+                                window.addEventListener("pointerup", onUp)
+                              }}
+                            >
+                              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 sm:w-2.5 sm:h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="9 3 3 3 3 9" />
+                                <polyline points="15 21 21 21 21 15" />
+                                <line x1="3" y1="3" x2="10" y2="10" />
+                                <line x1="21" y1="21" x2="14" y2="14" />
+                              </svg>
+                            </div>
+                          </div>
+                        </Draggable>
+                      </Fragment>
+                    )
+                  })()}
 
                   {/* Tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ bước Phê duyệt, chỉ hiện khi đã chọn */}
                   {placementModal.action === "phe_duyet" && signAs !== "none" && (
                     <Draggable
                       nodeRef={prefixNodeRef as RefObject<HTMLElement>}
                       position={{ x: placementModal.prefixX, y: placementModal.prefixY }}
-                      onDrag={(_, d) => setPlacementModal((p) => p ? { ...p, prefixX: d.x, prefixY: d.y } : null)}
                       onStop={(_, d) => setPlacementModal((p) => p ? { ...p, prefixX: d.x, prefixY: d.y } : null)}
                       bounds="parent"
-                      cancel=".react-resizable-handle,button,button *,a,.no-drag"
+                      cancel=".resize-handle,button,button *,a,.no-drag"
                     >
-                      <div ref={prefixNodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 11, cursor: "move" }}>
-                        <Resizable
-                          size={{ width: placementModal.prefixW, height: placementModal.prefixH }}
-                          onResizeStop={(_, __, ref) => setPlacementModal((p) => p ? {
-                            ...p,
-                            prefixW: parseInt(ref.style.width) || p.prefixW,
-                            prefixH: parseInt(ref.style.height) || p.prefixH,
-                          } : null)}
-                          minWidth={36}
-                          minHeight={16}
-                          style={{
-                            border: "2px dashed #059669",
-                            position: "relative",
-                            background: "rgba(236,253,245,0.9)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
+                      <div
+                        ref={prefixNodeRef}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          zIndex: 11,
+                          cursor: "move",
+                          width: placementModal.prefixW,
+                          height: placementModal.prefixH,
+                        }}
+                        className={`border rounded select-none flex items-center justify-center relative touch-none shadow-xs ${
+                          placementModal.showPrefix !== false
+                            ? "border-emerald-500 bg-emerald-50/90 text-emerald-800 text-xs font-bold"
+                            : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
+                        }`}
+                        title={placementModal.showPrefix !== false ? "Kéo để di chuyển tiền tố" : "Tiền tố đang ẩn — Bấm icon mắt để hiện lại"}
+                      >
+                        <span className={`truncate px-1 ${placementModal.showPrefix !== false ? "" : "line-through"}`}>
+                          {signAs}.
+                        </span>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onTouchEnd={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setPlacementModal((p) => p ? { ...p, showPrefix: p.showPrefix === false ? true : false } : null)
                           }}
+                          className={`absolute -top-1 -right-1 p-1.5 rounded-full flex items-center justify-center transition-colors z-20 hover:bg-black/5 ${
+                            placementModal.showPrefix !== false ? "text-emerald-600 hover:text-emerald-900" : "text-slate-400 hover:text-slate-700"
+                          }`}
+                          title={placementModal.showPrefix !== false ? "Ẩn tiền tố" : "Hiện lại tiền tố"}
                         >
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#047857", pointerEvents: "none" }}>{signAs}.</span>
-                        </Resizable>
+                          {placementModal.showPrefix !== false ? <Eye size={12} /> : <EyeOff size={12} />}
+                        </button>
                       </div>
                     </Draggable>
                   )}

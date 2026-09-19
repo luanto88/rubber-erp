@@ -1,10 +1,43 @@
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson"
-import { calculateGeometryAreaHa } from "./eudr-geometry-cleaner"
+import { calculateGeometryAreaHa, MIN_PIECE_AREA_HA } from "./eudr-geometry-cleaner"
+import { analyzeRingTopology, describeRingDefect } from "./eudr-ring-topology"
+
+/**
+ * Cổng kiểm tra file GeoJSON trước khi giao khách, theo chính sách 3 mức đã chốt.
+ *
+ * Nguyên tắc nền: **không bao giờ chặn xuất file chỉ vì lỗi hình học.**
+ * Hình học sai thì tự làm sạch và ghi nhật ký; chỉ chặn khi file mất ý nghĩa khai báo.
+ *
+ *   Mức 1 (fixed)    — tự sửa + ghi nhật ký: tự cắt, có lỗ, vòng hở, làm tròn toạ độ.
+ *   Mức 2 (warning)  — loại khỏi file + ghi rõ: mảnh vụn dưới 0,01 ha khi lô còn mảnh khác.
+ *   Mức 3 (blocking) — chặn xuất: mã lô rỗng/trùng, toạ độ ngoài Campuchia,
+ *                      lô thuộc đơn mà mất sạch hình học, hoặc không còn lô nào.
+ *
+ * ⚠️ Về Mức 3 và lô mất sạch hình học: ở cổng xuất, MỌI lô đều thuộc đơn hàng (danh sách lô
+ * suy ra từ chính chuỗi truy xuất của đơn). Nên một lô không còn hình học nghĩa là sản phẩm
+ * từ lô đó không có dữ liệu định vị — phải CHẶN và bắt người dùng sửa, tuyệt đối không loại
+ * âm thầm. Việc loại âm thầm chính là lỗ hổng truy xuất mà cổng này sinh ra để bịt.
+ */
+
+export type EudrIssueSeverity = "blocking" | "warning" | "fixed"
+
+export type EudrIssue = {
+  severity: EudrIssueSeverity
+  code: string
+  plotCode: string
+  message: string
+  at?: [number, number]
+}
 
 export type EudrValidationResult = {
+  /** Chỉ `false` khi có lỗi Mức 3. Lỗi hình học đã tự sửa không làm file mất hiệu lực. */
   isValid: boolean
+  issues: EudrIssue[]
+  blocking: EudrIssue[]
+  warnings: EudrIssue[]
+  fixed: EudrIssue[]
+  /** Giữ để tương thích với các nơi gọi cũ đang đọc `errors`. */
   errors: string[]
-  warnings: string[]
   details: Array<{
     plotCode: string
     declaredArea: number
@@ -19,128 +52,118 @@ export type EudrValidationResult = {
   }>
 }
 
-function ccw(A: number[], B: number[], C: number[]) {
-  return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
-}
-
-function segmentsIntersect(A: number[], B: number[], C: number[], D: number[]): boolean {
-  // If adjacent or sharing an exact vertex, they don't intersect in a crossing way
-  if (
-    (Math.abs(A[0] - C[0]) < 1e-9 && Math.abs(A[1] - C[1]) < 1e-9) ||
-    (Math.abs(A[0] - D[0]) < 1e-9 && Math.abs(A[1] - D[1]) < 1e-9) ||
-    (Math.abs(B[0] - C[0]) < 1e-9 && Math.abs(B[1] - C[1]) < 1e-9) ||
-    (Math.abs(B[0] - D[0]) < 1e-9 && Math.abs(B[1] - D[1]) < 1e-9)
-  ) {
-    return false
-  }
-  return ccw(A, C, D) !== ccw(B, C, D) && ccw(A, B, C) !== ccw(A, B, D)
-}
-
 /**
- * Kiểm tra vòng có bị tự cắt (self-intersection)
+ * Kiểm tra một vòng có tự cắt / tự chạm hay không.
+ *
+ * Nay chỉ là lớp mỏng gọi kernel `analyzeRingTopology()`. Bản cũ tự cài thuật toán và có
+ * hai điểm mù đã được chứng minh bằng code thật:
+ *  - `segmentsIntersect()` trả `false` ngay khi hai đoạn chia sẻ đỉnh chính xác → MÙ HOÀN TOÀN
+ *    với pinch point, đúng loại lỗi "Ring Self-intersection" mà khách hàng báo về.
+ *  - Vòng lặp dò spike chạy `i < length - 2` nên bỏ sót đỉnh gập ngay tại chỗ nối đầu–cuối.
  */
-export function checkRingSelfIntersection(ring: number[][]): { hasIntersection: boolean; atPoint?: [number, number] } {
-  if (!Array.isArray(ring) || ring.length < 4) return { hasIntersection: false }
-  const n = ring.length - 1
-
-  // 1. Kiểm tra đỉnh lùi trực tiếp (fold-back spike)
-  for (let i = 0; i < ring.length - 2; i++) {
-    const A = ring[i]
-    const B = ring[i + 1]
-    const C = ring[i + 2]
-    if (!A || !B || !C) continue
-    const dx1 = B[0] - A[0]
-    const dy1 = B[1] - A[1]
-    const dx2 = C[0] - B[0]
-    const dy2 = C[1] - B[1]
-    const len1 = Math.hypot(dx1, dy1)
-    const len2 = Math.hypot(dx2, dy2)
-    if (len1 > 1e-7 && len2 > 1e-7) {
-      const dot = dx1 * dx2 + dy1 * dy2
-      if (dot / (len1 * len2) < -0.9999) {
-        return { hasIntersection: true, atPoint: [B[0], B[1]] }
-      }
-    }
-  }
-
-  // 2. Kiểm tra giao cắt giữa các đoạn không kề nhau
-  for (let i = 0; i < n; i++) {
-    const A = ring[i]
-    const B = ring[i + 1]
-    for (let j = i + 1; j < n; j++) {
-      if (j === i + 1 || (i === 0 && j === n - 1)) continue
-      const C = ring[j]
-      const D = ring[j + 1]
-      if (segmentsIntersect(A, B, C, D)) {
-        return { hasIntersection: true, atPoint: [A[0], A[1]] }
-      }
-    }
-  }
-
-  return { hasIntersection: false }
+export function checkRingSelfIntersection(ring: number[][]): {
+  hasIntersection: boolean
+  atPoint?: [number, number]
+} {
+  const result = analyzeRingTopology(ring)
+  if (result.isSimple) return { hasIntersection: false }
+  const first = result.defects.find((d) => d.kind !== "Degenerate")
+  if (!first) return { hasIntersection: false }
+  return { hasIntersection: true, atPoint: first.at }
 }
 
-/**
- * Cổng kiểm tra tính hợp lệ trước khi xuất file GeoJSON theo chuẩn EUDR / TRACES
- */
-export function validateEudrCollection(collection: FeatureCollection | null | undefined): EudrValidationResult {
-  const errors: string[] = []
-  const warnings: string[] = []
+/** Phạm vi toạ độ hợp lệ cho vùng trồng tại Campuchia / Đông Dương. */
+const LON_MIN = 102
+const LON_MAX = 110
+const LAT_MIN = 8
+const LAT_MAX = 24
+
+export function validateEudrCollection(
+  collection: FeatureCollection | null | undefined,
+): EudrValidationResult {
+  const issues: EudrIssue[] = []
   const details: EudrValidationResult["details"] = []
 
-  if (!collection || !Array.isArray(collection.features) || collection.features.length === 0) {
+  const push = (
+    severity: EudrIssueSeverity,
+    code: string,
+    plotCode: string,
+    message: string,
+    at?: [number, number],
+  ) => {
+    issues.push({ severity, code, plotCode, message, at })
+  }
+
+  const build = (): EudrValidationResult => {
+    const blocking = issues.filter((i) => i.severity === "blocking")
+    const warnings = issues.filter((i) => i.severity === "warning")
+    const fixed = issues.filter((i) => i.severity === "fixed")
     return {
-      isValid: false,
-      errors: ["File GeoJSON không có dữ liệu hoặc danh sách features rỗng."],
-      warnings: [],
-      details: [],
+      isValid: blocking.length === 0,
+      issues,
+      blocking,
+      warnings,
+      fixed,
+      errors: blocking.map((i) => i.message),
+      details,
     }
   }
 
-  const seenPlotCodes = new Set<string>()
+  if (!collection || !Array.isArray(collection.features) || collection.features.length === 0) {
+    push("blocking", "EMPTY_COLLECTION", "-", "File GeoJSON không có lô nào sau khi làm sạch.")
+    return build()
+  }
+
+  // Một lô có thể xuất thành nhiều feature (lô bị đường/suối cắt thành nhiều mảnh).
+  // Vì vậy KHÔNG coi mã lô lặp lại là trùng lặp; chỉ gom lại để đối chiếu diện tích.
+  const byPlot = new Map<string, { declared: number; geom: number; areaSum: number; count: number }>()
 
   collection.features.forEach((feature, idx) => {
     const p = (feature.properties || {}) as Record<string, unknown>
-    const plotCode = String(p.Ma_lo_2026 || p.Ma_lo || p.Ten || `feature_${idx + 1}`).trim()
-    const declaredArea = Number(p.Dtich2026_ha ?? p.Area ?? 0) || 0
+    const plotCode = String(p.Ma_lo_2026 || p.Ma_lo || p.Ten || "").trim()
+    const declaredArea = Number(p.Dtich2026_ha ?? 0) || 0
     const geomArea = calculateGeometryAreaHa(feature.geometry)
-    const diffArea = geomArea - declaredArea
-    const diffPct = declaredArea > 0 ? (Math.abs(diffArea) / declaredArea) * 100 : (geomArea > 0 ? 100 : 0)
+    const featureArea = Number(p.Area ?? 0) || 0
 
-    const issues: string[] = []
+    const localIssues: string[] = []
     let hasHoles = false
     let hasKinks = false
     let isClosed = true
     let coordsValid = true
 
-    // 1. Kiểm tra mã lô rỗng / trùng lặp
-    if (!plotCode || plotCode.startsWith("feature_")) {
-      errors.push(`Feature #${idx + 1}: Mã lô bị rỗng.`)
-      issues.push("Mã lô rỗng")
-    } else if (seenPlotCodes.has(plotCode)) {
-      errors.push(`Lô [${plotCode}]: Bị trùng lặp nhiều feature trong cùng một file.`)
-      issues.push("Trùng lặp mã lô")
-    } else {
-      seenPlotCodes.add(plotCode)
+    // ── Mức 3: mã lô rỗng ──────────────────────────────────────────────────────────
+    if (!plotCode) {
+      push("blocking", "EMPTY_PLOT_CODE", `feature #${idx + 1}`, `Feature #${idx + 1}: mã lô bị rỗng.`)
+      localIssues.push("Mã lô rỗng")
     }
 
-    // 2. Kiểm tra thuộc tính bắt buộc của EUDR / TRACES
-    if (!p.ProducerName) {
-      warnings.push(`Lô [${plotCode}]: Thiếu thuộc tính 'ProducerName'.`)
-    }
+    // ── Mức 3: thiếu thuộc tính bắt buộc của TRACES ────────────────────────────────
     if (!p.ProducerCountry && !p.producerCountry) {
-      errors.push(`Lô [${plotCode}]: Thiếu thuộc tính bắt buộc 'ProducerCountry' / 'producerCountry'.`)
-      issues.push("Thiếu ProducerCountry")
+      push(
+        "blocking",
+        "MISSING_PRODUCER_COUNTRY",
+        plotCode,
+        `Lô [${plotCode}]: thiếu thuộc tính bắt buộc 'ProducerCountry' / 'producerCountry'.`,
+      )
+      localIssues.push("Thiếu ProducerCountry")
+    }
+    if (!p.ProducerName) {
+      push("warning", "MISSING_PRODUCER_NAME", plotCode, `Lô [${plotCode}]: thiếu thuộc tính 'ProducerName'.`)
     }
 
-    // 3. Kiểm tra hình học
+    // ── Hình học ───────────────────────────────────────────────────────────────────
     const geom = feature.geometry
     if (!geom) {
-      errors.push(`Lô [${plotCode}]: Không có hình học (geometry = null).`)
-      issues.push("Không có geometry")
+      push("blocking", "NO_GEOMETRY", plotCode, `Lô [${plotCode}]: không có hình học.`)
+      localIssues.push("Không có geometry")
     } else if (geom.type !== "Polygon" && geom.type !== "MultiPolygon") {
-      errors.push(`Lô [${plotCode}]: Định dạng hình học không hợp lệ (${geom.type}). Chỉ cho phép Polygon hoặc MultiPolygon.`)
-      issues.push(`Sai định dạng hình học: ${geom.type}`)
+      push(
+        "blocking",
+        "BAD_GEOMETRY_TYPE",
+        plotCode,
+        `Lô [${plotCode}]: định dạng hình học không hợp lệ (${geom.type}). Chỉ cho phép Polygon hoặc MultiPolygon.`,
+      )
+      localIssues.push(`Sai định dạng hình học: ${geom.type}`)
     } else {
       const polygons: number[][][][] =
         geom.type === "Polygon"
@@ -148,81 +171,127 @@ export function validateEudrCollection(collection: FeatureCollection | null | un
           : ((geom as MultiPolygon).coordinates as number[][][][])
 
       for (const rings of polygons) {
-        // Kiểm tra vòng trong (lỗ)
+        // Mức 1: còn vòng trong nghĩa là cleaner chưa chạy — vẫn xuất được, chỉ cảnh báo
         if (rings.length > 1) {
           hasHoles = true
-          errors.push(`Lô [${plotCode}]: Chứa ${rings.length - 1} vòng trong (lỗ). Quy định EUDR không cho phép đa giác có lỗ.`)
-          issues.push("Có vòng trong (lỗ)")
+          push(
+            "warning",
+            "HAS_HOLES",
+            plotCode,
+            `Lô [${plotCode}]: còn ${rings.length - 1} vòng trong (lỗ) chưa được làm sạch.`,
+          )
+          localIssues.push("Có vòng trong (lỗ)")
         }
 
         const exterior = rings[0]
         if (!exterior || exterior.length < 4) {
-          errors.push(`Lô [${plotCode}]: Ranh giới ngoài không đủ điểm (tối thiểu 4 điểm).`)
-          issues.push("Không đủ điểm ranh giới")
+          push("blocking", "RING_TOO_SHORT", plotCode, `Lô [${plotCode}]: ranh giới ngoài không đủ 4 điểm.`)
+          localIssues.push("Không đủ điểm ranh giới")
           continue
         }
 
-        // Kiểm tra khép kín vòng
         const first = exterior[0]
         const last = exterior[exterior.length - 1]
-        if (Math.abs(first[0] - last[0]) > 1e-7 || Math.abs(first[1] - last[1]) > 1e-7) {
+        if (first[0] !== last[0] || first[1] !== last[1]) {
           isClosed = false
-          errors.push(`Lô [${plotCode}]: Ranh giới chưa khép kín (điểm đầu khác điểm cuối).`)
-          issues.push("Ranh giới chưa khép kín")
+          push("warning", "RING_NOT_CLOSED", plotCode, `Lô [${plotCode}]: ranh giới chưa khép kín.`)
+          localIssues.push("Ranh giới chưa khép kín")
         }
 
-        // Kiểm tra tọa độ WGS84 nằm trong dải Campuchia/Đông Dương
+        // ── Mức 3: toạ độ ngoài phạm vi Campuchia ────────────────────────────────
         for (const pt of exterior) {
-          const lon = pt[0]
-          const lat = pt[1]
-          if (lon < 102 || lon > 110 || lat < 8 || lat > 24) {
+          if (pt[0] < LON_MIN || pt[0] > LON_MAX || pt[1] < LAT_MIN || pt[1] > LAT_MAX) {
             coordsValid = false
-            errors.push(`Lô [${plotCode}]: Tọa độ ngoài phạm vi cho phép [lon=${lon}, lat=${lat}].`)
-            issues.push(`Tọa độ ngoài phạm vi: ${lon}, ${lat}`)
+            push(
+              "blocking",
+              "COORDS_OUT_OF_RANGE",
+              plotCode,
+              `Lô [${plotCode}]: toạ độ ngoài phạm vi cho phép [lon=${pt[0]}, lat=${pt[1]}].`,
+              [pt[0], pt[1]],
+            )
+            localIssues.push(`Toạ độ ngoài phạm vi: ${pt[0]}, ${pt[1]}`)
             break
           }
         }
 
-        // Kiểm tra tự cắt (self-intersection)
-        const kinkCheck = checkRingSelfIntersection(exterior)
-        if (kinkCheck.hasIntersection) {
+        // ── Mức 1: tự cắt / tự chạm ──────────────────────────────────────────────
+        const topo = analyzeRingTopology(exterior)
+        if (!topo.isSimple) {
           hasKinks = true
-          const coordStr = kinkCheck.atPoint ? ` (tại tọa độ ${kinkCheck.atPoint[0]}, ${kinkCheck.atPoint[1]})` : ""
-          errors.push(`Lô [${plotCode}]: Ranh giới tự cắt qua chính nó (Self-intersection)${coordStr}.`)
-          issues.push(`Tự cắt${coordStr}`)
+          const defect = topo.defects[0]
+          push(
+            "warning",
+            "RING_SELF_INTERSECTION",
+            plotCode,
+            `Lô [${plotCode}]: ${describeRingDefect(defect)} — chưa được làm sạch.`,
+            defect.kind === "Degenerate" ? undefined : defect.at,
+          )
+          localIssues.push("Ranh giới tự cắt")
         }
       }
     }
 
-    // 4. Kiểm tra diện tích
-    if (geomArea <= 0.001) {
-      errors.push(`Lô [${plotCode}]: Diện tích hình học bằng 0 hoặc quá nhỏ (< 0.001 ha).`)
-      issues.push("Diện tích bằng 0")
-    } else if (diffPct > 10 && declaredArea > 0) {
-      warnings.push(
-        `Lô [${plotCode}]: Diện tích hình học (${geomArea.toFixed(2)} ha) lệch ${diffPct.toFixed(1)}% so với diện tích khai báo (${declaredArea.toFixed(2)} ha, chênh ${diffArea > 0 ? "+" : ""}${diffArea.toFixed(2)} ha).`,
+    // ── Mức 3: lô thuộc đơn nhưng mất sạch hình học ────────────────────────────────
+    if (geomArea < MIN_PIECE_AREA_HA) {
+      push(
+        "blocking",
+        "PLOT_AREA_TOO_SMALL",
+        plotCode,
+        `Lô [${plotCode}]: diện tích hình học chỉ còn ${geomArea.toFixed(6)} ha (dưới ${MIN_PIECE_AREA_HA} ha). ` +
+          `Lô này thuộc đơn hàng nên không được loại bỏ — cần sửa ranh giới tại Cài đặt → Lô vườn → ${plotCode}.`,
       )
-      issues.push(`Lệch diện tích ${diffPct.toFixed(1)}%`)
+      localIssues.push("Diện tích quá nhỏ")
+    }
+
+    if (plotCode) {
+      const acc = byPlot.get(plotCode) || { declared: declaredArea, geom: 0, areaSum: 0, count: 0 }
+      acc.declared = declaredArea || acc.declared
+      acc.geom += geomArea
+      acc.areaSum += featureArea
+      acc.count += 1
+      byPlot.set(plotCode, acc)
     }
 
     details.push({
       plotCode,
       declaredArea,
       geomArea,
-      diffArea,
-      diffPct,
+      diffArea: geomArea - declaredArea,
+      diffPct: declaredArea > 0 ? (Math.abs(geomArea - declaredArea) / declaredArea) * 100 : 0,
       hasHoles,
       hasKinks,
       isClosed,
       coordsValid,
-      issues,
+      issues: localIssues,
     })
   })
 
-  return {
-    isValid: errors.length === 0,
-    errors,
-    warnings,
-    details,
+  // ── Đối chiếu ở cấp lô (sau khi đã gom mọi mảnh của cùng một mã lô) ──────────────
+  for (const [plotCode, acc] of byPlot) {
+    // `Area` phải luôn bắt nguồn từ số đo khai báo. Tổng `Area` của mọi mảnh cùng mã lô
+    // phải bằng đúng `Dtich2026_ha` — nếu lệch nghĩa là ai đó đã lấy `Area` từ hình học.
+    if (acc.declared > 0 && Math.abs(acc.areaSum - acc.declared) > 0.02) {
+      push(
+        "warning",
+        "AREA_SUM_MISMATCH",
+        plotCode,
+        `Lô [${plotCode}]: tổng 'Area' của ${acc.count} mảnh là ${acc.areaSum.toFixed(2)} ha, ` +
+          `khác diện tích khai báo ${acc.declared.toFixed(2)} ha.`,
+      )
+    }
+    if (acc.declared > 0) {
+      const diffPct = (Math.abs(acc.geom - acc.declared) / acc.declared) * 100
+      if (diffPct > 10) {
+        push(
+          "warning",
+          "AREA_DEVIATION",
+          plotCode,
+          `Lô [${plotCode}]: diện tích hình học (${acc.geom.toFixed(2)} ha) lệch ${diffPct.toFixed(1)}% ` +
+            `so với diện tích khai báo (${acc.declared.toFixed(2)} ha).`,
+        )
+      }
+    }
   }
+
+  return build()
 }

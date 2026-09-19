@@ -110,6 +110,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       id: order.id,
       factory_id: order.factory_id,
       assignments: order.assignments || [],
+      ngay: order.ngay,
     })
 
     return NextResponse.json({
@@ -123,6 +124,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       lotCertMap: trace.lotCertMap,
       diemGn: trace.diemGn,
       geoData: trace.geoData,
+      // GĐ 3(c): nhật ký làm sạch/nở mảnh — client dùng lại khi tự tải file (serializeEudrGeoJson),
+      // không phải để hiển thị trực tiếp trên trang.
+      eudrCleanLog: trace.cleanLog,
       traceInfo: trace.traceInfo,
     })
   } catch (err) {

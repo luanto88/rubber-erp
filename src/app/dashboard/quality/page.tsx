@@ -373,6 +373,15 @@ export default function QualityPage() {
   const [expandedId,    setExpandedId]   = useState<string|null>(null)
   const [parentMap,     setParentMap]    = useState<Map<string,QcResult>>(new Map())
 
+  // ── Uninspected completed lots state ─────────────────────────────────────────
+  type UninspectedGroup = {
+    date: string
+    formattedDate: string
+    lots: { id: string; ma_lo: string; loai_csr: string; num?: number }[]
+  }
+  const [uninspectedGroups, setUninspectedGroups] = useState<UninspectedGroup[]>([])
+  const [uninspectedLoading, setUninspectedLoading] = useState(false)
+
   // ── Create-view state ────────────────────────────────────────────────────────
   const [createForm, setCreateForm] = useState<CreateForm>({
     ngay_kn: new Date().toISOString().slice(0,10),
@@ -515,6 +524,77 @@ export default function QualityPage() {
     const { data } = await supabase.from("qc_custom_std")
       .select("*").eq("factory_id", fid).order("ten_kh")
     setCustomStds(data || [])
+  }, [])
+
+  // ── Load uninspected completed lots ──────────────────────────────────────────
+  const loadUninspectedLots = useCallback(async (fid: string) => {
+    setUninspectedLoading(true)
+    try {
+      const [completedLots, existingQC] = await Promise.all([
+        fetchAllPaginated<{
+          id: string
+          ma_lo: string
+          loai_csr: string
+          ngay_sx: string
+          ngay_ht?: string | null
+          trang_thai: string
+          num?: number
+        }>((from, to) =>
+          supabase
+            .from("lots")
+            .select("id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,num")
+            .eq("factory_id", fid)
+            .in("trang_thai", ["Hoàn thành", "Hoan thanh"])
+            .order("ngay_sx", { ascending: false })
+            .order("num", { ascending: true })
+            .range(from, to)
+        ),
+        fetchAllPaginated<{ lot_id: string | null; ma_lo: string | null }>((from, to) =>
+          supabase
+            .from("qc_results")
+            .select("lot_id,ma_lo")
+            .eq("factory_id", fid)
+            .range(from, to)
+        ),
+      ])
+
+      const testedIds = new Set((existingQC || []).map(r => r.lot_id).filter(Boolean))
+      const testedRows = (existingQC || []).filter(r => r.ma_lo)
+
+      const uninspected = (completedLots || []).filter(l => {
+        if (normalizeLotStatus(l.trang_thai) !== "Hoàn thành") return false
+        if (testedIds.has(l.id)) return false
+        if (testedRows.some(r => matchesLotCode(l.ma_lo, r.ma_lo))) return false
+        return true
+      })
+
+      // Group by lot QC date (ngay_ht || ngay_sx)
+      const groupMap = new Map<string, typeof uninspected>()
+      uninspected.forEach(lot => {
+        const d = getLotQcDate(lot) || "Chưa có ngày"
+        const list = groupMap.get(d) || []
+        list.push(lot)
+        groupMap.set(d, list)
+      })
+
+      // Sort dates descending
+      const sortedDates = Array.from(groupMap.keys()).sort((a, b) => b.localeCompare(a))
+      const groups: UninspectedGroup[] = sortedDates.map(date => {
+        const lots = groupMap.get(date) || []
+        lots.sort((a, b) => (a.num ?? 0) - (b.num ?? 0) || a.ma_lo.localeCompare(b.ma_lo))
+        return {
+          date,
+          formattedDate: formatDateDisplay(date) || date,
+          lots,
+        }
+      })
+
+      setUninspectedGroups(groups)
+    } catch (err) {
+      console.error("loadUninspectedLots failed", err)
+    } finally {
+      setUninspectedLoading(false)
+    }
   }, [])
 
   const backfillQcLotLinks = useCallback(async (fid: string, loaiCsr: string) => {
@@ -832,6 +912,7 @@ export default function QualityPage() {
     loadResults(fid)
     loadStats(fid)
     loadCustomStds(fid)
+    loadUninspectedLots(fid)
     setCurrentUser(cachedUser)
     setUserRole(cachedUser?.role || "")
     supabase.from("factories").select("*").eq("id",fid).limit(1)
@@ -875,10 +956,11 @@ export default function QualityPage() {
   }
 
   // ── Create flow ──────────────────────────────────────────────────────────────
-  const openCreate = (prefillDate?: string) => {
+  const openCreate = (prefillDate?: string, prefillChungLoai?: string) => {
     const kn = prefillDate || new Date().toISOString().slice(0,10)
-    const sx = kn
-    setCreateForm({ ngay_kn:kn, ngay_sx:sx, chung_loai:"10", loai_kn:"thuong",
+    const sx = prefillDate || kn
+    const cl = prefillChungLoai || "10"
+    setCreateForm({ ngay_kn:kn, ngay_sx:sx, chung_loai:cl, loai_kn:"thuong",
       so_mau:6, tuy_chon_mau:6, tieu_chuan:"TCCS 112:2022" })
     setEligibleLots([]); setSelectedLotIds(new Set())
     setActiveTabLotId(null); setTabData({}); setEditingResultId(null)
@@ -973,11 +1055,19 @@ export default function QualityPage() {
     })
   }
 
+  const getMinSamplesForField = (fieldKey: string, soMau: number): number => {
+    if (soMau === 6) {
+      if (["tro", "bay_hoi", "nito"].includes(fieldKey)) return 4
+      if (fieldKey === "mooney") return 2
+    }
+    return soMau
+  }
+
   const isTabFilled = (lotId: string): boolean => {
     const td = tabData[lotId]; if (!td) return false
     return getVisibleFields(createForm.chung_loai).every(field => {
-      const vals = (td.samples[field]||[]).filter(v=>v!==""&&!isNaN(Number(v)))
-      return vals.length >= createForm.so_mau
+      const vals = (td.samples[field]||[]).filter(v=>v!==""&&v!==null&&v!==undefined&&!isNaN(Number(v)))
+      return vals.length >= getMinSamplesForField(field, createForm.so_mau)
     })
   }
 
@@ -1012,7 +1102,12 @@ export default function QualityPage() {
       const lotId = Array.from(selectedLotIds)[0]
       const td = tabData[lotId]
       if (!td) { return }
-      const samples = Object.fromEntries(Object.entries(td.samples).map(([k,v])=>[k,v.map(Number)]))
+      const samples = Object.fromEntries(
+        Object.entries(td.samples).map(([k, v]) => [
+          k,
+          v.map(val => (val !== "" && val !== null && val !== undefined && !isNaN(Number(val))) ? Number(val) : "")
+        ])
+      )
       const { grade, dat_hang, trang_thai } = calcGrade(td.samples, loaiCsr, createForm.tieu_chuan, customLimits)
       const { error } = await supabase.from("qc_results").update({
         ma_lo: eligibleLots[0]?.ma_lo,
@@ -1042,7 +1137,12 @@ export default function QualityPage() {
         const lot = eligibleLots.find(l=>l.id===lotId)
         const td  = tabData[lotId]
         if (!lot||!td) continue
-        const samples = Object.fromEntries(Object.entries(td.samples).map(([k,v])=>[k,v.map(Number)]))
+        const samples = Object.fromEntries(
+          Object.entries(td.samples).map(([k, v]) => [
+            k,
+            v.map(val => (val !== "" && val !== null && val !== undefined && !isNaN(Number(val))) ? Number(val) : "")
+          ])
+        )
         const { grade, dat_hang, trang_thai } = calcGrade(td.samples, loaiCsr, createForm.tieu_chuan, customLimits)
         if (createForm.loai_kn === "kl_rot_hang") {
           retestReturnLotId = lot.id
@@ -1056,9 +1156,10 @@ export default function QualityPage() {
         if (parentId && lot.prev_qc) {
           ALL_FIELDS.forEach(f => {
             const origVals = ((lot.prev_qc!.samples as any)?.[f.key]||[]).map(Number)
-            ;(samples[f.key]||[]).forEach((v:number,i:number)=>{
-              if (v!==(origVals[i]||0)) notes.push({
-                field:`${f.label} M${i+1}`, old_val:origVals[i]||0, new_val:v,
+            ;(samples[f.key]||[]).forEach((v, i)=>{
+              const numV = v !== "" ? Number(v) : 0
+              if (numV!==(origVals[i]||0)) notes.push({
+                field:`${f.label} M${i+1}`, old_val:origVals[i]||0, new_val:numV,
                 timestamp: new Date().toISOString(), user: user.full_name||"—"
               })
             })
@@ -1095,6 +1196,7 @@ export default function QualityPage() {
     setView("list")
     loadResults(factoryId)
     loadStats(factoryId)
+    loadUninspectedLots(factoryId)
     setEditDateModal(null)
     } catch (err) {
       showToast(`Lỗi: ${err instanceof Error ? err.message : String(err)}`, false)
@@ -1155,6 +1257,7 @@ export default function QualityPage() {
     if (delDate) void autoCloseSigningRequestForDate(delDate)
     loadResults(factoryId)
     loadStats(factoryId)
+    loadUninspectedLots(factoryId)
   }
 
   const handleBulkDelete = async () => {
@@ -1212,6 +1315,7 @@ export default function QualityPage() {
     setDeleteMode(null)
     loadResults(factoryId)
     loadStats(factoryId)
+    loadUninspectedLots(factoryId)
   }
 
   // ── TCKH save ────────────────────────────────────────────────────────────────
@@ -1497,6 +1601,7 @@ export default function QualityPage() {
         })
         loadResults(factoryId)
         loadStats(factoryId)
+        loadUninspectedLots(factoryId)
       } else {
         showToast("Không nhập được lô nào", false)
       }
@@ -2002,7 +2107,20 @@ export default function QualityPage() {
                           <div key={f.key} className={`rounded-xl border p-4 transition-colors ${
                             isFieldFailed ? "border-red-300 bg-red-50/60 shadow-sm" : "border-slate-200"}`}>
                             <div className="flex items-center justify-between mb-3">
-                              <span className={`font-bold text-sm ${isFieldFailed ? "text-red-700" : "text-slate-700"}`}>{f.label}</span>
+                              <div className="flex items-center gap-2">
+                                <span className={`font-bold text-sm ${isFieldFailed ? "text-red-700" : "text-slate-700"}`}>{f.label}</span>
+                                {createForm.so_mau === 6 && (
+                                  ["tro", "bay_hoi", "nito"].includes(f.key) ? (
+                                    <span className="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                                      Tối thiểu 4 mẫu
+                                    </span>
+                                  ) : f.key === "mooney" ? (
+                                    <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+                                      Tối thiểu 2 mẫu
+                                    </span>
+                                  ) : null
+                                )}
+                              </div>
                               {g && (
                                 <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${
                                   g.dat ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600 border border-red-200 shadow-sm"}`}>
@@ -2098,6 +2216,61 @@ export default function QualityPage() {
               </>
             )}
           />
+
+          {/* Banner cảnh báo lô chưa kiểm nghiệm */}
+          {uninspectedGroups.length > 0 && (
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50/80 border border-amber-200/90 rounded-2xl p-4 sm:p-5 mb-5 shadow-xs">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-amber-100/80 text-amber-700 rounded-xl shrink-0 mt-0.5">
+                  <AlertTriangle size={20} className="text-amber-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-extrabold text-amber-900 text-base">
+                      Cảnh báo lô chưa kiểm nghiệm
+                    </span>
+                    <span className="px-2.5 py-0.5 bg-amber-200/80 text-amber-800 text-xs font-bold rounded-full">
+                      {uninspectedGroups.reduce((sum, g) => sum + g.lots.length, 0)} lô chờ KN
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {uninspectedGroups.map((group) => (
+                      <div
+                        key={group.date}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-white/80 rounded-xl border border-amber-200/60 shadow-xs"
+                      >
+                        <div className="text-sm text-slate-800 leading-relaxed">
+                          <span className="font-bold text-amber-800">
+                            Ngày {group.formattedDate}
+                          </span>
+                          {" "}có{" "}
+                          <span className="font-bold text-red-600">
+                            {group.lots.length} lô
+                          </span>
+                          {" "}chưa kiểm nghiệm:{" "}
+                          <span className="font-mono font-bold text-emerald-800">
+                            {group.lots.map((l) => l.ma_lo).join(", ")}
+                          </span>
+                        </div>
+                        {hasPermission(currentUser, "quality.create") && (
+                          <button
+                            onClick={() => {
+                              const firstCl = group.lots[0]?.loai_csr?.replace(/^(CSR|SVR)/, "")
+                              openCreate(group.date, firstCl)
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-xs transition-colors shrink-0 self-start sm:self-center"
+                          >
+                            <Plus size={13} /> Tạo phiếu ngày này
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Tab nav */}
           <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit overflow-x-auto max-w-full">

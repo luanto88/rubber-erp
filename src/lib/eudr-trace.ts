@@ -6,21 +6,14 @@ import { DIEM_GN, buildLoThuHoach, normalizeDeliveryPoints } from "@/lib/dispatc
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { loadDispatchTripsByUids, type StorageTripItem } from "@/lib/storage-detail"
 import { dedupeLotsByMaLo, normalizeLotCode } from "@/app/dashboard/product/shared"
-import {
-  mergePlotProperties,
-  buildStaticPlotFeatureMap,
-  type ForestPlotRow,
-} from "@/lib/eudr-plot-merge"
-import {
-  sanitizeEudrGeometry,
-  sortFeaturesByPlotCode,
-  calculateGeometryAreaHa,
-} from "@/lib/eudr-geometry-cleaner"
+import { buildStaticPlotFeatureMap, type ForestPlotRow } from "@/lib/eudr-plot-merge"
+import { buildEudrFeatureCollection, type PlotCleanEntry } from "@/lib/eudr-feature-collection"
 
 // Port thuần (không phụ thuộc React state) của traceGeoChain trong
 // src/app/dashboard/eudr/EudrClient.tsx — dùng cho route customer-portal chạy server-side
-// bằng service-role client. Trang EUDR nội bộ giữ nguyên bản gốc, không refactor lại để
-// tránh rủi ro regression.
+// bằng service-role client. Kể từ GĐ 3, cả hai nơi cùng dựng FeatureCollection qua
+// `buildEudrFeatureCollection()` (src/lib/eudr-feature-collection.ts) — không còn 2 bản logic
+// gần y hệt nhau như trước.
 
 export type TraceOrderAssignment = {
   lot_id: string
@@ -35,6 +28,13 @@ export type TraceOrderInput = {
   id: string
   factory_id: string
   assignments: TraceOrderAssignment[]
+  /**
+   * Ngày của đơn xuất hàng — dùng làm `export_date` trong GeoJSON EUDR.
+   * BẮT BUỘC truyền để không rơi về "hôm nay" (bug cũ: file tải từ Customer Portal đổi
+   * `export_date` mỗi ngày dù cùng một đơn). Optional ở type để không phải sửa toàn bộ nơi
+   * gọi cũ cùng lúc; nơi gọi thiếu `ngay` sẽ fallback về ngày hiện tại như hành vi cũ.
+   */
+  ngay?: string
 }
 
 export type TraceLot = {
@@ -67,6 +67,10 @@ export type TraceResult = {
   lotCertMap: Record<string, string>
   diemGn: string[]
   geoData: FeatureCollection
+  /** Nhật ký làm sạch/nở mảnh theo lô (GĐ 3) — cho API route forward vào payload để hiển thị. */
+  cleanLog: PlotCleanEntry[]
+  /** Mã lô mất sạch hình học — GĐ 3 chỉ ghi lại (shadow mode), GĐ 4 sẽ nâng lên chặn xuất. */
+  lostPlots: string[]
   traceInfo: {
     lots: number
     ngans: number
@@ -103,6 +107,8 @@ export async function traceExportOrderGeoChain(
       lotCertMap: {},
       diemGn: [],
       geoData: EMPTY_GEO,
+      cleanLog: [],
+      lostPlots: [],
       traceInfo: { lots: 0, ngans: 0, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 },
     }
   }
@@ -150,6 +156,8 @@ export async function traceExportOrderGeoChain(
       lotCertMap: {},
       diemGn: [],
       geoData: EMPTY_GEO,
+      cleanLog: [],
+      lostPlots: [],
       traceInfo: { lots: 0, ngans: 0, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 },
     }
   }
@@ -163,6 +171,8 @@ export async function traceExportOrderGeoChain(
       lotCertMap: {},
       diemGn: [],
       geoData: EMPTY_GEO,
+      cleanLog: [],
+      lostPlots: [],
       traceInfo: { lots: typedLots.length, ngans: 0, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 },
     }
   }
@@ -187,6 +197,8 @@ export async function traceExportOrderGeoChain(
       lotCertMap: certMap,
       diemGn: [],
       geoData: EMPTY_GEO,
+      cleanLog: [],
+      lostPlots: [],
       traceInfo: { lots: typedLots.length, ngans: nganIds.length, tripUids: 0, matchedRows: 0, diemGn: 0, features: 0 },
     }
   }
@@ -271,7 +283,10 @@ export async function traceExportOrderGeoChain(
     extractionDates[lot.id] = tripDates[0] || ngan.ngay_bd || ""
   }
 
-  // 4. Lấy polygon lô vườn và ghép metadata đầy đủ từ GeoJSON chuẩn
+  // 4. Lấy polygon lô vườn và dựng FeatureCollection qua builder dùng chung (GĐ 3a) — tự nở mọi
+  // lô nhiều mảnh thành N Feature Polygon, tự chia Area/Dtich2026_ha theo tỷ lệ diện tích hình
+  // học (tổng khớp đúng số khai báo), và không còn loại lô âm thầm khi mất sạch hình học
+  // (ghi vào `cleanLog`/`lostPlots` thay vì `if (area < 0.001) return acc` như bản cũ).
   const tenList = [...diemGnSet]
   const full = await loadStaticPlotFeatureCollection()
   const staticPlotMap = buildStaticPlotFeatureMap(full)
@@ -287,30 +302,16 @@ export async function traceExportOrderGeoChain(
 
   const dbPlotMap = new Map(((plotRows || []) as ForestPlotRow[]).map((plot) => [plot.ten, plot] as const))
 
-  const rawFeatures = tenList.reduce<FeatureCollection["features"]>((acc, plotCode) => {
-    const dbPlot = dbPlotMap.get(plotCode)
-    const staticPlot = staticPlotMap.get(plotCode)
-    const rawGeometry =
-      (dbPlot?.geometry as FeatureCollection["features"][number]["geometry"] | undefined) || staticPlot?.geometry
+  // export_date phải theo đúng ngày của đơn hàng, không phải "hôm nay" — bug cũ khiến file tải
+  // từ Customer Portal đổi export_date mỗi ngày dù cùng một đơn (xem GĐ 3d).
+  const exportDate = order.ngay || new Date().toISOString().split("T")[0]
 
-    if (!rawGeometry) return acc
-
-    // Sanitize hình học theo chuẩn EUDR: bỏ vòng trong (lỗ), khép vòng, chuẩn hóa 6 số thập phân
-    const geometry = sanitizeEudrGeometry(rawGeometry)
-    const area = calculateGeometryAreaHa(geometry)
-    if (area < 0.001) return acc
-
-    acc.push({
-      type: "Feature",
-      properties: mergePlotProperties(plotCode, dbPlot, staticPlot),
-      geometry,
-    })
-
-    return acc
-  }, [])
-
-  // Sắp xếp tăng dần cố định theo Ma_lo_2026 cho công cụ Whisp / TRACES
-  const filteredFeatures = sortFeaturesByPlotCode(rawFeatures)
+  const { collection, cleanLog, lostPlots } = buildEudrFeatureCollection({
+    plotCodes: tenList,
+    dbPlots: dbPlotMap,
+    staticPlots: staticPlotMap,
+    exportDate,
+  })
 
   return {
     resolvedAssignments,
@@ -318,14 +319,16 @@ export async function traceExportOrderGeoChain(
     extractionDates,
     lotCertMap: certMap,
     diemGn: [...diemGnSet],
-    geoData: { type: "FeatureCollection", features: filteredFeatures },
+    geoData: collection,
+    cleanLog,
+    lostPlots,
     traceInfo: {
       lots: typedLots.length,
       ngans: nganIds.length,
       tripUids: allTripUids.size,
       matchedRows,
       diemGn: diemGnSet.size,
-      features: filteredFeatures.length,
+      features: collection.features.length,
       fallback: usedDateFallback,
     },
   }

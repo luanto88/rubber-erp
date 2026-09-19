@@ -4,6 +4,8 @@ import QRCode from "qrcode"
 import JSZip from "jszip"
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from "geojson"
 import { sanitizeOrderCodeForFile } from "@/lib/eudr-filename"
+import { serializeEudrGeoJson } from "@/lib/eudr-export-gate"
+import type { PlotCleanEntry } from "@/lib/eudr-feature-collection"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
@@ -358,6 +360,8 @@ export async function buildEudrOrderZipBlob(
   extractionDates: Record<string, string>,
   lotCertMap: Record<string, string>,
   files: EudrZipAttachment[],
+  /** Nhật ký làm sạch/nở mảnh (GĐ 3) — truyền qua cổng serializeEudrGeoJson, chỉ để quan sát. */
+  cleanLog?: PlotCleanEntry[],
 ): Promise<Blob> {
   const [dds1Blob, dds2Blob] = await Promise.all([
     generateDDS1(order, geoData, factory, lotCertMap),
@@ -371,7 +375,7 @@ export async function buildEudrOrderZipBlob(
   if (geoData) {
     zip.file(
       getUniqueZipEntryName(`${order.ma_don}_supply_chain.geojson`, usedNames),
-      JSON.stringify(geoData, null, 2),
+      serializeEudrGeoJson(geoData, { cleanLog }).json,
     )
     // CSV đối chiếu số thứ tự, mã lô, nông trường, đội, diện tích, năm trồng (Phần D.3)
     const csvRows = [

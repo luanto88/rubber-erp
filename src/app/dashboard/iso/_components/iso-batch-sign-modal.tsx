@@ -28,6 +28,8 @@ import {
   type SignPlacement,
   type SignedFilePlacement,
 } from "./iso-types"
+import { findRoleBoxForStep } from "@/lib/signing/template-layout"
+import { computeSnugBoxSize } from "@/lib/signing/text-fit"
 
 function toTitleCase(str: string | null | undefined): string {
   if (!str) return ""
@@ -65,6 +67,7 @@ export type BatchBox = {
   hPct: number
   showName: boolean
   showChucVu: boolean
+  showPrefix?: boolean
   chucVuKey?: "chinh_quyen" | "kiem_nhiem" | string | null
   signAs?: SignAsType
   sigInnerX?: number
@@ -144,20 +147,26 @@ function BatchInteractiveSignBox({
   const sigInnerX = Math.max(0, Math.min(bw - sigInnerW, box.sigInnerX ?? Math.max(0, (bw - sigInnerW) / 2)))
   const sigInnerY = Math.max(0, Math.min(bh - sigInnerH, box.sigInnerY ?? 4))
 
-  const nameInnerW = Math.min(bw, Math.max(30, box.nameInnerW || Math.min(bw - 8, 105)))
-  const nameInnerH = Math.min(bh, Math.max(12, box.nameInnerH || 20))
-  const nameInnerX = Math.max(0, Math.min(bw - nameInnerW, box.nameInnerX ?? Math.max(0, (bw - nameInnerW) / 2)))
-  const nameInnerY = Math.max(0, Math.min(bh - nameInnerH, box.nameInnerY ?? Math.max(4, bh - (box.showChucVu ? 42 : 22))))
-
-  const cvInnerW = Math.min(bw, Math.max(30, box.cvInnerW || Math.min(bw - 8, 105)))
-  const cvInnerH = Math.min(bh, Math.max(12, box.cvInnerH || 18))
-  const cvInnerX = Math.max(0, Math.min(bw - cvInnerW, box.cvInnerX ?? Math.max(0, (bw - cvInnerW) / 2)))
-  const cvInnerY = Math.max(0, Math.min(bh - cvInnerH, box.cvInnerY ?? Math.max(18, bh - 20)))
-
   const effectiveCvText =
     (box.chucVuKey === "kiem_nhiem" ? signerChucVuByKey?.kiem_nhiem : signerChucVuByKey?.chinh_quyen) ||
     signerChucVu ||
     (isPheDuyet ? "Người phê duyệt" : "Người xem xét")
+
+  const snugCv = computeSnugBoxSize(effectiveCvText, "chuc_vu")
+  const snugName = computeSnugBoxSize(signerName, "name")
+
+  // Chức danh ở TRÊN, Họ tên ở DƯỚI
+  const cvInnerW = Math.min(bw, Math.max(30, box.cvInnerW || Math.min(bw - 8, snugCv.w)))
+  const cvInnerH = Math.min(bh, Math.max(12, box.cvInnerH || snugCv.h))
+  const cvInnerX = Math.max(0, Math.min(bw - cvInnerW, box.cvInnerX ?? Math.max(0, (bw - cvInnerW) / 2)))
+  const cvInnerY = Math.max(0, Math.min(bh - cvInnerH, box.cvInnerY ?? Math.max(4, bh - (box.showName ? 44 : 22))))
+
+  const nameInnerW = Math.min(bw, Math.max(30, box.nameInnerW || Math.min(bw - 8, snugName.w)))
+  const nameInnerH = Math.min(bh, Math.max(12, box.nameInnerH || snugName.h))
+  const nameInnerX = Math.max(0, Math.min(bw - nameInnerW, box.nameInnerX ?? Math.max(0, (bw - nameInnerW) / 2)))
+  const nameInnerY = Math.max(0, Math.min(bh - nameInnerH, box.nameInnerY ?? Math.max(18, bh - 22)))
+
+  const effectivePrefix = box.signAs && box.signAs !== "none" ? box.signAs : null
 
   return (
     <div
@@ -184,6 +193,37 @@ function BatchInteractiveSignBox({
         Khung của bạn {boxesOnPageCount > 1 ? `#${boxIndex + 1}` : ""}
       </div>
 
+      {/* Tiền tố ký thay có icon mắt ẩn/hiện */}
+      {effectivePrefix && (
+        <div
+          className={`absolute -top-6 right-0 border py-0.5 px-2 rounded select-none shadow-xs text-center leading-none flex items-center gap-1.5 transition-all z-20 ${
+            box.showPrefix !== false
+              ? "border-emerald-400 bg-emerald-50 text-emerald-900 text-xs font-bold"
+              : "border-dashed border-slate-300 bg-slate-100 text-slate-400 text-xs opacity-60"
+          }`}
+        >
+          <span className={box.showPrefix !== false ? "" : "line-through"}>{effectivePrefix}.</span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onUpdate({ showPrefix: box.showPrefix === false ? true : false })
+            }}
+            className={`p-0.5 rounded-full hover:bg-black/5 ${
+              box.showPrefix !== false ? "text-emerald-600 hover:text-emerald-900" : "text-slate-400 hover:text-slate-700"
+            }`}
+            title={box.showPrefix !== false ? "Ẩn tiền tố" : "Hiện lại tiền tố"}
+          >
+            {box.showPrefix !== false ? <Eye size={12} /> : <EyeOff size={12} />}
+          </button>
+        </div>
+      )}
+
+      {/* Chữ ký */}
       <Draggable
         nodeRef={sigNodeRef as RefObject<HTMLElement>}
         position={{ x: sigInnerX, y: sigInnerY }}
@@ -256,58 +296,12 @@ function BatchInteractiveSignBox({
         </div>
       </Draggable>
 
-      <Draggable
-        nodeRef={nameNodeRef as RefObject<HTMLElement>}
-        position={{ x: nameInnerX, y: nameInnerY }}
-        bounds="parent"
-        onStop={(_, d) => onUpdate({ nameInnerX: d.x, nameInnerY: d.y, boxDomW: bw, boxDomH: bh })}
-      >
-        <div
-          ref={nameNodeRef}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: nameInnerW,
-            height: nameInnerH,
-            cursor: "move",
-            userSelect: "none",
-            fontFamily: "'Times New Roman', Times, serif",
-          }}
-          className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all touch-none ${
-            box.showName
-              ? "border-sky-400 bg-sky-50/95 text-sky-950 text-xs hover:border-sky-600"
-              : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
-          }`}
-          title={box.showName ? "Kéo để di chuyển vị trí tên trong khung" : "Tên đang ẩn — Bấm icon mắt để hiện lại"}
-        >
-          <span className={`truncate w-full ${box.showName ? "" : "line-through"}`}>
-            {toTitleCase(signerName || "Người ký")}
-          </span>
-          <button
-            type="button"
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onTouchEnd={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-              onUpdate({ showName: !box.showName })
-            }}
-            className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
-              box.showName ? "text-sky-600 hover:text-sky-900" : "text-slate-400 hover:text-slate-700"
-            }`}
-            title={box.showName ? "Ẩn họ tên" : "Hiện lại họ tên"}
-          >
-            {box.showName ? <Eye size={12} /> : <EyeOff size={12} />}
-          </button>
-        </div>
-      </Draggable>
-
+      {/* Chức vụ (TRÊN Họ tên) */}
       <Draggable
         nodeRef={cvNodeRef as RefObject<HTMLElement>}
         position={{ x: cvInnerX, y: cvInnerY }}
         bounds="parent"
+        cancel=".resize-handle"
         onStop={(_, d) => onUpdate({ cvInnerX: d.x, cvInnerY: d.y, boxDomW: bw, boxDomH: bh })}
       >
         <div
@@ -349,6 +343,128 @@ function BatchInteractiveSignBox({
           >
             {box.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
           </button>
+
+          <div
+            className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-violet-600 hover:bg-violet-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+            title="Kéo để co giãn kích thước chức vụ"
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              const startX = e.clientX
+              const startY = e.clientY
+              const startW = cvInnerW
+              const startH = cvInnerH
+              const curX = cvInnerX
+              const curY = cvInnerY
+
+              const onMove = (ev: PointerEvent) => {
+                const dx = ev.clientX - startX
+                const dy = ev.clientY - startY
+                const newW = Math.max(30, Math.min(bw - curX, startW + dx))
+                const newH = Math.max(12, Math.min(bh - curY, startH + dy))
+                onUpdate({ cvInnerW: newW, cvInnerH: newH, boxDomW: bw, boxDomH: bh })
+              }
+              const onUp = () => {
+                window.removeEventListener("pointermove", onMove)
+                window.removeEventListener("pointerup", onUp)
+              }
+              window.addEventListener("pointermove", onMove)
+              window.addEventListener("pointerup", onUp)
+            }}
+          >
+            <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 3 3 3 3 9" />
+              <polyline points="15 21 21 21 21 15" />
+              <line x1="3" y1="3" x2="10" y2="10" />
+              <line x1="21" y1="21" x2="14" y2="14" />
+            </svg>
+          </div>
+        </div>
+      </Draggable>
+
+      {/* Họ tên (DƯỚI Chức vụ) */}
+      <Draggable
+        nodeRef={nameNodeRef as RefObject<HTMLElement>}
+        position={{ x: nameInnerX, y: nameInnerY }}
+        bounds="parent"
+        cancel=".resize-handle"
+        onStop={(_, d) => onUpdate({ nameInnerX: d.x, nameInnerY: d.y, boxDomW: bw, boxDomH: bh })}
+      >
+        <div
+          ref={nameNodeRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: nameInnerW,
+            height: nameInnerH,
+            cursor: "move",
+            userSelect: "none",
+            fontFamily: "'Times New Roman', Times, serif",
+          }}
+          className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all touch-none ${
+            box.showName
+              ? "border-sky-400 bg-sky-50/95 text-sky-950 text-xs hover:border-sky-600"
+              : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
+          }`}
+          title={box.showName ? "Kéo để di chuyển vị trí tên trong khung" : "Tên đang ẩn — Bấm icon mắt để hiện lại"}
+        >
+          <span className={`truncate w-full ${box.showName ? "" : "line-through"}`}>
+            {toTitleCase(signerName || "Người ký")}
+          </span>
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onUpdate({ showName: !box.showName })
+            }}
+            className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
+              box.showName ? "text-sky-600 hover:text-sky-900" : "text-slate-400 hover:text-slate-700"
+            }`}
+            title={box.showName ? "Ẩn họ tên" : "Hiện lại họ tên"}
+          >
+            {box.showName ? <Eye size={12} /> : <EyeOff size={12} />}
+          </button>
+
+          <div
+            className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-sky-600 hover:bg-sky-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+            title="Kéo để co giãn kích thước họ tên"
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              e.preventDefault()
+              const startX = e.clientX
+              const startY = e.clientY
+              const startW = nameInnerW
+              const startH = nameInnerH
+              const curX = nameInnerX
+              const curY = nameInnerY
+
+              const onMove = (ev: PointerEvent) => {
+                const dx = ev.clientX - startX
+                const dy = ev.clientY - startY
+                const newW = Math.max(30, Math.min(bw - curX, startW + dx))
+                const newH = Math.max(12, Math.min(bh - curY, startH + dy))
+                onUpdate({ nameInnerW: newW, nameInnerH: newH, boxDomW: bw, boxDomH: bh })
+              }
+              const onUp = () => {
+                window.removeEventListener("pointermove", onMove)
+                window.removeEventListener("pointerup", onUp)
+              }
+              window.addEventListener("pointermove", onMove)
+              window.addEventListener("pointerup", onUp)
+            }}
+          >
+            <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 3 3 3 3 9" />
+              <polyline points="15 21 21 21 21 15" />
+              <line x1="3" y1="3" x2="10" y2="10" />
+              <line x1="21" y1="21" x2="14" y2="14" />
+            </svg>
+          </div>
         </div>
       </Draggable>
     </div>
@@ -660,8 +776,24 @@ export function IsoBatchSignModal({
           const matchingBoxes: BatchBox[] = []
 
           if (tmpl && Array.isArray(tmpl.khung)) {
+            const stepIdx = isPheDuyet ? (doc.cap_tl === "Cấp 2" ? 1 : 2) : 1
+            const totalSteps = doc.cap_tl === "Cấp 2" ? 2 : 3
+
+            // Dùng findRoleBoxForStep để xác định khung chuẩn
+            const roleBox = findRoleBoxForStep(tmpl.khung, {
+              stepIndex: stepIdx,
+              totalSteps,
+              stepName: isPheDuyet ? "Người phê duyệt" : "Người xem xét",
+              stepKey: currentRole,
+              action,
+            })
+
             tmpl.khung.forEach((k, idx) => {
-              if (k.vai_tro === currentRole) {
+              const isMatch = roleBox
+                ? k === roleBox || k.vai_tro === currentRole || (currentRole === "phe_duyet" ? k.vai_tro === "buoc_cuoi" : k.vai_tro === "soat_xet")
+                : (k.vai_tro === currentRole || (currentRole === "phe_duyet" ? k.vai_tro === "buoc_cuoi" : k.vai_tro === "soat_xet"))
+
+              if (isMatch) {
                 const pageNum = Math.min(Math.max(Number(k.so_trang) || 1, 1), numPages)
                 const pageDim = dims[pageNum] || { w: 595.28, h: 841.89 }
                 const xPt = Number(k.x_pt) || 100
@@ -678,6 +810,7 @@ export function IsoBatchSignModal({
                   hPct: (hPt / pageDim.h) * 100,
                   showName: !!k.show_name,
                   showChucVu: !!k.show_chuc_vu,
+                  showPrefix: true,
                   chucVuKey: (k.chuc_vu_key as "chinh_quyen" | "kiem_nhiem") || "chinh_quyen",
                   signAs: (k.sign_as as SignAsType) || "none",
                 })
@@ -1019,35 +1152,41 @@ export function IsoBatchSignModal({
           const sX_pt = bxPt + Math.max(0, Math.min(bwPt - sW_pt, (sInnerX / bDomW) * bwPt))
           const sY_pt = byPtBottom + Math.max(0, Math.min(bhPt - sH_pt, (1 - (sInnerY + sInnerH) / bDomH) * bhPt))
 
-          // Tên
-          const nInnerW = b.nameInnerW || Math.min(bDomW - 8, 105)
-          const nInnerH = b.nameInnerH || 20
-          const nInnerX = b.nameInnerX ?? Math.max(0, (bDomW - nInnerW) / 2)
-          const nInnerY = b.nameInnerY ?? Math.max(4, bDomH - (b.showChucVu ? 42 : 22))
-
-          const nW_pt = Math.min(bwPt, Math.max(20, (nInnerW / bDomW) * bwPt))
-          const nH_pt = Math.min(bhPt, Math.max(10, (nInnerH / bDomH) * bhPt))
-          const nX_pt = bxPt + Math.max(0, Math.min(bwPt - nW_pt, (nInnerX / bDomW) * bwPt))
-          const nY_pt = byPtBottom + Math.max(0, Math.min(bhPt - nH_pt, (1 - (nInnerY + nInnerH) / bDomH) * bhPt + 2))
-
-          // Chức vụ
+          // Chức vụ (TRÊN Họ tên)
           let cvX_pt: number | undefined
           let cvY_pt: number | undefined
           let cvW_pt: number | undefined
           let cvH_pt: number | undefined
 
           if (b.showChucVu) {
-            const cvInnerW = b.cvInnerW || Math.min(bDomW - 8, 105)
-            const cvInnerH = b.cvInnerH || 18
+            const effectiveCvText =
+              (b.chucVuKey === "kiem_nhiem" ? signerChucVuByKey?.kiem_nhiem : signerChucVuByKey?.chinh_quyen) ||
+              signerChucVu ||
+              (isPheDuyet ? "Người phê duyệt" : "Người xem xét")
+            const snugCv = computeSnugBoxSize(effectiveCvText, "chuc_vu")
+            const cvInnerW = b.cvInnerW || Math.min(bDomW - 8, snugCv.w)
+            const cvInnerH = b.cvInnerH || snugCv.h
             const cvInnerX = b.cvInnerX ?? Math.max(0, (bDomW - cvInnerW) / 2)
-            const cvInnerY = b.cvInnerY ?? Math.max(18, bDomH - 20)
+            const cvInnerY = b.cvInnerY ?? Math.max(4, bDomH - (b.showName ? 44 : 22))
 
             cvW_pt = Math.min(bwPt, Math.max(20, (cvInnerW / bDomW) * bwPt))
             cvH_pt = Math.min(bhPt, Math.max(10, (cvInnerH / bDomH) * bhPt))
             cvX_pt = bxPt + Math.max(0, Math.min(bwPt - cvW_pt, (cvInnerX / bDomW) * bwPt))
-            // Tính toạ độ Y độc lập theo vị trí kéo thả thực tế của Chức vụ, đảm bảo dù Chức vụ ở trên hay ở dưới Tên đều in chuẩn xác
+            // Tính toạ độ Y độc lập theo vị trí kéo thả thực tế của Chức vụ, đảm bảo Chức vụ ở trên Tên in chuẩn xác
             cvY_pt = byPtBottom + Math.max(0, Math.min(bhPt - cvH_pt, (1 - (cvInnerY + cvInnerH) / bDomH) * bhPt + 2))
           }
+
+          // Tên (DƯỚI Chức vụ)
+          const snugName = computeSnugBoxSize(signerName, "name")
+          const nInnerW = b.nameInnerW || Math.min(bDomW - 8, snugName.w)
+          const nInnerH = b.nameInnerH || snugName.h
+          const nInnerX = b.nameInnerX ?? Math.max(0, (bDomW - nInnerW) / 2)
+          const nInnerY = b.nameInnerY ?? Math.max(18, bDomH - 22)
+
+          const nW_pt = Math.min(bwPt, Math.max(20, (nInnerW / bDomW) * bwPt))
+          const nH_pt = Math.min(bhPt, Math.max(10, (nInnerH / bDomH) * bhPt))
+          const nX_pt = bxPt + Math.max(0, Math.min(bwPt - nW_pt, (nInnerX / bDomW) * bwPt))
+          const nY_pt = byPtBottom + Math.max(0, Math.min(bhPt - nH_pt, (1 - (nInnerY + nInnerH) / bDomH) * bhPt + 2))
 
           return {
             x: sX_pt,
@@ -1087,7 +1226,7 @@ export function IsoBatchSignModal({
           chucVuY: mainPl.chucVuY,
           chucVuWidth: mainPl.chucVuWidth,
           chucVuHeight: mainPl.chucVuHeight,
-          showPrefix: isPheDuyet && (mainBox.signAs || signAs) !== "none",
+          showPrefix: isPheDuyet && (mainBox.signAs || signAs) !== "none" && mainBox.showPrefix !== false,
           prefixX: Math.max(0, mainPl.x - 40),
           prefixY: mainPl.y + 10,
           prefixWidth: 35,

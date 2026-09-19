@@ -47,7 +47,7 @@ export type SnugBoxSize = {
 export function computeSnugBoxSize(
   text: string | null | undefined,
   type: "name" | "chuc_vu",
-  scale = 1.5,
+  scale = 1.0,
   fontSizePt = 13,
 ): SnugBoxSize {
   const content = (text || (type === "name" ? "Người ký" : "Chức vụ")).trim()
@@ -71,7 +71,7 @@ export function computeSnugBoxSize(
   // Chiều cao: fontSize * line-height (1.15) + padding viền trên/dưới
   const snugH = Math.max(
     type === "name" ? 22 : 20,
-    Math.ceil(fontSizePx * 1.25 + 5),
+    Math.ceil(fontSizePx * 1.25 + 4),
   )
 
   return { w: snugW, h: snugH }

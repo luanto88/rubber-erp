@@ -122,10 +122,10 @@ export async function getIsoTasks(factoryId: string, userId: string): Promise<Mo
   const [{ data: docs }, { data: forms }] = await Promise.all([
     supabase
       .from("iso_documents")
-      .select("id, trang_thai, xem_xet_user_id, phe_duyet_user_id, soan_thao_user_id")
+      .select("id, trang_thai, xem_xet_user_id, phe_duyet_user_id, soan_thao_user_id, created_by")
       .eq("factory_id", factoryId)
       .or(`xem_xet_user_id.eq.${userId},phe_duyet_user_id.eq.${userId},soan_thao_user_id.eq.${userId}`)
-      .in("trang_thai", ["cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet", "tra_ve"]),
+      .in("trang_thai", ["draft", "cho_xem_xet", "cho_phe_duyet", "bi_tu_choi_phe_duyet", "tra_ve"]),
     supabase
       .from("iso_form_instances")
       .select("id, trang_thai, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, so_buoc_tong, buoc_hien_tai, thu_tu_ky_json")
@@ -133,13 +133,20 @@ export async function getIsoTasks(factoryId: string, userId: string): Promise<Mo
       .in("trang_thai", ["draft", "cho_xem_xet", "cho_phe_duyet", "tra_ve"]),
   ])
 
-  type IsoDocRow = { trang_thai: string; xem_xet_user_id: string | null; phe_duyet_user_id: string | null; soan_thao_user_id: string | null }
+  type IsoDocRow = {
+    trang_thai: string
+    xem_xet_user_id: string | null
+    phe_duyet_user_id: string | null
+    soan_thao_user_id: string | null
+    created_by: string | null
+  }
   const docCount = ((docs || []) as IsoDocRow[]).filter(
     (d) =>
       (d.trang_thai === "cho_xem_xet" && d.xem_xet_user_id === userId) ||
       (d.trang_thai === "cho_phe_duyet" && d.phe_duyet_user_id === userId) ||
       (d.trang_thai === "bi_tu_choi_phe_duyet" && d.xem_xet_user_id === userId) ||
-      (d.trang_thai === "tra_ve" && d.soan_thao_user_id === userId),
+      (d.trang_thai === "tra_ve" && d.soan_thao_user_id === userId) ||
+      (d.trang_thai === "draft" && d.soan_thao_user_id === userId),
   ).length
 
   type IsoFormRow = {

@@ -1589,7 +1589,7 @@ export async function POST(req: NextRequest) {
                       : (typeof placement.nameX === "number" ? placement.nameX + (placement.nameWidth ?? 100) / 2 : placement.x + placement.width / 2)
                     const cvY = typeof placement.chucVuY === "number"
                       ? placement.chucVuY
-                      : (typeof placement.nameY === "number" ? Math.max(0, placement.nameY - 18) : Math.max(0, placement.y - 36))
+                      : (typeof placement.nameY === "number" ? placement.nameY + (placement.nameHeight ?? 20) + 2 : Math.max(0, placement.y - 36))
 
                     originalPages.getPage(pageIndex).drawText(chucVuText.trim(), {
                       x: cvXCenter - cvWidth / 2,
@@ -1656,7 +1656,7 @@ export async function POST(req: NextRequest) {
                         : (typeof extraP.nameX === "number" ? extraP.nameX + (extraP.nameWidth ?? 100) / 2 : extraP.x + extraP.width / 2)
                       const cvY = typeof extraP.chucVuY === "number"
                         ? extraP.chucVuY
-                        : (typeof extraP.nameY === "number" ? Math.max(0, extraP.nameY - 18) : Math.max(0, extraP.y - 36))
+                        : (typeof extraP.nameY === "number" ? extraP.nameY + (extraP.nameHeight ?? 20) + 2 : Math.max(0, extraP.y - 36))
 
                       originalPages.getPage(extraPageIndex).drawText(extraCvText.trim(), {
                         x: cvXCenter - cvWidth / 2,
@@ -1815,7 +1815,7 @@ export async function POST(req: NextRequest) {
                 : (typeof placement.nameX === "number" ? placement.nameX + (placement.nameWidth ?? 100) / 2 : placement.x + placement.width / 2)
               const cvY = typeof placement.chucVuY === "number"
                 ? placement.chucVuY
-                : (typeof placement.nameY === "number" ? Math.max(0, placement.nameY - 18) : Math.max(0, placement.y - 36))
+                : (typeof placement.nameY === "number" ? placement.nameY + (placement.nameHeight ?? 20) + 2 : Math.max(0, placement.y - 36))
 
               originalPages.getPage(pageIndex).drawText(chucVuText.trim(), {
                 x: cvXCenter - cvWidth / 2,
@@ -1876,7 +1876,7 @@ export async function POST(req: NextRequest) {
                       : (typeof extraP.nameX === "number" ? extraP.nameX + (extraP.nameWidth ?? 100) / 2 : extraP.x + extraP.width / 2)
                     const cvY = typeof extraP.chucVuY === "number"
                       ? extraP.chucVuY
-                      : (typeof extraP.nameY === "number" ? Math.max(0, extraP.nameY - 18) : Math.max(0, extraP.y - 36))
+                      : (typeof extraP.nameY === "number" ? extraP.nameY + (extraP.nameHeight ?? 20) + 2 : Math.max(0, extraP.y - 36))
 
                     originalPages.getPage(extraPageIndex).drawText(extraCvText.trim(), {
                       x: cvXCenter - cvWidth / 2,

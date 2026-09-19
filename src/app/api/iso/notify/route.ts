@@ -44,6 +44,10 @@ const ACTION_LABELS: Record<string, ActionLabel> = {
     title: "Tài liệu trả về Nháp",
     body: (maTl, tenTl, actor) => `Tài liệu ${maTl} — "${tenTl}" đã được ${actor} trả về trạng thái Nháp.`,
   },
+  giao_soan_thao: {
+    title: "Phân công soạn thảo tài liệu",
+    body: (maTl, tenTl, actor) => `Bạn đã được ${actor} chỉ định làm người soạn thảo tài liệu ${maTl} — "${tenTl}". Vui lòng kiểm tra và thực hiện ký gửi bước 1.`,
+  },
 }
 
 export async function POST(req: NextRequest) {

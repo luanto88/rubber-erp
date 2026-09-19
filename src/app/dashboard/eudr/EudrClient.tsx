@@ -8,19 +8,14 @@ import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { loadDispatchTripsByUids, type StorageTripItem } from "@/lib/storage-detail"
 import { dedupeLotsByMaLo, normalizeLotCode } from "@/app/dashboard/product/shared"
 import {
-  mergePlotProperties,
   buildStaticPlotFeatureMap,
   toDisplayText,
   toDisplayNumber,
   type ForestPlotRow,
   type EudrPlotProperties,
 } from "@/lib/eudr-plot-merge"
-import {
-  sanitizeEudrGeometry,
-  sortFeaturesByPlotCode,
-  calculateGeometryAreaHa,
-} from "@/lib/eudr-geometry-cleaner"
-import { validateEudrCollection } from "@/lib/eudr-validator"
+import { buildEudrFeatureCollection, type PlotCleanEntry } from "@/lib/eudr-feature-collection"
+import { serializeEudrGeoJson } from "@/lib/eudr-export-gate"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -344,6 +339,8 @@ export default function EudrClient() {
   const [attachmentsLocked, setAttachmentsLocked] = useState<boolean | null>(null)
 
   const [geoData, setGeoData]   = useState<FeatureCollection|null>(null)
+  // Nhật ký làm sạch/nở mảnh theo lô (GĐ 3) — dùng khi tải file qua serializeEudrGeoJson().
+  const [eudrCleanLog, setEudrCleanLog] = useState<PlotCleanEntry[]>([])
   const [selectedPlot, setSelectedPlot] = useState<EudrPlotProperties | null>(null)
   const [diemGnSet, setDiemGnSet] = useState<Set<string>>(new Set())
   const [loadingGeo, setLoadingGeo] = useState(false)
@@ -675,7 +672,10 @@ export default function EudrClient() {
       }
       setExtractionDates(edMap)
 
-      // 4. Lấy polygon lô vườn và ghép metadata đầy đủ từ GeoJSON chuẩn
+      // 4. Lấy polygon lô vườn và dựng FeatureCollection qua builder dùng chung (GĐ 3a) — tự nở
+      // mọi lô nhiều mảnh thành N Feature Polygon, tự chia Area/Dtich2026_ha theo tỷ lệ diện
+      // tích hình học (tổng khớp đúng số khai báo), và không còn loại lô âm thầm khi mất sạch
+      // hình học (ghi vào cleanLog thay vì `if (area < 0.001) return acc` như bản cũ).
       const tenList = [...diemGn]
       const fullResponse = await fetch("/geojson/Lo cao su - 2026_Full.geojson")
       const full: FeatureCollection | null = fullResponse.ok ? await fullResponse.json() : null
@@ -694,37 +694,16 @@ export default function EudrClient() {
         ((plotRows || []) as ForestPlotRow[]).map((plot) => [plot.ten, plot] as const),
       )
 
-      const rawFeatures = tenList.reduce<FeatureCollection["features"]>((acc, plotCode) => {
-        const dbPlot = dbPlotMap.get(plotCode)
-        const staticPlot = staticPlotMap.get(plotCode)
-        const rawGeometry =
-          (dbPlot?.geometry as FeatureCollection["features"][number]["geometry"] | undefined) ||
-          staticPlot?.geometry
+      const { collection, cleanLog } = buildEudrFeatureCollection({
+        plotCodes: tenList,
+        dbPlots: dbPlotMap,
+        staticPlots: staticPlotMap,
+        exportDate: ord.ngay,
+      })
+      setEudrCleanLog(cleanLog)
 
-        if (!rawGeometry) return acc
-
-        // Sanitize hình học theo chuẩn EUDR: bỏ vòng trong (lỗ), khép kín vòng, chuẩn hóa 6 số thập phân
-        const geometry = sanitizeEudrGeometry(rawGeometry)
-        const area = calculateGeometryAreaHa(geometry)
-        if (area < 0.001) return acc
-
-        acc.push({
-          type: "Feature",
-          properties: mergePlotProperties(plotCode, dbPlot, staticPlot, ord.ngay),
-          geometry,
-        })
-
-        return acc
-      }, [])
-
-      // Sắp xếp tăng dần cố định theo Ma_lo_2026 cho công cụ Whisp / TRACES
-      const filtered: FeatureCollection = {
-        type: "FeatureCollection",
-        features: sortFeaturesByPlotCode(rawFeatures),
-      }
-
-      setTraceInfo({ lots: typedLots.length, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: filtered.features.length, fallback: usedDateFallback })
-      setGeoData(filtered)
+      setTraceInfo({ lots: typedLots.length, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: collection.features.length, fallback: usedDateFallback })
+      setGeoData(collection)
     } catch (e) {
       console.error(e)
     }
@@ -928,7 +907,7 @@ export default function EudrClient() {
       zip.file(shipmentName, await generateDDS2(order, lotDetails, extractionDates, factory))
 
       if (geoData) {
-        zip.file(geojsonName, JSON.stringify(geoData, null, 2))
+        zip.file(geojsonName, serializeEudrGeoJson(geoData, { cleanLog: eudrCleanLog }).json)
         // CSV đối chiếu số thứ tự, mã lô, nông trường, đội, diện tích, năm trồng (Phần D.3)
         const csvRows = [
           ["STT", "Ma_lo_2026", "Ten", "Nong_truong", "Doi_2026", "Dtich_ha", "Nam_trong"],
@@ -1371,13 +1350,13 @@ export default function EudrClient() {
                     <Map size={13} className="text-emerald-600 shrink-0"/>
                     <span className="flex-1 text-xs text-slate-700 truncate">{sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson</span>
                     <button onClick={() => {
-                      const validation = validateEudrCollection(geoData)
+                      const { json, validation } = serializeEudrGeoJson(geoData, { cleanLog: eudrCleanLog })
                       if (!validation.isValid) {
                         showToast(`Cảnh báo GeoJSON: ${validation.errors[0]}`, false)
                       } else if (validation.warnings.length > 0) {
-                        showToast(`Lưu ý: ${validation.warnings[0]}`, true)
+                        showToast(`Lưu ý: ${validation.warnings[0].message}`, true)
                       }
-                      const blob = new Blob([JSON.stringify(geoData, null, 2)], { type: "application/geo+json" })
+                      const blob = new Blob([json], { type: "application/geo+json" })
                       saveAs(blob, `${sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson`)
                     }} className="p-1 hover:bg-emerald-100 rounded text-emerald-600" title="Tải về"><FileDown size={13}/></button>
                   </div>

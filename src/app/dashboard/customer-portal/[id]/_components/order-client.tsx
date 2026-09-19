@@ -8,6 +8,8 @@ import type { FeatureCollection } from "geojson"
 import { saveAs } from "file-saver"
 import { ArrowLeft, Download, FileDown, FileText, Loader2, MapPin, Package } from "lucide-react"
 import { buildEudrOrderZipBlob, generateDDS1, generateDDS2, sanitizeOrderCodeForFile, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
+import { serializeEudrGeoJson } from "@/lib/eudr-export-gate"
+import type { PlotCleanEntry } from "@/lib/eudr-feature-collection"
 import { EudrPlotMap } from "@/app/dashboard/eudr/_components/eudr-plot-map"
 import {
   getStoredCustomerPortalLang,
@@ -42,6 +44,8 @@ type PortalData = {
   lotCertMap: Record<string, string>
   diemGn: string[]
   geoData: FeatureCollection
+  /** Nhật ký làm sạch/nở mảnh (GĐ 3) — optional để tương thích response cũ chưa có field này. */
+  eudrCleanLog?: PlotCleanEntry[]
   traceInfo: { lots: number; ngans: number; tripUids: number; matchedRows: number; diemGn: number; features: number; fallback?: boolean }
 }
 
@@ -157,7 +161,8 @@ export default function CustomerPortalOrderClient() {
     if (!data) return
     setDownloading("geojson")
     try {
-      const blob = new Blob([JSON.stringify(data.geoData, null, 2)], { type: "application/geo+json" })
+      const { json } = serializeEudrGeoJson(data.geoData, { cleanLog: data.eudrCleanLog })
+      const blob = new Blob([json], { type: "application/geo+json" })
       saveAs(blob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_supply_chain.geojson`)
     } finally {
       setDownloading(null)
@@ -184,6 +189,7 @@ export default function CustomerPortalOrderClient() {
         data.extractionDates,
         data.lotCertMap,
         data.order.files || [],
+        data.eudrCleanLog,
       )
       saveAs(zipBlob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_EUDR.zip`)
     } catch {

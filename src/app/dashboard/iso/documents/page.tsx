@@ -59,7 +59,7 @@ export default function IsoDocumentsPage() {
         supabase
         .from("iso_documents")
         .select(
-          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, soan_thao_user_id, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at, file_signed_pdf_url, file_signed_office_url, file_goc_url",
+          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, soan_thao_user_id, created_by, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at, file_signed_pdf_url, file_signed_office_url, file_goc_url",
         )
         .eq("factory_id", fid)
         .order("updated_at", { ascending: false }),
@@ -394,8 +394,8 @@ export default function IsoDocumentsPage() {
                     <td className="px-4 py-3 text-right">
                       {(() => {
                         const isAdmin = userRole === "admin"
-                        const canEditDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
-                        const canDeleteDoc = (doc.trang_thai === "draft" && doc.soan_thao_user_id === userId) || isAdmin
+                        const canEditDoc = (doc.trang_thai === "draft" && (doc.soan_thao_user_id === userId || doc.created_by === userId)) || isAdmin
+                        const canDeleteDoc = (doc.trang_thai === "draft" && (doc.soan_thao_user_id === userId || doc.created_by === userId)) || isAdmin
                         // `<a download>` bị bỏ qua khi khác origin (file nằm trên Supabase
                         // Storage) — phải dùng `?download=` của Storage, xem storage-download.ts.
                         const canOpenDocFile = canOpenIsoFile(doc.trang_thai, user)
@@ -503,8 +503,8 @@ export default function IsoDocumentsPage() {
                       <td className="px-4 py-3 text-right">
                         {(() => {
                           const isAdmin = userRole === "admin"
-                          const canEditChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
-                          const canDeleteChild = (child.trang_thai === "draft" && child.soan_thao_user_id === userId) || isAdmin
+                          const canEditChild = (child.trang_thai === "draft" && (child.soan_thao_user_id === userId || child.created_by === userId)) || isAdmin
+                          const canDeleteChild = (child.trang_thai === "draft" && (child.soan_thao_user_id === userId || child.created_by === userId)) || isAdmin
                           const canOpenChildFile = canOpenIsoFile(child.trang_thai, user)
                           const childDownloadUrl = buildStorageDownloadUrl(
                             child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url,

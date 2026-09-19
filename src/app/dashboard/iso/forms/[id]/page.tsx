@@ -577,8 +577,8 @@ function SignPlacementModal({
   const [canvasError, setCanvasError] = useState<string | null>(null)
 
   // Element states (canvas pixels) — tính toán kích thước vừa khít text (Auto-Fit Snug Box)
-  const initialSnugName = computeSnugBoxSize(userName, "name", 1.5)
-  const initialSnugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.5)
+  const initialSnugName = computeSnugBoxSize(userName, "name", 1.0)
+  const initialSnugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.0)
   const [sigState, setSigState] = useState<ElemState>({ x: 60, y: 200, w: 140, h: 60 })
   const [nameState, setNameState] = useState<ElemState>({ x: 60, y: 270, w: initialSnugName.w, h: initialSnugName.h })
   const [cvState, setCvState] = useState<ElemState>({ x: 60, y: 298, w: initialSnugCv.w, h: initialSnugCv.h })
@@ -815,8 +815,8 @@ function SignPlacementModal({
           const nameCanvas = toCanvas(namePt)
           const cvCanvas = toCanvas(cvPt)
 
-          const snugName = computeSnugBoxSize(userName, "name", curScale)
-          const snugCv = computeSnugBoxSize(userChucVu, "chuc_vu", curScale)
+          const snugName = computeSnugBoxSize(userName, "name", 1.0)
+          const snugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.0)
 
           const snugNameW = Math.min(roleCanvas.w, snugName.w)
           const snugCvW = Math.min(roleCanvas.w, snugCv.w)
@@ -1010,8 +1010,8 @@ function SignPlacementModal({
    * trước, không cần chính xác từng pixel.
    */
   const previewTextStyle = (text: string, boxW: number): CSSProperties => {
-    const maxPx = SIGN_TEXT_FONT_SIZE_PT * pdfScale
-    const minPx = SIGN_TEXT_MIN_FONT_SIZE_PT * pdfScale
+    const maxPx = SIGN_TEXT_FONT_SIZE_PT
+    const minPx = SIGN_TEXT_MIN_FONT_SIZE_PT
     const fitted = text ? (boxW - 4) / (text.length * 0.5) : maxPx
     return {
       fontFamily: SIGN_TEXT_FONT_FAMILY,
