@@ -68,6 +68,35 @@ export function parseFiniteNumber(value: unknown) {
   return Number.isFinite(number) ? number : null
 }
 
+export type ForestPlotCodeAliasRow = {
+  alias_ten: string
+  canonical_ten: string
+}
+
+/**
+ * Dựng map tra cứu bí danh mã lô (`alias_ten` → danh sách `canonical_ten`) từ các dòng đã query
+ * trong bảng `forest_plot_code_aliases` (xem migration `20260919_forest_plot_code_aliases.sql`).
+ *
+ * Một `alias_ten` có thể ứng với NHIỀU `canonical_ten` (vd "M6" = hợp của "M6S" + "M6T" — 2 mảnh
+ * con đã digitize riêng, kề nhau thành 1 thửa liền mạch) — mỗi tổ hợp là 1 dòng riêng trong bảng
+ * (`UNIQUE(factory_id, alias_ten, canonical_ten)`, KHÔNG unique trên riêng `alias_ten`).
+ *
+ * Hàm thuần — không I/O. Caller tự query DB rồi truyền dòng kết quả vào đây, cùng nguyên tắc
+ * với `buildStaticPlotFeatureMap()` ở trên.
+ */
+export function buildForestPlotAliasMap(rows: ForestPlotCodeAliasRow[] | null | undefined) {
+  const map = new globalThis.Map<string, string[]>()
+  for (const row of rows || []) {
+    const alias = String(row.alias_ten || "").trim()
+    const canonical = String(row.canonical_ten || "").trim()
+    if (!alias || !canonical) continue
+    const list = map.get(alias)
+    if (list) list.push(canonical)
+    else map.set(alias, [canonical])
+  }
+  return map
+}
+
 export function buildStaticPlotFeatureMap(full: FeatureCollection | null) {
   const mapped = new globalThis.Map<string, FeatureCollection["features"][number]>()
   for (const feature of full?.features || []) {

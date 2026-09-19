@@ -124,6 +124,11 @@ export function validateEudrCollection(
     const declaredArea = Number(p.Dtich2026_ha ?? 0) || 0
     const geomArea = calculateGeometryAreaHa(feature.geometry)
     const featureArea = Number(p.Area ?? 0) || 0
+    // Diện tích khai báo Ở CẤP LÔ (không phải cấp mảnh) — dùng cho đối chiếu byPlot bên dưới.
+    // `Dtich_lo_ha` chỉ tồn tại trên lô nhiều mảnh (giống nhau trên mọi mảnh cùng mã lô, xem
+    // eudr-feature-collection.ts); lô 1 mảnh không có field này nên fallback về `declaredArea`
+    // (Dtich2026_ha), vốn với lô 1 mảnh chính là diện tích cả lô — hành vi không đổi.
+    const lotDeclaredArea = Number(p.Dtich_lo_ha ?? p.Dtich2026_ha ?? 0) || 0
 
     const localIssues: string[] = []
     let hasHoles = false
@@ -244,8 +249,8 @@ export function validateEudrCollection(
     }
 
     if (plotCode) {
-      const acc = byPlot.get(plotCode) || { declared: declaredArea, geom: 0, areaSum: 0, count: 0 }
-      acc.declared = declaredArea || acc.declared
+      const acc = byPlot.get(plotCode) || { declared: lotDeclaredArea, geom: 0, areaSum: 0, count: 0 }
+      acc.declared = lotDeclaredArea || acc.declared
       acc.geom += geomArea
       acc.areaSum += featureArea
       acc.count += 1
@@ -269,7 +274,8 @@ export function validateEudrCollection(
   // ── Đối chiếu ở cấp lô (sau khi đã gom mọi mảnh của cùng một mã lô) ──────────────
   for (const [plotCode, acc] of byPlot) {
     // `Area` phải luôn bắt nguồn từ số đo khai báo. Tổng `Area` của mọi mảnh cùng mã lô
-    // phải bằng đúng `Dtich2026_ha` — nếu lệch nghĩa là ai đó đã lấy `Area` từ hình học.
+    // phải bằng đúng diện tích khai báo CẢ LÔ (`acc.declared`, lấy từ `Dtich_lo_ha` nếu có,
+    // fallback `Dtich2026_ha`) — nếu lệch nghĩa là ai đó đã lấy `Area` từ hình học.
     if (acc.declared > 0 && Math.abs(acc.areaSum - acc.declared) > 0.02) {
       push(
         "warning",

@@ -1,4 +1,4 @@
-import type { Feature, FeatureCollection, Geometry, Polygon } from "geojson"
+import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon } from "geojson"
 import {
   mergePlotProperties,
   parseFiniteNumber,
@@ -169,6 +169,57 @@ export function expandPlotFeatures(args: {
   return { features, entry: buildCleanEntry(plotCode, features.length, droppedHa, fixes) }
 }
 
+type AliasSource = { ten: string; dbRow: ForestPlotRow | null; staticFeature: Feature | null }
+
+/**
+ * Gộp geometry + diện tích khai báo của 1..N mã "canonical" thành MỘT hàng `ForestPlotRow` ảo,
+ * để `expandPlotFeatures()` xử lý y hệt một lô đa mảnh thật (mỗi nguồn đóng góp đúng ring/diện
+ * tích của chính nó, `splitDeclaredArea()` tự chia lại theo tỷ lệ hình học nếu tổng >1 mảnh).
+ *
+ * Dùng khi 1 mã bí danh không có geometry riêng nhưng đã được XÁC NHẬN là hợp của nhiều mã đã
+ * digitize (vd "M6" = "M6S" + "M6T", 2 mảnh kề nhau tạo thành 1 thửa liền mạch — xem
+ * `forest_plot_code_aliases`). Với đúng 1 nguồn, hành vi tương đương mượn thẳng geometry của
+ * nguồn đó (không đổi so với bí danh 1:1 đơn giản).
+ *
+ * `ma_lo_full` CỐ Ý luôn `null` — không được mượn của bất kỳ nguồn nào, xem lý do ở nơi gọi.
+ */
+function combineAliasSources(sources: AliasSource[]): ForestPlotRow | null {
+  const polygons: number[][][][] = []
+  let totalDeclared = 0
+  let anyDeclared = false
+
+  for (const s of sources) {
+    const rawGeometry =
+      (s.dbRow?.geometry as Geometry | undefined) ?? (s.staticFeature?.geometry as Geometry | undefined) ?? null
+    if (rawGeometry?.type === "Polygon") {
+      polygons.push((rawGeometry as Polygon).coordinates as number[][][])
+    } else if (rawGeometry?.type === "MultiPolygon") {
+      polygons.push(...((rawGeometry as MultiPolygon).coordinates as number[][][][]))
+    }
+
+    const refProps = (s.staticFeature?.properties as EudrPlotProperties | undefined) || {}
+    const declared = parseFiniteNumber(s.dbRow?.dien_tich_ha ?? refProps.Dtich2026_ha ?? null)
+    if (declared !== null) {
+      totalDeclared += declared
+      anyDeclared = true
+    }
+  }
+
+  if (polygons.length === 0) return null
+
+  return {
+    ten: sources.map((s) => s.ten).join("+"),
+    ma_lo_full: null,
+    geometry: { type: "MultiPolygon", coordinates: polygons } as MultiPolygon,
+    nong_truong: null,
+    doi: null,
+    giong: null,
+    dien_tich_ha: anyDeclared ? totalDeclared : null,
+    nam_trong: null,
+    nam_cao_up: null,
+  }
+}
+
 /**
  * Builder đầy đủ (GĐ 3a) — dựng cả FeatureCollection cho một danh sách mã lô, thay trọn khối
  * lặp ở `EudrClient.tsx:697-724` và `eudr-trace.ts:290-321` (gồm cả `sortFeaturesByPlotCode`).
@@ -182,21 +233,60 @@ export function buildEudrFeatureCollection(input: {
   staticPlots: Map<string, Feature>
   /** Ngày xuất — BẮT BUỘC, chặn tái diễn lỗi export_date ngay ở kiểu dữ liệu. */
   exportDate: string
+  /**
+   * Bí danh mã lô (`alias_ten` → danh sách `canonical_ten`, từ `forest_plot_code_aliases` — xem
+   * `eudr-plot-merge.ts`'s `buildForestPlotAliasMap()`). CHỈ được tra khi mã lô KHÔNG có geometry
+   * riêng ở cả `dbPlots` lẫn `staticPlots` — không bao giờ ghi đè lên geometry thật đã có. Nếu
+   * bỏ qua tham số này, hành vi giữ nguyên y hệt trước khi có alias (không có mã nào được thay).
+   * 1 alias có thể ứng với NHIỀU canonical (vd "M6" = hợp "M6S" + "M6T") — xem `combineAliasSources()`.
+   */
+  aliasMap?: Map<string, string[]>
 }): { collection: FeatureCollection; cleanLog: PlotCleanEntry[]; lostPlots: string[] } {
-  const { plotCodes, dbPlots, staticPlots, exportDate } = input
+  const { plotCodes, dbPlots, staticPlots, exportDate, aliasMap } = input
   const allFeatures: Feature[] = []
   const cleanLog: PlotCleanEntry[] = []
   const lostPlots: string[] = []
 
   for (const plotCode of plotCodes) {
+    let dbRow = dbPlots.get(plotCode) ?? null
+    let staticFeature = staticPlots.get(plotCode) ?? null
+    let aliasNote: string | null = null
+
+    if (!dbRow && !staticFeature && aliasMap) {
+      const canonicalTens = aliasMap.get(plotCode)
+      if (canonicalTens && canonicalTens.length > 0) {
+        const sources: AliasSource[] = canonicalTens.map((ten) => ({
+          ten,
+          dbRow: dbPlots.get(ten) ?? null,
+          staticFeature: staticPlots.get(ten) ?? null,
+        }))
+        const anySourceFound = sources.some((s) => s.dbRow || s.staticFeature)
+        if (anySourceFound) {
+          // Mượn geometry/diện tích/metadata của (các) mã gốc, nhưng KHÔNG được mượn
+          // `ma_lo_full`/`Ma_lo_2026` — mỗi mã bí danh là một đơn vị lịch cạo RIÊNG trong hệ
+          // thống (khác `Ten`), dù cùng một thửa đất thật với mã gốc. Nếu giữ nguyên
+          // `ma_lo_full` của mã gốc, 2 mã bí danh cùng mượn 1 mã gốc (vd "G13T" và "G13Đ" cùng
+          // mượn "G13") sẽ mang CHUNG `Ma_lo_2026` — và `eudr-validator.ts`'s `byPlot` gộp các
+          // feature theo đúng khóa này, khiến 2 lần diện tích khai báo đầy đủ (24,2 + 24,2 ha)
+          // bị cộng dồn nhầm vào một nhóm chỉ có 1 diện tích khai báo (24,2 ha) → báo sai lệch
+          // ~100% (đã kiểm chứng bằng script, xem lịch sử commit). `combineAliasSources()` luôn
+          // trả `ma_lo_full: null`, khiến `mergePlotProperties()` tự fallback dùng đúng
+          // `plotCode` (mã bí danh) làm định danh — mỗi bí danh tự đối chiếu diện tích riêng.
+          dbRow = combineAliasSources(sources)
+          staticFeature = null
+          aliasNote = `Bí danh đã xác nhận: dùng geometry của mã "${canonicalTens.join(" + ")}" (xem forest_plot_code_aliases).`
+        }
+      }
+    }
+
     const { features, entry } = expandPlotFeatures({
       plotCode,
-      dbRow: dbPlots.get(plotCode) ?? null,
-      staticFeature: staticPlots.get(plotCode) ?? null,
+      dbRow,
+      staticFeature,
       exportDate,
     })
     allFeatures.push(...features)
-    cleanLog.push(entry)
+    cleanLog.push(aliasNote ? { ...entry, fixes: [...entry.fixes, aliasNote] } : entry)
     if (entry.lostAllGeometry) lostPlots.push(plotCode)
   }
 

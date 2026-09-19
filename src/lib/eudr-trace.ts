@@ -6,7 +6,7 @@ import { DIEM_GN, buildLoThuHoach, normalizeDeliveryPoints } from "@/lib/dispatc
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { loadDispatchTripsByUids, type StorageTripItem } from "@/lib/storage-detail"
 import { dedupeLotsByMaLo, normalizeLotCode } from "@/app/dashboard/product/shared"
-import { buildStaticPlotFeatureMap, type ForestPlotRow } from "@/lib/eudr-plot-merge"
+import { buildForestPlotAliasMap, buildStaticPlotFeatureMap, type ForestPlotRow } from "@/lib/eudr-plot-merge"
 import { buildEudrFeatureCollection, type PlotCleanEntry } from "@/lib/eudr-feature-collection"
 
 // Port thuần (không phụ thuộc React state) của traceGeoChain trong
@@ -291,13 +291,28 @@ export async function traceExportOrderGeoChain(
   const full = await loadStaticPlotFeatureCollection()
   const staticPlotMap = buildStaticPlotFeatureMap(full)
 
-  const { data: plotRows } = tenList.length
+  // Bí danh mã lô (vd "G13Đ" -> "G13") — chỉ dùng khi mã KHÔNG có geometry riêng, xem
+  // forest_plot_code_aliases (migration 20260919) + eudr-plot-merge.ts's buildForestPlotAliasMap().
+  const { data: aliasRows } = tenList.length
+    ? await client
+        .from("forest_plot_code_aliases")
+        .select("alias_ten, canonical_ten")
+        .eq("factory_id", order.factory_id)
+        .eq("is_active", true)
+        .in("alias_ten", tenList)
+    : { data: null }
+  const aliasMap = buildForestPlotAliasMap(aliasRows)
+  // Query forest_plots phải gồm cả mã CANONICAL của mọi alias khớp (1 alias có thể ứng với
+  // NHIỀU canonical, vd "M6" = "M6S"+"M6T") — nếu không dbPlotMap sẽ không có geometry để mượn.
+  const plotTenQuery = [...new Set([...tenList, ...[...aliasMap.values()].flat()])]
+
+  const { data: plotRows } = plotTenQuery.length
     ? await client
         .from("forest_plots")
         .select("ten, ma_lo_full, geometry, nong_truong, doi, giong, dien_tich_ha, nam_trong, nam_cao_up")
         .eq("factory_id", order.factory_id)
         .eq("is_active", true)
-        .in("ten", tenList)
+        .in("ten", plotTenQuery)
     : { data: null }
 
   const dbPlotMap = new Map(((plotRows || []) as ForestPlotRow[]).map((plot) => [plot.ten, plot] as const))
@@ -311,6 +326,7 @@ export async function traceExportOrderGeoChain(
     dbPlots: dbPlotMap,
     staticPlots: staticPlotMap,
     exportDate,
+    aliasMap,
   })
 
   return {

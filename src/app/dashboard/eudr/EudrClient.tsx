@@ -8,6 +8,7 @@ import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { loadDispatchTripsByUids, type StorageTripItem } from "@/lib/storage-detail"
 import { dedupeLotsByMaLo, normalizeLotCode } from "@/app/dashboard/product/shared"
 import {
+  buildForestPlotAliasMap,
   buildStaticPlotFeatureMap,
   toDisplayText,
   toDisplayNumber,
@@ -687,13 +688,28 @@ export default function EudrClient() {
       const full: FeatureCollection | null = fullResponse.ok ? await fullResponse.json() : null
       const staticPlotMap = buildStaticPlotFeatureMap(full)
 
-      const { data: plotRows } = tenList.length
+      // Bí danh mã lô (vd "G13Đ" -> "G13") — chỉ dùng khi mã KHÔNG có geometry riêng, xem
+      // forest_plot_code_aliases (migration 20260919) + eudr-plot-merge.ts's buildForestPlotAliasMap().
+      const { data: aliasRows } = tenList.length
+        ? await supabase
+            .from("forest_plot_code_aliases")
+            .select("alias_ten, canonical_ten")
+            .eq("factory_id", ord.factory_id)
+            .eq("is_active", true)
+            .in("alias_ten", tenList)
+        : { data: null }
+      const aliasMap = buildForestPlotAliasMap(aliasRows)
+      // Query forest_plots phải gồm cả mã CANONICAL của mọi alias khớp (1 alias có thể ứng với
+      // NHIỀU canonical, vd "M6" = "M6S"+"M6T") — nếu không dbPlotMap sẽ không có geometry để mượn.
+      const plotTenQuery = [...new Set([...tenList, ...[...aliasMap.values()].flat()])]
+
+      const { data: plotRows } = plotTenQuery.length
         ? await supabase
             .from("forest_plots")
             .select("ten, ma_lo_full, geometry, nong_truong, doi, giong, dien_tich_ha, nam_trong, nam_cao_up")
             .eq("factory_id", ord.factory_id)
             .eq("is_active", true)
-            .in("ten", tenList)
+            .in("ten", plotTenQuery)
         : { data: null }
 
       const dbPlotMap = new globalThis.Map(
@@ -705,6 +721,7 @@ export default function EudrClient() {
         dbPlots: dbPlotMap,
         staticPlots: staticPlotMap,
         exportDate: ord.ngay,
+        aliasMap,
       })
       setEudrCleanLog(cleanLog)
       // GĐ 4: ghi eudr_clean_log/eudr_geometry_hash mỗi khi trace được tính lại (view time,
