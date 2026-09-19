@@ -11,7 +11,7 @@ import { SIGN_AS_OPTIONS, type SignAsType, type ThuTuKyStep, stepSignerUserId, t
 import { clampRectToBox, findRoleBoxForStep } from "@/lib/signing/template-layout"
 import { getSignatureImage } from "@/lib/signing/signature-image"
 import { computeIntegrityHash } from "@/lib/signing/hash"
-import { sealPdfWithVerifyLink, type VerifyLinkTarget } from "@/lib/signing/verify-link"
+import { sealPdfWithVerifyLink, sealPdfWithVerifyLinks, type VerifyLinkGroup, type VerifyLinkTarget } from "@/lib/signing/verify-link"
 import {
   loadSignerNameFont,
   drawSignatureImage,
@@ -731,15 +731,36 @@ export async function POST(
         let padesError: string | null = null
         const logId = randomUUID()
 
+        type StepLogEntry = {
+          logId: string
+          userId: string
+          stepIndex: number
+          action: string
+          padesSigIndex?: number | null
+        }
+        const stepLogs: StepLogEntry[] = []
+
         if (finalExt === "pdf") {
           try {
-            const linkTargets: VerifyLinkTarget[] = []
-            for (const item of allPlacements) {
+            const linkGroups: VerifyLinkGroup[] = []
+            allPlacements.forEach((item, idx) => {
               const p = item.placement
-              if (!p) continue
+              if (!p) return
+              const isFinalStep = idx === allPlacements.length - 1
+              const stepLogId = isFinalStep ? logId : randomUUID()
+              const actionName = isFinalStep ? "phe_duyet" : (idx === 0 ? "soan_thao" : "xem_xet")
+              stepLogs.push({
+                logId: stepLogId,
+                userId: item.userId,
+                stepIndex: idx + 1,
+                action: actionName,
+                padesSigIndex: isFinalStep ? 0 : null,
+              })
+
+              const targets: VerifyLinkTarget[] = []
               const pageIdx = (p.page ?? 1) - 1
               if (pageIdx >= 0) {
-                linkTargets.push({
+                targets.push({
                   pageIndex: pageIdx,
                   x: p.x,
                   y: p.y,
@@ -750,7 +771,7 @@ export async function POST(
               for (const extra of p.extraPlacements ?? []) {
                 const extraIdx = (extra.page ?? 1) - 1
                 if (extraIdx >= 0) {
-                  linkTargets.push({
+                  targets.push({
                     pageIndex: extraIdx,
                     x: extra.x,
                     y: extra.y,
@@ -759,7 +780,13 @@ export async function POST(
                   })
                 }
               }
-            }
+              if (targets.length > 0) {
+                linkGroups.push({
+                  targets,
+                  url: `${APP_URL}/van-ban-verify/${stepLogId}`,
+                })
+              }
+            })
 
             const { data: userProfile } = await supabaseAdmin
               .from("profiles")
@@ -768,18 +795,16 @@ export async function POST(
               .maybeSingle()
 
             const sealSignerName = signerName || "Người phê duyệt"
-            const verifyUrl = `${APP_URL}/van-ban-verify/${logId}`
-            const sealedBuf = await sealPdfWithVerifyLink(
+            const sealedBuf = await sealPdfWithVerifyLinks(
               Buffer.from(finalBytes),
-              linkTargets,
-              verifyUrl,
+              linkGroups,
               sealSignerName,
               (userProfile?.auth_email as string) || "",
             )
             finalBytes = new Uint8Array(sealedBuf)
             padesSigIndex = 0
           } catch (sealErr) {
-            console.warn("[finalize N-step] sealPdfWithVerifyLink warning:", sealErr)
+            console.warn("[finalize N-step] sealPdfWithVerifyLinks warning:", sealErr)
             padesError = sealErr instanceof Error ? sealErr.message : "Lỗi niêm phong chữ ký số"
           }
         }
@@ -807,17 +832,35 @@ export async function POST(
 
         await supabaseAdmin.from("iso_form_instances").update(updates).eq("id", instanceId)
 
-        await supabaseAdmin.from("doc_approval_log").insert({
-          id: logId,
-          factory_id: factoryId,
-          doc_id: instanceId,
-          doc_type: "iso_form",
-          user_id: userId,
-          action: "phe_duyet",
-          content_hash: signedContentHash,
-          pades_sig_index: padesSigIndex,
-          pades_error: padesError,
-        })
+        if (stepLogs.length > 0) {
+          for (const sLog of stepLogs) {
+            await supabaseAdmin.from("doc_approval_log").insert({
+              id: sLog.logId,
+              factory_id: factoryId,
+              doc_id: instanceId,
+              doc_type: "iso_form",
+              user_id: sLog.userId,
+              action: sLog.action,
+              buoc_ky: sLog.stepIndex,
+              content_hash: signedContentHash,
+              pades_sig_index: sLog.padesSigIndex,
+              pades_error: sLog.padesSigIndex !== null ? padesError : null,
+            })
+          }
+        } else {
+          await supabaseAdmin.from("doc_approval_log").insert({
+            id: logId,
+            factory_id: factoryId,
+            doc_id: instanceId,
+            doc_type: "iso_form",
+            user_id: userId,
+            action: "phe_duyet",
+            buoc_ky: soBuocTong,
+            content_hash: signedContentHash,
+            pades_sig_index: padesSigIndex,
+            pades_error: padesError,
+          })
+        }
 
         await supabaseAdmin.from("iso_form_instance_logs").insert({
           instance_id: instanceId,
@@ -1121,15 +1164,36 @@ export async function POST(
       let padesError: string | null = null
       const logId = randomUUID()
 
+      type StepLogEntry = {
+        logId: string
+        userId: string
+        stepIndex: number
+        action: string
+        padesSigIndex?: number | null
+      }
+      const stepLogs: StepLogEntry[] = []
+
       if (finalExt === "pdf") {
         try {
-          const linkTargets: VerifyLinkTarget[] = []
-          for (const item of allPlacements) {
+          const linkGroups: VerifyLinkGroup[] = []
+          allPlacements.forEach((item, idx) => {
             const p = item.placement
-            if (!p) continue
+            if (!p) return
+            const isFinalStep = idx === allPlacements.length - 1
+            const stepLogId = isFinalStep ? logId : randomUUID()
+            const actionName = isFinalStep ? "phe_duyet" : (idx === 0 ? "soan_thao" : "xem_xet")
+            stepLogs.push({
+              logId: stepLogId,
+              userId: item.userId,
+              stepIndex: idx + 1,
+              action: actionName,
+              padesSigIndex: isFinalStep ? 0 : null,
+            })
+
+            const targets: VerifyLinkTarget[] = []
             const pageIdx = (p.page ?? 1) - 1
             if (pageIdx >= 0) {
-              linkTargets.push({
+              targets.push({
                 pageIndex: pageIdx,
                 x: p.x,
                 y: p.y,
@@ -1140,7 +1204,7 @@ export async function POST(
             for (const extra of p.extraPlacements ?? []) {
               const extraIdx = (extra.page ?? 1) - 1
               if (extraIdx >= 0) {
-                linkTargets.push({
+                targets.push({
                   pageIndex: extraIdx,
                   x: extra.x,
                   y: extra.y,
@@ -1149,7 +1213,13 @@ export async function POST(
                 })
               }
             }
-          }
+            if (targets.length > 0) {
+              linkGroups.push({
+                targets,
+                url: `${APP_URL}/van-ban-verify/${stepLogId}`,
+              })
+            }
+          })
 
           const { data: userProfile } = await supabaseAdmin
             .from("profiles")
@@ -1158,18 +1228,16 @@ export async function POST(
             .maybeSingle()
 
           const sealSignerName = signerName || "Người phê duyệt"
-          const verifyUrl = `${APP_URL}/van-ban-verify/${logId}`
-          const sealedBuf = await sealPdfWithVerifyLink(
+          const sealedBuf = await sealPdfWithVerifyLinks(
             Buffer.from(finalBytes),
-            linkTargets,
-            verifyUrl,
+            linkGroups,
             sealSignerName,
             (userProfile?.auth_email as string) || "",
           )
           finalBytes = new Uint8Array(sealedBuf)
           padesSigIndex = 0
         } catch (sealErr) {
-          console.warn("[finalize 3-step] sealPdfWithVerifyLink warning:", sealErr)
+          console.warn("[finalize 3-step] sealPdfWithVerifyLinks warning:", sealErr)
           padesError = sealErr instanceof Error ? sealErr.message : "Lỗi niêm phong chữ ký số"
         }
       }
@@ -1197,17 +1265,34 @@ export async function POST(
 
       await supabaseAdmin.from("iso_form_instances").update(updates).eq("id", instanceId)
 
-      await supabaseAdmin.from("doc_approval_log").insert({
-        id: logId,
-        factory_id: factoryId,
-        doc_id: instanceId,
-        doc_type: "iso_form",
-        user_id: userId,
-        action: "phe_duyet",
-        content_hash: signedContentHash,
-        pades_sig_index: padesSigIndex,
-        pades_error: padesError,
-      })
+      if (stepLogs.length > 0) {
+        for (const sLog of stepLogs) {
+          await supabaseAdmin.from("doc_approval_log").insert({
+            id: sLog.logId,
+            factory_id: factoryId,
+            doc_id: instanceId,
+            doc_type: "iso_form",
+            user_id: sLog.userId,
+            action: sLog.action,
+            buoc_ky: sLog.stepIndex,
+            content_hash: signedContentHash,
+            pades_sig_index: sLog.padesSigIndex,
+            pades_error: sLog.padesSigIndex !== null ? padesError : null,
+          })
+        }
+      } else {
+        await supabaseAdmin.from("doc_approval_log").insert({
+          id: logId,
+          factory_id: factoryId,
+          doc_id: instanceId,
+          doc_type: "iso_form",
+          user_id: userId,
+          action: "phe_duyet",
+          content_hash: signedContentHash,
+          pades_sig_index: padesSigIndex,
+          pades_error: padesError,
+        })
+      }
 
       await supabaseAdmin.from("iso_form_instance_logs").insert({
         instance_id: instanceId,

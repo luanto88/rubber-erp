@@ -40,6 +40,9 @@ type Props = {
   factoryId: string
   userId: string
   initialDocIds?: string[] // pre-filled từ trang chi tiết
+  itemType?: "document" | "form"
+  formTitle?: string
+  formCode?: string
   onClose: () => void
   onSuccess?: (distributed: number, skipped: number) => void
 }
@@ -48,10 +51,14 @@ export function DistributionModal({
   factoryId,
   userId,
   initialDocIds,
+  itemType = "document",
+  formTitle,
+  formCode,
   onClose,
   onSuccess,
 }: Props) {
-  const [step, setStep] = useState<1 | 2>(1)
+  const isForm = itemType === "form"
+  const [step, setStep] = useState<1 | 2>(isForm && (initialDocIds?.length ?? 0) > 0 ? 2 : 1)
 
   // Bước 1: chọn tài liệu
   const [docs, setDocs] = useState<IsoDocument[]>([])
@@ -80,8 +87,12 @@ export function DistributionModal({
     skipped: number
   } | null>(null)
 
-  // Load docs có hiệu lực
+  // Load docs có hiệu lực (chỉ khi không phải form instance)
   useEffect(() => {
+    if (isForm) {
+      setLoadingDocs(false)
+      return
+    }
     const loadDocs = async () => {
       setLoadingDocs(true)
       const { data } = await supabase
@@ -96,7 +107,7 @@ export function DistributionModal({
       setLoadingDocs(false)
     }
     void loadDocs()
-  }, [factoryId])
+  }, [factoryId, isForm])
 
   // Load người nhận khi vào bước 2
   // Dùng API thay vì query trực tiếp để bypass RLS (profiles chỉ cho admin đọc tất cả)
@@ -108,6 +119,7 @@ export function DistributionModal({
       const params = new URLSearchParams({
         factoryId,
         docIds: selectedDocIds.join(","),
+        itemType,
       })
       const res = await fetch(`/api/iso/distribute?${params.toString()}`)
       const json = (await res.json()) as {
@@ -202,6 +214,7 @@ export function DistributionModal({
           recipientUserIds: selectedUserIds,
           ghiChu: ghiChu || undefined,
           distributorUserId: userId,
+          itemType,
         }),
       })
       const json = (await res.json()) as {
@@ -231,11 +244,11 @@ export function DistributionModal({
     <div className="flex w-full items-center justify-between">
       <div className="text-xs text-slate-500">
         {step === 1
-          ? `${selectedDocIds.length} tài liệu đã chọn`
+          ? `${selectedDocIds.length} ${isForm ? "hồ sơ" : "tài liệu"} đã chọn`
           : `${selectedUserIds.length} người đã chọn`}
       </div>
       <div className="flex gap-2">
-        {step === 2 && (
+        {step === 2 && !isForm && (
           <button
             onClick={() => setStep(1)}
             className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
@@ -276,15 +289,22 @@ export function DistributionModal({
 
   return (
     <ModalShell
-      title="Phân phối tài liệu ISO"
+      title={isForm ? "Phân phối hồ sơ thực hiện ISO" : "Phân phối tài liệu ISO"}
       onClose={onClose}
       maxWidth="2xl"
       footer={modalFooter}
     >
         {!saveSuccess && (
           <p className="text-xs text-slate-500 -mt-2 mb-4">
-            Bước {step}/2 —{" "}
-            {step === 1 ? "Chọn tài liệu" : "Chọn người nhận"}
+            {isForm ? (
+              formTitle ? (
+                <span className="inline-block py-1 px-2.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                  📋 Hồ sơ: {formCode ? `[${formCode}] ` : ""}{formTitle}
+                </span>
+              ) : "Chọn người hoặc phòng ban nhận phân phối hồ sơ"
+            ) : (
+              `Bước ${step}/2 — ${step === 1 ? "Chọn tài liệu" : "Chọn người nhận"}`
+            )}
           </p>
         )}
           {/* ─── Thành công ─── */}
@@ -548,7 +568,7 @@ export function DistributionModal({
                 <p className="text-xs text-slate-500 bg-violet-50 rounded-xl px-3 py-2">
                   Sẽ phân phối{" "}
                   <span className="font-bold text-violet-700">
-                    {selectedDocIds.length} tài liệu
+                    {selectedDocIds.length} {isForm ? "hồ sơ" : "tài liệu"}
                   </span>{" "}
                   cho{" "}
                   <span className="font-bold text-violet-700">

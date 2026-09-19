@@ -4,7 +4,7 @@ import QRCode from "qrcode"
 import JSZip from "jszip"
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon } from "geojson"
 import { sanitizeOrderCodeForFile } from "@/lib/eudr-filename"
-import { serializeEudrGeoJson } from "@/lib/eudr-export-gate"
+import { serializeEudrGeoJson, EUDR_EXPORT_BLOCK_ENABLED } from "@/lib/eudr-export-gate"
 import type { PlotCleanEntry } from "@/lib/eudr-feature-collection"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
@@ -375,7 +375,7 @@ export async function buildEudrOrderZipBlob(
   if (geoData) {
     zip.file(
       getUniqueZipEntryName(`${order.ma_don}_supply_chain.geojson`, usedNames),
-      serializeEudrGeoJson(geoData, { cleanLog }).json,
+      serializeEudrGeoJson(geoData, { cleanLog, block: EUDR_EXPORT_BLOCK_ENABLED }).json,
     )
     // CSV đối chiếu số thứ tự, mã lô, nông trường, đội, diện tích, năm trồng (Phần D.3)
     const csvRows = [
@@ -399,6 +399,34 @@ export async function buildEudrOrderZipBlob(
         .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
         .join("\r\n")
     zip.file(getUniqueZipEntryName(`${order.ma_don}_doi_chieu_lo.csv`, usedNames), csvContent)
+
+    // Nhật ký làm sạch hình học (GĐ 4) — song ngữ Việt-Anh vì file đi kèm hồ sơ gửi khách nước
+    // ngoài. Liệt kê TOÀN BỘ lô trong cleanLog, kể cả lô sạch — đúng triết lý "luôn ghi rõ,
+    // không bỏ âm thầm" xuyên suốt dự án (không chỉ liệt kê lô có vấn đề).
+    if (cleanLog && cleanLog.length > 0) {
+      const cleanRows = [
+        [
+          "Ma_lo / Plot code",
+          "So_manh_xuat / Feature count",
+          "Dien_tich_manh_vun_bo_ha / Dropped area (ha)",
+          "Cac_sua_loi / Fixes applied",
+          "Mat_sach_hinh_hoc / Lost all geometry",
+        ],
+        ...cleanLog.map((e) => [
+          e.plotCode,
+          e.featureCount,
+          e.droppedHa.toFixed(6),
+          e.fixes.join(" | "),
+          e.lostAllGeometry ? "CO / YES" : "",
+        ]),
+      ]
+      const cleanCsv =
+        "﻿" +
+        cleanRows
+          .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+          .join("\r\n")
+      zip.file(getUniqueZipEntryName(`${order.ma_don}_nhat_ky_lam_sach.csv`, usedNames), cleanCsv)
+    }
   }
 
   for (const f of files) {

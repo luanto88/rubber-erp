@@ -12,7 +12,7 @@ import type { FeatureCollection } from "geojson"
 import { saveAs } from "file-saver"
 import { Download, FileDown, FileText, Loader2, MapPin, Package, ShieldCheck } from "lucide-react"
 import { buildEudrOrderZipBlob, generateDDS1, generateDDS2, sanitizeOrderCodeForFile, type FactoryProfile, type LotDetail } from "@/app/dashboard/eudr/dds-generator"
-import { serializeEudrGeoJson } from "@/lib/eudr-export-gate"
+import { serializeEudrGeoJson, EUDR_EXPORT_BLOCK_ENABLED, EudrExportBlockedError } from "@/lib/eudr-export-gate"
 import type { PlotCleanEntry } from "@/lib/eudr-feature-collection"
 import { EudrPlotMap } from "@/app/dashboard/eudr/_components/eudr-plot-map"
 import {
@@ -155,9 +155,12 @@ export function EudrOrderPublicClient({ token }: { token: string }) {
     if (!data) return
     setDownloading("geojson")
     try {
-      const { json } = serializeEudrGeoJson(data.geoData, { cleanLog: data.eudrCleanLog })
+      const { json } = serializeEudrGeoJson(data.geoData, { cleanLog: data.eudrCleanLog, block: EUDR_EXPORT_BLOCK_ENABLED })
       const blob = new Blob([json], { type: "application/geo+json" })
       saveAs(blob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_supply_chain.geojson`)
+    } catch (error: unknown) {
+      console.error("[EUDR] Public order geojson blocked", error)
+      showToast(error instanceof EudrExportBlockedError ? t("errorExportBlocked") : t("errorGenerateDds"), false)
     } finally {
       setDownloading(null)
     }
@@ -184,8 +187,9 @@ export function EudrOrderPublicClient({ token }: { token: string }) {
         data.eudrCleanLog,
       )
       saveAs(zipBlob, `${sanitizeOrderCodeForFile(data.order.ma_don)}_EUDR.zip`)
-    } catch {
-      showToast(t("errorGenerateDds"), false)
+    } catch (error: unknown) {
+      console.error("[EUDR] Public order ZIP blocked", error)
+      showToast(error instanceof EudrExportBlockedError ? t("errorExportBlocked") : t("errorGenerateDds"), false)
     } finally {
       setDownloading(null)
     }

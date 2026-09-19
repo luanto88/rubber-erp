@@ -12,7 +12,7 @@ import { getSignatureImage } from "@/lib/signing/signature-image"
 import { loadSignerNameFont, computeNameSlot, ISO_SIGNER_NAME_STYLE } from "@/lib/signing/stamp-pdf"
 import { authorizeIsoSignRequest } from "@/app/api/sign/_lib/iso-sign-auth"
 import { hasPadesRootCa } from "@/lib/signing/pades"
-import { sealPdfWithVerifyLink, type VerifyLinkTarget } from "@/lib/signing/verify-link"
+import { sealPdfWithVerifyLink, sealPdfWithVerifyLinks, type VerifyLinkGroup, type VerifyLinkTarget } from "@/lib/signing/verify-link"
 
 // Polyfill DOMMatrix for pdfjs-dist v5 on Node.js (Vercel Node runtime lacks this Web API)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -1933,6 +1933,15 @@ export async function POST(req: NextRequest) {
     let padesSigIndex: number | null = null
     let padesError: string | null = null
 
+    type StepLogEntry = {
+      logId: string
+      userId: string
+      stepIndex: number
+      action: string
+      padesSigIndex?: number | null
+    }
+    const stepLogs: StepLogEntry[] = []
+
     // CHỈ niêm phong ở bước PHÊ DUYỆT của FILE CHÍNH — 1 niêm phong duy nhất cho cả tài liệu:
     //  - Route này dựng lại file từ `file_goc_url` và vẽ lại chữ ký của cả 3 bước mỗi lượt ký,
     //    kết thúc bằng `create()` + `copyPages()` + `save()` — thao tác phẳng hoá file, xoá sạch
@@ -1950,26 +1959,38 @@ export async function POST(req: NextRequest) {
           "Chưa cấu hình SIGN_PADES_ROOT_CA_CERT_PEM / SIGN_PADES_ROOT_CA_KEY_PEM trên môi trường này"
       } else {
         try {
-          // Phủ link lên MỌI ô con dấu có trên file (cả 3 bước ký + các khung nhân bản) — file chỉ
-          // có đúng 1 niêm phong nên bấm vào chữ ký nào cũng dẫn tới cùng trang xác thực.
-          const linkTargets: VerifyLinkTarget[] = []
+          const linkGroups: VerifyLinkGroup[] = []
           const pageCount = finalDoc.getPageCount()
-          for (const { signerUserId, placement } of allPlacements) {
-            if (!signerUserId || !placement) continue
-            const idx = placement.page - 1
-            if (idx >= 0 && idx < pageCount) {
-              linkTargets.push({
-                pageIndex: idx,
-                x: placement.x,
-                y: placement.y,
-                width: placement.width,
-                height: placement.height,
+
+          allPlacements.forEach((entry, idx) => {
+            if (!entry.signerUserId || !entry.placement) return
+            const isFinalStep = idx === allPlacements.length - 1
+            const stepLogId = isFinalStep ? logId : randomUUID()
+            const actionName = isFinalStep ? "phe_duyet" : (idx === 0 ? "soan_thao" : "xem_xet")
+            stepLogs.push({
+              logId: stepLogId,
+              userId: entry.signerUserId,
+              stepIndex: idx + 1,
+              action: actionName,
+              padesSigIndex: isFinalStep ? 0 : null,
+            })
+
+            const targets: VerifyLinkTarget[] = []
+            const p = entry.placement
+            const pageIdx = p.page - 1
+            if (pageIdx >= 0 && pageIdx < pageCount) {
+              targets.push({
+                pageIndex: pageIdx,
+                x: p.x,
+                y: p.y,
+                width: p.width,
+                height: p.height,
               })
             }
-            for (const extra of placement.extraPlacements ?? []) {
+            for (const extra of p.extraPlacements ?? []) {
               const extraIdx = (extra.page ?? 1) - 1
               if (extraIdx >= 0 && extraIdx < pageCount) {
-                linkTargets.push({
+                targets.push({
                   pageIndex: extraIdx,
                   x: extra.x,
                   y: extra.y,
@@ -1978,17 +1999,22 @@ export async function POST(req: NextRequest) {
                 })
               }
             }
-          }
+            if (targets.length > 0) {
+              linkGroups.push({
+                targets,
+                url: `${APP_URL}/van-ban-verify/${stepLogId}`,
+              })
+            }
+          })
 
           // Tên trên chứng thư = người phê duyệt (người đang gọi route ở bước này).
           // Email: dùng ĐÚNG email nội bộ dạng `username@auth...` (chắc chắn ASCII, hợp chuẩn
           // IA5String của attribute `emailAddress`) — không đưa mã/tên tài liệu có dấu tiếng Việt
           // vào chứng thư, xem cảnh báo trong `issueLeafCertificate` của pades.ts.
           const sealSignerName = signerNames.get(userId)?.trim() || "Nguoi phe duyet"
-          signedPdfBytes = await sealPdfWithVerifyLink(
+          signedPdfBytes = await sealPdfWithVerifyLinks(
             signedPdfBytes,
-            linkTargets,
-            `${APP_URL}/van-ban-verify/${logId}`,
+            linkGroups,
             sealSignerName,
             (profileData?.auth_email as string) || "",
           )
@@ -2041,28 +2067,46 @@ export async function POST(req: NextRequest) {
     }
     console.log("[generate-pdf] DB update OK - docId:", docId)
 
-    // `doc_approval_log` là bảng BẤT BIẾN (trigger chặn UPDATE/DELETE) — phải ghi đủ giá trị ngay
-    // lần insert duy nhất này, kể cả `pades_sig_index`. Id sinh sẵn ở trên để link xác thực phủ
-    // trên con dấu trỏ đúng dòng log này.
-    const baseLogRow = {
-      id: logId,
-      factory_id: factoryId,
-      doc_id: docId,
-      doc_type: docType,
-      user_id: userId,
-      action: "generate_pdf",
-      content_hash: signedContentHash,
-      ip_address: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "",
-      user_agent: req.headers.get("user-agent") || "",
-    }
-    const { error: logErr } = await supabaseAdmin
-      .from("doc_approval_log")
-      .insert({ ...baseLogRow, pades_sig_index: padesSigIndex, pades_error: padesError })
-    if (logErr) {
-      // Migration 20260905 chưa chạy → 2 cột mới chưa tồn tại, PostgREST từ chối cả câu insert.
-      // Vẫn phải giữ dòng nhật ký + hash toàn vẹn (đã có từ Giai đoạn 0), chỉ mất phần chỉ số
-      // chữ ký số — nếu không sẽ mất trắng audit trail của lượt ký này.
-      await supabaseAdmin.from("doc_approval_log").insert(baseLogRow)
+    // Ghi nhận nhật ký phê duyệt cho từng bước ký
+    if (stepLogs.length > 0) {
+      for (const sLog of stepLogs) {
+        const row = {
+          id: sLog.logId,
+          factory_id: factoryId,
+          doc_id: docId,
+          doc_type: docType,
+          user_id: sLog.userId,
+          action: sLog.action,
+          buoc_ky: sLog.stepIndex,
+          content_hash: signedContentHash,
+          ip_address: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "",
+          user_agent: req.headers.get("user-agent") || "",
+        }
+        const { error: logErr } = await supabaseAdmin
+          .from("doc_approval_log")
+          .insert({ ...row, pades_sig_index: sLog.padesSigIndex, pades_error: sLog.padesSigIndex !== null ? padesError : null })
+        if (logErr) {
+          await supabaseAdmin.from("doc_approval_log").insert(row)
+        }
+      }
+    } else {
+      const baseLogRow = {
+        id: logId,
+        factory_id: factoryId,
+        doc_id: docId,
+        doc_type: docType,
+        user_id: userId,
+        action: "generate_pdf",
+        content_hash: signedContentHash,
+        ip_address: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "",
+        user_agent: req.headers.get("user-agent") || "",
+      }
+      const { error: logErr } = await supabaseAdmin
+        .from("doc_approval_log")
+        .insert({ ...baseLogRow, pades_sig_index: padesSigIndex, pades_error: padesError })
+      if (logErr) {
+        await supabaseAdmin.from("doc_approval_log").insert(baseLogRow)
+      }
     }
 
     const bodySignaturesEmbedded = allPlacements.filter((entry) => entry.signerUserId && entry.placement).length

@@ -17,12 +17,28 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const factoryId = searchParams.get("factoryId")
     const docIdsParam = searchParams.get("docIds")
+    const itemType = searchParams.get("itemType") || "document"
 
     if (!factoryId) {
       return NextResponse.json({ error: "Thiếu factoryId" }, { status: 400 })
     }
 
     const docIds = docIdsParam ? docIdsParam.split(",").filter(Boolean) : []
+
+    const isForm = itemType === "form"
+    const existingPromise = docIds.length > 0
+      ? isForm
+        ? supabaseAdmin
+            .from("iso_distribution_recipients")
+            .select("recipient_user_id, iso_form_instance_id")
+            .eq("factory_id", factoryId)
+            .in("iso_form_instance_id", docIds)
+        : supabaseAdmin
+            .from("iso_distribution_recipients")
+            .select("recipient_user_id, iso_document_id")
+            .eq("factory_id", factoryId)
+            .in("iso_document_id", docIds)
+      : Promise.resolve({ data: [], error: null })
 
     const [profilesRes, deptsRes, existingRes] = await Promise.all([
       supabaseAdmin
@@ -32,13 +48,7 @@ export async function GET(req: NextRequest) {
         .eq("status", "active")
         .order("full_name"),
       supabaseAdmin.from("departments").select("id, code, name").eq("is_active", true),
-      docIds.length > 0
-        ? supabaseAdmin
-            .from("iso_distribution_recipients")
-            .select("recipient_user_id, iso_document_id")
-            .eq("factory_id", factoryId)
-            .in("iso_document_id", docIds)
-        : Promise.resolve({ data: [], error: null }),
+      existingPromise,
     ])
 
     if (profilesRes.error) {
@@ -89,13 +99,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { factoryId, docIds, recipientUserIds, ghiChu, distributorUserId } =
+    const { factoryId, docIds, recipientUserIds, ghiChu, distributorUserId, itemType = "document" } =
       (await req.json()) as {
         factoryId: string
         docIds: string[]
         recipientUserIds: string[]
         ghiChu?: string
         distributorUserId: string
+        itemType?: "document" | "form"
       }
 
     if (
@@ -107,29 +118,97 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 
-    // Validate docs đều co_hieu_luc và thuộc factory
-    const { data: docs, error: docErr } = await supabaseAdmin
-      .from("iso_documents")
-      .select(
-        "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh",
-      )
-      .eq("factory_id", factoryId)
-      .in("id", docIds)
+    const isForm = itemType === "form"
 
-    if (docErr) {
-      return NextResponse.json({ error: docErr.message }, { status: 500 })
+    type ItemSummary = {
+      id: string
+      ma: string
+      ten: string
+      dateStr: string
     }
+    const itemSummaries: ItemSummary[] = []
 
-    const invalidDocs = (docs || []).filter(
-      (d) => (d.trang_thai as string) !== "co_hieu_luc",
-    )
-    if (invalidDocs.length > 0) {
-      return NextResponse.json(
-        {
-          error: `Chỉ phân phối tài liệu đang có hiệu lực. Tài liệu không hợp lệ: ${invalidDocs.map((d) => d.ma_tai_lieu).join(", ")}`,
-        },
-        { status: 400 },
+    if (isForm) {
+      // Validate form instances: thuộc factory và đã được phê duyệt (da_phe_duyet)
+      const { data: formRows, error: formErr } = await supabaseAdmin
+        .from("iso_form_instances")
+        .select("id, tieu_de, trang_thai, template_doc_id, ky_phe_duyet_at, updated_at")
+        .eq("factory_id", factoryId)
+        .in("id", docIds)
+
+      if (formErr) {
+        return NextResponse.json({ error: formErr.message }, { status: 500 })
+      }
+
+      const invalidForms = (formRows || []).filter(
+        (f) => (f.trang_thai as string) !== "da_phe_duyet",
       )
+      if (invalidForms.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Chỉ phân phối hồ sơ đã phê duyệt hoàn tất. Hồ sơ chưa duyệt: ${invalidForms.map((f) => f.tieu_de || f.id).join(", ")}`,
+          },
+          { status: 400 },
+        )
+      }
+
+      // Lấy thêm mã template nếu có
+      const templateIds = (formRows || [])
+        .map((f) => f.template_doc_id)
+        .filter(Boolean) as string[]
+      const { data: tmplDocs } = templateIds.length > 0
+        ? await supabaseAdmin
+            .from("iso_documents")
+            .select("id, ma_tai_lieu, ten_tai_lieu")
+            .in("id", templateIds)
+        : { data: [] }
+      const tmplMap = new Map((tmplDocs || []).map((t) => [t.id, t]))
+
+      for (const f of formRows || []) {
+        const tmpl = f.template_doc_id ? tmplMap.get(f.template_doc_id) : null
+        itemSummaries.push({
+          id: f.id,
+          ma: tmpl?.ma_tai_lieu || "Biểu mẫu",
+          ten: (f.tieu_de as string) || tmpl?.ten_tai_lieu || "Hồ sơ thực hiện",
+          dateStr: f.ky_phe_duyet_at ? new Date(f.ky_phe_duyet_at as string).toLocaleDateString("vi-VN") : "",
+        })
+      }
+    } else {
+      // Validate docs đều co_hieu_luc và thuộc factory
+      const { data: docs, error: docErr } = await supabaseAdmin
+        .from("iso_documents")
+        .select(
+          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh",
+        )
+        .eq("factory_id", factoryId)
+        .in("id", docIds)
+
+      if (docErr) {
+        return NextResponse.json({ error: docErr.message }, { status: 500 })
+      }
+
+      const invalidDocs = (docs || []).filter(
+        (d) => (d.trang_thai as string) !== "co_hieu_luc",
+      )
+      if (invalidDocs.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Chỉ phân phối tài liệu đang có hiệu lực. Tài liệu không hợp lệ: ${invalidDocs.map((d) => d.ma_tai_lieu).join(", ")}`,
+          },
+          { status: 400 },
+        )
+      }
+
+      for (const d of docs || []) {
+        itemSummaries.push({
+          id: d.id,
+          ma: (d.ma_tai_lieu as string | null) || "",
+          ten: (d.ten_tai_lieu as string) || "",
+          dateStr: (d.ngay_hieu_luc as string | null)
+            ? new Date(d.ngay_hieu_luc as string).toLocaleDateString("vi-VN")
+            : "",
+        })
+      }
     }
 
     // Kiểm tra duplicate: tìm tất cả (docId, userId) đã tồn tại
@@ -137,17 +216,26 @@ export async function POST(req: NextRequest) {
       recipientUserIds.map((uid) => ({ docId, uid })),
     )
 
-    const { data: existingRows } = await supabaseAdmin
-      .from("iso_distribution_recipients")
-      .select("iso_document_id, recipient_user_id")
-      .eq("factory_id", factoryId)
-      .in("iso_document_id", docIds)
-      .in("recipient_user_id", recipientUserIds)
+    const existingQuery = isForm
+      ? supabaseAdmin
+          .from("iso_distribution_recipients")
+          .select("iso_form_instance_id, recipient_user_id")
+          .eq("factory_id", factoryId)
+          .in("iso_form_instance_id", docIds)
+          .in("recipient_user_id", recipientUserIds)
+      : supabaseAdmin
+          .from("iso_distribution_recipients")
+          .select("iso_document_id, recipient_user_id")
+          .eq("factory_id", factoryId)
+          .in("iso_document_id", docIds)
+          .in("recipient_user_id", recipientUserIds)
+
+    const { data: existingRows } = await existingQuery
 
     const existingSet = new Set(
       (existingRows || []).map(
         (r) =>
-          `${r.iso_document_id as string}|${r.recipient_user_id as string}`,
+          `${(isForm ? (r as Record<string, unknown>).iso_form_instance_id : (r as Record<string, unknown>).iso_document_id) as string}|${r.recipient_user_id as string}`,
       ),
     )
 
@@ -161,7 +249,7 @@ export async function POST(req: NextRequest) {
     if (newPairs.length === 0) {
       return NextResponse.json(
         {
-          error: "Tất cả người được chọn đã nhận tài liệu này rồi.",
+          error: `Tất cả người được chọn đã nhận ${isForm ? "hồ sơ" : "tài liệu"} này rồi.`,
           skipped: skippedPairs.length,
         },
         { status: 400 },
@@ -189,9 +277,12 @@ export async function POST(req: NextRequest) {
     // Insert recipients
     const recipientRows = newPairs.map((p) => ({
       batch_id: batch.id as string,
-      iso_document_id: p.docId,
       factory_id: factoryId,
       recipient_user_id: p.uid,
+      item_type: isForm ? "form" : "document",
+      ...(isForm
+        ? { iso_form_instance_id: p.docId, iso_document_id: null }
+        : { iso_document_id: p.docId, iso_form_instance_id: null }),
     }))
 
     const { error: recErr } = await supabaseAdmin
@@ -204,11 +295,11 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = []
 
-    // Lấy profiles người nhận
+    // Lấy profiles người nhận (kèm auth_email)
     const uniqueRecipientIds = [...new Set(newPairs.map((p) => p.uid))]
     const { data: recipientProfiles } = await supabaseAdmin
       .from("profiles")
-      .select("id, full_name, username")
+      .select("id, full_name, username, auth_email")
       .in("id", uniqueRecipientIds)
 
     // Lấy tên người phân phối
@@ -222,26 +313,25 @@ export async function POST(req: NextRequest) {
       (distributorProfile?.username as string | null) ||
       "Hệ thống"
 
-    // Tên docs được phân phối
-    const docSummary = (docs || [])
-      .map(
-        (d) =>
-          `${(d.ma_tai_lieu as string | null) || ""} — ${d.ten_tai_lieu as string}`,
-      )
+    // Tóm tắt items được phân phối
+    const docSummary = itemSummaries
+      .map((d) => `${d.ma ? `${d.ma} — ` : ""}${d.ten}`)
       .join(", ")
 
     // ── 1. In-app notifications ──────────────────────────────────────────────
     const notifRows = newPairs.map((p) => {
-      const doc = (docs || []).find((d) => d.id === p.docId)
-      const ma = (doc?.ma_tai_lieu as string | null) || ""
-      const ten = (doc?.ten_tai_lieu as string) || ""
+      const itm = itemSummaries.find((d) => d.id === p.docId)
+      const ma = itm?.ma || ""
+      const ten = itm?.ten || ""
       return {
         factory_id: factoryId,
         user_id: p.uid,
         type: "phan_phoi",
         doc_id: p.docId,
-        doc_type: "iso_document",
-        title: `Tài liệu ${ma} đã được phân phối đến bạn`,
+        doc_type: isForm ? "iso_form" : "iso_document",
+        title: isForm
+          ? `Hồ sơ ISO ${ma ? `${ma} ` : ""}đã được phân phối đến bạn`
+          : `Tài liệu ${ma} đã được phân phối đến bạn`,
         body: `"${ten}" đã được phân phối. Truy cập Kho của tôi để xem.`,
         is_read: false,
         link: `${APP_URL}/dashboard/iso/kho`,
@@ -269,10 +359,13 @@ export async function POST(req: NextRequest) {
         .filter(Boolean)
         .join(", ")
 
+      const titleTg = isForm ? "Phân phối hồ sơ thực hiện ISO" : "Phân phối tài liệu ISO"
+      const itemLabel = isForm ? "Hồ sơ" : "Tài liệu"
+
       const tgMsg = [
-        `📤 <b>Phân phối tài liệu ISO</b>`,
+        `📤 <b>${titleTg}</b>`,
         ``,
-        `📋 Tài liệu: ${docSummary}`,
+        `📋 ${itemLabel}: ${docSummary}`,
         `👤 Người phân phối: ${distributorName}`,
         recipientNames ? `📬 Gửi đến (${uniqueRecipientIds.length} người): ${recipientNames}` : null,
         ghiChu ? `📝 Ghi chú: ${ghiChu}` : null,
@@ -341,16 +434,28 @@ export async function POST(req: NextRequest) {
           if (row.email && row.email.includes("@")) emailSet.add(row.email)
         }
 
+        // Bổ sung auth_email từ bảng profiles nếu chưa có trong maintenance_staff
+        for (const p of (recipientProfiles || []) as Array<{ auth_email?: string | null }>) {
+          if (p.auth_email && p.auth_email.includes("@")) {
+            emailSet.add(p.auth_email)
+          }
+        }
+
         if (emailSet.size > 0) {
           const khoLink = `${APP_URL}/dashboard/iso/kho`
-          const subject = `[ISO] Tài liệu mới được phân phối đến bạn`
+          const subject = isForm
+            ? `[ISO] Hồ sơ thực hiện mới được phân phối đến bạn`
+            : `[ISO] Tài liệu mới được phân phối đến bạn`
+          const emailHeaderTitle = isForm
+            ? `📤 Hồ sơ thực hiện ISO mới được phân phối`
+            : `📤 Tài liệu ISO mới được phân phối`
 
-          const docListHtml = (docs || [])
+          const docListHtml = itemSummaries
             .map(
               (d) => `<tr>
-            <td style="padding:4px 8px;border:1px solid #e2e8f0">${(d.ma_tai_lieu as string | null) || ""}</td>
-            <td style="padding:4px 8px;border:1px solid #e2e8f0">${d.ten_tai_lieu as string}</td>
-            <td style="padding:4px 8px;border:1px solid #e2e8f0">${(d.ngay_hieu_luc as string | null) ? new Date(d.ngay_hieu_luc as string).toLocaleDateString("vi-VN") : ""}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0">${d.ma || "—"}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0">${d.ten}</td>
+            <td style="padding:6px 8px;border:1px solid #e2e8f0">${d.dateStr || "—"}</td>
           </tr>`,
             )
             .join("")
@@ -358,16 +463,16 @@ export async function POST(req: NextRequest) {
           const htmlBody = `
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
   <div style="background:#7c3aed;padding:16px 24px">
-    <h2 style="color:white;margin:0;font-size:16px">📤 Tài liệu ISO mới được phân phối</h2>
+    <h2 style="color:white;margin:0;font-size:16px">${emailHeaderTitle}</h2>
   </div>
   <div style="padding:24px;background:white">
-    <p style="color:#374151;font-size:14px;margin:0 0 16px 0">Bạn vừa nhận được ${docIds.length} tài liệu từ <strong>${distributorName}</strong>:</p>
+    <p style="color:#374151;font-size:14px;margin:0 0 16px 0">Bạn vừa nhận được ${docIds.length} ${isForm ? "hồ sơ" : "tài liệu"} từ <strong>${distributorName}</strong>:</p>
     <table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead>
         <tr style="background:#f8fafc">
-          <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left">Mã tài liệu</th>
-          <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left">Tên tài liệu</th>
-          <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left">Ngày hiệu lực</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left">${isForm ? "Mã biểu mẫu" : "Mã tài liệu"}</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left">${isForm ? "Tiêu đề hồ sơ" : "Tên tài liệu"}</th>
+          <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left">${isForm ? "Ngày duyệt" : "Ngày hiệu lực"}</th>
         </tr>
       </thead>
       <tbody>${docListHtml}</tbody>

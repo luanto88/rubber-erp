@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation"
 import {
   Search, Plus, FolderOpen, AlertTriangle,
   FileText, Loader2, Sparkles, RefreshCw, ClipboardList,
-  Eye, Pencil, Trash2, Download, BadgeCheck,
+  Eye, Pencil, Trash2, Download, BadgeCheck, Share2,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
 import { ModalShell } from "../../_components/modal-shell"
+import { DistributionModal } from "../_components/distribution-modal"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { PageHeaderBanner } from "../../_components/page-header-banner"
 import { PageBackgroundMotif } from "../../_components/page-background-motif"
@@ -404,6 +405,7 @@ export default function IsoFormsPage() {
   // Role & delete
   const [userRole, setUserRole] = useState("")
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
+  const [distributeForm, setDistributeForm] = useState<{ id: string; title: string; code?: string } | null>(null)
 
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -731,6 +733,21 @@ export default function IsoFormsPage() {
                                   <Download size={14} />
                                 </a>
                               )}
+                              {inst.trang_thai === "da_phe_duyet" && (
+                                <button
+                                  title="Phân phối hồ sơ này"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setDistributeForm({
+                                      id: inst.id,
+                                      title: inst.tieu_de || "Hồ sơ ISO",
+                                    })
+                                  }}
+                                  className="p-1.5 rounded-lg hover:bg-teal-100 text-slate-400 hover:text-teal-600 transition-colors"
+                                >
+                                  <Share2 size={14} />
+                                </button>
+                              )}
                               {canEditInst && (
                                 <button
                                   title="Sửa"
@@ -814,6 +831,19 @@ export default function IsoFormsPage() {
         >
           <p className="text-sm text-slate-600">Hành động này không thể hoàn tác. Hồ sơ và file đính kèm sẽ bị xóa vĩnh viễn.</p>
         </ModalShell>
+      )}
+
+      {/* Distribution Modal */}
+      {distributeForm && factoryId && userId && (
+        <DistributionModal
+          factoryId={factoryId}
+          userId={userId}
+          initialDocIds={[distributeForm.id]}
+          itemType="form"
+          formTitle={distributeForm.title}
+          formCode={distributeForm.code}
+          onClose={() => setDistributeForm(null)}
+        />
       )}
     </IsoShell>
   )

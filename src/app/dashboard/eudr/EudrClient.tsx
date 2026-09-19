@@ -15,7 +15,13 @@ import {
   type EudrPlotProperties,
 } from "@/lib/eudr-plot-merge"
 import { buildEudrFeatureCollection, type PlotCleanEntry } from "@/lib/eudr-feature-collection"
-import { serializeEudrGeoJson } from "@/lib/eudr-export-gate"
+import {
+  serializeEudrGeoJson,
+  EUDR_EXPORT_BLOCK_ENABLED,
+  EudrExportBlockedError,
+  describeEudrExportBlockedError,
+} from "@/lib/eudr-export-gate"
+import { writeEudrCleanLogIfChanged } from "@/lib/eudr-clean-log-write"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -701,6 +707,10 @@ export default function EudrClient() {
         exportDate: ord.ngay,
       })
       setEudrCleanLog(cleanLog)
+      // GĐ 4: ghi eudr_clean_log/eudr_geometry_hash mỗi khi trace được tính lại (view time,
+      // không phải lúc tải file) — best-effort, idempotent (bỏ qua nếu hash không đổi). Không
+      // cần after() ở client: không có vòng đời request/response cần giữ sống như server.
+      void writeEudrCleanLogIfChanged(supabase, ord.id, collection, cleanLog)
 
       setTraceInfo({ lots: typedLots.length, ngans: nganIds.length, tripUids: allTripUids.size, matchedRows, diemGn: diemGn.size, features: collection.features.length, fallback: usedDateFallback })
       setGeoData(collection)
@@ -907,7 +917,7 @@ export default function EudrClient() {
       zip.file(shipmentName, await generateDDS2(order, lotDetails, extractionDates, factory))
 
       if (geoData) {
-        zip.file(geojsonName, serializeEudrGeoJson(geoData, { cleanLog: eudrCleanLog }).json)
+        zip.file(geojsonName, serializeEudrGeoJson(geoData, { cleanLog: eudrCleanLog, block: EUDR_EXPORT_BLOCK_ENABLED }).json)
         // CSV đối chiếu số thứ tự, mã lô, nông trường, đội, diện tích, năm trồng (Phần D.3)
         const csvRows = [
           ["STT", "Ma_lo_2026", "Ten", "Nong_truong", "Doi_2026", "Dtich_ha", "Nam_trong"],
@@ -1098,7 +1108,12 @@ export default function EudrClient() {
         showToast(`Đã tải gộp 2 DDS, GeoJSON và ${filesForZip.length} file đính kèm`)
       }
     } catch (error: unknown) {
-      showToast("Lỗi: " + (error instanceof Error ? error.message : "Unknown error"), false)
+      if (error instanceof EudrExportBlockedError) {
+        console.error("[EUDR] Xuất ZIP bị chặn", error.issues)
+        showToast(describeEudrExportBlockedError(error), false)
+      } else {
+        showToast("Lỗi: " + (error instanceof Error ? error.message : "Unknown error"), false)
+      }
     }
     setDownloading(false)
   }
@@ -1350,15 +1365,44 @@ export default function EudrClient() {
                     <Map size={13} className="text-emerald-600 shrink-0"/>
                     <span className="flex-1 text-xs text-slate-700 truncate">{sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson</span>
                     <button onClick={() => {
-                      const { json, validation } = serializeEudrGeoJson(geoData, { cleanLog: eudrCleanLog })
-                      if (!validation.isValid) {
-                        showToast(`Cảnh báo GeoJSON: ${validation.errors[0]}`, false)
-                      } else if (validation.warnings.length > 0) {
-                        showToast(`Lưu ý: ${validation.warnings[0].message}`, true)
+                      try {
+                        const { json, validation } = serializeEudrGeoJson(geoData, { cleanLog: eudrCleanLog, block: EUDR_EXPORT_BLOCK_ENABLED })
+                        if (!validation.isValid) {
+                          showToast(`Cảnh báo GeoJSON: ${validation.errors[0]}`, false)
+                        } else if (validation.warnings.length > 0) {
+                          showToast(`Lưu ý: ${validation.warnings[0].message}`, true)
+                        }
+                        const blob = new Blob([json], { type: "application/geo+json" })
+                        saveAs(blob, `${sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson`)
+                      } catch (error: unknown) {
+                        if (error instanceof EudrExportBlockedError) {
+                          console.error("[EUDR] Tải GeoJSON đơn lẻ bị chặn", error.issues)
+                          showToast(describeEudrExportBlockedError(error), false)
+                        } else {
+                          showToast("Lỗi: " + (error instanceof Error ? error.message : "Unknown error"), false)
+                        }
                       }
-                      const blob = new Blob([json], { type: "application/geo+json" })
-                      saveAs(blob, `${sanitizeOrderCodeForFile(order.ma_don)}_supply_chain.geojson`)
                     }} className="p-1 hover:bg-emerald-100 rounded text-emerald-600" title="Tải về"><FileDown size={13}/></button>
+                  </div>
+                )}
+
+                {/* GĐ 4: Nhật ký làm sạch hình học — chỉ admin thấy, chỉ hiện khi có gì đáng
+                    chú ý (mảnh vụn bị loại, mất sạch hình học, hoặc có phép sửa hình học) */}
+                {isAdminUser && eudrCleanLog.some((e) => e.lostAllGeometry || e.droppedHa > 0 || e.fixes.length > 0) && (
+                  <div className="p-3 bg-white rounded-xl border border-slate-200">
+                    <div className="flex items-center gap-2 mb-2 text-xs font-bold text-slate-600">
+                      <AlertTriangle size={13}/> Nhật ký làm sạch hình học
+                    </div>
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {eudrCleanLog.filter((e) => e.lostAllGeometry || e.droppedHa > 0 || e.fixes.length > 0).map((entry) => (
+                        <div key={entry.plotCode} className={`text-[11px] px-2 py-1.5 rounded-lg border ${entry.lostAllGeometry ? "bg-red-50 border-red-200 text-red-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
+                          <b>{entry.plotCode}</b>
+                          {entry.lostAllGeometry && " — MẤT SẠCH HÌNH HỌC, cần sửa tại Cài đặt → Lô vườn"}
+                          {entry.droppedHa > 0 && ` — loại ${entry.droppedHa.toFixed(4)} ha mảnh vụn`}
+                          {entry.fixes.length > 0 && ` — ${entry.fixes.join("; ")}`}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

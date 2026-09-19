@@ -43,6 +43,11 @@ export type EudrPlotProperties = {
   Area?: string | number | null
   external_id?: string
   export_date?: string
+  /** Diện tích CẢ LÔ (không phải phần chia của mảnh này) — chỉ có khi lô bị tách nhiều mảnh,
+   *  giống nhau trên mọi mảnh cùng mã lô. Xem `eudr-feature-collection.ts`'s `expandPlotFeatures`. */
+  Dtich_lo_ha?: string | number | null
+  /** "1/3" = mảnh 1 trong tổng 3 mảnh của cùng 1 lô — chỉ có khi lô bị tách nhiều mảnh. */
+  Manh?: string
   [key: string]: unknown
 }
 

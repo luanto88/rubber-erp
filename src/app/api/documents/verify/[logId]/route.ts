@@ -37,10 +37,12 @@ const SUPPORTED_DOC_TYPES = new Set(["van_ban", "iso", "iso_form"])
 /** "Ký bước 2" / "Phê duyệt" — nhãn hiển thị cho người xem, không phải mã nội bộ. */
 function buocLabel(row: LogRow): string {
   if (row.doc_type === "iso" || row.doc_type === "iso_form") {
-    // ISO chỉ niêm phong đúng 1 lần lúc phê duyệt (xem generate-pdf/route.ts's shouldSealPades);
-    // dòng log không kèm chữ ký số là các lượt đóng dấu soạn thảo/xem xét.
+    if (row.action === "soan_thao" || row.buoc_ky === 1) return "Soạn thảo / Người lập"
+    if (row.action === "xem_xet" || row.buoc_ky === 2) return "Xem xét / Soát xét"
+    if (row.action === "phe_duyet") return "Phê duyệt ban hành"
+    if (row.buoc_ky != null) return `Ký bước ${row.buoc_ky}`
     return row.pades_sig_index === null || row.pades_sig_index === undefined
-      ? "Đóng dấu tài liệu"
+      ? "Đóng dấu xác nhận"
       : "Phê duyệt ban hành"
   }
   if (row.action === "phe_duyet") return "Phê duyệt"
@@ -77,9 +79,35 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     const isIso = log.doc_type === "iso"
     const isIsoForm = log.doc_type === "iso_form"
 
-    const profilePromise = log.user_id
-      ? supabase.from("profiles").select("full_name, username").eq("id", log.user_id).maybeSingle()
-      : Promise.resolve({ data: null })
+    // Tải thông tin người ký hiện tại và lịch sử các bước ký của tài liệu này
+    const [profileRes, siblingLogsRes] = await Promise.all([
+      log.user_id
+        ? supabase.from("profiles").select("full_name, username").eq("id", log.user_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase
+        .from("doc_approval_log")
+        .select("id, user_id, action, buoc_ky, created_at, pades_sig_index")
+        .eq("doc_id", log.doc_id)
+        .order("created_at", { ascending: true }),
+    ])
+
+    const profile = profileRes.data
+    const siblingLogs = (siblingLogsRes.data || []) as LogRow[]
+    const siblingUserIds = [...new Set(siblingLogs.map((l) => l.user_id).filter(Boolean))] as string[]
+    const { data: siblingProfiles } = siblingUserIds.length > 0
+      ? await supabase.from("profiles").select("id, full_name, username").in("id", siblingUserIds)
+      : { data: [] }
+    const profileMap = new Map((siblingProfiles || []).map((p) => [p.id, (p.full_name as string) || (p.username as string) || ""]))
+
+    const signingHistory = siblingLogs.map((l) => ({
+      id: l.id,
+      signerName: (l.user_id ? profileMap.get(l.user_id) : "") || "Không rõ",
+      buoc: buocLabel(l),
+      action: l.action,
+      kyLuc: l.created_at,
+      isCurrent: l.id === log?.id,
+      hasPades: l.pades_sig_index != null,
+    }))
 
     let docRow: Record<string, unknown> | null = null
     let trangThai: string | null = null
@@ -88,14 +116,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     let fileSignedPdfUrl: string | null = null
 
     if (isIsoForm) {
-      const [{ data: profile }, { data: formInst }] = await Promise.all([
-        profilePromise,
-        supabase
-          .from("iso_form_instances")
-          .select("id, tieu_de, trang_thai, final_pdf_url, template_doc_id")
-          .eq("id", log.doc_id)
-          .maybeSingle(),
-      ])
+      const { data: formInst } = await supabase
+        .from("iso_form_instances")
+        .select("id, tieu_de, trang_thai, final_pdf_url, template_doc_id")
+        .eq("id", log.doc_id)
+        .maybeSingle()
+
       let tmplDoc: { ma_tai_lieu: string | null; ten_tai_lieu: string | null } | null = null
       if (formInst?.template_doc_id) {
         const { data: tmpl } = await supabase
@@ -110,62 +136,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       maTaiLieu = tmplDoc?.ma_tai_lieu || formInst?.tieu_de || null
       tenTaiLieu = tmplDoc?.ten_tai_lieu || formInst?.tieu_de || null
       fileSignedPdfUrl = (formInst?.final_pdf_url as string) || null
-
-      const base = {
-        docType: log.doc_type,
-        signerName: (profile?.full_name as string) || (profile?.username as string) || "Không rõ",
-        buoc: buocLabel(log),
-        kyLuc: log.created_at,
-        maTaiLieu,
-        tenTaiLieu,
-        trangThai,
-        contentHash: log.content_hash,
-      }
-
-      const severityFor = (valid: boolean): "ok" | "warn" | "error" => {
-        if (valid) return "ok"
-        if (trangThai === "het_hieu_luc") return "warn"
-        return "error"
-      }
-
-      if (log.pades_sig_index === null || log.pades_sig_index === undefined) {
-        return NextResponse.json({
-          ...base,
-          valid: false,
-          severity: severityFor(false),
-          reason: log.pades_error
-            ? `Bước ký này không có chữ ký số (chỉ có con dấu hình ảnh) — ${log.pades_error}`
-            : "Bước ký này không có chữ ký số (chỉ có con dấu hình ảnh)",
-        })
-      }
-
-      if (!fileSignedPdfUrl) {
-        return NextResponse.json({
-          ...base,
-          valid: false,
-          severity: severityFor(false),
-          reason: "Không tìm thấy file đã ký để xác thực",
-        })
-      }
-
-      const fileRes = await fetch(fileSignedPdfUrl)
-      if (!fileRes.ok) {
-        return NextResponse.json({
-          ...base,
-          valid: false,
-          severity: severityFor(false),
-          reason: "Không tải được file để xác thực",
-        })
-      }
-      const pdfBytes = Buffer.from(await fileRes.arrayBuffer())
-      const result = verifyPadesSignature(pdfBytes, log.pades_sig_index as number)
-
-      return NextResponse.json({ ...base, ...result, severity: severityFor(result.valid) })
-    }
-
-    const [{ data: profile }, { data: doc }] = await Promise.all([
-      profilePromise,
-      isIso
+    } else {
+      const { data: doc } = await (isIso
         ? supabase
             .from("iso_documents")
             .select("ma_tai_lieu, ten_tai_lieu, trang_thai, file_signed_pdf_url")
@@ -175,40 +147,46 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
             .from("van_ban_documents")
             .select("ma_van_ban, ten_van_ban, trang_thai, file_signed_pdf_url")
             .eq("id", log.doc_id)
-            .maybeSingle(),
-    ])
+            .maybeSingle())
 
-    docRow = (doc ?? null) as Record<string, unknown> | null
-    trangThai = (docRow?.trang_thai as string) || null
-    fileSignedPdfUrl = (docRow?.file_signed_pdf_url as string) || null
+      docRow = (doc ?? null) as Record<string, unknown> | null
+      trangThai = (docRow?.trang_thai as string) || null
+      fileSignedPdfUrl = (docRow?.file_signed_pdf_url as string) || null
+      maTaiLieu = ((isIso ? docRow?.ma_tai_lieu : docRow?.ma_van_ban) as string) || null
+      tenTaiLieu = ((isIso ? docRow?.ten_tai_lieu : docRow?.ten_van_ban) as string) || null
+    }
 
     const base = {
       docType: log.doc_type,
       signerName: (profile?.full_name as string) || (profile?.username as string) || "Không rõ",
       buoc: buocLabel(log),
       kyLuc: log.created_at,
-      maTaiLieu: ((isIso ? docRow?.ma_tai_lieu : docRow?.ma_van_ban) as string) || null,
-      tenTaiLieu: ((isIso ? docRow?.ten_tai_lieu : docRow?.ten_van_ban) as string) || null,
+      maTaiLieu,
+      tenTaiLieu,
       trangThai,
       contentHash: log.content_hash,
+      signingHistory: signingHistory.length > 0 ? signingHistory : undefined,
     }
 
-    /**
-     * Phân biệt "chữ ký hỏng do quy trình bình thường" với "chữ ký hỏng thật sự".
-     *
-     * Khi 1 tài liệu ISO hết hiệu lực, `api/sign/restamp-pdf/route.ts` GHI ĐÈ `file_signed_pdf_url`
-     * bằng bản đã đóng thêm dấu "Hết hiệu lực" ⇒ chữ ký PAdES của bản ban hành chắc chắn không còn
-     * khớp. Đây là hệ quả đã được chấp nhận của quyết định "ghi đè khi hết hiệu lực", KHÔNG phải
-     * dấu hiệu giả mạo. Thiếu nhánh này thì mọi tài liệu hết hiệu lực đều hiện cảnh báo đỏ "file đã
-     * bị sửa" và gây hoảng khi đánh giá ISO.
-     */
     const severityFor = (valid: boolean): "ok" | "warn" | "error" => {
       if (valid) return "ok"
       if (isIso && trangThai === "het_hieu_luc") return "warn"
       return "error"
     }
 
-    if (log.pades_sig_index === null || log.pades_sig_index === undefined) {
+    let sigIndexToVerify = log.pades_sig_index
+    let isInheritedSeal = false
+
+    // Với tài liệu/hồ sơ ISO đã ban hành/phê duyệt, niêm phong PAdES bao trùm toàn bộ các bước ký.
+    // Nếu dòng log là bước soạn thảo/xem xét (chưa có pades_sig_index riêng), chứng thực theo niêm phong gốc của file.
+    if (sigIndexToVerify === null || sigIndexToVerify === undefined) {
+      if ((isIso || isIsoForm) && fileSignedPdfUrl && (trangThai === "co_hieu_luc" || trangThai === "da_phe_duyet")) {
+        sigIndexToVerify = 0
+        isInheritedSeal = true
+      }
+    }
+
+    if (sigIndexToVerify === null || sigIndexToVerify === undefined) {
       return NextResponse.json({
         ...base,
         valid: false,
@@ -219,7 +197,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       })
     }
 
-    if (!docRow?.file_signed_pdf_url) {
+    if (!fileSignedPdfUrl) {
       return NextResponse.json({
         ...base,
         valid: false,
@@ -228,10 +206,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       })
     }
 
-    // Xác thực trên file MỚI NHẤT của tài liệu.
-    // - Văn bản: nhờ incremental update, chữ ký của mọi bước trước vẫn còn nguyên trong file cuối.
-    // - ISO: file chỉ có đúng 1 niêm phong (index 0) đặt lúc phê duyệt.
-    const fileRes = await fetch(docRow.file_signed_pdf_url as string)
+    const fileRes = await fetch(fileSignedPdfUrl)
     if (!fileRes.ok) {
       return NextResponse.json({
         ...base,
@@ -240,10 +215,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
         reason: "Không tải được file để xác thực",
       })
     }
-    const pdfBytes = Buffer.from(await fileRes.arrayBuffer())
-    const result = verifyPadesSignature(pdfBytes, log.pades_sig_index as number)
 
-    return NextResponse.json({ ...base, ...result, severity: severityFor(result.valid) })
+    const pdfBytes = Buffer.from(await fileRes.arrayBuffer())
+    const result = verifyPadesSignature(pdfBytes, sigIndexToVerify)
+
+    return NextResponse.json({
+      ...base,
+      ...result,
+      inheritedNote: isInheritedSeal && result.valid ? "Chữ ký hợp lệ — Đã được niêm phong theo quy trình ban hành tài liệu" : undefined,
+      severity: severityFor(result.valid),
+    })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })
   }

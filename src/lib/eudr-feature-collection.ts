@@ -157,6 +157,10 @@ export function expandPlotFeatures(args: {
       ...baseProperties,
       Area: splitAreas[i],
       Dtich2026_ha: splitAreas[i],
+      // Chỉ 2 field này mới cho biết đây là 1 MẢNH của 1 lô lớn hơn, không phải 1 lô độc lập —
+      // Area/Dtich2026_ha ở trên chỉ là phần chia riêng của mảnh, dễ bị đọc nhầm là cả lô.
+      Dtich_lo_ha: declaredHa, // diện tích CẢ LÔ, giống nhau trên mọi mảnh cùng mã lô
+      Manh: `${i + 1}/${piecesWithArea.length}`, // "1/3" = mảnh 1 trong tổng 3 mảnh
     }
     const geometry: Polygon = { type: "Polygon", coordinates: [piece.ring] }
     return { type: "Feature", properties, geometry }

@@ -5,12 +5,34 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Eye, ExternalLink, FileText, ImagePlus, Loader2, Plus,
-  QrCode, RotateCcw, Save, Send, Trash2, Wrench, X,
+  AlertCircle, AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, Coins, Edit3, Eye, ExternalLink, FileSignature, FileText, ImagePlus, Loader2, Plus,
+  QrCode, RotateCcw, Save, Send, Trash2, Users, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../../_components/maintenance-shell"
+
+function fmtDateVi(dateStr?: string | null): string {
+  if (!dateStr) return "—"
+  try {
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return dateStr
+    return d.toLocaleDateString("vi-VN")
+  } catch {
+    return dateStr
+  }
+}
+
+function fmtDateTimeVi(dateStr?: string | null): string {
+  if (!dateStr) return "—"
+  try {
+    const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return dateStr
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} ${d.toLocaleDateString("vi-VN")}`
+  } catch {
+    return dateStr
+  }
+}
 import {
   BO_PHAN_LIST,
   currencySymbol,
@@ -188,6 +210,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const { id } = use(params)
   const isNew = id === "new"
   const router = useRouter()
+  const [isEditMode, setIsEditMode] = useState(isNew)
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
@@ -590,6 +613,38 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // Xóa biên bản: người tạo chỉ được xóa khi Chờ duyệt và không đang luân chuyển ký; admin xóa
   // được mọi trạng thái.
   const canDelete = isAdmin || (isCreator && record?.trang_thai === "cho_duyet" && !isSigningInProgress)
+  const isEditable = !isReadOnly
+  const inEditMode = effectiveIsNew || isEditMode
+
+  const costByCurrency = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const line of lines) {
+      const c = line.loai_tien || "USD"
+      const val = parseFloat(line.chi_phi_dk) || 0
+      map[c] = (map[c] || 0) + val
+    }
+    return map
+  }, [lines])
+
+  const totalCongTho = useMemo(() => {
+    return lines.reduce((sum, l) => sum + (parseFloat(l.cong_tho) || 0), 0)
+  }, [lines])
+
+  const totalMaterialsCount = useMemo(() => {
+    return lines.reduce((sum, l) => sum + l.materials.length, 0)
+  }, [lines])
+
+  const totalMaterialsQty = useMemo(() => {
+    return lines.reduce((sum, l) => sum + l.materials.reduce((mSum, m) => mSum + (parseFloat(m.so_luong) || 0), 0), 0)
+  }, [lines])
+
+  const printDocType = useMemo(() => {
+    const loaiSuaChua = lines[0]?.loai_sua_chua || "lon"
+    if (record?.hang_muc === "Sửa chữa") {
+      return record.bo_phan === "Đội xe" && loaiSuaChua === "nho" ? "sua_chua_nho_xe" : "su_co_nho"
+    }
+    return record?.bo_phan === "Đội xe" ? "bao_duong_xe" : "bao_duong"
+  }, [record?.hang_muc, record?.bo_phan, lines])
 
   // Staff categories
   // So khớp CHÍNH XÁC (không phải chuỗi con) để tách rõ Giám đốc / Phó giám đốc, tự động loại
@@ -1292,10 +1347,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         // đang ở URL "new", chưa điều hướng), effectiveIsNew đã false nên rơi vào nhánh else.
         await loadRecord(factoryId, recordId)
         setSavedRecordId(recordId)
+        setIsEditMode(false)
         // KHÔNG router.push ngay — điều hướng bị delay tới khi KpiLinkPrompt đóng (onDone).
         setKpiPrompt({ recordId: recordId, recordLabel: kpiLabel, navigateTo: `/dashboard/maintenance/records/${recordId}` })
       } else {
         setSaveSuccess(`Đã lưu biên bản ${record?.ma_bb || ""}. Trạng thái: ${trangThaiLabel(record?.trang_thai)}.`)
+        setIsEditMode(false)
         void loadRecord(factoryId, effectiveId)
         setKpiPrompt({ recordId: recordId, recordLabel: kpiLabel })
       }
@@ -1355,408 +1412,419 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     ? <span className="px-3 py-1 rounded-full text-sm font-bold bg-emerald-100 text-emerald-700">Đã duyệt</span>
     : record?.trang_thai === "huy"
     ? <span className="px-3 py-1 rounded-full text-sm font-bold bg-red-100 text-red-600">Đã hủy</span>
+    : record?.trang_thai === "tu_choi"
+    ? <span className="px-3 py-1 rounded-full text-sm font-bold bg-rose-100 text-rose-700">Bị từ chối</span>
     : <span className="px-3 py-1 rounded-full text-sm font-bold bg-amber-100 text-amber-700">Chờ duyệt</span>
 
-  return (
-    <MaintenanceShell>
-      {kpiPrompt && (
-        <KpiLinkPrompt
-          factoryId={factoryId}
-          moduleCode="maintenance:save"
-          recordId={kpiPrompt.recordId}
-          recordLabel={kpiPrompt.recordLabel}
-          recordUrl={`/dashboard/maintenance/records/${kpiPrompt.recordId}`}
-          onDone={() => {
-            setKpiPrompt(null)
-            if (kpiPrompt.navigateTo) router.push(kpiPrompt.navigateTo)
-          }}
-        />
-      )}
-      {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-2">
-        <div className="flex flex-wrap items-start gap-4">
-          <div>
-            <h1 className="text-2xl font-extrabold text-slate-800 flex items-center gap-2">
-              <Wrench size={20} className="text-orange-500" />
-              {effectiveIsNew ? "Tạo biên bản mới" : (record?.ma_bb || "Biên bản bảo trì")}
-            </h1>
-            {record && <div className="mt-1">{statusBadge}</div>}
-          </div>
-          {/* QR code — hiển thị sau khi có mã biên bản */}
-          {record?.ma_bb && recordQrUrl && (
-            <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-              <div className="rounded-lg border border-slate-200 bg-white p-1">
-                <QRCodeSVG value={recordQrUrl} size={56} level="M" />
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                  <QrCode size={10} /> QR tra cứu
-                </div>
-                <div className="text-[11px] font-semibold text-slate-600 font-mono">{record.ma_bb}</div>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {isUploadingAnyImage && (
-            <span className="flex items-center gap-1 px-2 py-1.5 bg-amber-50 text-amber-700 text-xs font-bold rounded-lg border border-amber-200">
-              <Loader2 size={12} className="animate-spin" /> Đang tải ảnh lên — vui lòng đợi trước khi lưu...
-            </span>
-          )}
-          {!effectiveIsNew && record && (
-            <>
-              {record.hang_muc === "Sửa chữa" && (() => {
-                    const loaiSuaChua = lines[0]?.loai_sua_chua || "lon"
-                    // Đội xe + sửa chữa nhỏ (≤200$) vẫn giữ bộ tài liệu riêng F08+F15SmallVehicle+F06
-                    if (record.bo_phan === "Đội xe" && loaiSuaChua === "nho") {
-                      return (
-                        <>
-                          {signingStatus?.fileHienTai ? (
-                            <a
-                              href={signingStatus.fileHienTai}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                            >
-                              <Eye size={16} />
-                            </a>
-                          ) : (
-                            <Link
-                              href={`/dashboard/maintenance/print?type=sua_chua_nho_xe&record_id=${effectiveId}`}
-                              target="_blank"
-                              title="Sửa chữa nhỏ (chưa ký)"
-                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                            >
-                              <FileText size={16} />
-                            </Link>
-                          )}
-                          {user && (
-                            <MaintenanceSignStatusBadge
-                              status={signingStatus}
-                              currentUser={user}
-                              canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
-                              onOpenSignPrompt={() => setSignModalOpen(true)}
-                              onCancelled={() => { setSigningStatus(undefined); if (factoryId) void loadSigningStatus(factoryId, id) }}
-                              showToast={(msg, ok = true) => { if (ok) setSaveSuccess(msg); else setSaveError(msg) }}
-                            />
-                          )}
-                        </>
-                      )
-                    }
-                    // Còn lại (mọi bộ phận, kể cả Đội xe sửa chữa lớn >200$) gộp chung 1 file
-                    // F13 + F10 + F15 (+ Ảnh) — không tách "Sự cố"/"Đề nghị" thành 2 nút nữa
-                    return (
-                      <>
-                        {/* Giống hệt Chất lượng/Điều xe: chưa có yêu cầu ký → render bản in
-                            (khoảng trống ký tay); đã có yêu cầu ký → mở đúng file HIỆN TẠI (có
-                            chữ ký điện tử đã đóng dấu, dù đang chờ ký tiếp hay đã hoàn tất) —
-                            không quay lại render bản in nháp nữa. */}
-                        {signingStatus?.fileHienTai ? (
-                          <a
-                            href={signingStatus.fileHienTai}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                          >
-                            <Eye size={16} />
-                          </a>
-                        ) : (
-                          <Link
-                            href={`/dashboard/maintenance/print?type=su_co_nho&record_id=${effectiveId}`}
-                            target="_blank"
-                            title="In biên bản (chưa ký)"
-                            className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                          >
-                            <FileText size={16} />
-                          </Link>
-                        )}
-                        {user && (
-                          <MaintenanceSignStatusBadge
-                            status={signingStatus}
-                            currentUser={user}
-                            canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
-                            onOpenSignPrompt={() => setSignModalOpen(true)}
-                            onCancelled={() => { setSigningStatus(undefined); if (factoryId) void loadSigningStatus(factoryId, id) }}
-                            showToast={(msg, ok = true) => { if (ok) setSaveSuccess(msg); else setSaveError(msg) }}
-                          />
-                        )}
-                      </>
-                    )
-                  })()}
-                  {record.hang_muc === "Bảo dưỡng" && record.bo_phan !== "Đội xe" && (
-                    <>
-                      {signingStatus?.fileHienTai ? (
-                        <a
-                          href={signingStatus.fileHienTai}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                        >
-                          <Eye size={16} />
-                        </a>
-                      ) : (
-                        <Link
-                          href={`/dashboard/maintenance/print?type=bao_duong&record_id=${effectiveId}`}
-                          target="_blank"
-                          title="In biên bản (chưa ký)"
-                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                        >
-                          <FileText size={16} />
-                        </Link>
-                      )}
-                      {user && (
-                        <MaintenanceSignStatusBadge
-                          status={signingStatus}
-                          currentUser={user}
-                          canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
-                          onOpenSignPrompt={() => setSignModalOpen(true)}
-                          onCancelled={() => { setSigningStatus(undefined); if (factoryId) void loadSigningStatus(factoryId, id) }}
-                          showToast={(msg, ok = true) => { if (ok) setSaveSuccess(msg); else setSaveError(msg) }}
-                        />
-                      )}
-                    </>
-                  )}
-                  {record.hang_muc === "Bảo dưỡng" && record.bo_phan === "Đội xe" && (
-                    <>
-                      {signingStatus?.fileHienTai ? (
-                        <a
-                          href={signingStatus.fileHienTai}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={signingStatus.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                        >
-                          <Eye size={16} />
-                        </a>
-                      ) : (
-                        <Link
-                          href={`/dashboard/maintenance/print?type=bao_duong_xe&record_id=${effectiveId}`}
-                          target="_blank"
-                          title="In biên bản (chưa ký)"
-                          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                        >
-                          <FileText size={16} />
-                        </Link>
-                      )}
-                      {user && (
-                        <MaintenanceSignStatusBadge
-                          status={signingStatus}
-                          currentUser={user}
-                          canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
-                          onOpenSignPrompt={() => setSignModalOpen(true)}
-                          onCancelled={() => { setSigningStatus(undefined); if (factoryId) void loadSigningStatus(factoryId, id) }}
-                          showToast={(msg, ok = true) => { if (ok) setSaveSuccess(msg); else setSaveError(msg) }}
-                        />
-                      )}
-                    </>
-                  )}
-                </>
-              )}
-          {/* Gửi ký duyệt — inline cùng hàng với "In biên bản"/nút ký, khớp Chất lượng/Điều xe.
-              Thay thế hoàn toàn nút "Phê duyệt" thủ công cũ (đã bỏ, xem MaintenanceSignStatusBadge
-              — nút "Gửi ký duyệt" tự hiện ngay khi biên bản vừa lưu xong, không cần trang_thai
-              === "da_duyet" nữa; trang_thai giờ do signField() tự chuyển khi ký hoàn tất). */}
-          {/* GỬI DUYỆT LẠI — creator khi tu_choi (dữ liệu lịch sử từ trước khi bỏ nút "Từ chối"), quay về cho_duyet */}
-          {!effectiveIsNew && record?.trang_thai === "tu_choi" && isCreator && (
-            <button
-              onClick={handleResubmit}
-              disabled={saving || isUploadingAnyImage}
-              title={saving ? "Đang gửi..." : "Gửi duyệt lại"}
-              className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors disabled:opacity-50"
-            >
-              <Send size={16} />
-            </button>
-          )}
-          {/* HỦY BIÊN BẢN — creator khi cho_duyet; admin được hủy cả biên bản đã duyệt */}
-          {!effectiveIsNew && record?.trang_thai === "cho_duyet" && isCreator && (
-            <button
-              onClick={handleCancel}
-              disabled={saving || isUploadingAnyImage}
-              title="Hủy biên bản"
-              className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-            >
-              <X size={16} />
-            </button>
-          )}
-          {!effectiveIsNew && record?.trang_thai === "da_duyet" && isAdmin && (
-            <button
-              onClick={handleCancel}
-              disabled={saving || isUploadingAnyImage}
-              title="Hủy biên bản"
-              className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-            >
-              <X size={16} />
-            </button>
-          )}
-          {/* XÓA BIÊN BẢN — creator khi cho_duyet; admin xóa được mọi trạng thái */}
-          {!effectiveIsNew && canDelete && (
-            <button
-              onClick={handleDeleteRecord}
-              disabled={saving || isUploadingAnyImage}
-              title="Xóa biên bản"
-              className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
-            >
-              <Trash2 size={16} />
-            </button>
-          )}
-          {/* HỦY SAU KHI HOÀN TẤT — admin-only, khi da_duyet (đã ký xong + đã xuất kho tự động).
-              Thay thế "Hủy phê duyệt" cũ — đảo ngược xuất kho + đưa biên bản về chờ ký + đánh
-              dấu yêu cầu ký cũ là 'huy' (giữ làm lịch sử) để tạo yêu cầu ký mới được. */}
-          {!effectiveIsNew && record?.trang_thai === "da_duyet" && isAdmin && (
-            <button
-              onClick={handleReverseApproval}
-              disabled={saving || isUploadingAnyImage}
-              title={saving ? "Đang xử lý..." : "Hủy sau khi hoàn tất"}
-              className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 transition-colors disabled:opacity-50"
-            >
-              <RotateCcw size={16} />
-            </button>
-          )}
-          {/* LƯU BIÊN BẢN — creator khi cho_duyet hoặc đang tạo mới. Chỉ sáng khi có thay đổi
-              thật (bug đã báo: nút luôn sáng dù không sửa gì → bấm nhầm sau lần lưu đầu tạo bản
-              ghi trùng lặp). Dù `!isDirty` không còn chặn được duplicate nữa (đã fix ở
-              handleSave qua effectiveIsNew — bấm lại giờ chỉ lưu đè, không tạo mới), vẫn giữ gate
-              này để đúng mong muốn UX đã yêu cầu. */}
-          {!isReadOnly && (
-            <button
-              onClick={handleSave}
-              disabled={saving || isUploadingAnyImage || !isDirty}
-              title={saving ? "Đang lưu..." : !isDirty ? "Chưa có thay đổi nào để lưu" : undefined}
-              className="flex items-center gap-1 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow transition-all disabled:opacity-50"
-            >
-              <Save size={13} /> {saving ? "Đang lưu..." : "Lưu biên bản"}
-            </button>
-          )}
-        </div>
+  const renderReadOnlyGeneralInfo = () => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
+        <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+          <Wrench size={18} className="text-orange-500" />
+          Thông tin chung
+        </h2>
+        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+          Chế độ xem
+        </span>
       </div>
-
-      {saveError && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
-          <AlertTriangle size={16} className="shrink-0" />
-          <span className="text-sm font-bold whitespace-pre-line">{saveError}</span>
-          <button onClick={() => setSaveError(null)} className="ml-2 hover:opacity-70"><X size={14} /></button>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+        <div>
+          <p className="text-sm font-medium text-slate-500">Mã biên bản</p>
+          <p className="text-base font-bold font-mono text-orange-600 mt-1 break-all">
+            {record?.ma_bb || "—"}
+          </p>
         </div>
-      )}
-      {saveSuccess && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-emerald-600 text-white rounded-2xl shadow-2xl max-w-xl">
-          <CheckCircle2 size={16} className="shrink-0" />
-          <span className="text-sm font-bold">{saveSuccess}</span>
-          <button onClick={() => setSaveSuccess(null)} className="ml-2 hover:opacity-70"><X size={14} /></button>
-        </div>
-      )}
-
-      {/* Approved info banner */}
-      {record?.trang_thai === "da_duyet" && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 flex flex-wrap items-center gap-4 text-sm">
-          <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
-          <span className="text-emerald-700">
-            <strong>Đã phê duyệt</strong> bởi <strong>{record.nguoi_duyet || "—"}</strong>
-            {record.ngay_duyet && <> · {new Date(record.ngay_duyet).toLocaleString("vi-VN")}</>}
-          </span>
-          {issueDocIds.length > 0 && (
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              {issueDocIds.map((documentId, index) => (
-                <Link
-                  key={documentId}
-                  href={`/dashboard/inventory/issues?documentId=${documentId}`}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-emerald-300 text-emerald-700 text-xs font-bold rounded-lg hover:bg-emerald-50 transition-all"
-                >
-                  {issueDocIds.length > 1 ? `Phiếu xuất ${index + 1} →` : "Xem phiếu xuất kho →"}
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {record?.trang_thai === "huy" && (
-        <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-3 flex items-center gap-3 text-sm text-red-700">
-          <X size={16} className="shrink-0" />
-          <span>Biên bản đã bị hủy — không thể chỉnh sửa.</span>
-        </div>
-      )}
-      {record?.trang_thai === "tu_choi" && (
-        <div className="bg-rose-50 border border-rose-200 rounded-xl px-5 py-3 flex items-start gap-3 text-sm text-rose-700">
-          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-          <span>
-            <strong>Bị từ chối phê duyệt.</strong> Lý do: {record.ly_do_tu_choi || "—"}
-            {isCreator && " — Vui lòng sửa lại nội dung và bấm \"Gửi duyệt lại\"."}
-          </span>
-        </div>
-      )}
-
-      {/* Header form */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Hạng mục *</label>
-            <select
-              value={hangMuc}
-              onChange={(e) => setHangMuc(e.target.value as "Sửa chữa" | "Bảo dưỡng")}
-              disabled={isReadOnly}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+        <div>
+          <p className="text-sm font-medium text-slate-500">Hạng mục</p>
+          <div className="mt-1">
+            <span
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                hangMuc === "Sửa chữa"
+                  ? "bg-amber-100 text-amber-800 border border-amber-200"
+                  : "bg-sky-100 text-sky-800 border border-sky-200"
+              }`}
             >
-              <option value="Sửa chữa">Sửa chữa</option>
-              <option value="Bảo dưỡng">Bảo dưỡng</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày *</label>
-            <input
-              type="date"
-              value={ngay}
-              onChange={(e) => setNgay(e.target.value)}
-              disabled={isReadOnly}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Giờ bắt đầu</label>
-            <input
-              type="time"
-              value={tuGio}
-              onChange={(e) => setTuGio(e.target.value)}
-              disabled={isReadOnly}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Giờ kết thúc</label>
-            <input
-              type="datetime-local"
-              value={denGio}
-              onChange={(e) => setDenGio(e.target.value)}
-              disabled={isReadOnly}
-              className={`w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 ${timeWarning ? "border-amber-400" : "border-slate-300"}`}
-            />
-            {timeWarning && (
-              <p className="text-[11px] text-amber-600 font-semibold mt-1 flex items-center gap-1">
-                <AlertTriangle size={11} /> {timeWarning}
-              </p>
-            )}
+              {hangMuc}
+            </span>
           </div>
         </div>
         <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Bộ phận *</label>
-          <select
-            value={boPhan}
-            onChange={(e) => { setBoPhan(e.target.value); setSelectedAssetIds([]); setSelectedVehicleIds([]); setLines([]) }}
-            disabled={isReadOnly}
-            className="w-full md:w-64 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
-          >
-            {BO_PHAN_LIST.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
+          <p className="text-sm font-medium text-slate-500">Bộ phận</p>
+          <p className="text-base font-bold text-slate-900 mt-1">{boPhan || "—"}</p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Ngày lập biên bản</p>
+          <p className="text-base font-semibold text-slate-800 mt-1">{fmtDateVi(ngay)}</p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Giờ bắt đầu</p>
+          <p className="text-base font-semibold text-slate-800 mt-1">{tuGio || "—"}</p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Giờ kết thúc</p>
+          <p className="text-base font-semibold text-slate-800 mt-1">
+            {denGio ? denGio.replace("T", " ") : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Người tạo biên bản</p>
+          <p className="text-base font-semibold text-slate-800 mt-1">{record?.nguoi_tao || "—"}</p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Trạng thái phê duyệt</p>
+          <div className="mt-1">{statusBadge}</div>
         </div>
       </div>
+    </div>
+  )
 
+  const renderReadOnlyLines = () => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
+        <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+          <Wrench size={18} className="text-orange-500" />
+          Chi tiết Thiết bị & Hạng mục bảo trì
+        </h2>
+        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
+          {lines.length} {isDoiXe ? "xe" : "thiết bị"}
+        </span>
+      </div>
+
+      {/* Nội dung bảo dưỡng chung nếu có */}
+      {hangMuc === "Bảo dưỡng" && (noiDungChung.trim() || nguyenNhanChung.trim() || cacKhacPhucChung.trim() || imageUrlsChung.filter(Boolean).length > 0) && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50/60 p-5 space-y-3">
+          <div className="flex items-center gap-2 text-amber-800 font-bold text-sm">
+            <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-xs flex items-center justify-center">★</span>
+            Nội dung bảo dưỡng chung (áp dụng cho tất cả thiết bị)
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            {noiDungChung.trim() && (
+              <div>
+                <span className="font-bold text-amber-900 block mb-1">Mô tả bảo dưỡng chung:</span>
+                <p className="text-slate-800 whitespace-pre-wrap">{noiDungChung}</p>
+              </div>
+            )}
+            {nguyenNhanChung.trim() && (
+              <div>
+                <span className="font-bold text-amber-900 block mb-1">Lý do bảo dưỡng chung:</span>
+                <p className="text-slate-800 whitespace-pre-wrap">{nguyenNhanChung}</p>
+              </div>
+            )}
+            {cacKhacPhucChung.trim() && (
+              <div>
+                <span className="font-bold text-amber-900 block mb-1">Khối lượng / Cách khắc phục chung:</span>
+                <p className="text-slate-800 whitespace-pre-wrap">{cacKhacPhucChung}</p>
+              </div>
+            )}
+          </div>
+          {imageUrlsChung.filter(Boolean).length > 0 && (
+            <div className="pt-2 border-t border-amber-200/60">
+              <span className="text-xs font-bold text-amber-900 block mb-1.5">Ảnh chung ({imageUrlsChung.filter(Boolean).length} ảnh):</span>
+              <div className="flex flex-wrap gap-2">
+                {imageUrlsChung.filter(Boolean).map((url, i) => (
+                  <img
+                    key={url}
+                    src={url}
+                    alt={`Ảnh chung ${i + 1}`}
+                    loading="lazy"
+                    className="w-16 h-16 rounded-xl object-cover border border-amber-300 shadow-2xs hover:opacity-80 hover:scale-105 transition-all cursor-pointer"
+                    onClick={() => setZoomImageUrl(url)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Danh sách từng dòng */}
+      {lines.length === 0 ? (
+        <div className="p-8 text-center text-slate-400">
+          <Wrench size={32} className="mx-auto mb-2 opacity-30" />
+          <p className="text-sm">Chưa có thiết bị nào trong biên bản.</p>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {lines.map((line, idx) => (
+            <div key={line.id} className="rounded-2xl border border-slate-200 bg-slate-50/40 p-5 shadow-2xs">
+              {/* Header dòng */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3 mb-4">
+                <div className="flex items-center gap-3">
+                  <span className="w-7 h-7 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                    {idx + 1}
+                  </span>
+                  <div>
+                    <span className="text-base font-bold text-slate-900">{line.ten_tb}</span>
+                    <span className="ml-2 text-xs font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                      {line.ma_tb}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {hangMuc === "Sửa chữa" && line.loai_sua_chua && (
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                        line.loai_sua_chua === "lon"
+                          ? "bg-red-100 text-red-700 border border-red-200"
+                          : "bg-slate-100 text-slate-600 border border-slate-200"
+                      }`}
+                    >
+                      {line.loai_sua_chua === "lon" ? "Sửa chữa lớn (> 200$)" : "Sửa chữa nhỏ (≤ 200$)"}
+                    </span>
+                  )}
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                      line.chat_luong === "Không đạt"
+                        ? "bg-red-100 text-red-700 border border-red-200"
+                        : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                    }`}
+                  >
+                    Chất lượng: {line.chat_luong || "Đạt"}
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono">
+                    {currencySymbol(line.loai_tien)} {Number(line.chi_phi_dk || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Thông tin riêng Đội xe nếu có */}
+              {boPhan === "Đội xe" && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 p-3 bg-white rounded-xl border border-slate-200/60 text-xs">
+                  <div>
+                    <span className="text-slate-400 font-medium block">Tài xế</span>
+                    <span className="font-bold text-slate-800 mt-0.5 block">{line.ten_tai_xe || "—"}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-medium block">Chỉ số công-tơ-mét</span>
+                    <span className="font-bold text-slate-800 mt-0.5 block font-mono">
+                      {line.km_dong_ho ? `${line.km_dong_ho} km` : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-medium block">Nhiên liệu sử dụng</span>
+                    <span className="font-bold text-slate-800 mt-0.5 block">
+                      {line.nhien_lieu_su_dung ? `${line.nhien_lieu_su_dung} (${line.so_luong_do || 0} ${line.dvt_do || ""})` : "—"}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Nội dung sự cố / Tình trạng */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <p className="text-sm font-medium text-slate-500">Mô tả tình trạng</p>
+                  <p className="text-sm font-semibold text-slate-900 mt-1 whitespace-pre-wrap">
+                    {line.noi_dung || (hangMuc === "Bảo dưỡng" ? "(Dùng nội dung bảo dưỡng chung)" : "—")}
+                  </p>
+                </div>
+                {(hangMuc === "Sửa chữa" || (hangMuc === "Bảo dưỡng" && boPhan === "Đội xe")) && (
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">
+                      {hangMuc === "Sửa chữa" ? "Nguyên nhân hư hỏng" : "Lý do bảo dưỡng"}
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900 mt-1 whitespace-pre-wrap">
+                      {line.nguyen_nhan || (hangMuc === "Bảo dưỡng" ? "(Dùng lý do bảo dưỡng chung)" : "—")}
+                    </p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm font-medium text-slate-500">Cách khắc phục</p>
+                  <p className="text-sm font-semibold text-slate-900 mt-1 whitespace-pre-wrap">
+                    {line.cac_khac_phuc || (hangMuc === "Bảo dưỡng" ? "(Dùng cách khắc phục chung)" : "—")}
+                  </p>
+                </div>
+              </div>
+
+              {/* Chi phí & Công thợ */}
+              <div className="flex flex-wrap items-center gap-4 py-2.5 px-3.5 bg-slate-100/70 rounded-xl mb-4 text-xs">
+                <div>
+                  <span className="text-slate-500 font-medium">Chi phí vật tư: </span>
+                  <span className="font-bold text-slate-900 font-mono">
+                    {currencySymbol(line.loai_tien)} {Number(line.chi_phi_dk || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} {line.loai_tien}
+                  </span>
+                </div>
+                <div className="text-slate-300">|</div>
+                <div>
+                  <span className="text-slate-500 font-medium">Công thợ: </span>
+                  <span className="font-bold text-slate-900 font-mono">
+                    {Number(line.cong_tho || 0).toLocaleString()} {line.loai_tien}
+                  </span>
+                </div>
+              </div>
+
+              {/* Ảnh hiện trường */}
+              <div className="mb-4">
+                <p className="text-xs font-bold text-slate-600 mb-2">
+                  Ảnh hiện trường ({line.image_urls.filter(Boolean).length}/6)
+                </p>
+                {line.image_urls.filter(Boolean).length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">Không có ảnh hiện trường đính kèm.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2.5">
+                    {line.image_urls.filter(Boolean).map((url, i) => (
+                      <div key={url} className="relative group">
+                        <img
+                          src={url}
+                          alt={`Ảnh ${i + 1}`}
+                          loading="lazy"
+                          className="w-20 h-20 rounded-xl object-cover border border-slate-200 shadow-2xs hover:opacity-85 hover:scale-105 transition-all cursor-pointer"
+                          onClick={() => setZoomImageUrl(url)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Bảng vật tư thay thế */}
+              <div>
+                <p className="text-xs font-bold text-slate-600 mb-2">Vật tư & Linh kiện thay thế</p>
+                {line.materials.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">Không sử dụng vật tư thay thế cho thiết bị này.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500 border-b border-slate-200">
+                        <tr>
+                          <th className="py-2.5 px-3">Nguồn</th>
+                          <th className="py-2.5 px-3">Tên / Quy cách vật tư</th>
+                          <th className="py-2.5 px-3 text-center">ĐVT</th>
+                          <th className="py-2.5 px-3 text-right">Số lượng</th>
+                          <th className="py-2.5 px-3 text-right">Đơn giá</th>
+                          <th className="py-2.5 px-3 text-right">Thành tiền</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {line.materials.map((mat) => {
+                          const soLuong = parseFloat(mat.so_luong) || 0
+                          const donGia = parseFloat(mat.don_gia) || 0
+                          const thanhTien = soLuong * donGia
+                          const isKho = mat.nguon === "trong_kho"
+                          return (
+                            <tr key={mat.id} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="py-2.5 px-3">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    isKho
+                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                      : "bg-blue-50 text-blue-700 border border-blue-200"
+                                  }`}
+                                >
+                                  {isKho ? "Trong kho" : "Bên ngoài"}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 font-semibold text-slate-800">
+                                {mat.ten_vat_tu || "—"}
+                              </td>
+                              <td className="py-2.5 px-3 text-center text-slate-600 font-medium">
+                                {mat.dvt || "—"}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
+                                {soLuong.toLocaleString()}
+                              </td>
+                              <td className="py-2.5 px-3 text-right text-slate-700 font-mono">
+                                {donGia > 0 ? `${donGia.toLocaleString()} ${mat.loai_tien || ""}` : "—"}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-bold text-emerald-700 font-mono">
+                                {thanhTien > 0 ? `${thanhTien.toLocaleString()} ${mat.loai_tien || ""}` : "—"}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+
+  const renderEditGeneralInfo = () => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-1">
+        <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+          <Wrench size={18} className="text-orange-500" />
+          Thông tin biên bản
+        </h2>
+        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-orange-50 text-orange-700">
+          Chế độ chỉnh sửa
+        </span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Hạng mục *</label>
+          <select
+            value={hangMuc}
+            onChange={(e) => setHangMuc(e.target.value as "Sửa chữa" | "Bảo dưỡng")}
+            disabled={isReadOnly}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+          >
+            <option value="Sửa chữa">Sửa chữa</option>
+            <option value="Bảo dưỡng">Bảo dưỡng</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày *</label>
+          <input
+            type="date"
+            value={ngay}
+            onChange={(e) => setNgay(e.target.value)}
+            disabled={isReadOnly}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Giờ bắt đầu</label>
+          <input
+            type="time"
+            value={tuGio}
+            onChange={(e) => setTuGio(e.target.value)}
+            disabled={isReadOnly}
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-bold text-slate-600 block mb-1.5">Giờ kết thúc</label>
+          <input
+            type="datetime-local"
+            value={denGio}
+            onChange={(e) => setDenGio(e.target.value)}
+            disabled={isReadOnly}
+            className={`w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 ${timeWarning ? "border-amber-400" : "border-slate-300"}`}
+          />
+          {timeWarning && (
+            <p className="text-[11px] text-amber-600 font-semibold mt-1 flex items-center gap-1">
+              <AlertTriangle size={11} /> {timeWarning}
+            </p>
+          )}
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-bold text-slate-600 block mb-1.5">Bộ phận *</label>
+        <select
+          value={boPhan}
+          onChange={(e) => { setBoPhan(e.target.value); setSelectedAssetIds([]); setSelectedVehicleIds([]); setLines([]) }}
+          disabled={isReadOnly}
+          className="w-full md:w-64 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+        >
+          {BO_PHAN_LIST.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+      </div>
+    </div>
+  )
+
+  const renderEditLines = () => (
+    <div className="space-y-4">
       {/* Asset / Vehicle picker */}
       {!isReadOnly && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-3">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-3">
           <label className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
-            <Wrench size={12} className="text-orange-500" />
-            {isDoiXe ? "Xe *" : "Thiết bị *"}
+            <Wrench size={14} className="text-orange-500" />
+            {isDoiXe ? "Chọn xe phục vụ bảo trì *" : "Chọn thiết bị phục vụ bảo trì *"}
           </label>
 
           {/* Dropdown trigger */}
@@ -1764,7 +1832,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               type="button"
               onClick={() => setAssetDropdownOpen((o) => !o)}
-              className="w-full flex items-center justify-between px-3 py-2.5 border border-slate-300 rounded-xl text-sm bg-white hover:border-orange-400 focus:border-orange-400 outline-none transition-colors"
+              className="w-full flex items-center justify-between px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm bg-white hover:border-orange-400 focus:border-orange-400 outline-none transition-colors"
             >
               <span className={(isDoiXe ? selectedVehicleIds.length > 0 : selectedAssetIds.length > 0) ? "text-slate-700 font-semibold" : "text-slate-400"}>
                 {isDoiXe
@@ -1921,7 +1989,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       {/* Nội dung chung (Bảo dưỡng, ≥ 2 thiết bị) */}
       {hangMuc === "Bảo dưỡng" && lines.length > 1 && (
-        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-5 space-y-3">
+        <div className="bg-amber-50 rounded-2xl border border-amber-200 shadow-sm p-5 space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold text-amber-700 flex items-center gap-1.5">
               <span className="w-4 h-4 rounded-full bg-amber-400 text-white text-[10px] font-bold flex items-center justify-center">✎</span>
@@ -1973,7 +2041,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 />
               </div>
 
-              {/* Ảnh chung — chọn nhiều ảnh cùng lúc, giống khối ảnh riêng từng thiết bị */}
+              {/* Ảnh chung */}
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <label className="text-[10px] font-bold text-amber-700">
@@ -1982,6 +2050,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   </label>
                   {!isReadOnly && imageUrlsChung.filter(Boolean).length < 6 && (
                     <button
+                      type="button"
                       disabled={uploadingChungSlot}
                       onClick={handleCommonSlotClick}
                       className="flex items-center gap-1 px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-700 text-xs font-bold rounded-lg disabled:opacity-40"
@@ -2007,6 +2076,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         />
                         {!isReadOnly && (
                           <button
+                            type="button"
                             onClick={() => setImageUrlsChung((prev) => prev.filter((_, i) => i !== slotIdx))}
                             className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow"
                           >
@@ -2031,16 +2101,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       {/* Equipment lines */}
       {lines.map((line, idx) => (
-        <div key={line.id} className="bg-white rounded-xl border border-slate-200 shadow-sm">
+        <div key={line.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           {/* Line header */}
           <div
-            className="flex items-center justify-between px-5 py-3 bg-orange-50 border-b border-orange-100 cursor-pointer rounded-t-xl"
+            className="flex items-center justify-between px-5 py-3.5 bg-orange-50/70 border-b border-orange-100 cursor-pointer"
             onClick={() => updateLine(line.id, { expanded: !line.expanded })}
           >
             <div className="flex items-center gap-3">
               <span className="w-6 h-6 rounded-full bg-orange-200 text-orange-700 text-xs font-bold flex items-center justify-center">{idx + 1}</span>
               <div>
-                <span className="font-bold text-slate-700">{line.ten_tb}</span>
+                <span className="font-bold text-slate-800">{line.ten_tb}</span>
                 <span className="ml-2 text-xs text-slate-500 font-mono">{line.ma_tb}</span>
               </div>
               {hangMuc === "Sửa chữa" && line.loai_sua_chua && (
@@ -2052,10 +2122,20 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <div className="flex items-center gap-2">
               {!isReadOnly && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); setSelectedAssetIds((p) => p.filter((id) => id !== line.asset_id)); setLines((p) => p.filter((l) => l.id !== line.id)) }}
-                  className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (isDoiXe) {
+                      setSelectedVehicleIds((p) => p.filter((id) => id !== line.dispatch_vehicle_id))
+                    } else {
+                      setSelectedAssetIds((p) => p.filter((id) => id !== line.asset_id))
+                    }
+                    setLines((p) => p.filter((l) => l.id !== line.id))
+                  }}
+                  className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg transition-colors"
+                  title="Xóa thiết bị"
                 >
-                  <Trash2 size={13} />
+                  <Trash2 size={14} />
                 </button>
               )}
               {line.expanded ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
@@ -2156,13 +2236,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               {/* Cost */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Chi phí ước tính (tự tổng hợp từ vật tư)</label>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Chi phí ước tính (tự tổng hợp)</label>
                   <input
                     type="text"
                     value={`${currencySymbol(line.loai_tien)} ${Number(line.chi_phi_dk || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
                     disabled
                     readOnly
-                    title="Tự động bằng tổng (Đơn giá × Số lượng) của vật tư gắn với thiết bị này — sửa bằng cách thêm/sửa/xóa vật tư"
+                    title="Tự động bằng tổng (Đơn giá × Số lượng) của vật tư gắn với thiết bị này"
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm bg-slate-50 text-slate-600 font-semibold cursor-not-allowed"
                   />
                 </div>
@@ -2278,7 +2358,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 )
               })()}
 
-              {/* Km/giờ (Đội xe — Sửa chữa) + Chất lượng sau sửa chữa (mọi hạng mục/bộ phận) */}
+              {/* Km/giờ (Đội xe — Sửa chữa) + Chất lượng sau sửa chữa */}
               <div className="grid grid-cols-2 gap-3">
                 {boPhan === "Đội xe" && hangMuc === "Sửa chữa" && (
                   <div>
@@ -2330,6 +2410,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   <label className="text-xs font-bold text-slate-600">Vật tư sử dụng</label>
                   {!isReadOnly && (
                     <button
+                      type="button"
                       onClick={() => addMaterial(line.id)}
                       className="flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg"
                     >
@@ -2342,11 +2423,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   const searchKey = mat.id
                   const search = matSearches[searchKey] || ""
                   const catFilter = matCategoryFilters[searchKey] || ""
-                  // Both nguon types use inventory_items; display differs (stock shown for trong_kho only)
                   const filteredItems = filteredItemsMap.get(mat.id) ?? []
                   return (
                     <div key={mat.id} className="mb-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                      {/* Label row */}
                       <div className="flex items-center justify-between mb-1.5">
                         <label className="text-[10px] font-bold text-slate-500">{isKho ? "Vật tư kho" : "Vật tư bên ngoài"}</label>
                         {!isReadOnly && (
@@ -2373,9 +2452,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           )
                         )}
                       </div>
-                      {/* Single compact row: all fields */}
                       <div className="flex flex-wrap gap-1.5 items-end">
-                        {/* Nguồn */}
                         <div className="w-[88px]">
                           <label className="text-xs font-bold text-slate-500 block mb-1">Nguồn</label>
                           <select
@@ -2388,7 +2465,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             <option value="trong_kho">Trong kho</option>
                           </select>
                         </div>
-                        {/* Nhóm */}
                         <div className="w-[180px]">
                           <label className="text-xs font-bold text-slate-500 block mb-1">Nhóm</label>
                           <select
@@ -2403,7 +2479,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             ))}
                           </select>
                         </div>
-                        {/* Custom dropdown: Tìm / Chọn vật tư */}
                         <div className="flex-1 min-w-[180px] relative" ref={activeMaterialDropdown === mat.id ? matDropdownRef : null}>
                           <label className="text-xs font-bold text-slate-500 block mb-1">Tìm / Chọn vật tư</label>
                           <button
@@ -2448,9 +2523,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                     key={item.id}
                                     type="button"
                                     onClick={() => {
-                                      // Vật tư "Trong kho" tự điền Đơn giá/Loại tiền theo danh mục Kho
-                                      // vật tư (vẫn sửa tay được sau khi điền) — "Mua ngoài" giữ nguyên
-                                      // hành vi nhập tay vì giá mua ngoài thay đổi theo từng lần mua.
                                       const priceFields = mat.nguon === "trong_kho"
                                         ? { don_gia: item.don_gia > 0 ? String(item.don_gia) : mat.don_gia, loai_tien: item.loai_tien }
                                         : {}
@@ -2471,7 +2543,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             </div>
                           )}
                         </div>
-                        {/* Đơn vị */}
                         <div className="w-[42px]">
                           <label className="text-xs font-bold text-slate-500 block mb-1">ĐVT</label>
                           <input
@@ -2481,7 +2552,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
                           />
                         </div>
-                        {/* Số lượng */}
                         <div className="w-[50px]">
                           <label className="text-xs font-bold text-slate-500 block mb-1">Số lượng</label>
                           <input
@@ -2519,9 +2589,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             )
                           })()}
                         </div>
-                        {/* Đơn giá + Loại tiền — cả "Trong kho" (tự điền từ danh mục Kho vật tư,
-                            vẫn sửa tay được) và "Mua ngoài" (nhập tay) đều hiện đủ 2 trường này,
-                            để bảng "Vật tư sử dụng" trên biên bản luôn hiển thị đúng tiền. */}
                         <div className="w-[72px]">
                           <label className="text-xs font-bold text-slate-500 block mb-1">Đơn giá</label>
                           <input
@@ -2543,9 +2610,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                           </select>
                         </div>
-                        {/* Xóa */}
                         {!isReadOnly && (
-                          <button onClick={() => removeMaterial(line.id, mat.id)} className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg self-end">
+                          <button
+                            type="button"
+                            onClick={() => removeMaterial(line.id, mat.id)}
+                            className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg self-end"
+                          >
                             <Trash2 size={12} />
                           </button>
                         )}
@@ -2614,8 +2684,515 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           <p className="text-sm">Chọn thiết bị từ danh sách bên trên</p>
         </div>
       )}
+    </div>
+  )
 
-      {/* Hidden file inputs for image slot upload (multiple) */}
+  const renderSigningCard = () => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+          <FileSignature size={18} className="text-orange-500" />
+          Ký duyệt & Chứng từ
+        </h3>
+        {!effectiveIsNew && (
+          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono">
+            {record?.ma_bb}
+          </span>
+        )}
+      </div>
+
+      {effectiveIsNew ? (
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+          <p className="font-bold mb-1">Chưa lưu biên bản</p>
+          <p className="text-slate-600">Vui lòng hoàn thành thông tin và lưu biên bản để gửi ký duyệt hoặc in ấn chứng từ.</p>
+        </div>
+      ) : (
+        <div className="space-y-3.5">
+          {/* Tiến độ ký điện tử */}
+          {user && (
+            <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200/80">
+              <label className="text-[11px] font-bold text-slate-500 block mb-2 uppercase tracking-wider">
+                Tiến độ ký duyệt điện tử
+              </label>
+              <MaintenanceSignStatusBadge
+                status={signingStatus}
+                currentUser={user}
+                canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
+                onOpenSignPrompt={() => setSignModalOpen(true)}
+                onCancelled={() => {
+                  setSigningStatus(undefined)
+                  if (factoryId) void loadSigningStatus(factoryId, id)
+                }}
+                showToast={(msg, ok = true) => {
+                  if (ok) setSaveSuccess(msg)
+                  else setSaveError(msg)
+                }}
+              />
+            </div>
+          )}
+
+          {/* Mẫu in / Xem file đã ký */}
+          <div className="space-y-2 pt-1">
+            {signingStatus?.fileHienTai ? (
+              <a
+                href={signingStatus.fileHienTai}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-2xs"
+                title="Xem hoặc tải file PDF đã ký duyệt"
+              >
+                <FileText size={15} className="text-emerald-400" />
+                Xem file PDF đã ký điện tử
+              </a>
+            ) : (
+              <Link
+                href={`/dashboard/maintenance/records/${id}/print?type=${printDocType}`}
+                target="_blank"
+                className="flex items-center justify-center gap-2 w-full py-2.5 px-3 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold transition-all border border-orange-200"
+              >
+                <FileText size={15} />
+                In / Xuất mẫu biên bản
+              </Link>
+            )}
+          </div>
+
+          {/* Hành động nghiệp vụ */}
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            {!effectiveIsNew && record?.trang_thai === "tu_choi" && isCreator && (
+              <button
+                type="button"
+                onClick={handleResubmit}
+                disabled={saving || isUploadingAnyImage}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-50"
+              >
+                <Send size={14} /> Gửi duyệt lại
+              </button>
+            )}
+
+            {!effectiveIsNew && record?.trang_thai === "cho_duyet" && isCreator && (
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={saving || isUploadingAnyImage}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-bold hover:bg-red-100 transition-colors disabled:opacity-50"
+              >
+                <X size={14} /> Hủy biên bản
+              </button>
+            )}
+
+            {!effectiveIsNew && record?.trang_thai === "da_duyet" && isAdmin && (
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={saving || isUploadingAnyImage}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-bold hover:bg-red-100 transition-colors disabled:opacity-50"
+              >
+                <X size={14} /> Hủy biên bản đã duyệt
+              </button>
+            )}
+
+            {!effectiveIsNew && record?.trang_thai === "da_duyet" && isAdmin && (
+              <button
+                type="button"
+                onClick={handleReverseApproval}
+                disabled={saving || isUploadingAnyImage}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold hover:bg-amber-100 transition-colors disabled:opacity-50"
+                title="Hủy sau khi hoàn tất để đảo ngược xuất kho và đưa biên bản về chờ ký"
+              >
+                <RotateCcw size={14} /> Hủy sau khi hoàn tất (Đảo xuất kho)
+              </button>
+            )}
+
+            {!effectiveIsNew && canDelete && (
+              <button
+                type="button"
+                onClick={handleDeleteRecord}
+                disabled={saving || isUploadingAnyImage}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-slate-50 text-slate-500 border border-slate-200 text-xs font-bold hover:bg-red-50 hover:text-red-700 hover:border-red-200 transition-colors disabled:opacity-50"
+              >
+                <Trash2 size={14} /> Xóa biên bản
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  const renderCostSummaryCard = () => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+          <Coins size={18} className="text-emerald-600" />
+          Tổng hợp chi phí & vật tư
+        </h3>
+      </div>
+
+      <div className="space-y-3">
+        {/* Chi phí vật tư theo loại tiền */}
+        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5">
+          <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wider">
+            Chi phí vật tư ước tính
+          </span>
+          {Object.keys(costByCurrency).length > 0 ? (
+            Object.entries(costByCurrency).map(([cur, amount]) => (
+              <div key={cur} className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-600">Loại tiền {cur}:</span>
+                <span className="text-sm font-bold font-mono text-emerald-700">
+                  {currencySymbol(cur)} {amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {cur}
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="text-xs text-slate-400 italic">0.00</p>
+          )}
+        </div>
+
+        {/* Công thợ và số lượng */}
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="text-slate-500 block text-[11px] font-medium">Tổng công thợ</span>
+            <span className="text-base font-bold text-slate-900 font-mono mt-0.5 block">
+              {totalCongTho.toLocaleString()}
+            </span>
+          </div>
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+            <span className="text-slate-500 block text-[11px] font-medium">Số {isDoiXe ? "xe" : "thiết bị"}</span>
+            <span className="text-base font-bold text-slate-900 font-mono mt-0.5 block">
+              {lines.length}
+            </span>
+          </div>
+        </div>
+
+        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-500 font-medium">Linh kiện thay thế:</span>
+            <span className="font-bold text-slate-900 font-mono">
+              {totalMaterialsCount} dòng ({totalMaterialsQty.toLocaleString()} SL)
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderBottomLeftCard = () => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 h-full flex flex-col justify-between">
+      <div>
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+          <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+            <FileText size={18} className="text-orange-500" />
+            Ghi chú & Chi tiết bổ sung
+          </h3>
+          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+            {inEditMode ? "Chỉnh sửa" : "Chế độ xem"}
+          </span>
+        </div>
+
+        {inEditMode ? (
+          <div>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú biên bản</label>
+            <textarea
+              value={ghiChu}
+              onChange={(e) => setGhiChu(e.target.value)}
+              disabled={isReadOnly}
+              rows={4}
+              placeholder="Nhập ghi chú thêm cho biên bản bảo trì (nếu có)..."
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 resize-none"
+            />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm font-medium text-slate-500">Nội dung ghi chú</p>
+              <p className="text-sm font-semibold text-slate-900 mt-1 whitespace-pre-wrap">
+                {ghiChu?.trim() || "(Không có ghi chú thêm)"}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Tra cứu QR mini */}
+      {!effectiveIsNew && recordQrUrl && (
+        <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-4">
+          <div className="text-xs text-slate-500">
+            <span className="font-bold text-slate-700 block">Liên kết tra cứu trực tuyến</span>
+            <span className="font-mono text-[11px] text-slate-400 break-all">{recordQrUrl}</span>
+          </div>
+          <div className="shrink-0 p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+            <QRCodeSVG value={recordQrUrl} size={48} level="M" />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  const renderPersonnelCard = () => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 h-full flex flex-col justify-between">
+      <div>
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+          <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+            <Users size={18} className="text-blue-600" />
+            Thông tin Phê duyệt & Nhân sự
+          </h3>
+          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+            {inEditMode ? "Chỉnh sửa" : "Chế độ xem"}
+          </span>
+        </div>
+
+        {inEditMode ? (
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-2">Người thực hiện</label>
+              <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-1">
+                {nguoiThucHienStaff.map((s) => {
+                  const sel = selectedStaff.includes(s.ten)
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => {
+                        if (isReadOnly) return
+                        setSelectedStaff((prev) => sel ? prev.filter((n) => n !== s.ten) : [...prev, s.ten])
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                        sel
+                          ? "bg-emerald-100 border-emerald-300 text-emerald-700 shadow-2xs"
+                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {s.ten}{s.chuc_vu && ` (${s.chuc_vu})`}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhân viên phụ trách</label>
+                <select
+                  value={nvPhuTrach}
+                  onChange={(e) => setNvPhuTrach(e.target.value)}
+                  disabled={isReadOnly}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                >
+                  <option value="">— Chọn —</option>
+                  {eligibleStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">BGĐ phụ trách</label>
+                <select
+                  value={bgdPhuTrach}
+                  onChange={(e) => setBgdPhuTrach(e.target.value)}
+                  disabled={isReadOnly}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                >
+                  <option value="">— Chọn —</option>
+                  {bgdPhuTrachStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Giám đốc</label>
+                <select
+                  value={giamDoc}
+                  onChange={(e) => setGiamDoc(e.target.value)}
+                  disabled={isReadOnly}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                >
+                  <option value="">— Chọn —</option>
+                  {giamDocStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm font-medium text-slate-500">Người thực hiện ({selectedStaff.length})</p>
+              {selectedStaff.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {selectedStaff.map((st) => (
+                    <span
+                      key={st}
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200"
+                    >
+                      {st}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 italic mt-1">Chưa phân công người thực hiện</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+              <div>
+                <p className="text-sm font-medium text-slate-500">NV Phụ trách</p>
+                <p className="text-sm font-bold text-slate-800 mt-1">{nvPhuTrach || "—"}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">BGĐ Phụ trách</p>
+                <p className="text-sm font-bold text-slate-800 mt-1">{bgdPhuTrach || "—"}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Giám đốc</p>
+                <p className="text-sm font-bold text-slate-800 mt-1">{giamDoc || "—"}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-slate-100 text-right">
+        <span className="text-[11px] text-slate-400 font-mono">
+          Cập nhật: {fmtDateTimeVi(record?.updated_at || record?.created_at)}
+        </span>
+      </div>
+    </div>
+  )
+
+  return (
+    <MaintenanceShell>
+      {/* Toast Alert Notifications */}
+      {saveSuccess && (
+        <div className="mb-5 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2 text-sm font-bold">
+            <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+            <span>{saveSuccess}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSaveSuccess(null)}
+            className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-600 transition-colors"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="mb-5 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2 text-sm font-bold">
+            <AlertCircle size={18} className="text-rose-600 shrink-0" />
+            <span className="whitespace-pre-wrap">{saveError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSaveError(null)}
+            className="p-1 hover:bg-rose-100 rounded-lg text-rose-600 transition-colors"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {/* Top Header / Sticky Bar */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-5 flex flex-wrap items-center justify-between gap-4">
+        {/* Left: Back button, Title, Status badge */}
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard/maintenance/records"
+            className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            title="Quay lại danh sách biên bản"
+          >
+            <ArrowLeft size={18} />
+          </Link>
+          <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold shrink-0">
+            <Wrench size={20} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-lg font-extrabold text-slate-900">
+                {effectiveIsNew ? "Tạo biên bản mới" : (record?.ma_bb || "Biên bản bảo trì")}
+              </h1>
+              {statusBadge}
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {boPhan} · {hangMuc} · {fmtDateVi(ngay)}
+            </p>
+          </div>
+        </div>
+
+        {/* Right: Mode toggle & Action buttons */}
+        <div className="flex items-center gap-2.5">
+          {/* Cảnh báo đang upload ảnh */}
+          {isUploadingAnyImage && (
+            <span className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-700 animate-pulse">
+              <Loader2 size={13} className="animate-spin" />
+              Đang tải ảnh...
+            </span>
+          )}
+
+          {/* Toggle Chế độ xem / Chỉnh sửa (chỉ khi biên bản đã lưu và có quyền sửa) */}
+          {!effectiveIsNew && isEditable && (
+            <button
+              type="button"
+              onClick={() => setIsEditMode((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border ${
+                isEditMode
+                  ? "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
+                  : "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100"
+              }`}
+            >
+              {isEditMode ? (
+                <>
+                  <X size={14} /> Hủy sửa
+                </>
+              ) : (
+                <>
+                  <Edit3 size={14} /> Chỉnh sửa
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Nút Lưu biên bản (chỉ hiện khi đang tạo mới hoặc đang ở chế độ chỉnh sửa) */}
+          {!isReadOnly && inEditMode && (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || isUploadingAnyImage || !isDirty}
+              title={saving ? "Đang lưu..." : !isDirty ? "Chưa có thay đổi nào để lưu" : undefined}
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all disabled:opacity-50"
+            >
+              <Save size={14} />
+              {saving ? "Đang lưu..." : "Lưu biên bản"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main 2-Column Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* Left Column (8 cols ~ 67%) */}
+        <div className="lg:col-span-8 space-y-5">
+          {inEditMode ? renderEditGeneralInfo() : renderReadOnlyGeneralInfo()}
+          {inEditMode ? renderEditLines() : renderReadOnlyLines()}
+        </div>
+
+        {/* Right Column (4 cols ~ 33%) */}
+        <div className="lg:col-span-4 space-y-5">
+          {renderSigningCard()}
+          {renderCostSummaryCard()}
+        </div>
+      </div>
+
+      {/* Bottom Grid Row: Ghi chú & Chi tiết (Trái) + Thông tin Phê duyệt & Nhân sự (Phải) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch mt-5">
+        <div className="lg:col-span-8">
+          {renderBottomLeftCard()}
+        </div>
+        <div className="lg:col-span-4">
+          {renderPersonnelCard()}
+        </div>
+      </div>
+
+      {/* Hidden file inputs for image slot upload */}
       <input
         ref={slotInputRef}
         type="file"
@@ -2633,10 +3210,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         onChange={handleCommonSlotFileChange}
       />
 
-      {/* Lightbox phóng to ảnh — dùng chung cho ảnh riêng từng thiết bị và ảnh chung */}
+      {/* Lightbox phóng to ảnh */}
       {zoomImageUrl && (
         <div
-          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center"
+          className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4"
           onClick={() => setZoomImageUrl(null)}
         >
           <img
@@ -2646,6 +3223,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             onClick={(e) => e.stopPropagation()}
           />
           <button
+            type="button"
             onClick={() => setZoomImageUrl(null)}
             className="absolute top-4 right-4 w-10 h-10 bg-white/20 hover:bg-white/30 text-white rounded-full flex items-center justify-center"
           >
@@ -2654,6 +3232,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       )}
 
+      {/* Modal tạo vật tư bên ngoài */}
       {newExtMatModal && (
         <ModalShell
           title="Thêm vật tư bên ngoài"
@@ -2662,12 +3241,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           footer={
             <>
               <button
+                type="button"
                 onClick={() => setNewExtMatModal(null)}
                 className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
               >
                 Hủy
               </button>
               <button
+                type="button"
                 onClick={() => void handleSaveNewExtMat()}
                 disabled={savingNewExtMat}
                 className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
@@ -2677,64 +3258,65 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             </>
           }
         >
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư</label>
-                  <input
-                    value={newExtMatForm.code}
-                    onChange={(e) => setNewExtMatForm((p) => ({ ...p, code: e.target.value }))}
-                    placeholder="VD: BD22211"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm vật tư</label>
-                  <select
-                    value={newExtMatForm.category_id}
-                    onChange={(e) => setNewExtMatForm((p) => ({ ...p, category_id: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white"
-                  >
-                    <option value="">— Không phân nhóm —</option>
-                    {inventoryCategories.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
-                  <input
-                    value={newExtMatForm.ten_vat_tu}
-                    onChange={(e) => setNewExtMatForm((p) => ({ ...p, ten_vat_tu: e.target.value }))}
-                    placeholder="Tên đầy đủ của vật tư"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính</label>
-                  <input
-                    value={newExtMatForm.dvt}
-                    onChange={(e) => setNewExtMatForm((p) => ({ ...p, dvt: e.target.value }))}
-                    placeholder="Cái, kg, lít..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                  />
-                </div>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư</label>
+                <input
+                  value={newExtMatForm.code}
+                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, code: e.target.value }))}
+                  placeholder="VD: BD22211"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono"
+                />
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy cách / Đặc tính</label>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm vật tư</label>
+                <select
+                  value={newExtMatForm.category_id}
+                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, category_id: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white"
+                >
+                  <option value="">— Không phân nhóm —</option>
+                  {inventoryCategories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
                 <input
-                  value={newExtMatForm.specification}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, specification: e.target.value }))}
-                  placeholder="Quy cách, đặc tính kỹ thuật..."
+                  value={newExtMatForm.ten_vat_tu}
+                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, ten_vat_tu: e.target.value }))}
+                  placeholder="Tên đầy đủ của vật tư"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính</label>
+                <input
+                  value={newExtMatForm.dvt}
+                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, dvt: e.target.value }))}
+                  placeholder="Cái, kg, lít..."
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 />
               </div>
             </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy cách / Đặc tính</label>
+              <input
+                value={newExtMatForm.specification}
+                onChange={(e) => setNewExtMatForm((p) => ({ ...p, specification: e.target.value }))}
+                placeholder="Quy cách, đặc tính kỹ thuật..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
         </ModalShell>
       )}
 
+      {/* Modal Ký duyệt điện tử */}
       {signModalOpen && factoryId && !effectiveIsNew && signBundle && (
         <MaintenanceSignModal
           open={signModalOpen}
@@ -2746,63 +3328,21 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         />
       )}
 
-      {/* Personnel section */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
-        <div className="font-extrabold text-slate-700 mb-1">Nhân sự</div>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-2">Người thực hiện</label>
-          <div className="flex flex-wrap gap-2">
-            {nguoiThucHienStaff.map((s) => {
-              const sel = selectedStaff.includes(s.ten)
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => {
-                    if (isReadOnly) return
-                    setSelectedStaff((prev) => sel ? prev.filter((n) => n !== s.ten) : [...prev, s.ten])
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${sel ? "bg-emerald-100 border-emerald-300 text-emerald-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-                >
-                  {s.ten}{s.chuc_vu && ` (${s.chuc_vu})`}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhân viên phụ trách</label>
-            <select value={nvPhuTrach} onChange={(e) => setNvPhuTrach(e.target.value)} disabled={isReadOnly} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50">
-              <option value="">— Chọn —</option>
-              {eligibleStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">BGĐ phụ trách</label>
-            <select value={bgdPhuTrach} onChange={(e) => setBgdPhuTrach(e.target.value)} disabled={isReadOnly} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50">
-              <option value="">— Chọn —</option>
-              {bgdPhuTrachStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Giám đốc</label>
-            <select value={giamDoc} onChange={(e) => setGiamDoc(e.target.value)} disabled={isReadOnly} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50">
-              <option value="">— Chọn —</option>
-              {giamDocStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
-            </select>
-          </div>
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
-          <textarea
-            value={ghiChu}
-            onChange={(e) => setGhiChu(e.target.value)}
-            disabled={isReadOnly}
-            rows={2}
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 resize-none"
-          />
-        </div>
-      </div>
+      {/* Prompt liên kết KPI */}
+      {kpiPrompt && factoryId && (
+        <KpiLinkPrompt
+          factoryId={factoryId}
+          moduleCode="maintenance:save"
+          recordId={kpiPrompt.recordId}
+          recordLabel={kpiPrompt.recordLabel}
+          recordUrl={`/dashboard/maintenance/records/${kpiPrompt.recordId}`}
+          onDone={() => {
+            const dest = kpiPrompt.navigateTo
+            setKpiPrompt(null)
+            if (dest) router.push(dest)
+          }}
+        />
+      )}
     </MaintenanceShell>
   )
 }

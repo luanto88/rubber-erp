@@ -19,6 +19,7 @@ import { supabase } from "@/lib/supabase"
 import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
 import { isBlankNoteContent } from "@/lib/note-filter"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
+import { prepareForestPlotGeometry, mergeGeometryPieces, computeGeometryHash } from "@/lib/eudr-write-gate"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
@@ -846,6 +847,18 @@ export default function SettingsPage() {
   const [forestPlotGeometry, setForestPlotGeometry] = useState<unknown>(null)
   const [forestPlotGeoImporting, setForestPlotGeoImporting] = useState(false)
   const forestPlotGeoImportRef = useRef<HTMLInputElement>(null)
+  // GĐ5 EUDR: kiểm tra + làm sạch hình học NGAY khi người dùng vẽ/sửa polygon (phản hồi tức
+  // thì trên bản đồ) — saveForestPlot dùng lại đúng kết quả này làm chốt chặn cuối cùng, không
+  // tính lại. forestPlotGeometry === null là ca hợp lệ (lô chưa khảo sát ranh giới, cột
+  // geometry nullable) — KHÔNG gọi gate, giữ nguyên null.
+  const forestPlotGeometryCheck = useMemo(() => {
+    if (forestPlotGeometry == null) return null
+    const declaredAreaHa = forestPlotForm.dien_tich_ha ? parseFloat(forestPlotForm.dien_tich_ha) : null
+    return prepareForestPlotGeometry(forestPlotGeometry, {
+      plotCode: forestPlotForm.ten || undefined,
+      declaredAreaHa: declaredAreaHa && declaredAreaHa > 0 ? declaredAreaHa : null,
+    })
+  }, [forestPlotGeometry, forestPlotForm.ten, forestPlotForm.dien_tich_ha])
   const [configLoading, setConfigLoading] = useState(false)
   const [configLoaded, setConfigLoaded] = useState(false)
 
@@ -867,7 +880,9 @@ export default function SettingsPage() {
   const [configError, setConfigError] = useState("")
   const [configDelConfirm, setConfigDelConfirm] = useState<{ type: "warehouse" | "category" | "item" | "delivery-point" | "driver" | "vehicle" | "forest-plot"; id: string; label: string } | null>(null)
   const [importing, setImporting] = useState(false)
-  const [importResult, setImportResult] = useState<{ success: number; errors: string[] } | null>(null)
+  // warnings: chỉ dùng bởi import Lô vườn (GĐ5 EUDR) — lô "repaired" (hệ thống tự sửa hình
+  // học nhưng vẫn lưu được), tách khỏi errors (chỉ dùng cho lô "rejected").
+  const [importResult, setImportResult] = useState<{ success: number; errors: string[]; warnings?: string[] } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
 
   // Maintenance tab state
@@ -1772,9 +1787,17 @@ export default function SettingsPage() {
   const saveForestPlot = async () => {
     if (!factoryId) return
     if (!forestPlotForm.ten.trim()) { setConfigError("Mã ngắn (Ten) không được để trống"); return }
+    // GĐ5 EUDR: chốt chặn cuối cùng trước khi ghi DB — dùng lại forestPlotGeometryCheck
+    // (useMemo) đã tính sẵn theo đúng geometry đang hiển thị trên bản đồ, không tính lại.
+    if (forestPlotGeometryCheck && forestPlotGeometryCheck.report.status === "rejected") {
+      setConfigError("Không thể lưu: " + forestPlotGeometryCheck.report.problems.join(" "))
+      return
+    }
     setConfigSaving(true)
     setConfigError("")
     try {
+      const cleanedGeometry = forestPlotGeometry == null ? null : (forestPlotGeometryCheck?.geometry ?? null)
+      const geometryHash = cleanedGeometry ? await computeGeometryHash(cleanedGeometry) : null
       const payload = {
         factory_id: factoryId,
         ten: forestPlotForm.ten.trim().toUpperCase(),
@@ -1785,7 +1808,11 @@ export default function SettingsPage() {
         dien_tich_ha: forestPlotForm.dien_tich_ha ? (parseFloat(forestPlotForm.dien_tich_ha) || null) : null,
         nam_trong: forestPlotForm.nam_trong ? (parseInt(forestPlotForm.nam_trong) || null) : null,
         nam_cao_up: forestPlotForm.nam_cao_up ? (parseInt(forestPlotForm.nam_cao_up) || null) : null,
-        geometry: forestPlotGeometry || null,
+        geometry: cleanedGeometry,
+        // GĐ5 EUDR: dấu vết trước/sau làm sạch (xem migration 20260919_forest_plots_geometry_audit_trail.sql)
+        geometry_raw: forestPlotGeometry ?? null,
+        geometry_hash: geometryHash,
+        geometry_cleaned_at: cleanedGeometry ? new Date().toISOString() : null,
         is_active: forestPlotForm.is_active,
       }
       const { error } = configEditId
@@ -1807,26 +1834,62 @@ export default function SettingsPage() {
       const geojson = JSON.parse(await file.text())
       const features: Array<{ properties?: Record<string, unknown> | null; geometry?: unknown }> = geojson?.features ?? []
       if (!features.length) { setConfigError("File GeoJSON không có features"); return }
-      const seen = new Set<string>()
-      const rows = features.flatMap((f) => {
-        const p = f?.properties || {}
-        const ten = String(p.Ten || "").trim()
-        if (!ten || seen.has(ten)) return []
-        seen.add(ten)
-        return [{
+
+      // GĐ5 EUDR: nhóm feature theo Ten TRƯỚC khi gộp — 1 lô có thể bị đường/suối cắt thành
+      // nhiều mảnh, mỗi mảnh là 1 feature riêng dùng chung Ten (xem mergeGeometryPieces trong
+      // eudr-write-gate.ts). Quy tắc cũ "dedupe theo Ten, giữ dòng đầu tiên" từng vứt bỏ toàn
+      // bộ mảnh còn lại — đây chính là nguồn gốc mất 101,62 ha đã khôi phục ở GĐ2.
+      const groups = new Map<string, Array<{ properties?: Record<string, unknown> | null; geometry?: unknown }>>()
+      for (const f of features) {
+        const ten = String(f?.properties?.Ten || "").trim()
+        if (!ten) continue
+        const list = groups.get(ten)
+        if (list) list.push(f)
+        else groups.set(ten, [f])
+      }
+      if (groups.size === 0) { setConfigError("File GeoJSON không có feature nào có thuộc tính Ten hợp lệ"); return }
+
+      const rows: Record<string, unknown>[] = []
+      const rejected: string[] = []
+      const warnings: string[] = []
+      for (const [ten, group] of groups) {
+        const p = group[0]?.properties || {}
+        const dienTichHa = p.Dtich2026_ha != null ? (parseFloat(String(p.Dtich2026_ha)) || null) : null
+        const { geometry, report } = mergeGeometryPieces(
+          group.map((f) => f.geometry),
+          { plotCode: ten, declaredAreaHa: dienTichHa },
+        )
+        if (report.status === "rejected" || !geometry) {
+          rejected.push(`${ten}: ${report.problems.join(" ") || "Không tạo được hình học hợp lệ."}`)
+          continue
+        }
+        if (report.status === "repaired" && report.applied.length > 0) {
+          warnings.push(`${ten}: ${report.applied.join(" ")}`)
+        }
+        const geometryHash = await computeGeometryHash(geometry)
+        rows.push({
           factory_id: factoryId,
           ten,
           ma_lo_full: p.Ma_lo_2026 ? String(p.Ma_lo_2026).trim() : null,
           nong_truong: p.Nong_truong ? String(p.Nong_truong).trim() : null,
           doi: p.Doi_2026 != null ? (parseInt(String(p.Doi_2026)) || null) : null,
           giong: p.Giong ? String(p.Giong).trim() : null,
-          dien_tich_ha: p.Dtich2026_ha != null ? (parseFloat(String(p.Dtich2026_ha)) || null) : null,
+          dien_tich_ha: dienTichHa,
           nam_trong: p.Nam_trong != null ? (parseInt(String(p.Nam_trong)) || null) : null,
           nam_cao_up: p.Nam_cao_up != null ? (parseInt(String(p.Nam_cao_up)) || null) : null,
-          geometry: f.geometry || null,
+          geometry,
+          // GĐ5 EUDR: dấu vết trước làm sạch — 1 mảnh giữ nguyên geometry thô của feature đó;
+          // nhiều mảnh gộp vào GeometryCollection (đúng chuẩn GeoJSON) để giữ đủ N mảnh gốc.
+          geometry_raw:
+            group.length === 1
+              ? (group[0].geometry ?? null)
+              : { type: "GeometryCollection", geometries: group.map((f) => f.geometry).filter((g) => g != null) },
+          geometry_hash: geometryHash,
+          geometry_cleaned_at: new Date().toISOString(),
           is_active: true,
-        }]
-      })
+        })
+      }
+
       let errBatches = 0
       for (let i = 0; i < rows.length; i += 50) {
         const { error } = await supabase
@@ -1835,7 +1898,14 @@ export default function SettingsPage() {
         if (error) errBatches++
       }
       void loadConfigData(factoryId)
-      setImportResult({ success: rows.length - errBatches * 50, errors: errBatches > 0 ? [`${errBatches} batch lỗi khi upsert`] : [] })
+      setImportResult({
+        success: rows.length - errBatches * 50,
+        errors: [
+          ...(errBatches > 0 ? [`${errBatches} batch lỗi khi upsert vào cơ sở dữ liệu`] : []),
+          ...rejected,
+        ],
+        warnings,
+      })
     } catch (e: unknown) {
       setConfigError("Không đọc được file: " + (e instanceof Error ? e.message : String(e)))
     } finally {
@@ -3030,7 +3100,12 @@ export default function SettingsPage() {
                       ? saveForestPlot
                       : saveDeliveryPoint
         }
-        disabled={configSaving}
+        disabled={
+          configSaving ||
+          // GĐ5 EUDR: chặn Lưu khi hình học vừa vẽ/import không dùng được — banner đỏ dưới
+          // bản đồ đã giải thích lý do, saveForestPlot cũng tự chặn lại lần nữa ở tầng logic.
+          (configModal === "forest-plot" && forestPlotGeometryCheck?.report.status === "rejected")
+        }
         className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
       >
         {configSaving ? "Đang lưu..." : "Lưu"}
@@ -3782,6 +3857,11 @@ export default function SettingsPage() {
                   {importResult.errors.length > 0 && (
                     <ul className="mt-2 space-y-0.5 text-xs text-red-600 max-h-40 overflow-y-auto">
                       {importResult.errors.map((e, i) => <li key={i}>• {e}</li>)}
+                    </ul>
+                  )}
+                  {importResult.warnings && importResult.warnings.length > 0 && (
+                    <ul className="mt-2 space-y-0.5 text-xs text-amber-700 max-h-40 overflow-y-auto">
+                      {importResult.warnings.map((w, i) => <li key={i}>• {w}</li>)}
                     </ul>
                   )}
                 </div>
@@ -6094,6 +6174,22 @@ export default function SettingsPage() {
                     <div className="isolate rounded-xl overflow-hidden border border-slate-200">
                       <PolygonDrawMap existingGeometry={forestPlotGeometry} onChange={setForestPlotGeometry} />
                     </div>
+                    {forestPlotGeometryCheck && forestPlotGeometryCheck.report.status === "rejected" && (
+                      <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                        <p className="font-bold mb-1">⚠️ Không dùng được hình học này — không lưu được:</p>
+                        <ul className="space-y-0.5">
+                          {forestPlotGeometryCheck.report.problems.map((p, i) => <li key={i}>• {p}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {forestPlotGeometryCheck && forestPlotGeometryCheck.report.status === "repaired" && (
+                      <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                        <p className="font-bold mb-1">Hệ thống sẽ tự sửa hình học này trước khi lưu:</p>
+                        <ul className="space-y-0.5">
+                          {forestPlotGeometryCheck.report.applied.map((a, i) => <li key={i}>• {a}</li>)}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 </>
               )}

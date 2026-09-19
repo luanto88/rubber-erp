@@ -12,6 +12,16 @@ import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react"
 
 type Severity = "ok" | "warn" | "error"
 
+type SigningStep = {
+  id: string
+  signerName: string
+  buoc: string
+  action: string | null
+  kyLuc: string | null
+  isCurrent: boolean
+  hasPades: boolean
+}
+
 type VerifyResponse = {
   docType: "van_ban" | "iso" | "iso_form"
   signerName: string
@@ -31,6 +41,7 @@ type VerifyResponse = {
   validTo?: string
   keyAlgorithm?: string
   digestAlgorithm?: string
+  signingHistory?: SigningStep[]
 }
 
 const TRANG_THAI_LABEL: Record<string, Record<string, string>> = {
@@ -169,6 +180,50 @@ export function VanBanVerifyClient({ logId }: { logId: string }) {
           />
         )}
       </div>
+
+      {data.signingHistory && data.signingHistory.length > 1 && (
+        <div className="border-t border-slate-100 p-6 space-y-3 bg-slate-50/40">
+          <p className="font-bold text-slate-700 text-xs uppercase tracking-wider">Tiến trình ký duyệt tài liệu</p>
+          <div className="space-y-2">
+            {data.signingHistory.map((step, idx) => (
+              <a
+                key={step.id}
+                href={`/van-ban-verify/${step.id}`}
+                className={`flex items-center justify-between p-2.5 rounded-xl border transition-all text-xs ${
+                  step.isCurrent
+                    ? "bg-white border-violet-300 shadow-xs ring-1 ring-violet-200"
+                    : "bg-white/60 border-slate-200 hover:bg-white"
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-extrabold ${
+                    step.isCurrent ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600"
+                  }`}>
+                    {idx + 1}
+                  </span>
+                  <div className="min-w-0 truncate">
+                    <p className={`font-bold truncate ${step.isCurrent ? "text-violet-900" : "text-slate-800"}`}>
+                      {step.signerName}
+                    </p>
+                    <p className="text-[11px] text-slate-500">{step.buoc}</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  {step.isCurrent ? (
+                    <span className="inline-block px-2 py-0.5 rounded-md bg-violet-100 text-violet-700 font-extrabold text-[10px]">
+                      Đang xem
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">
+                      {step.kyLuc ? new Date(step.kyLuc).toLocaleDateString("vi-VN") : "—"}
+                    </span>
+                  )}
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {data.valid && (
         <div className="border-t border-slate-100 p-6 space-y-2 text-xs bg-slate-50/60">

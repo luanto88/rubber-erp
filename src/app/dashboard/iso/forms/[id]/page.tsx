@@ -8,7 +8,7 @@ import {
   AlertTriangle, Loader2, FileText, Send, Pen,
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
   ChevronLeft, ChevronRight, Plus, LayoutTemplate,
-  ArrowUp, ArrowDown, Trash2, Save, UserCheck,
+  ArrowUp, ArrowDown, Trash2, Save, UserCheck, Share2,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
@@ -34,6 +34,7 @@ import {
 } from "@/lib/signing/template-layout"
 import { computeSnugBoxSize } from "@/lib/signing/text-fit"
 import { IsoShell } from "../../_components/iso-shell"
+import { DistributionModal } from "../../_components/distribution-modal"
 import { ModalShell } from "../../../_components/modal-shell"
 import {
   fmtDate,
@@ -2089,6 +2090,7 @@ export default function IsoFormInstancePage() {
     sourceFileUrl: string | null
   } | null>(null)
   const [showReturnModal, setShowReturnModal] = useState(false)
+  const [showDistributeModal, setShowDistributeModal] = useState(false)
   const [signLoading, setSignLoading] = useState(false)
 
   // Bootstrap
@@ -3114,6 +3116,15 @@ export default function IsoFormInstancePage() {
                   <UserCheck size={13} /> Đổi người ký
                 </button>
               )}
+              {isDone && (
+                <button
+                  onClick={() => setShowDistributeModal(true)}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-800 text-sm font-bold rounded-xl border border-teal-200 transition-colors flex-1 sm:flex-none"
+                  title="Phân phối hồ sơ này đến người nhận / phòng ban"
+                >
+                  <Share2 size={13} /> Phân phối
+                </button>
+              )}
               {isEditable && canManageDraft && (
                 <button
                   onClick={handleManualSaveConfig}
@@ -3706,6 +3717,23 @@ export default function IsoFormInstancePage() {
           onConfirm={handleConfirmDoiNguoiKy}
           onClose={() => setDoiNguoiKyOpen(false)}
           saving={doiNguoiKySaving}
+        />
+      )}
+
+      {/* Distribution Modal */}
+      {showDistributeModal && factoryId && userId && (
+        <DistributionModal
+          factoryId={factoryId}
+          userId={userId}
+          initialDocIds={[instanceId]}
+          itemType="form"
+          formTitle={instance.tieu_de || template?.ten_tai_lieu || undefined}
+          formCode={template?.ma_tai_lieu || undefined}
+          onClose={() => setShowDistributeModal(false)}
+          onSuccess={(distributed) => {
+            setActionSuccess(`Đã phân phối hồ sơ đến ${distributed} người nhận!`)
+            setTimeout(() => setActionSuccess(null), 4000)
+          }}
         />
       )}
     </IsoShell>

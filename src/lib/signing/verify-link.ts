@@ -60,6 +60,39 @@ export function addVerifyLinkAnnotations(
   }
 }
 
+export type VerifyLinkGroup = {
+  targets: VerifyLinkTarget[]
+  url: string
+}
+
+/**
+ * Biến thể nhận danh sách các nhóm link (mỗi nhóm ứng với 1 người ký / 1 bước ký):
+ * Cho phép mỗi con dấu trên cùng một file PDF trỏ về đúng trang xác thực của người ký đó.
+ */
+export async function sealPdfWithVerifyLinks(
+  pdfBytes: Buffer,
+  linkGroups: VerifyLinkGroup[],
+  signerName: string,
+  contactEmail: string,
+): Promise<Buffer> {
+  if (!hasPadesRootCa()) {
+    const doc = await PDFDocument.load(pdfBytes)
+    for (const group of linkGroups) {
+      if (group.targets.length > 0 && group.url) {
+        addVerifyLinkAnnotations(doc, group.targets, group.url)
+      }
+    }
+    return Buffer.from(await doc.save())
+  }
+  const doc = await PDFDocument.load(pdfBytes, { forIncrementalUpdate: true })
+  for (const group of linkGroups) {
+    if (group.targets.length > 0 && group.url) {
+      addVerifyLinkAnnotations(doc, group.targets, group.url)
+    }
+  }
+  return applyPadesSignatureToDoc(doc, signerName, contactEmail)
+}
+
 /**
  * Biến thể nhận thẳng bytes: load 1 lần bằng `@cantoo/pdf-lib` → phủ link → nhúng PAdES.
  *
@@ -77,13 +110,6 @@ export async function sealPdfWithVerifyLink(
   signerName: string,
   contactEmail: string,
 ): Promise<Buffer> {
-  if (!hasPadesRootCa()) {
-    const doc = await PDFDocument.load(pdfBytes)
-    addVerifyLinkAnnotations(doc, targets, verifyUrl)
-    return Buffer.from(await doc.save())
-  }
-  const doc = await PDFDocument.load(pdfBytes, { forIncrementalUpdate: true })
-  addVerifyLinkAnnotations(doc, targets, verifyUrl)
-  return applyPadesSignatureToDoc(doc, signerName, contactEmail)
+  return sealPdfWithVerifyLinks(pdfBytes, [{ targets, url: verifyUrl }], signerName, contactEmail)
 }
 

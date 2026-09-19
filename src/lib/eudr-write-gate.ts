@@ -18,6 +18,20 @@ import {
  * và cho dữ liệu bị sửa thẳng bằng SQL). Ở trạng thái lành mạnh nó phải là no-op.
  */
 
+/**
+ * SHA-256 hex của MỘT Geometry đã sạch (`forest_plots.geometry`) — dùng ở đường GHI, KHÁC
+ * `computeEudrGeometryHash` trong `eudr-export-gate.ts` (hash cả FeatureCollection JSON ở
+ * đường XUẤT). Web Crypto API — chạy được cả trình duyệt (form Cài đặt → Lô vườn) lẫn Node
+ * (script seed/import CLI).
+ */
+export async function computeGeometryHash(geometry: Polygon | MultiPolygon): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(geometry))
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes)
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+}
+
 /** Phạm vi toạ độ hợp lệ cho vùng trồng tại Campuchia / Đông Dương. */
 const LON_MIN = 102
 const LON_MAX = 110

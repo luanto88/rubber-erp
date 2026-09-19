@@ -17,6 +17,7 @@ import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background
 type KhoItem = {
   recipientId: string
   docId: string
+  itemType: "document" | "form"
   ma_tai_lieu: string | null
   ten_tai_lieu: string
   loai_tai_lieu: string | null
@@ -63,52 +64,86 @@ export default function KhoPage() {
     async (fid: string, uid: string) => {
       setLoading(true)
       try {
-        const { data } = await supabase
+        const { data: recData } = await supabase
           .from("iso_distribution_recipients")
-          .select(
-            `id, iso_document_id, first_viewed_at, first_downloaded_at, created_at,
-             iso_documents!iso_document_id(
-               id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai,
-               ngay_hieu_luc, lan_ban_hanh,
-               file_signed_pdf_url, file_signed_office_url, file_goc_url
-             )`,
-          )
+          .select("id, iso_document_id, iso_form_instance_id, item_type, first_viewed_at, first_downloaded_at, created_at")
           .eq("factory_id", fid)
           .eq("recipient_user_id", uid)
           .order("created_at", { ascending: false })
 
-        type DocJoined = {
+        const rawRows = (recData || []) as Array<{
           id: string
-          ma_tai_lieu: string | null
-          ten_tai_lieu: string
-          loai_tai_lieu: string | null
-          trang_thai: string
-          ngay_hieu_luc: string | null
-          lan_ban_hanh: string | null
-          file_signed_pdf_url: string | null
-          file_signed_office_url: string | null
-          file_goc_url: string | null
-        }
-        type RawRecipient = {
-          id: string
-          iso_document_id: string
+          iso_document_id: string | null
+          iso_form_instance_id: string | null
+          item_type: string | null
           first_viewed_at: string | null
           first_downloaded_at: string | null
           created_at: string
-          iso_documents: DocJoined | DocJoined[] | null
-        }
-        const rows = ((data || []) as unknown) as RawRecipient[]
+        }>
 
-        // Deduplicate by doc — giữ row cũ nhất (ngày nhận đầu tiên)
+        const docIds = rawRows.map((r) => r.iso_document_id).filter(Boolean) as string[]
+        const formIds = rawRows.map((r) => r.iso_form_instance_id).filter(Boolean) as string[]
+
+        const [docsRes, formsRes] = await Promise.all([
+          docIds.length > 0
+            ? supabase
+                .from("iso_documents")
+                .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh, file_signed_pdf_url, file_signed_office_url, file_goc_url")
+                .in("id", docIds)
+            : Promise.resolve({ data: [] }),
+          formIds.length > 0
+            ? supabase
+                .from("iso_form_instances")
+                .select("id, tieu_de, trang_thai, template_doc_id, ky_phe_duyet_at, final_pdf_url, final_office_url, soan_thao_signed_url, draft_file_url")
+                .in("id", formIds)
+            : Promise.resolve({ data: [] }),
+        ])
+
+        const docsMap = new Map(((docsRes.data || []) as any[]).map((d) => [d.id, d]))
+        const rawForms = (formsRes.data || []) as any[]
+
+        // Lấy mã template cho form instances
+        const tmplIds = rawForms.map((f) => f.template_doc_id).filter(Boolean) as string[]
+        const tmplRes = tmplIds.length > 0
+          ? await supabase.from("iso_documents").select("id, ma_tai_lieu, ten_tai_lieu").in("id", tmplIds)
+          : { data: [] }
+        const tmplMap = new Map(((tmplRes.data || []) as any[]).map((t) => [t.id, t]))
+
+        const formsMap = new Map(rawForms.map((f) => [f.id, f]))
+
+        // Deduplicate: mỗi item giữ row mới nhất
         const seen = new Map<string, KhoItem>()
-        for (const row of rows) {
-          const rawDoc = row.iso_documents
-          const doc = Array.isArray(rawDoc) ? (rawDoc[0] ?? null) : rawDoc
-          if (!doc) continue
-          if (!seen.has(row.iso_document_id)) {
-            seen.set(row.iso_document_id, {
+        for (const row of rawRows) {
+          const isForm = row.item_type === "form" || (!!row.iso_form_instance_id && !row.iso_document_id)
+          const itemId = isForm ? row.iso_form_instance_id! : row.iso_document_id!
+          if (!itemId || seen.has(itemId)) continue
+
+          if (isForm) {
+            const form = formsMap.get(itemId)
+            if (!form) continue
+            const tmpl = form.template_doc_id ? tmplMap.get(form.template_doc_id) : null
+            seen.set(itemId, {
               recipientId: row.id,
-              docId: row.iso_document_id,
+              docId: itemId,
+              itemType: "form",
+              ma_tai_lieu: tmpl?.ma_tai_lieu || "Biểu mẫu",
+              ten_tai_lieu: form.tieu_de || tmpl?.ten_tai_lieu || "Hồ sơ thực hiện",
+              loai_tai_lieu: "Hồ sơ thực hiện",
+              trang_thai: form.trang_thai === "da_phe_duyet" ? "co_hieu_luc" : form.trang_thai,
+              ngay_hieu_luc: form.ky_phe_duyet_at || null,
+              lan_ban_hanh: "—",
+              ngay_nhan: row.created_at,
+              first_viewed_at: row.first_viewed_at,
+              first_downloaded_at: row.first_downloaded_at,
+              file_url: form.final_pdf_url || form.soan_thao_signed_url || form.draft_file_url || null,
+            })
+          } else {
+            const doc = docsMap.get(itemId)
+            if (!doc) continue
+            seen.set(itemId, {
+              recipientId: row.id,
+              docId: itemId,
+              itemType: "document",
               ma_tai_lieu: doc.ma_tai_lieu,
               ten_tai_lieu: doc.ten_tai_lieu,
               loai_tai_lieu: doc.loai_tai_lieu,
@@ -176,56 +211,82 @@ export default function KhoPage() {
           icon={BadgeCheck}
           action={
             <span className="rounded-full bg-white/15 border border-white/40 px-3 py-1 text-xs font-bold text-white">
-              {items.length} tài liệu
+              {items.length} tài liệu & hồ sơ
             </span>
           }
         />
 
-        {/* Cảnh báo hết hiệu lực */}
+        {/* Cảnh báo tài liệu hết hiệu lực */}
         {hetHieuLucCount > 0 && (
-          <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-            <AlertTriangle size={15} className="shrink-0" />
+          <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+            <AlertTriangle size={14} className="shrink-0 text-amber-600" />
             <span>
-              <span className="font-bold">{hetHieuLucCount}</span> tài liệu bạn đã nhận đã hết hiệu lực.
-              Liên hệ Ban ISO để nhận bản mới.
+              Có <strong>{hetHieuLucCount}</strong> tài liệu/hồ sơ đã hết hiệu lực. Tài liệu
+              hết hiệu lực được giữ lại trong kho để bạn đối chiếu lịch sử nhưng
+              không nên áp dụng trong vận hành thực tế.
             </span>
           </div>
         )}
 
-        {/* Filters */}
-        <FilterBar activeCount={filterLoai.length + (filterTrangThai !== "all" ? 1 : 0)}>
-          <div className="flex flex-wrap gap-2">
-            {allLoai.map((loai) => (
+        {/* Filter bar */}
+        <FilterBar>
+          {/* Loại tài liệu */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-slate-500">Loại:</span>
+            {allLoai.map((loai) => {
+              const active = filterLoai.includes(loai)
+              return (
+                <button
+                  key={loai}
+                  onClick={() =>
+                    setFilterLoai((prev) =>
+                      active ? prev.filter((l) => l !== loai) : [...prev, loai],
+                    )
+                  }
+                  className={
+                    "text-xs font-semibold px-2.5 py-1 rounded-lg transition-all " +
+                    (active
+                      ? "bg-violet-600 text-white shadow-xs"
+                      : "bg-slate-100 hover:bg-slate-200 text-slate-600")
+                  }
+                >
+                  {loai}
+                </button>
+              )
+            })}
+            {filterLoai.length > 0 && (
               <button
-                key={loai}
-                onClick={() =>
-                  setFilterLoai((prev) =>
-                    prev.includes(loai)
-                      ? prev.filter((x) => x !== loai)
-                      : [...prev, loai],
-                  )
-                }
+                onClick={() => setFilterLoai([])}
+                className="text-xs text-slate-400 hover:text-slate-600 underline"
+              >
+                Xóa lọc
+              </button>
+            )}
+          </div>
+
+          {/* Trạng thái hiệu lực */}
+          <div className="flex items-center gap-1">
+            {(
+              [
+                { key: "all", label: "Tất cả" },
+                { key: "co_hieu_luc", label: "Đang hiệu lực" },
+                { key: "het_hieu_luc", label: "Hết hiệu lực" },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setFilterTrangThai(tab.key)}
                 className={
-                  "px-3 py-1 rounded-full text-xs font-bold border transition-all " +
-                  (filterLoai.includes(loai)
-                    ? "bg-violet-600 text-white border-violet-600"
-                    : "bg-white text-slate-600 border-slate-300 hover:border-violet-400")
+                  "text-xs font-semibold px-2.5 py-1 rounded-lg transition-all " +
+                  (filterTrangThai === tab.key
+                    ? "bg-slate-800 text-white shadow-xs"
+                    : "bg-slate-100 hover:bg-slate-200 text-slate-600")
                 }
               >
-                {loai}
+                {tab.label}
               </button>
             ))}
           </div>
-
-          <select
-            value={filterTrangThai}
-            onChange={(e) => setFilterTrangThai(e.target.value)}
-            className="px-3 py-1.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
-          >
-            <option value="all">Tất cả trạng thái</option>
-            <option value="co_hieu_luc">Đang hiệu lực</option>
-            <option value="het_hieu_luc">Hết hiệu lực</option>
-          </select>
         </FilterBar>
 
         {/* Table */}
@@ -242,9 +303,9 @@ export default function KhoPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50 text-left">
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs">Mã tài liệu</th>
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs">Tên tài liệu</th>
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs hidden md:table-cell">Loại</th>
+                  <th className="px-4 py-3 font-bold text-slate-600 text-xs">Mã</th>
+                  <th className="px-4 py-3 font-bold text-slate-600 text-xs">Tên / Tiêu đề</th>
+                  <th className="px-4 py-3 font-bold text-slate-600 text-xs hidden md:table-cell">Phân loại</th>
                   <th className="px-4 py-3 font-bold text-slate-600 text-xs hidden md:table-cell">Ngày nhận</th>
                   <th className="px-4 py-3 font-bold text-slate-600 text-xs">Tình trạng</th>
                   <th className="px-4 py-3 font-bold text-slate-600 text-xs">Trạng thái</th>
@@ -263,7 +324,14 @@ export default function KhoPage() {
                       }
                     >
                       <td className="px-4 py-3 font-bold text-slate-800">
-                        {item.ma_tai_lieu || "—"}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {item.itemType === "form" && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded border border-indigo-200 shrink-0">
+                              Hồ sơ
+                            </span>
+                          )}
+                          <span>{item.ma_tai_lieu || "—"}</span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-slate-700 max-w-xs truncate">
                         {item.ten_tai_lieu}

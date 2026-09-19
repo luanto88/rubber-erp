@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse, after } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { traceExportOrderGeoChain, type TraceOrderAssignment } from "@/lib/eudr-trace"
+import { writeEudrCleanLogIfChanged } from "@/lib/eudr-clean-log-write"
 
 export const dynamic = "force-dynamic"
 
@@ -82,6 +83,17 @@ export async function GET(req: NextRequest) {
       assignments: order.assignments || [],
       ngay: order.ngay,
     })
+
+    // GĐ 4: ghi eudr_clean_log/eudr_geometry_hash mỗi khi trace được tính lại (view time),
+    // không phải lúc tải file — best-effort, idempotent, không được làm chậm response. Route
+    // này CÔNG KHAI (không xác thực) nên idempotent đặc biệt quan trọng — tránh F5 liên tục
+    // sinh UPDATE thừa.
+    const writeCleanLog = () => writeEudrCleanLogIfChanged(supabaseAdmin, order.id, trace.geoData, trace.cleanLog)
+    try {
+      after(writeCleanLog)
+    } catch {
+      void writeCleanLog()
+    }
 
     return NextResponse.json({
       order: {
