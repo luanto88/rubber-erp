@@ -2027,7 +2027,7 @@ export default function SignTemplateEditorPage() {
               activeDocId === docId ? "bg-emerald-500 text-white font-bold shadow-xs" : "bg-white/10 text-white/80 hover:bg-white/20"
             }`}
           >
-            <span>📄 Quy trình chính ({isoDocData?.ma_tai_lieu || "Cha"})</span>
+            <span>📄 Quy trình chính ({isoDocData?.ma_tai_lieu || "Tài liệu"})</span>
             {(docTemplateStatus[docId] || (activeDocId === docId && roles.some((r) => r.placed))) ? (
               <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
             ) : (
@@ -2049,7 +2049,7 @@ export default function SignTemplateEditorPage() {
                 activeDocId === child.id ? "bg-emerald-500 text-white font-bold shadow-xs" : "bg-white/10 text-white/80 hover:bg-white/20"
               }`}
             >
-              <span>📑 Biểu mẫu: {child.ma_tai_lieu || child.ten_tai_lieu || `Con ${idx + 1}`}</span>
+              <span>📑 Biểu mẫu: {child.ma_tai_lieu || child.ten_tai_lieu || `Hồ sơ ${idx + 1}`}</span>
               {(docTemplateStatus[child.id] || (activeDocId === child.id && (roles.some((r) => r.placed) || isExemptIsoDoc))) ? (
                 <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
               ) : (

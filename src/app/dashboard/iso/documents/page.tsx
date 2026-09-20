@@ -341,7 +341,7 @@ export default function IsoDocumentsPage() {
                             type="button"
                             onClick={() => setExpandedParents((prev) => ({ ...prev, [doc.id]: !prev[doc.id] }))}
                             className="rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-violet-700"
-                            title="Xem hồ sơ con"
+                            title="Xem hồ sơ"
                           >
                             <ChevronDown size={14} className={`transition-transform ${isExpanded ? "rotate-180" : ""}`} />
                           </button>
@@ -398,7 +398,7 @@ export default function IsoDocumentsPage() {
                         const canDeleteDoc = (doc.trang_thai === "draft" && (doc.soan_thao_user_id === userId || doc.created_by === userId)) || isAdmin
                         // `<a download>` bị bỏ qua khi khác origin (file nằm trên Supabase
                         // Storage) — phải dùng `?download=` của Storage, xem storage-download.ts.
-                        const canOpenDocFile = canOpenIsoFile(doc.trang_thai, user)
+                        const canOpenDocFile = canOpenIsoFile(doc.trang_thai, user, doc, userId)
                         const downloadUrl = buildStorageDownloadUrl(
                           doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url,
                           `${doc.ma_tai_lieu || "Tài liệu ISO"} ${doc.ten_tai_lieu || ""}`.trim(),
@@ -488,7 +488,7 @@ export default function IsoDocumentsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-700 line-clamp-1">{child.ten_tai_lieu}</div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">Hồ sơ con</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">Hồ sơ</div>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
                         <span className="px-2 py-0.5 bg-sky-50 text-sky-700 rounded-md text-xs font-bold">
@@ -505,7 +505,7 @@ export default function IsoDocumentsPage() {
                           const isAdmin = userRole === "admin"
                           const canEditChild = (child.trang_thai === "draft" && (child.soan_thao_user_id === userId || child.created_by === userId)) || isAdmin
                           const canDeleteChild = (child.trang_thai === "draft" && (child.soan_thao_user_id === userId || child.created_by === userId)) || isAdmin
-                          const canOpenChildFile = canOpenIsoFile(child.trang_thai, user)
+                          const canOpenChildFile = canOpenIsoFile(child.trang_thai, user, child, userId)
                           const childDownloadUrl = buildStorageDownloadUrl(
                             child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url,
                             `${child.ma_tai_lieu || "Hồ sơ ISO"} ${child.ten_tai_lieu || ""}`.trim(),

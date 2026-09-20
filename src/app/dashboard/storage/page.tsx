@@ -1998,7 +1998,7 @@ export default function StoragePage() {
                   <DateTextInput value={form.ngay_bd}
                     onChange={(nextNgayBd) => {
                       updateForm({ ngay_bd: nextNgayBd })
-                      void fetchTrips(nextNgayBd, form.ngay_kt, form.loai_nl, modal === "add").then((trips) => {
+                      void fetchTrips(nextNgayBd, form.ngay_kt, form.loai_nl, modal === "add", editId, form.nguon_goc, form.chung_nhan, form.ghi_chu).then((trips) => {
                         applyFetchedTrips(trips, modal === "add")
                       })
                     }}
@@ -2009,7 +2009,7 @@ export default function StoragePage() {
                   <DateTextInput value={form.ngay_kt}
                     onChange={(nextNgayKt) => {
                       updateForm({ ngay_kt: nextNgayKt })
-                      void fetchTrips(form.ngay_bd, nextNgayKt, form.loai_nl, modal === "add").then((trips) => {
+                      void fetchTrips(form.ngay_bd, nextNgayKt, form.loai_nl, modal === "add", editId, form.nguon_goc, form.chung_nhan, form.ghi_chu).then((trips) => {
                         applyFetchedTrips(trips, modal === "add")
                       })
                     }}
@@ -2038,8 +2038,8 @@ export default function StoragePage() {
 
               {/* Trips from Điều xe */}
               {form.ngay_bd && (
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <div className="bg-slate-50 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200">
+                <div className="border border-slate-200 rounded-xl relative z-30">
+                  <div className="bg-slate-50 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 rounded-t-xl relative z-30">
                     <div className="flex items-center gap-2">
                       <Truck size={14} className="text-slate-500" />
                       <span className="text-xs font-bold text-slate-700">
@@ -2054,7 +2054,7 @@ export default function StoragePage() {
                         labels={{ [EMPTY_NOTE_FILTER]: "Không có ký hiệu KT" }}
                         placeholder="Tất cả ký hiệu KT"
                         searchPlaceholder="Tìm ký hiệu KT..."
-                        className="min-w-48"
+                        className="min-w-48 relative z-30"
                       />
                       <button
                         onClick={() => setSelectedTrips(new Set(noteFilteredTrips.map(t => t.ref)))}
@@ -2070,17 +2070,17 @@ export default function StoragePage() {
                   </div>
 
                   {loadingTrips ? (
-                    <div className="p-6 text-center text-slate-400 text-sm">Đang tải chuyến xe...</div>
+                    <div className="p-6 text-center text-slate-400 text-sm rounded-b-xl">Đang tải chuyến xe...</div>
                   ) : dispatchTrips.length === 0 ? (
-                    <div className="p-6 text-center text-slate-400 text-sm">
+                    <div className="p-6 text-center text-slate-400 text-sm rounded-b-xl">
                       Không có chuyến xe trong khoảng ngày này
                     </div>
                   ) : noteFilteredTrips.length === 0 ? (
-                    <div className="p-6 text-center text-slate-400 text-sm">
+                    <div className="p-6 text-center text-slate-400 text-sm rounded-b-xl">
                       Không có chuyến xe nào khớp bộ lọc Ký hiệu KT đang chọn
                     </div>
                   ) : (
-                    <div className="max-h-56 overflow-y-auto">
+                    <div className="max-h-56 overflow-y-auto rounded-b-xl relative z-0">
                       <table className="w-full text-xs">
                         <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                           <tr>
@@ -2137,7 +2137,7 @@ export default function StoragePage() {
               )}
 
               {/* KL tươi / khô — read-only, tự tính từ xe được chọn */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 relative z-0">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
                     KL tươi (kg) <span className="text-emerald-600 font-normal">(tự tính)</span>
@@ -2157,7 +2157,7 @@ export default function StoragePage() {
               </div>
 
               {/* Ký hiệu kỹ thuật & Ghi chú tự do */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 relative z-0">
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
                     Ký hiệu kỹ thuật <span className="text-slate-400 font-normal">(VD: T, Tr, TM, GCTBK, TL...)</span>

@@ -302,6 +302,116 @@ export function fmtDate(d: string | null | undefined): string {
   return `${day}/${month}/${year}`
 }
 
+export function fmtDateTime(d: string | null | undefined): string {
+  if (!d) return ""
+  const dt = new Date(d)
+  if (isNaN(dt.getTime())) return d
+  const day = String(dt.getDate()).padStart(2, "0")
+  const month = String(dt.getMonth() + 1).padStart(2, "0")
+  const year = dt.getFullYear()
+  const hours = String(dt.getHours()).padStart(2, "0")
+  const mins = String(dt.getMinutes()).padStart(2, "0")
+  return `${day}/${month}/${year} ${hours}:${mins}`
+}
+
+export interface IsoLogActionMeta {
+  label: string
+  badgeCls: string
+  dotCls: string
+}
+
+export const ISO_LOG_ACTION_CONFIG: Record<string, IsoLogActionMeta> = {
+  clone: {
+    label: "Khởi tạo hồ sơ",
+    badgeCls: "bg-slate-100 text-slate-700 border-slate-200",
+    dotCls: "bg-slate-400",
+  },
+  gui_xem_xet: {
+    label: "Gửi xem xét",
+    badgeCls: "bg-blue-50 text-blue-700 border-blue-200",
+    dotCls: "bg-blue-500",
+  },
+  gui_phe_duyet: {
+    label: "Gửi phê duyệt",
+    badgeCls: "bg-indigo-50 text-indigo-700 border-indigo-200",
+    dotCls: "bg-indigo-500",
+  },
+  xem_xet: {
+    label: "Ký xem xét",
+    badgeCls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    dotCls: "bg-emerald-500",
+  },
+  phe_duyet: {
+    label: "Ký phê duyệt",
+    badgeCls: "bg-teal-50 text-teal-700 border-teal-200 font-semibold",
+    dotCls: "bg-teal-600",
+  },
+  tra_ve: {
+    label: "Trả về hồ sơ",
+    badgeCls: "bg-amber-50 text-amber-700 border-amber-200",
+    dotCls: "bg-amber-500",
+  },
+  tu_choi: {
+    label: "Từ chối",
+    badgeCls: "bg-rose-50 text-rose-700 border-rose-200",
+    dotCls: "bg-rose-500",
+  },
+  doi_nguoi_ky: {
+    label: "Đổi người ký",
+    badgeCls: "bg-purple-50 text-purple-700 border-purple-200",
+    dotCls: "bg-purple-500",
+  },
+  soan_thao: {
+    label: "Soạn thảo & ký",
+    badgeCls: "bg-sky-50 text-sky-700 border-sky-200",
+    dotCls: "bg-sky-500",
+  },
+  gui_lai_phe_duyet: {
+    label: "Gửi lại phê duyệt",
+    badgeCls: "bg-blue-50 text-blue-700 border-blue-200",
+    dotCls: "bg-blue-500",
+  },
+  tra_ve_nhap: {
+    label: "Trả về bản nháp",
+    badgeCls: "bg-amber-50 text-amber-700 border-amber-200",
+    dotCls: "bg-amber-500",
+  },
+}
+
+export function formatIsoLogAction(action: string): IsoLogActionMeta {
+  if (ISO_LOG_ACTION_CONFIG[action]) {
+    return ISO_LOG_ACTION_CONFIG[action]
+  }
+  if (action.startsWith("ky_buoc_")) {
+    const stepNo = action.replace("ky_buoc_", "")
+    return {
+      label: `Ký bước ${stepNo}`,
+      badgeCls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      dotCls: "bg-emerald-500",
+    }
+  }
+  if (action === "ky_buoc") {
+    return {
+      label: "Ký bước duyệt",
+      badgeCls: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      dotCls: "bg-emerald-500",
+    }
+  }
+  return {
+    label: action.replace(/_/g, " "),
+    badgeCls: "bg-slate-100 text-slate-700 border-slate-200",
+    dotCls: "bg-slate-400",
+  }
+}
+
+export function cleanLogNote(note: string | null | undefined): string | null {
+  if (!note) return null
+  return note
+    .replace(/^Tạo từ template PDF:\s*/i, "Từ mẫu PDF: ")
+    .replace(/^Tạo từ template:\s*/i, "Từ mẫu: ")
+}
+
+
 // ─── Module Thực hiện hồ sơ ISO ───────────────────────────────────────────
 
 export type IsoFormInstanceStatus =

@@ -668,7 +668,7 @@ export default function IsoDocumentDetailPage() {
       // Load ALL siblings for display (no filter by trang_thai/users)
       const { data: allSiblings } = await supabase
         .from("iso_documents")
-        .select("id, ma_tai_lieu, ten_tai_lieu, trang_thai, loai_tai_lieu, file_signed_pdf_url, file_signed_office_url, file_goc_url, auto_convert_pdf")
+        .select("id, ma_tai_lieu, ten_tai_lieu, trang_thai, loai_tai_lieu, file_signed_pdf_url, file_signed_office_url, file_goc_url, auto_convert_pdf, created_by, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id")
         .eq("factory_id", fid)
         .eq("parent_doc_id", d.parent_doc_id)
         .order("ma_tai_lieu", { ascending: true })
@@ -1014,9 +1014,9 @@ export default function IsoDocumentDetailPage() {
   // Người soạn thảo của tài liệu này (hoặc đang tạo mới)
   const isSoanThao = isNew || (!!userId && userId === doc?.soan_thao_user_id)
   const canToggleAutoConvert = (trangThai === "draft" || trangThai === "tra_ve") && (isDrafter || isNguoiTao || isAdmin)
-  // Mở/tải file của CHÍNH bản ghi này. Bản hết hiệu lực cần quyền iso.view_het_hieu_luc —
+  // Mở/tải file của CHÍNH bản ghi này. Bản hết hiệu lực cần quyền iso.view_het_hieu_luc (hoặc người tham gia hồ sơ) —
   // thông tin chi tiết vẫn xem bình thường, chỉ nội dung file bị khoá.
-  const canOpenThisFile = canOpenIsoFile(trangThai, user)
+  const canOpenThisFile = canOpenIsoFile(trangThai, user, doc, userId)
   const canAddChildRow = !!(selectedParentDocId && form.loai_tai_lieu_cha && form.so_hieu_cha)
 
   const showToast = (ok: boolean, text: string) => {
@@ -1098,11 +1098,11 @@ export default function IsoDocumentDetailPage() {
       return
     }
     if (form.phan_loai_tl === "con") {
-      setSaveError("Phần upload nhiều hồ sơ con chỉ dùng khi đang soạn thảo tài liệu cha.")
+      setSaveError("Phần upload nhiều hồ sơ chỉ dùng khi đang soạn thảo tài liệu.")
       return
     }
     if (!form.ma_tai_lieu) {
-      setSaveError("Vui lòng nhập đủ thông tin để sinh mã tài liệu cha trước khi upload hồ sơ con.")
+      setSaveError("Vui lòng nhập đủ thông tin để sinh mã tài liệu trước khi upload hồ sơ.")
       return
     }
 
@@ -1127,7 +1127,7 @@ export default function IsoDocumentDetailPage() {
       if (uploadWarnings.length > 0) {
         showToast(false, `Đã chuẩn hoá tên file lưu trữ: ${uploadWarnings.join("; ")}`)
       } else {
-        showToast(true, `Đã tải lên ${uploaded.length} file hồ sơ con`)
+        showToast(true, `Đã tải lên ${uploaded.length} file hồ sơ`)
       }
     } finally {
       setFileUploading(false)
@@ -1291,9 +1291,9 @@ export default function IsoDocumentDetailPage() {
     if (commonErrors.length > 0) return commonErrors[0] as string
 
     if (isReviewForm) {
-      // TH4: soát xét nhiều hồ sơ con — validate childReviewRows
+      // TH4: soát xét nhiều hồ sơ — validate childReviewRows
       if (isConForm) {
-        if (!reviewParentDocId) return "Vui lòng chọn tài liệu cha"
+        if (!reviewParentDocId) return "Vui lòng chọn tài liệu"
         if (childReviewRows.length === 0) return "Vui lòng thêm ít nhất một hồ sơ cần soát xét"
         const invalidRow = childReviewRows.find((row) => !row.old_doc_id || !row.lan_sua_doi || !row.ten_tai_lieu_moi.trim() || !row.file_url)
         if (invalidRow) return "Vui lòng điền đủ mã hồ sơ, lần sửa đổi, tên mới và file cho từng dòng"
@@ -1304,7 +1304,7 @@ export default function IsoDocumentDetailPage() {
         const hasDupNewCode = new Set(newCodes).size !== newCodes.length
         if (hasDupNewCode) return "Có mã hồ sơ mới bị trùng nhau trong danh sách"
       } else {
-        // TH3: soát xét tài liệu cha — validate single-row fields
+        // TH3: soát xét tài liệu — validate single-row fields
         const reviewErrors = [
           requireValue(form.ma_tai_lieu_cu || form.ma_tai_lieu, "mã tài liệu"),
           requireValue(form.ten_tai_lieu_cu, "tên tài liệu cũ"),
@@ -1315,17 +1315,17 @@ export default function IsoDocumentDetailPage() {
         if (reviewErrors.length > 0) return reviewErrors[0] as string
         if (childReviewRows.length > 0) {
           const invalidRow = childReviewRows.find((row) => !row.old_doc_id || !row.lan_sua_doi || !row.ten_tai_lieu_moi.trim() || !row.file_url)
-          if (invalidRow) return "Vui lòng điền đủ mã hồ sơ, lần sửa đổi, tên mới và file cho từng hồ sơ con đang soát xét"
-          if (childReviewRows.some((row) => !isValidRevisionText(row.lan_sua_doi))) return "Lần sửa đổi của hồ sơ con phải có dạng 2 chữ số hoặc NN/NN, ví dụ 01 hoặc 01/01"
-          if (childReviewRows.some((row) => row.doi_ma && !row.ma_tai_lieu_moi.trim())) return "Vui lòng nhập mã hồ sơ mới cho các hồ sơ con có đổi mã"
+          if (invalidRow) return "Vui lòng điền đủ mã hồ sơ, lần sửa đổi, tên mới và file cho từng hồ sơ đang soát xét"
+          if (childReviewRows.some((row) => !isValidRevisionText(row.lan_sua_doi))) return "Lần sửa đổi của hồ sơ phải có dạng 2 chữ số hoặc NN/NN, ví dụ 01 hoặc 01/01"
+          if (childReviewRows.some((row) => row.doi_ma && !row.ma_tai_lieu_moi.trim())) return "Vui lòng nhập mã hồ sơ mới cho các hồ sơ có đổi mã"
         }
         if (childDraftRows.length > 0) {
           const invalidDraftRow = childDraftRows.find((row) =>
             !row.loai_tai_lieu || !row.so_hieu || !row.ten_tai_lieu.trim() || !row.lan_ban_hanh || !row.file_url
           )
-          if (invalidDraftRow) return "Vui lòng nhập đủ Loại hồ sơ, Tên hồ sơ, Số hiệu, Lần ban hành và File hồ sơ cho từng hồ sơ con mới"
+          if (invalidDraftRow) return "Vui lòng nhập đủ Loại hồ sơ, Tên hồ sơ, Số hiệu, Lần ban hành và File hồ sơ cho từng hồ sơ mới"
           if (childDraftRows.some((row) => !isValidRevisionText(row.lan_ban_hanh))) {
-            return "Lần ban hành của hồ sơ con mới phải có dạng 2 chữ số hoặc NN/NN, ví dụ 00 hoặc 01/01"
+            return "Lần ban hành của hồ sơ mới phải có dạng 2 chữ số hoặc NN/NN, ví dụ 00 hoặc 01/01"
           }
         }
       }
@@ -1338,7 +1338,7 @@ export default function IsoDocumentDetailPage() {
 
     const draftErrors = isConForm
       ? [
-          requireValue(selectedParentDocId, "tài liệu cha"),
+          requireValue(selectedParentDocId, "tài liệu"),
           requireValue(form.ma_tai_lieu_cha, "mã tài liệu"),
           requireValue(form.loai_tai_lieu_cha, "loại tài liệu"),
           requireValue(form.so_hieu_cha, "số hiệu tài liệu"),
@@ -1453,7 +1453,7 @@ export default function IsoDocumentDetailPage() {
         const createdIds = (data || []).map((row) => row.id)
         await Promise.all(createdIds.map((id) => saveStandards(id)))
         setChildDraftRows([])
-        showToast(true, `Đã tạo ${createdIds.length} hồ sơ con cho ${form.ma_tai_lieu}`)
+        showToast(true, `Đã tạo ${createdIds.length} hồ sơ cho ${form.ma_tai_lieu}`)
         return createdIds
       }
 
@@ -1504,7 +1504,7 @@ export default function IsoDocumentDetailPage() {
         if (form.phan_loai_tl === "con" || childUploadFiles.length === 0) return true
         const firstChildNumber = parseInt(childUploadStartNo)
         if (!Number.isFinite(firstChildNumber) || firstChildNumber < 1) {
-          setSaveError("Số hiệu bắt đầu của hồ sơ con không hợp lệ.")
+          setSaveError("Số hiệu bắt đầu của hồ sơ không hợp lệ.")
           return false
         }
         const childPayloads = childUploadFiles.map((file, index) => {
@@ -1531,7 +1531,7 @@ export default function IsoDocumentDetailPage() {
         const createdIds = (data || []).map((row) => row.id)
         await Promise.all(createdIds.map((id) => saveStandards(id)))
         setChildUploadFiles([])
-        showToast(true, `Đã tạo ${createdIds.length} hồ sơ con cho ${form.ma_tai_lieu}`)
+        showToast(true, `Đã tạo ${createdIds.length} hồ sơ cho ${form.ma_tai_lieu}`)
         return true
       }
       void saveChildRecords
@@ -3020,7 +3020,7 @@ export default function IsoDocumentDetailPage() {
         <div className="max-h-56 space-y-2 overflow-auto">
           {childDocs.map((child) => {
             const url = childFileUrl(child)
-            const canOpenChild = canOpenIsoFile(child.trang_thai, user)
+            const canOpenChild = canOpenIsoFile(child.trang_thai, user, child, userId)
             return (
               <div key={child.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 space-y-1">
                 <div className="flex items-center gap-2">
@@ -3328,7 +3328,7 @@ export default function IsoDocumentDetailPage() {
             </div>
             {isCon && form.ma_tai_lieu_cha && (
               <div>
-                <p className="text-sm font-medium text-slate-500">Mã tài liệu cha</p>
+                <p className="text-sm font-medium text-slate-500">Mã tài liệu</p>
                 <p className="text-base font-bold font-mono text-slate-900 mt-1">{form.ma_tai_lieu_cha}</p>
               </div>
             )}
@@ -3668,14 +3668,14 @@ export default function IsoDocumentDetailPage() {
         {!isReviewForm && isCon && (
           <>
             <div className="sm:col-span-2">
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã tài liệu cha có hiệu lực <span className="text-red-500">*</span></label>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã tài liệu có hiệu lực <span className="text-red-500">*</span></label>
               <select value={selectedParentDocId} onChange={(e) => applyParentDocumentForChild(e.target.value)} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
-                <option value="">-- Chọn tài liệu cha --</option>
+                <option value="">-- Chọn tài liệu --</option>
                 {parentDocOptions.map((parent) => (
                   <option key={parent.id} value={parent.id}>{parent.ma_tai_lieu} - {parent.ten_tai_lieu}</option>
                 ))}
               </select>
-              <p className="mt-1 text-[11px] text-slate-400">Danh sách lọc theo tiêu chuẩn và phòng ban đã chọn, chỉ gồm tài liệu cha có hiệu lực.</p>
+              <p className="mt-1 text-[11px] text-slate-400">Danh sách lọc theo tiêu chuẩn và phòng ban đã chọn, chỉ gồm tài liệu có hiệu lực.</p>
             </div>
             <div className="hidden">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại tài liệu <span className="text-red-500">*</span></label>
@@ -3702,10 +3702,10 @@ export default function IsoDocumentDetailPage() {
 
         {isReviewForm && (
           <>
-            {/* Soát xét hồ sơ con: chọn tài liệu cha trước để lọc danh sách hồ sơ */}
+            {/* Soát xét hồ sơ: chọn tài liệu trước để lọc danh sách hồ sơ */}
             {isCon && (
               <div className="sm:col-span-2">
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tài liệu cha (bộ quy trình) <span className="text-red-500">*</span></label>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tài liệu (bộ quy trình) <span className="text-red-500">*</span></label>
                 <select
                   value={reviewParentDocId}
                   onChange={(e) => {
@@ -3716,12 +3716,12 @@ export default function IsoDocumentDetailPage() {
                   disabled={!isEditable}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
                 >
-                  <option value="">— Chọn tài liệu cha có hiệu lực —</option>
+                  <option value="">— Chọn tài liệu có hiệu lực —</option>
                   {reviewParentOptions.map((p) => (
                     <option key={p.id} value={p.id}>{p.ma_tai_lieu} — {p.ten_tai_lieu}</option>
                   ))}
                 </select>
-                <p className="mt-1 text-[11px] text-slate-400">Chọn tài liệu cha để lọc danh sách hồ sơ bên dưới.</p>
+                <p className="mt-1 text-[11px] text-slate-400">Chọn tài liệu để lọc danh sách hồ sơ bên dưới.</p>
               </div>
             )}
             {/* TH3 only: single mã tài liệu dropdown + tên cũ + lần sửa đổi + đổi mã */}
@@ -4192,11 +4192,11 @@ export default function IsoDocumentDetailPage() {
           <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full !bg-sky-600 px-2.5 py-1 text-xs font-extrabold !text-white">{form.phan_loai_tl === "con" ? "Lô hồ sơ" : "Bộ tài liệu"}</span>
-              <span className="font-bold">{form.phan_loai_tl === "con" ? (form.ma_tai_lieu_cha || "Quy trình cha") : (doc.ma_tai_lieu || "Tài liệu cha")}</span>
+              <span className="font-bold">{form.phan_loai_tl === "con" ? (form.ma_tai_lieu_cha || "Quy trình") : (doc.ma_tai_lieu || "Tài liệu")}</span>
               <span>{form.phan_loai_tl === "con" ? `có ${childDocs.length + 1} hồ sơ cùng cấp đang xử lý.` : `đang được xử lý cùng ${childDocs.length} hồ sơ kèm theo.`}</span>
             </div>
             <p className="mt-1 text-xs text-sky-700">
-              {form.phan_loai_tl === "con" ? "Khi ký, hệ thống xử lý lần lượt các hồ sơ trong lô cùng người soạn/xem xét/phê duyệt." : "Người xem xét/phê duyệt xử lý một bộ duy nhất; khi ký, hệ thống sẽ mở lần lượt file chính và từng hồ sơ con cần ký."}
+              {form.phan_loai_tl === "con" ? "Khi ký, hệ thống xử lý lần lượt các hồ sơ trong lô cùng người soạn/xem xét/phê duyệt." : "Người xem xét/phê duyệt xử lý một bộ duy nhất; khi ký, hệ thống sẽ mở lần lượt file chính và từng hồ sơ cần ký."}
             </p>
           </div>
         )}
@@ -4394,7 +4394,7 @@ export default function IsoDocumentDetailPage() {
                       <p className="text-sm font-extrabold text-emerald-800">Hồ sơ cần soát xét</p>
                       <p className="text-[11px] text-slate-500">Mỗi dòng là một hồ sơ. Chọn hồ sơ cũ và upload file phiên bản mới.</p>
                       {!reviewParentDocId && (
-                        <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu cha (bộ quy trình) trước.</p>
+                        <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu (bộ quy trình) trước.</p>
                       )}
                     </div>
                     <button
@@ -4428,7 +4428,7 @@ export default function IsoDocumentDetailPage() {
                                 ))}
                               </select>
                               {rowChildOptions.length === 0 && reviewParentDocId && (
-                                <span className="mt-1 block text-[10px] text-amber-600">Tài liệu cha chưa có hồ sơ con có hiệu lực.</span>
+                                <span className="mt-1 block text-[10px] text-amber-600">Tài liệu chưa có hồ sơ có hiệu lực.</span>
                               )}
                             </label>
                             <label className="text-[11px] font-bold text-slate-600">
@@ -4528,7 +4528,7 @@ export default function IsoDocumentDetailPage() {
                     <p className="text-sm font-extrabold text-slate-700">Hồ sơ cần soạn thảo</p>
                     <p className="text-[11px] text-slate-500">Mỗi dòng là một hồ sơ riêng. Upload file riêng cho mỗi dòng.</p>
                     {!canAddChildRow && (
-                      <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu cha và nhập số hiệu trước khi thêm hồ sơ.</p>
+                      <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu và nhập số hiệu trước khi thêm hồ sơ.</p>
                     )}
                   </div>
                   <button
@@ -4612,7 +4612,7 @@ export default function IsoDocumentDetailPage() {
                 <div className="space-y-2">
                   {siblingDocs.map((sib) => {
                     const sibUrl = sib.file_signed_pdf_url || sib.file_signed_office_url || sib.file_goc_url
-                    const canOpenSib = canOpenIsoFile(sib.trang_thai, user)
+                    const canOpenSib = canOpenIsoFile(sib.trang_thai, user, sib, userId)
                     const isSelf = sib.id === docId
                     const statusColor = (TRANG_THAI_COLOR as Record<string, string>)[sib.trang_thai] || "bg-slate-100 text-slate-600"
                     return (
@@ -4779,7 +4779,7 @@ export default function IsoDocumentDetailPage() {
                 <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-xs font-extrabold text-sky-800">Hồ sơ con của tài liệu này</p>
+                      <p className="text-xs font-extrabold text-sky-800">Hồ sơ của tài liệu này</p>
                       <p className="text-[11px] text-sky-700">
                         {isEditable ? "Bấm Thêm hồ sơ, nhập từng dòng và upload một file riêng cho mỗi hồ sơ." : "Danh sách hồ sơ đã lưu."}
                       </p>
@@ -4853,7 +4853,7 @@ export default function IsoDocumentDetailPage() {
                       </div>
                     ))}
                     {childDraftRows.length === 0 && childDocs.length === 0 && (
-                      <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ con nào. Bấm &quot;Thêm hồ sơ&quot; để bắt đầu.</p>
+                      <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ nào. Bấm &quot;Thêm hồ sơ&quot; để bắt đầu.</p>
                     )}
                   </div>
                   )}
@@ -4893,10 +4893,10 @@ export default function IsoDocumentDetailPage() {
                 <div className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-extrabold text-emerald-800">Soát xét hồ sơ con hiện có</p>
-                      <p className="text-[11px] text-slate-500">Chọn các hồ sơ con đang có hiệu lực thuộc tài liệu cha này và upload phiên bản mới cho từng hồ sơ cần sửa.</p>
+                      <p className="text-sm font-extrabold text-emerald-800">Soát xét hồ sơ hiện có</p>
+                      <p className="text-[11px] text-slate-500">Chọn các hồ sơ đang có hiệu lực thuộc tài liệu này và upload phiên bản mới cho từng hồ sơ cần sửa.</p>
                       {!canAddParentReviewChild && (
-                        <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu cha đang có hiệu lực trước khi thêm hồ sơ con cần soát xét.</p>
+                        <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu đang có hiệu lực trước khi thêm hồ sơ cần soát xét.</p>
                       )}
                     </div>
                     {isEditable && (
@@ -4935,7 +4935,7 @@ export default function IsoDocumentDetailPage() {
                               ))}
                             </select>
                             {parentReviewChildOptions.length === 0 && canAddParentReviewChild && (
-                              <span className="mt-1 block text-[10px] text-amber-600">Tài liệu cha này chưa có hồ sơ con có hiệu lực.</span>
+                              <span className="mt-1 block text-[10px] text-amber-600">Tài liệu này chưa có hồ sơ có hiệu lực.</span>
                             )}
                           </label>
                           <label className="text-[11px] font-bold text-slate-600">
@@ -4995,7 +4995,7 @@ export default function IsoDocumentDetailPage() {
                       </div>
                     )})}
                     {childReviewRows.length === 0 && (
-                      <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">Chưa có hồ sơ con nào cần soát xét trong đợt này.</p>
+                      <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">Chưa có hồ sơ nào cần soát xét trong đợt này.</p>
                     )}
                   </div>
                 </div>
@@ -5003,10 +5003,10 @@ export default function IsoDocumentDetailPage() {
                 <div className="rounded-xl border border-sky-200 bg-white p-4 shadow-sm">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-extrabold text-sky-800">Thêm hồ sơ con mới</p>
-                      <p className="text-[11px] text-slate-500">Dùng cho hồ sơ con phát sinh mới trong lần soát xét tài liệu cha hiện tại.</p>
+                      <p className="text-sm font-extrabold text-sky-800">Thêm hồ sơ mới</p>
+                      <p className="text-[11px] text-slate-500">Dùng cho hồ sơ phát sinh mới trong lần soát xét tài liệu hiện tại.</p>
                       {!canAddParentReviewNewChild && (
-                        <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu cha và mã đích trước khi thêm hồ sơ con mới.</p>
+                        <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu và mã đích trước khi thêm hồ sơ mới.</p>
                       )}
                     </div>
                     {isEditable && (
@@ -5097,7 +5097,7 @@ export default function IsoDocumentDetailPage() {
                       </div>
                     )})}
                     {childDraftRows.length === 0 && childDocs.length === 0 && (
-                      <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ con mới nào trong đợt soát xét này.</p>
+                      <p className="rounded-lg bg-white/70 px-3 py-2 text-[11px] text-sky-700">Chưa có hồ sơ mới nào trong đợt soát xét này.</p>
                     )}
                   </div>
                 </div>

@@ -1,7 +1,8 @@
 "use client"
 
+import Link from "next/link"
 import { useState, useEffect, useCallback } from "react"
-import { Archive, Eye, Download, AlertTriangle, BadgeCheck } from "lucide-react"
+import { Archive, Eye, Download, AlertTriangle, BadgeCheck, ArrowUpRight } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, type SessionUser } from "@/lib/auth"
 import { canOpenIsoFile, EXPIRED_FILE_HINT } from "@/app/dashboard/iso/_components/iso-file-access"
@@ -24,10 +25,18 @@ type KhoItem = {
   trang_thai: string
   ngay_hieu_luc: string | null
   lan_ban_hanh: string | null
-  ngay_nhan: string // created_at của recipient row
+  ngay_nhan: string // created_at của recipient row hoặc ngày tạo
   first_viewed_at: string | null
   first_downloaded_at: string | null
   file_url: string | null // ưu tiên: signed_pdf > signed_office > goc
+  created_by?: string | null
+  soan_thao_user_id?: string | null
+  xem_xet_user_id?: string | null
+  phe_duyet_user_id?: string | null
+  nguoi_tao?: string | null
+  is_owner?: boolean // user là tác giả / người soạn / người soát xét / người lập
+  new_doc_id?: string | null // ID bản mới có hiệu lực thay thế (nếu có)
+  new_doc_ma?: string | null // Lần ban hành bản mới
 }
 
 function getFileUrl(doc: {
@@ -56,14 +65,15 @@ export default function KhoPage() {
   const [items, setItems] = useState<KhoItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Filters
+  // Filters — Mặc định lọc "co_hieu_luc" để người dùng tập trung vào tài liệu đang vận hành
   const [filterLoai, setFilterLoai] = useState<string[]>([])
-  const [filterTrangThai, setFilterTrangThai] = useState<string>("all")
+  const [filterTrangThai, setFilterTrangThai] = useState<string>("co_hieu_luc")
 
   const loadItems = useCallback(
     async (fid: string, uid: string) => {
       setLoading(true)
       try {
+        // 1. Lấy danh sách tài liệu / hồ sơ được phân phối đến user
         const { data: recData } = await supabase
           .from("iso_distribution_recipients")
           .select("id, iso_document_id, iso_form_instance_id, item_type, first_viewed_at, first_downloaded_at, created_at")
@@ -84,28 +94,62 @@ export default function KhoPage() {
         const docIds = rawRows.map((r) => r.iso_document_id).filter(Boolean) as string[]
         const formIds = rawRows.map((r) => r.iso_form_instance_id).filter(Boolean) as string[]
 
-        const [docsRes, formsRes] = await Promise.all([
+        // 2. Lấy thêm tài liệu do chính user tạo / soạn thảo / soát xét (co_hieu_luc hoặc het_hieu_luc)
+        // 3. Lấy thêm hồ sơ do chính user lập (nguoi_tao = uid) đã phê duyệt
+        // 4. Lấy danh sách tài liệu đang có hiệu lực để đối chiếu bản thay thế cho bản hết hiệu lực
+        const [docsRes, formsRes, userDocsRes, userFormsRes, activeDocsRes] = await Promise.all([
           docIds.length > 0
             ? supabase
                 .from("iso_documents")
-                .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh, file_signed_pdf_url, file_signed_office_url, file_goc_url")
+                .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh, file_signed_pdf_url, file_signed_office_url, file_goc_url, created_by, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id")
                 .in("id", docIds)
             : Promise.resolve({ data: [] }),
           formIds.length > 0
             ? supabase
                 .from("iso_form_instances")
-                .select("id, tieu_de, trang_thai, template_doc_id, ky_phe_duyet_at, final_pdf_url, final_office_url, soan_thao_signed_url, draft_file_url")
+                .select("id, tieu_de, trang_thai, template_doc_id, ky_phe_duyet_at, final_pdf_url, final_office_url, soan_thao_signed_url, draft_file_url, nguoi_tao, xem_xet_user_id, phe_duyet_user_id")
                 .in("id", formIds)
             : Promise.resolve({ data: [] }),
+          supabase
+            .from("iso_documents")
+            .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh, file_signed_pdf_url, file_signed_office_url, file_goc_url, created_by, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id, created_at")
+            .eq("factory_id", fid)
+            .or(`created_by.eq.${uid},soan_thao_user_id.eq.${uid},xem_xet_user_id.eq.${uid}`)
+            .in("trang_thai", ["co_hieu_luc", "het_hieu_luc"])
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("iso_form_instances")
+            .select("id, tieu_de, trang_thai, template_doc_id, ky_phe_duyet_at, final_pdf_url, final_office_url, soan_thao_signed_url, draft_file_url, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, created_at")
+            .eq("factory_id", fid)
+            .or(`nguoi_tao.eq.${uid},xem_xet_user_id.eq.${uid}`)
+            .eq("trang_thai", "da_phe_duyet")
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("iso_documents")
+            .select("id, ma_tai_lieu, lan_ban_hanh")
+            .eq("factory_id", fid)
+            .eq("trang_thai", "co_hieu_luc"),
         ])
+
+        // Bản đồ tài liệu đang có hiệu lực theo mã (chuẩn hóa chữ thường)
+        const activeDocByCode = new Map<string, { id: string; lan_ban_hanh: string | null }>()
+        for (const ad of ((activeDocsRes.data || []) as any[])) {
+          if (ad.ma_tai_lieu) {
+            activeDocByCode.set(ad.ma_tai_lieu.trim().toLowerCase(), { id: ad.id, lan_ban_hanh: ad.lan_ban_hanh })
+          }
+        }
 
         const docsMap = new Map(((docsRes.data || []) as any[]).map((d) => [d.id, d]))
         const rawForms = (formsRes.data || []) as any[]
 
         // Lấy mã template cho form instances
-        const tmplIds = rawForms.map((f) => f.template_doc_id).filter(Boolean) as string[]
-        const tmplRes = tmplIds.length > 0
-          ? await supabase.from("iso_documents").select("id, ma_tai_lieu, ten_tai_lieu").in("id", tmplIds)
+        const allFormTmplIds = [
+          ...rawForms.map((f) => f.template_doc_id),
+          ...((userFormsRes.data || []) as any[]).map((f) => f.template_doc_id),
+        ].filter(Boolean) as string[]
+
+        const tmplRes = allFormTmplIds.length > 0
+          ? await supabase.from("iso_documents").select("id, ma_tai_lieu, ten_tai_lieu").in("id", allFormTmplIds)
           : { data: [] }
         const tmplMap = new Map(((tmplRes.data || []) as any[]).map((t) => [t.id, t]))
 
@@ -113,6 +157,8 @@ export default function KhoPage() {
 
         // Deduplicate: mỗi item giữ row mới nhất
         const seen = new Map<string, KhoItem>()
+
+        // 1. Xử lý các dòng được phân phối
         for (const row of rawRows) {
           const isForm = row.item_type === "form" || (!!row.iso_form_instance_id && !row.iso_document_id)
           const itemId = isForm ? row.iso_form_instance_id! : row.iso_document_id!
@@ -122,6 +168,7 @@ export default function KhoPage() {
             const form = formsMap.get(itemId)
             if (!form) continue
             const tmpl = form.template_doc_id ? tmplMap.get(form.template_doc_id) : null
+            const isOwner = form.nguoi_tao === uid || form.xem_xet_user_id === uid
             seen.set(itemId, {
               recipientId: row.id,
               docId: itemId,
@@ -136,10 +183,19 @@ export default function KhoPage() {
               first_viewed_at: row.first_viewed_at,
               first_downloaded_at: row.first_downloaded_at,
               file_url: form.final_pdf_url || form.soan_thao_signed_url || form.draft_file_url || null,
+              nguoi_tao: form.nguoi_tao,
+              xem_xet_user_id: form.xem_xet_user_id,
+              phe_duyet_user_id: form.phe_duyet_user_id,
+              is_owner: isOwner,
             })
           } else {
             const doc = docsMap.get(itemId)
             if (!doc) continue
+            const isOwner = doc.created_by === uid || doc.soan_thao_user_id === uid || doc.xem_xet_user_id === uid
+            const normCode = doc.ma_tai_lieu ? doc.ma_tai_lieu.trim().toLowerCase() : ""
+            const activeMatch = doc.trang_thai === "het_hieu_luc" && normCode ? activeDocByCode.get(normCode) : null
+            const newDocId = activeMatch && activeMatch.id !== itemId ? activeMatch.id : null
+
             seen.set(itemId, {
               recipientId: row.id,
               docId: itemId,
@@ -154,6 +210,91 @@ export default function KhoPage() {
               first_viewed_at: row.first_viewed_at,
               first_downloaded_at: row.first_downloaded_at,
               file_url: getFileUrl(doc),
+              created_by: doc.created_by,
+              soan_thao_user_id: doc.soan_thao_user_id,
+              xem_xet_user_id: doc.xem_xet_user_id,
+              phe_duyet_user_id: doc.phe_duyet_user_id,
+              is_owner: isOwner,
+              new_doc_id: newDocId,
+              new_doc_ma: activeMatch?.lan_ban_hanh || null,
+            })
+          }
+        }
+
+        // 2. Bổ sung các tài liệu do user tạo/soạn thảo/soát xét nếu chưa có trong danh sách phân phối
+        for (const doc of ((userDocsRes.data || []) as any[])) {
+          const itemId = doc.id
+          const normCode = doc.ma_tai_lieu ? doc.ma_tai_lieu.trim().toLowerCase() : ""
+          const activeMatch = doc.trang_thai === "het_hieu_luc" && normCode ? activeDocByCode.get(normCode) : null
+          const newDocId = activeMatch && activeMatch.id !== itemId ? activeMatch.id : null
+
+          if (seen.has(itemId)) {
+            // Cập nhật cờ owner và context
+            const exist = seen.get(itemId)!
+            exist.is_owner = true
+            exist.created_by = doc.created_by
+            exist.soan_thao_user_id = doc.soan_thao_user_id
+            exist.xem_xet_user_id = doc.xem_xet_user_id
+            exist.phe_duyet_user_id = doc.phe_duyet_user_id
+            if (!exist.new_doc_id && newDocId) {
+              exist.new_doc_id = newDocId
+              exist.new_doc_ma = activeMatch?.lan_ban_hanh || null
+            }
+          } else {
+            seen.set(itemId, {
+              recipientId: `owner-${itemId}`,
+              docId: itemId,
+              itemType: "document",
+              ma_tai_lieu: doc.ma_tai_lieu,
+              ten_tai_lieu: doc.ten_tai_lieu,
+              loai_tai_lieu: doc.loai_tai_lieu,
+              trang_thai: doc.trang_thai,
+              ngay_hieu_luc: doc.ngay_hieu_luc,
+              lan_ban_hanh: doc.lan_ban_hanh,
+              ngay_nhan: doc.created_at,
+              first_viewed_at: null,
+              first_downloaded_at: null,
+              file_url: getFileUrl(doc),
+              created_by: doc.created_by,
+              soan_thao_user_id: doc.soan_thao_user_id,
+              xem_xet_user_id: doc.xem_xet_user_id,
+              phe_duyet_user_id: doc.phe_duyet_user_id,
+              is_owner: true,
+              new_doc_id: newDocId,
+              new_doc_ma: activeMatch?.lan_ban_hanh || null,
+            })
+          }
+        }
+
+        // 3. Bổ sung hồ sơ do user lập nếu chưa có
+        for (const form of ((userFormsRes.data || []) as any[])) {
+          const itemId = form.id
+          if (seen.has(itemId)) {
+            const exist = seen.get(itemId)!
+            exist.is_owner = true
+            exist.nguoi_tao = form.nguoi_tao
+            exist.xem_xet_user_id = form.xem_xet_user_id
+            exist.phe_duyet_user_id = form.phe_duyet_user_id
+          } else {
+            const tmpl = form.template_doc_id ? tmplMap.get(form.template_doc_id) : null
+            seen.set(itemId, {
+              recipientId: `owner-${itemId}`,
+              docId: itemId,
+              itemType: "form",
+              ma_tai_lieu: tmpl?.ma_tai_lieu || "Biểu mẫu",
+              ten_tai_lieu: form.tieu_de || tmpl?.ten_tai_lieu || "Hồ sơ thực hiện",
+              loai_tai_lieu: "Hồ sơ thực hiện",
+              trang_thai: form.trang_thai === "da_phe_duyet" ? "co_hieu_luc" : form.trang_thai,
+              ngay_hieu_luc: form.ky_phe_duyet_at || null,
+              lan_ban_hanh: "—",
+              ngay_nhan: form.created_at,
+              first_viewed_at: null,
+              first_downloaded_at: null,
+              file_url: form.final_pdf_url || form.soan_thao_signed_url || form.draft_file_url || null,
+              nguoi_tao: form.nguoi_tao,
+              xem_xet_user_id: form.xem_xet_user_id,
+              phe_duyet_user_id: form.phe_duyet_user_id,
+              is_owner: true,
             })
           }
         }
@@ -199,6 +340,7 @@ export default function KhoPage() {
   })
 
   const hetHieuLucCount = items.filter((it) => it.trang_thai === "het_hieu_luc").length
+
 
   return (
     <IsoShell>
@@ -330,6 +472,11 @@ export default function KhoPage() {
                               Hồ sơ
                             </span>
                           )}
+                          {item.is_owner && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-sky-50 text-sky-700 rounded border border-sky-200 shrink-0">
+                              Của bạn
+                            </span>
+                          )}
                           <span>{item.ma_tai_lieu || "—"}</span>
                         </div>
                       </td>
@@ -385,21 +532,32 @@ export default function KhoPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2 justify-end">
+                        <div className="flex items-center gap-2 justify-end flex-wrap">
                           {!item.file_url ? (
                             <span className="text-xs text-slate-400">
                               Chưa có file
                             </span>
-                          ) : !canOpenIsoFile(item.trang_thai, user) ? (
+                          ) : !canOpenIsoFile(item.trang_thai, user, item, userId) ? (
                             // Tài liệu đã phân phối trước đây nhưng nay hết hiệu lực: người
                             // chưa được cấp iso.view_het_hieu_luc không mở/tải được nữa, vẫn
                             // thấy nguyên dòng để biết mình từng nhận tài liệu này.
-                            <span
-                              title={EXPIRED_FILE_HINT}
-                              className="rounded-lg bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600"
-                            >
-                              Hết hiệu lực — cần quyền xem
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                              <span
+                                title={EXPIRED_FILE_HINT}
+                                className="rounded-lg bg-red-50 px-2 py-1 text-[10px] font-bold text-red-600"
+                              >
+                                Hết hiệu lực — cần quyền xem
+                              </span>
+                              {item.new_doc_id && (
+                                <Link
+                                  href={`/dashboard/iso/documents/${item.new_doc_id}`}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-all"
+                                  title={`Xem bản mới có hiệu lực (${item.new_doc_ma || ""})`}
+                                >
+                                  Xem bản mới <ArrowUpRight size={12} />
+                                </Link>
+                              )}
+                            </div>
                           ) : (
                             <>
                               <a
@@ -430,6 +588,15 @@ export default function KhoPage() {
                                 <Download size={12} />
                                 Tải
                               </a>
+                              {isHetHieuLuc && item.new_doc_id && (
+                                <Link
+                                  href={`/dashboard/iso/documents/${item.new_doc_id}`}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-all"
+                                  title={`Xem bản mới có hiệu lực (${item.new_doc_ma || ""})`}
+                                >
+                                  Bản mới <ArrowUpRight size={12} />
+                                </Link>
+                              )}
                             </>
                           )}
                         </div>

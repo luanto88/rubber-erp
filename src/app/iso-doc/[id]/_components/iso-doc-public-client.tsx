@@ -131,7 +131,7 @@ export function IsoDocPublicClient({ docId }: { docId: string }) {
         <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-4 shadow-sm flex items-center justify-between gap-3">
           <div className="min-w-0">
             <span className="text-[11px] font-extrabold uppercase tracking-wide text-blue-600 block">
-              Thuộc Quy trình cha
+              Thuộc Tài liệu quy trình
             </span>
             <p className="font-bold text-sm text-blue-900 truncate">
               {data.parentDoc.maTaiLieu} · {data.parentDoc.tenTaiLieu}

@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
         factory_id: factoryId,
         user_id: userId,
         action: "clone",
-        note: `Tạo từ template PDF: ${template.ten_tai_lieu}`,
+        note: `Tạo từ mẫu PDF: ${template.ten_tai_lieu}`,
       })
 
       return NextResponse.json({ instanceId, isPdfOnly: true, templatePdfUrl: draftUrl })
@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
       factory_id: factoryId,
       user_id: userId,
       action: "clone",
-      note: `Tạo từ template: ${template.ten_tai_lieu}`,
+      note: `Tạo từ mẫu: ${template.ten_tai_lieu}`,
     })
 
     return NextResponse.json({ instanceId, draftFileUrl, ext })

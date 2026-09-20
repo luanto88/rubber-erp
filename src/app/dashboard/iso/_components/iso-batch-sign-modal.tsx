@@ -657,7 +657,7 @@ export function IsoBatchSignModal({
           rawDocs.push({
             docId: doc.id,
             kind: "main",
-            label: `Quy trình chính · ${doc.ma_tai_lieu || "Tài liệu cha"}`,
+            label: `Quy trình chính · ${doc.ma_tai_lieu || "Tài liệu"}`,
             code: doc.ma_tai_lieu || "",
             typeCode: doc.loai_tai_lieu || "QT",
             url: parentPdf!,

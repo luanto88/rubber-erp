@@ -122,16 +122,19 @@ interface ExistingProductionRecord {
   doi: number
   so_xe: string
   chuyen: number
+  ma_nguon?: string
   created_at: string
   updated_at: string
 }
 
-function getMatchedKey(row: Pick<ParsedSlRow, "ngay" | "doi" | "base_xe" | "chuyen">) {
+function getMatchedKey(row: Pick<ParsedSlRow, "ngay" | "doi" | "base_xe" | "chuyen"> & { ma_nguon?: string; ghi_chu?: string }) {
+  const ma_nguon = row.ma_nguon || (row.doi === 0 || row.ghi_chu === "TM" ? "m" : "cs")
   return buildProductionRecordKey({
     ngay: row.ngay,
     doi: row.doi,
     so_xe: row.base_xe,
     chuyen: row.chuyen,
+    ma_nguon,
   })
 }
 
@@ -145,7 +148,7 @@ async function loadExistingRecords(
 
   const { data, error } = await supabase
     .from("production_records")
-    .select("id, ngay, doi, so_xe, chuyen, created_at, updated_at")
+    .select("id, ngay, doi, so_xe, chuyen, ma_nguon, created_at, updated_at")
     .eq("factory_id", factoryId)
     .in("ngay", uniqueDates)
 
@@ -461,25 +464,29 @@ export function OutputImport({
       const skippedInvalidNote = matched.length - rowsToImport.length
 
       const batchId = crypto.randomUUID()
-      const rows = rowsToImport.map(r => ({
-        factory_id: factoryId,
-        ngay: r.ngay,
-        doi: r.doi,
-        so_xe: r.base_xe,
-        chuyen: r.chuyen,
-        tai_xe: r.tai_xe,
-        mn_tuoi: r.mn_tuoi, mn_drc: r.mn_drc, mn_kho: r.mn_kho,
-        ct_tuoi: r.ct_tuoi, ct_drc: r.ct_drc, ct_kho: r.ct_kho,
-        dct_tuoi: r.dct_tuoi, dct_drc: r.dct_drc, dct_kho: r.dct_kho,
-        dkt_tuoi: r.dkt_tuoi, dkt_drc: r.dkt_drc, dkt_kho: r.dkt_kho,
-        dt_tuoi: r.dt_tuoi, dt_drc: r.dt_drc, dt_kho: r.dt_kho,
-        dispatch_entry_id: r.dispatch_entry_id,
-        warn_codes: r.warn_codes,
-        import_batch_id: batchId,
-        ghi_chu: isBlankNoteContent(r.ghi_chu) ? null : r.ghi_chu.trim(),
-        nguoi_upload: currentUser?.full_name || currentUser?.username || null,
-        created_by: currentUser?.id ?? null,
-      }))
+      const rows = rowsToImport.map(r => {
+        const ma_nguon = r.ma_nguon || (r.doi === 0 || r.ghi_chu === "TM" ? "m" : "cs")
+        return {
+          factory_id: factoryId,
+          ngay: r.ngay,
+          doi: r.doi,
+          so_xe: r.base_xe,
+          chuyen: r.chuyen,
+          tai_xe: r.tai_xe,
+          mn_tuoi: r.mn_tuoi, mn_drc: r.mn_drc, mn_kho: r.mn_kho,
+          ct_tuoi: r.ct_tuoi, ct_drc: r.ct_drc, ct_kho: r.ct_kho,
+          dct_tuoi: r.dct_tuoi, dct_drc: r.dct_drc, dct_kho: r.dct_kho,
+          dkt_tuoi: r.dkt_tuoi, dkt_drc: r.dkt_drc, dkt_kho: r.dkt_kho,
+          dt_tuoi: r.dt_tuoi, dt_drc: r.dt_drc, dt_kho: r.dt_kho,
+          dispatch_entry_id: r.dispatch_entry_id,
+          warn_codes: r.warn_codes,
+          import_batch_id: batchId,
+          ghi_chu: isBlankNoteContent(r.ghi_chu) ? null : r.ghi_chu.trim(),
+          ma_nguon,
+          nguoi_upload: currentUser?.full_name || currentUser?.username || null,
+          created_by: currentUser?.id ?? null,
+        }
+      })
       const existingRows = await loadExistingRecords(supabase, factoryId, rowsToImport)
       const existingByKey = new Map<string, ExistingProductionRecord[]>()
       for (const row of existingRows) {

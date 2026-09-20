@@ -5,10 +5,11 @@ import type { CSSProperties, RefObject } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   ArrowLeft, Download, Upload, Eye, EyeOff, CheckCircle2, X,
-  AlertTriangle, Loader2, FileText, Send, Pen,
+  AlertTriangle, Loader2, FileText, Send, Pen, PenLine,
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
-  ChevronLeft, ChevronRight, Plus, LayoutTemplate,
+  ChevronLeft, ChevronRight, ChevronDown, Plus, LayoutTemplate,
   ArrowUp, ArrowDown, Trash2, Save, UserCheck, Share2,
+  ShieldCheck, Bell,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
@@ -38,6 +39,9 @@ import { DistributionModal } from "../../_components/distribution-modal"
 import { ModalShell } from "../../../_components/modal-shell"
 import {
   fmtDate,
+  fmtDateTime,
+  formatIsoLogAction,
+  cleanLogNote,
   LOAI_TAI_LIEU_LABEL,
   FORM_INSTANCE_STATUS_LABEL,
   FORM_INSTANCE_STATUS_COLOR,
@@ -109,6 +113,120 @@ function StatusBadge({ status }: { status: IsoFormInstanceStatus }) {
   const label = FORM_INSTANCE_STATUS_LABEL[status] ?? status
   const color = FORM_INSTANCE_STATUS_COLOR[status] ?? "bg-slate-100 text-slate-600"
   return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${color}`}>{label}</span>
+}
+
+function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
+  return (
+    <div className="rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
+      <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">{label}</dt>
+      <dd className="text-sm font-semibold text-slate-800 break-words">{value || "—"}</dd>
+    </div>
+  )
+}
+
+function TimelineStep({
+  label,
+  sublabel,
+  done,
+  pending,
+  isMyTurn,
+  at,
+  stepNo,
+  accentColor,
+  isLast,
+}: {
+  label: string
+  sublabel: string
+  done: boolean
+  pending?: boolean
+  isMyTurn?: boolean
+  at?: string | null
+  stepNo?: number
+  accentColor?: string
+  isLast?: boolean
+}) {
+  const accent = accentColor || "#10b981"
+  const connector = done
+    ? "#a7f3d0"
+    : pending
+      ? "repeating-linear-gradient(to bottom,#fcd34d 0 4px,transparent 4px 8px)"
+      : "#e2e8f0"
+
+  return (
+    <li className="relative flex gap-3 pb-4 last:pb-0">
+      {!isLast && (
+        <span
+          className="absolute left-4 top-9 bottom-0 w-0.5 -translate-x-1/2 rounded"
+          style={done || !pending ? { background: connector } : { backgroundImage: connector }}
+        />
+      )}
+
+      <span
+        className={`relative z-10 w-8 h-8 shrink-0 rounded-full grid place-items-center ring-4 ${
+          done
+            ? "bg-emerald-500 text-white ring-emerald-100"
+            : isMyTurn
+              ? "bg-amber-500 text-white ring-amber-200 animate-pulse"
+              : pending
+                ? "bg-white text-slate-500 border-2 border-slate-300 ring-slate-100"
+                : "bg-white text-slate-300 border-2 border-dashed border-slate-200 ring-transparent"
+        }`}
+      >
+        {done ? (
+          <CheckCircle2 size={16} />
+        ) : isMyTurn ? (
+          <Bell size={14} />
+        ) : stepNo ? (
+          <span className="text-[11px] font-extrabold">{stepNo}</span>
+        ) : (
+          <Clock size={14} />
+        )}
+      </span>
+
+      <div
+        className={`min-w-0 flex-1 rounded-xl border px-3 py-2.5 ${
+          done
+            ? "border-emerald-100 bg-emerald-50/60"
+            : isMyTurn
+              ? "border-amber-200 bg-amber-50 shadow-sm"
+              : pending
+                ? "border-slate-200 bg-white"
+                : "border-slate-200 border-dashed bg-slate-50/60"
+        }`}
+        style={{ borderLeft: `3px solid ${done || pending ? accent : `${accent}55`}` }}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <p className={`text-sm font-bold ${done || isMyTurn ? "text-slate-800" : "text-slate-500"}`}>
+            {label}
+          </p>
+          {done && (
+            <span className="shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
+              Đã ký
+            </span>
+          )}
+          {pending && (
+            <span
+              className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                isMyTurn ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {isMyTurn ? "🔔 Đến lượt bạn" : "Đang chờ"}
+            </span>
+          )}
+        </div>
+        {sublabel && (
+          <p className={`text-[13px] mt-0.5 ${done ? "text-slate-600" : isMyTurn ? "text-amber-700 font-semibold" : "text-slate-400"}`}>
+            {sublabel}
+          </p>
+        )}
+        {at && (
+          <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+            <Clock size={11} /> {fmtDate(at)}
+          </p>
+        )}
+      </div>
+    </li>
+  )
 }
 
 // ─── WorkflowStepper ─────────────────────────────────────────────────────────
@@ -2045,10 +2163,12 @@ export default function IsoFormInstancePage() {
   }, [searchParams])
   const [loading, setLoading] = useState(true)
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
+  const [rightTab, setRightTab] = useState<"timeline" | "config">("timeline")
 
   const [instance, setInstance] = useState<IsoFormInstance | null>(null)
   const [template, setTemplate] = useState<Pick<IsoDocument, "id" | "ten_tai_lieu" | "ma_tai_lieu" | "loai_tai_lieu" | "phong_ban" | "lan_ban_hanh"> & { file_signed_pdf_url?: string | null; file_goc_url?: string | null; mo_ta_tim_kiem?: string | null } | null>(null)
   const [logs, setLogs] = useState<LogRow[]>([])
+  const [logUserNames, setLogUserNames] = useState<Record<string, string>>({})
 
   // Config state (editable when draft/tra_ve)
   const [cap_tl, setCapTl] = useState("Cấp 1")
@@ -2211,7 +2331,29 @@ export default function IsoFormInstancePage() {
       .select("id, user_id, action, note, created_at")
       .eq("instance_id", instanceId)
       .order("created_at", { ascending: false })
-    setLogs((logData ?? []) as LogRow[])
+    const rows = (logData ?? []) as LogRow[]
+    setLogs(rows)
+
+    const uids = Array.from(new Set(rows.map((r) => r.user_id).filter(Boolean)))
+    if (uids.length > 0) {
+      void (async () => {
+        try {
+          const { data: profs } = await supabase
+            .from("profiles")
+            .select("id, full_name, username")
+            .in("id", uids)
+          if (profs && profs.length > 0) {
+            const map: Record<string, string> = {}
+            for (const p of profs) {
+              map[p.id] = (p.full_name as string) || (p.username as string) || ""
+            }
+            setLogUserNames((prev) => ({ ...prev, ...map }))
+          }
+        } catch {
+          // ignore
+        }
+      })()
+    }
     return row
   }, [instanceId, userId, loadDeptUsers])
 
@@ -2232,6 +2374,17 @@ export default function IsoFormInstancePage() {
     pp.forEach((p) => map.set(p.id, p))
     setAllApproverProfiles(Array.from(map.values()))
   }, [])
+
+  const getLogUserName = useCallback((uid: string) => {
+    if (!uid) return ""
+    if (logUserNames[uid]) return logUserNames[uid]
+    const found = allApproverProfiles.find((p) => p.id === uid)
+    if (found?.full_name) return found.full_name
+    if (uid === instance?.nguoi_tao && instance?.soan_thao) return instance.soan_thao
+    if (uid === instance?.xem_xet_user_id && instance?.xem_xet) return instance.xem_xet
+    if (uid === instance?.phe_duyet_user_id && instance?.phe_duyet) return instance.phe_duyet
+    return ""
+  }, [logUserNames, allApproverProfiles, instance])
 
   const addStep = () => {
     setSteps((prev) => [
@@ -2993,33 +3146,165 @@ export default function IsoFormInstancePage() {
 
   return (
     <IsoShell>
-      <div className="space-y-5">
-        {/* ── Back + Header ── */}
-        <div className="flex items-start gap-3">
-          <button
-            onClick={() => router.push("/dashboard/iso/forms")}
-            className="mt-1 p-2 rounded-xl hover:bg-slate-100 text-slate-500 shrink-0"
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-xl font-extrabold text-slate-800 line-clamp-2">{instance.tieu_de}</h1>
-              <StatusBadge status={instance.trang_thai} />
-            </div>
-            {instance.ly_do_tra_ve && (
-              <div className="mt-1 text-sm text-rose-600 flex items-start gap-1">
-                <Info size={13} className="mt-0.5 shrink-0" />
-                <span>{instance.ly_do_tra_ve}</span>
+      <div className="space-y-6">
+        {/* ── Top Bar: Header + Action buttons (đồng bộ 100% với UI Văn bản) ── */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <button
+              onClick={() => router.push("/dashboard/iso/forms")}
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0 mt-0.5"
+              title="Quay lại danh sách"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h1 className="text-xl font-extrabold text-slate-800 break-words">{instance.tieu_de}</h1>
+                <StatusBadge status={instance.trang_thai} />
               </div>
+              <p className="text-sm text-slate-400 mt-0.5 font-mono">
+                {template?.ma_tai_lieu || "Chưa có mã"}
+                {template?.ten_tai_lieu && ` · ${template.ten_tai_lieu}`}
+              </p>
+            </div>
+          </div>
+
+          {/* Action buttons trên Top bar */}
+          <div className="flex items-center gap-2 flex-wrap sm:flex-shrink-0 sm:justify-end">
+            {/* Nút Xem file (màu xanh lam như Ảnh 1) */}
+            {fileUrl && (
+              <a
+                href={fileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all shadow-2xs"
+              >
+                <Eye size={15} />
+                Xem file
+              </a>
             )}
-            <p className="text-xs text-slate-400 mt-1">
-              Tạo: {fmtDate(instance.created_at)} &middot; Cập nhật: {fmtDate(instance.updated_at)}
-            </p>
+
+            {/* Nút Phân phối (màu tím như Ảnh 1) */}
+            {isDone && (
+              <button
+                onClick={() => setShowDistributeModal(true)}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all"
+                title="Phân phối hồ sơ này đến người nhận / phòng ban"
+              >
+                <Share2 size={15} />
+                Phân phối
+              </button>
+            )}
+
+            {canSignStep1 && (
+              <button
+                onClick={openSendModal}
+                disabled={saving || !instance.draft_file_url || mustSetupTemplate}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-md transition-all"
+                title={mustSetupTemplate
+                  ? "Biểu mẫu này chưa có mẫu vị trí ký — bấm 'Cài đặt vị trí ký' trước"
+                  : undefined}
+              >
+                {saving ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+                {isNStepRecord || steps.length > 0
+                  ? (steps.length === 2 ? "Ký & Gửi phê duyệt" : steps.length > 2 ? "Ký & Gửi xem xét" : "Ký & Gửi hồ sơ")
+                  : (cap_tl === "Cấp 1" ? "Ký & Gửi xem xét" : "Ký & Gửi phê duyệt")}
+              </button>
+            )}
+
+            {isNStepRecord && canSignCurrentStep && (
+              <button
+                onClick={openSignStepModal}
+                disabled={signLoading}
+                className={`flex items-center gap-2 px-4 py-2 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-md transition-all ${
+                  buocHienTai + 1 >= (instance.so_buoc_tong ?? 0)
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-amber-600 hover:bg-amber-700"
+                }`}
+              >
+                {signLoading ? <Loader2 size={15} className="animate-spin" /> : <Pen size={15} />}
+                {buocHienTai + 1 >= (instance.so_buoc_tong ?? 0)
+                  ? "Ký phê duyệt"
+                  : `Ký bước ${buocHienTai + 1}: ${stepDisplayLabel(currentStep)}`}
+              </button>
+            )}
+
+            {!isNStepRecord && isXemXet && (
+              <button
+                onClick={openXemXetModal}
+                disabled={signLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-md transition-all"
+              >
+                {signLoading ? <Loader2 size={15} className="animate-spin" /> : <Pen size={15} />}
+                Ký xem xét
+              </button>
+            )}
+
+            {!isNStepRecord && isPheDuyet && (
+              <button
+                onClick={openPheDuyetModal}
+                disabled={signLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-md transition-all"
+              >
+                {signLoading ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                Phê duyệt
+              </button>
+            )}
+
+            {canReturn && (
+              <button
+                onClick={() => setShowReturnModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-sm font-bold rounded-xl border border-rose-200 transition-all"
+              >
+                <RotateCcw size={15} /> Trả về
+              </button>
+            )}
+
+            {canChangeSigner && (
+              <button
+                onClick={() => setDoiNguoiKyOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-bold rounded-xl border border-amber-300 transition-all"
+                title="Thay đổi người ký nếu người ký hiện tại vắng mặt"
+              >
+                <UserCheck size={15} /> Đổi người ký
+              </button>
+            )}
+
+            {isEditable && canManageDraft && templateSignSetupUrl && (
+              <button
+                onClick={() => void goToTemplateSetup()}
+                disabled={!signStepsReady || saving}
+                className="flex items-center gap-2 px-4 py-2 bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 text-sm font-bold rounded-xl border border-sky-200 transition-all"
+                title={signStepsReady
+                  ? "Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng"
+                  : "Chọn đủ người ký ở 'Cấu hình phê duyệt' trước khi cài đặt vị trí ký"}
+              >
+                <LayoutTemplate size={15} /> Cài đặt vị trí ký
+              </button>
+            )}
+
+            <button
+              onClick={() => factoryId && void loadInstance(factoryId)}
+              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-xs rounded-xl transition-colors shrink-0"
+              title="Làm mới"
+            >
+              <RefreshCcw size={15} />
+            </button>
           </div>
         </div>
 
-        {/* Vì sao nút "Ký & Gửi" đang khoá — nói thẳng thay vì để người dùng bấm mãi không được */}
+        {/* Thông báo trả về nếu có */}
+        {instance.trang_thai === "tra_ve" && instance.ly_do_tra_ve && (
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <RotateCcw size={15} className="text-rose-600" />
+              <span className="text-sm font-bold text-rose-700">Hồ sơ bị trả về</span>
+            </div>
+            <p className="text-sm text-rose-600">{instance.ly_do_tra_ve}</p>
+          </div>
+        )}
+
+        {/* Cảnh báo thiếu mẫu vị trí ký */}
         {isEditable && canManageDraft && mustSetupTemplate && (
           <div className="flex items-start gap-3 p-4 bg-sky-50 border border-sky-200 rounded-2xl">
             <LayoutTemplate size={18} className="text-sky-600 shrink-0 mt-0.5" />
@@ -3034,138 +3319,7 @@ export default function IsoFormInstancePage() {
           </div>
         )}
 
-        {/* ── Workflow stepper + Actions inline ── */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="overflow-x-auto min-w-0 max-w-full pb-1 sm:pb-0">
-              <WorkflowStepper
-                cap_tl={cap_tl}
-                trang_thai={instance.trang_thai}
-                so_buoc_tong={instance.so_buoc_tong}
-                buoc_hien_tai={instance.buoc_hien_tai}
-                thu_tu_ky_json={instance.thu_tu_ky_json}
-              />
-            </div>
-            <div className="flex items-center gap-2 shrink-0 flex-wrap w-full sm:w-auto">
-              {canSignStep1 && (
-                <button
-                  onClick={openSendModal}
-                  disabled={saving || !instance.draft_file_url || mustSetupTemplate}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl transition-colors flex-1 sm:flex-none"
-                  title={mustSetupTemplate
-                    ? "Biểu mẫu này chưa có mẫu vị trí ký — bấm 'Cài đặt vị trí ký' trước"
-                    : undefined}
-                >
-                  {saving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                  {isNStepRecord || steps.length > 0
-                    ? (steps.length === 2 ? "Ký & Gửi phê duyệt" : steps.length > 2 ? "Ký & Gửi xem xét" : "Ký & Gửi hồ sơ")
-                    : (cap_tl === "Cấp 1" ? "Ký & Gửi xem xét" : "Ký & Gửi phê duyệt")}
-                </button>
-              )}
-              {isNStepRecord && canSignCurrentStep && (
-                <button
-                  onClick={openSignStepModal}
-                  disabled={signLoading}
-                  className={
-                    "flex items-center justify-center gap-1.5 px-4 py-2 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors flex-1 sm:flex-none " +
-                    (buocHienTai + 1 >= (instance.so_buoc_tong ?? 0)
-                      ? "bg-emerald-600 hover:bg-emerald-700"
-                      : "bg-amber-500 hover:bg-amber-600")
-                  }
-                >
-                  {signLoading ? <Loader2 size={13} className="animate-spin" /> : <Pen size={13} />}
-                  {buocHienTai + 1 >= (instance.so_buoc_tong ?? 0)
-                    ? "Ký phê duyệt"
-                    : `Ký bước ${buocHienTai + 1}: ${stepDisplayLabel(currentStep)}`}
-                </button>
-              )}
-              {!isNStepRecord && isXemXet && (
-                <button
-                  onClick={openXemXetModal}
-                  disabled={signLoading}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors flex-1 sm:flex-none"
-                >
-                  {signLoading ? <Loader2 size={13} className="animate-spin" /> : <Pen size={13} />}
-                  Ký xem xét
-                </button>
-              )}
-              {!isNStepRecord && isPheDuyet && (
-                <button
-                  onClick={openPheDuyetModal}
-                  disabled={signLoading}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors flex-1 sm:flex-none"
-                >
-                  {signLoading ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-                  Phê duyệt
-                </button>
-              )}
-              {canReturn && (
-                <button
-                  onClick={() => setShowReturnModal(true)}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-sm font-bold rounded-xl border border-rose-200 transition-colors flex-1 sm:flex-none"
-                >
-                  <RotateCcw size={13} /> Trả về
-                </button>
-              )}
-              {canChangeSigner && (
-                <button
-                  onClick={() => setDoiNguoiKyOpen(true)}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-violet-50 hover:bg-violet-100 text-violet-700 text-sm font-bold rounded-xl border border-violet-200 transition-colors flex-1 sm:flex-none"
-                  title="Thay đổi người ký nếu người ký hiện tại vắng mặt"
-                >
-                  <UserCheck size={13} /> Đổi người ký
-                </button>
-              )}
-              {isDone && (
-                <button
-                  onClick={() => setShowDistributeModal(true)}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-teal-50 hover:bg-teal-100 text-teal-800 text-sm font-bold rounded-xl border border-teal-200 transition-colors flex-1 sm:flex-none"
-                  title="Phân phối hồ sơ này đến người nhận / phòng ban"
-                >
-                  <Share2 size={13} /> Phân phối
-                </button>
-              )}
-              {isEditable && canManageDraft && (
-                <button
-                  onClick={handleManualSaveConfig}
-                  disabled={saving}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50 text-emerald-700 text-sm font-bold rounded-xl border border-emerald-200 transition-colors flex-1 sm:flex-none"
-                  title="Lưu các thay đổi về người ký và thứ tự phê duyệt"
-                >
-                  {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                  Lưu cấu hình
-                </button>
-              )}
-              {isEditable && canManageDraft && templateSignSetupUrl && (
-                <button
-                  onClick={() => void goToTemplateSetup()}
-                  disabled={!signStepsReady || saving}
-                  className="flex items-center justify-center gap-1.5 px-4 py-2 bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 text-sm font-bold rounded-xl border border-sky-200 transition-colors flex-1 sm:flex-none"
-                  title={signStepsReady
-                    ? "Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng"
-                    : "Chọn đủ người ký ở 'Cấu hình phê duyệt' trước khi cài đặt vị trí ký"}
-                >
-                  <LayoutTemplate size={13} /> Cài đặt vị trí ký
-                </button>
-              )}
-              <button
-                onClick={() => factoryId && void loadInstance(factoryId)}
-                className="flex items-center gap-1.5 px-3 py-2 text-slate-400 hover:text-slate-600 text-xs rounded-xl hover:bg-slate-50 shrink-0"
-                title="Làm mới"
-              >
-                <RefreshCcw size={12} />
-              </button>
-            </div>
-          </div>
-          {isEditable && canManageDraft && !instance.draft_file_url && (
-            <div className="mt-2 flex items-start gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
-              <AlertTriangle size={12} className="shrink-0 mt-0.5" />
-              <span>Cần tải lên file hồ sơ trước khi gửi.</span>
-            </div>
-          )}
-        </div>
-
-        {/* ── Toast notifications ── */}
+        {/* Toasts */}
         {actionError && (
           <div className="flex items-center gap-3 px-4 py-3 bg-red-600 text-white rounded-2xl shadow-lg text-sm font-bold">
             <AlertTriangle size={15} className="shrink-0" />
@@ -3180,208 +3334,258 @@ export default function IsoFormInstancePage() {
           </div>
         )}
 
-        {/* Tỉ lệ 3+2 và `items-stretch` mirror đúng trang chi tiết Văn bản: bản 2/3 + 1/3 cũ
-            làm cột trái (chỉ 2 thẻ ngắn) thừa ra một mảng trống lớn, trong khi cột phải dài
-            hơn hẳn. `flex-1` ở thẻ cuối mỗi cột kéo 2 cột cao bằng nhau. */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5 items-stretch">
-          {/* ── Left column (3/5) ── */}
-          <div className="lg:col-span-3 flex flex-col gap-5">
+        {/* Cột trái 3/5 — cột phải 2/5, `items-stretch` + `flex-1` để 2 card LUÔN cao bằng nhau */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-stretch">
+          {/* ── Cột trái: Thông tin hồ sơ (3/5) ── */}
+          <div className="lg:col-span-3 flex flex-col">
+            <div className="flex-1 flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="flex items-center gap-2.5 px-5 py-3.5 bg-mint-50 border-b border-mint-100">
+                <span className="w-8 h-8 rounded-full bg-mint-100 grid place-items-center text-[#1f6a58] shrink-0">
+                  <FileText size={16} />
+                </span>
+                <h2 className="text-sm font-extrabold text-slate-800">Thông tin hồ sơ</h2>
+              </div>
 
-            {/* Template info */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-sm font-extrabold text-slate-700 mb-3 flex items-center gap-2">
-                <FileText size={14} className="text-violet-500" />
-                Biểu mẫu gốc (read-only)
-              </h2>
-              {template ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className="text-xs text-slate-400">Tên</span>
-                    <p className="font-semibold text-slate-800 mt-0.5">{template.ten_tai_lieu}</p>
+              <div className="p-5 flex-1 flex flex-col justify-between">
+                <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <InfoRow label="Biểu mẫu gốc" value={template?.ten_tai_lieu || "—"} />
+                    <InfoRow label="Mã biểu mẫu" value={template?.ma_tai_lieu || "—"} />
+                    <InfoRow
+                      label="Loại hồ sơ"
+                      value={template?.loai_tai_lieu ? (LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu] || template.loai_tai_lieu) : "Biểu mẫu"}
+                    />
+                    <InfoRow label="Phòng ban" value={template?.phong_ban || "—"} />
+                    <InfoRow
+                      label="Người lập hồ sơ"
+                      value={instance.soan_thao || (instance.nguoi_tao ? (allApproverProfiles.find((p) => p.id === instance.nguoi_tao)?.full_name || instance.nguoi_tao) : "—")}
+                    />
+                    <InfoRow label="Ngày lập hồ sơ" value={fmtDate(instance.created_at)} />
+                    <InfoRow
+                      label="Cấp hồ sơ"
+                      value={
+                        isNStepRecord
+                          ? `${instance.so_buoc_tong || steps.length} bước ký`
+                          : instance.cap_tl || "—"
+                      }
+                    />
+                    <InfoRow
+                      label="Ngày phê duyệt"
+                      value={instance.ky_phe_duyet_at ? fmtDate(instance.ky_phe_duyet_at) : (isDone ? fmtDate(instance.updated_at) : "Chưa duyệt")}
+                    />
+                    {template?.mo_ta_tim_kiem && (
+                      <div className="sm:col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
+                        <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Mô tả biểu mẫu</dt>
+                        <dd className="text-sm text-slate-700 italic">{template.mo_ta_tim_kiem}</dd>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <span className="text-xs text-slate-400">Mã</span>
-                    <p className="font-semibold text-slate-800 mt-0.5">{template.ma_tai_lieu}</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400">Loại</span>
-                    <p className="font-semibold text-slate-800 mt-0.5">
-                      {LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu ?? ""] ?? template.loai_tai_lieu}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400">Phòng ban</span>
-                    <p className="font-semibold text-slate-800 mt-0.5">{template.phong_ban}</p>
-                  </div>
-                  {template.mo_ta_tim_kiem && (
-                    <div className="col-span-2">
-                      <span className="text-xs text-slate-400">Mô tả tìm kiếm AI</span>
-                      <p className="text-sm text-slate-600 mt-0.5 italic">{template.mo_ta_tim_kiem}</p>
+
+                  {instance.ghi_chu && (
+                    <div className="mt-4 pt-4 border-t border-slate-100">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
+                      <p className="text-sm text-slate-700">{instance.ghi_chu}</p>
                     </div>
                   )}
                 </div>
-              ) : (
-                <p className="text-sm text-slate-400">Đang tải thông tin biểu mẫu...</p>
-              )}
+
+                {/* Phân vùng File hồ sơ nằm gọn gàng bên trong thẻ Thông tin hồ sơ */}
+                <div className="mt-5 pt-4 border-t border-slate-100 space-y-3">
+                  <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tệp hồ sơ</dt>
+
+                  {/* Banner hướng dẫn khi biểu mẫu gốc chỉ có PDF */}
+                  {!instance.draft_file_url && (template?.file_signed_pdf_url || template?.file_goc_url) && (
+                    <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                      <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                      <div className="flex-1 text-xs">
+                        <p className="font-semibold text-amber-800">Biểu mẫu gốc chỉ có dạng PDF</p>
+                        <p className="text-slate-600 mt-0.5">Tải PDF về làm mẫu → điền nội dung → upload lại file (.docx, .xlsx, hoặc .pdf).</p>
+                        <a
+                          href={(template.file_signed_pdf_url || template.file_goc_url) ?? ""}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg"
+                        >
+                          <Download size={12} /> Tải PDF mẫu
+                        </a>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* File đã ký duyệt (khi hoàn thành) */}
+                  {isDone && (instance.final_pdf_url || instance.final_office_url) && (
+                    <div className="flex items-center gap-2.5 p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl">
+                      <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-emerald-900 truncate">
+                          {instance.tieu_de || "File đã ký duyệt"}
+                        </p>
+                        <p className="text-[10px] text-emerald-600 font-semibold uppercase">
+                          {instance.final_pdf_url ? "PDF ĐÃ KÝ DUYỆT" : instance.draft_file_type?.toUpperCase()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <a
+                          href={(instance.final_pdf_url || instance.final_office_url) ?? ""}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-white hover:bg-emerald-100 border border-emerald-200 rounded-lg shadow-2xs transition-all"
+                        >
+                          <Eye size={13} /> Xem
+                        </a>
+                        <button
+                          onClick={handleDownload}
+                          className="p-1.5 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors"
+                          title="Tải về"
+                        >
+                          <Download size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* File nháp / file đang xử lý */}
+                  {instance.draft_file_url && !uploading && !isDone && (
+                    <div className="flex items-center gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                      <FileText size={20} className="text-violet-600 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-slate-800 truncate">
+                          {instance.tieu_de || "File hồ sơ"}
+                        </p>
+                        <span className="text-[10px] font-bold uppercase text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">
+                          {instance.draft_file_type ?? "file"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <a
+                          href={fileUrl ?? ""}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
+                          title="Xem file"
+                        >
+                          <Eye size={15} />
+                        </a>
+                        <button
+                          onClick={handleDownload}
+                          className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
+                          title="Tải về"
+                        >
+                          <Download size={15} />
+                        </button>
+                        {canManageDraft && (
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="flex items-center gap-1 px-2 py-1 text-xs font-bold text-violet-700 hover:bg-violet-50 rounded-lg transition-colors"
+                            title="Thay file"
+                          >
+                            <RotateCcw size={12} /> Thay file
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Upload spinner */}
+                  {uploading && (
+                    <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                      <Loader2 size={16} className="text-amber-500 animate-spin shrink-0" />
+                      <span className="text-xs text-amber-700 flex-1 truncate">{uploadFile?.name ?? "Đang tải lên..."}</span>
+                    </div>
+                  )}
+
+                  {/* Upload zone khi chưa có file */}
+                  {canManageDraft && !uploading && !instance.draft_file_url && (
+                    <div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".docx,.xlsx,.pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) {
+                            setUploadFile(f)
+                            setDocxPreviewHtml(null)
+                            if (f.name.toLowerCase().endsWith(".docx")) void loadDocxPreview(f)
+                            void handleUpload(f)
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full py-3 border-2 border-dashed border-slate-300 hover:border-violet-300 hover:bg-violet-50 rounded-xl text-xs text-slate-500 hover:text-violet-600 transition-colors flex items-center justify-center gap-2 font-medium"
+                      >
+                        <Upload size={14} />
+                        Tải lên file hồ sơ (.docx, .xlsx, .pdf)
+                      </button>
+                      {uploadError && (
+                        <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={11} />{uploadError}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* DOCX preview */}
+                  {docxPreviewHtml && (
+                    <div className="mt-2">
+                      <button
+                        onClick={() => setShowPreview((p) => !p)}
+                        className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-violet-600"
+                      >
+                        {showPreview ? <EyeOff size={12} /> : <Eye size={12} />}
+                        {showPreview ? "Ẩn xem trước" : "Xem trước nội dung DOCX"}
+                      </button>
+                      {showPreview && (
+                        <div
+                          className="mt-2 p-3 border border-slate-200 rounded-xl bg-white max-h-60 overflow-y-auto text-xs prose prose-sm max-w-none"
+                          dangerouslySetInnerHTML={{ __html: docxPreviewHtml }}
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-
-            {/* File section — order-first: trên màn hẹp nhảy lên đầu cột để khỏi phải cuộn
-                qua toàn bộ thông tin biểu mẫu mới bấm được Xem/Tải. Desktop giữ chỗ cũ. */}
-            <div className="order-first lg:order-none lg:flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-sm font-extrabold text-slate-700 mb-3 flex items-center gap-2">
-                <Upload size={14} className="text-slate-500" />
-                File hồ sơ
-              </h2>
-
-              {/* PDF-only template banner */}
-              {!instance.draft_file_url && (template?.file_signed_pdf_url || template?.file_goc_url) && (
-                <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl mb-3">
-                  <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
-                  <div className="flex-1 text-sm">
-                    <p className="font-semibold text-amber-800">Biểu mẫu gốc chỉ có dạng PDF</p>
-                    <p className="text-xs text-amber-600 mt-0.5">Tải PDF về làm mẫu → điền nội dung → upload lại file (.docx, .xlsx, hoặc .pdf).</p>
-                    <a
-                      href={(template.file_signed_pdf_url || template.file_goc_url) ?? ""}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg"
-                    >
-                      <Download size={12} /> Tải PDF mẫu
-                    </a>
-                  </div>
-                </div>
-              )}
-
-              {/* Current file */}
-              {instance.draft_file_url && !uploading && (
-                <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-xl mb-3">
-                  <FileText size={20} className="text-violet-500 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-800 truncate">
-                      {instance.tieu_de ?? (isDone ? "File đã phê duyệt" : "File nháp")}
-                    </p>
-                    <span className="text-[10px] font-bold uppercase text-violet-600 bg-violet-100 px-1.5 py-0.5 rounded">{instance.draft_file_type ?? "file"}</span>
-                  </div>
-                  <a
-                    href={fileUrl ?? ""}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500"
-                    title="Xem file"
-                  >
-                    <Eye size={14} />
-                  </a>
-                  <button
-                    onClick={handleDownload}
-                    className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-500"
-                    title="Tải về"
-                  >
-                    <Download size={14} />
-                  </button>
-                  {canManageDraft && (
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50 rounded-lg"
-                    >
-                      <RotateCcw size={11} /> Thay file
-                    </button>
-                  )}
-                </div>
-              )}
-              {/* Uploading progress indicator */}
-              {uploading && (
-                <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl mb-3">
-                  <Loader2 size={16} className="text-amber-500 animate-spin shrink-0" />
-                  <span className="text-sm text-amber-700 flex-1 truncate">{uploadFile?.name ?? "Đang tải lên..."}</span>
-                </div>
-              )}
-
-              {/* Final file (after approval) */}
-              {isDone && (instance.final_pdf_url || instance.final_office_url) && (
-                <div className="flex items-center gap-3 p-3 bg-emerald-50 rounded-xl mb-3 border border-emerald-100">
-                  <CheckCircle2 size={20} className="text-emerald-500 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-emerald-800">File đã ký duyệt</p>
-                    <p className="text-xs text-emerald-500">{instance.final_pdf_url ? "PDF" : instance.draft_file_type?.toUpperCase()}</p>
-                  </div>
-                  <a
-                    href={(instance.final_pdf_url || instance.final_office_url) ?? ""}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 rounded-lg"
-                  >
-                    <Eye size={12} /> Xem
-                  </a>
-                </div>
-              )}
-
-              {/* Upload zone (only when editable and not currently uploading) */}
-              {canManageDraft && !uploading && (
-                <div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".docx,.xlsx,.pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0]
-                      if (f) {
-                        setUploadFile(f)
-                        setDocxPreviewHtml(null)
-                        if (f.name.toLowerCase().endsWith(".docx")) void loadDocxPreview(f)
-                        void handleUpload(f)
-                      }
-                    }}
-                  />
-                  {!instance.draft_file_url && (
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full py-3 border-2 border-dashed border-slate-300 hover:border-violet-300 hover:bg-violet-50 rounded-xl text-sm text-slate-500 hover:text-violet-600 transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Upload size={14} />
-                      Tải lên file hồ sơ (.docx, .xlsx, .pdf)
-                    </button>
-                  )}
-                  {uploadError && (
-                    <p className="mt-2 text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={11} />{uploadError}</p>
-                  )}
-                </div>
-              )}
-
-              {/* DOCX preview */}
-              {docxPreviewHtml && (
-                <div className="mt-3">
-                  <button
-                    onClick={() => setShowPreview((p) => !p)}
-                    className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-violet-600"
-                  >
-                    {showPreview ? <EyeOff size={12} /> : <Eye size={12} />}
-                    {showPreview ? "Ẩn xem trước" : "Xem trước nội dung DOCX"}
-                  </button>
-                  {showPreview && (
-                    <div
-                      className="mt-2 p-4 border border-slate-200 rounded-xl bg-white max-h-80 overflow-y-auto text-sm prose prose-sm max-w-none"
-                      dangerouslySetInnerHTML={{ __html: docxPreviewHtml }}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
-
           </div>
 
-          {/* ── Right column (2/5) ── */}
-          <div className="lg:col-span-2 flex flex-col gap-5">
+          {/* ── Cột phải: Tiến trình ký xác nhận & phê duyệt (2/5) ── */}
+          <div className="lg:col-span-2 flex flex-col">
+            <div className="flex-1 w-full flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              {/* Header đồng bộ ảnh 1 */}
+              <div className="flex items-center justify-between gap-2.5 px-5 py-3.5 bg-amber-50 border-b border-amber-100">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-full bg-amber-100 grid place-items-center text-amber-700 shrink-0">
+                    <ShieldCheck size={16} />
+                  </span>
+                  <h2 className="text-sm font-extrabold text-slate-800">
+                    {canManageDraft && rightTab === "config"
+                      ? "Cấu hình phê duyệt"
+                      : "Tiến trình ký xác nhận & phê duyệt"}
+                  </h2>
+                </div>
+                {canManageDraft && (
+                  <div className="flex items-center gap-1 bg-amber-100/70 p-0.5 rounded-lg text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setRightTab("timeline")}
+                      className={`px-2 py-1 rounded-md transition-all ${rightTab === "timeline" ? "bg-white text-slate-800 shadow-2xs" : "text-amber-800 hover:text-amber-900"}`}
+                    >
+                      Tiến trình
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRightTab("config")}
+                      className={`px-2 py-1 rounded-md transition-all ${rightTab === "config" ? "bg-white text-slate-800 shadow-2xs" : "text-amber-800 hover:text-amber-900"}`}
+                    >
+                      Cấu hình
+                    </button>
+                  </div>
+                )}
+              </div>
 
-            {/* Config panel (editable only) */}
-            {canManageDraft && (
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <h2 className="text-sm font-extrabold text-slate-700 mb-3 flex items-center gap-2">
-                  <Settings size={14} className="text-slate-500" />
-                  Cấu hình phê duyệt
-                </h2>
-
-                <div className="space-y-3">
+              {/* Body: Config tab khi soạn thảo */}
+              {canManageDraft && rightTab === "config" ? (
+                <div className="p-5 space-y-3">
                   {/* Header with step count and add button */}
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-slate-600">
@@ -3397,7 +3601,7 @@ export default function IsoFormInstancePage() {
                   </div>
 
                   {/* Steps list */}
-                  <div className="space-y-2.5 max-h-[680px] overflow-y-auto pr-1">
+                  <div className="space-y-2.5 max-h-[480px] overflow-y-auto pr-1">
                     {steps.map((s, idx) => {
                       const isFirst = idx === 0
                       const isLast = idx === steps.length - 1
@@ -3424,35 +3628,34 @@ export default function IsoFormInstancePage() {
                               <button
                                 type="button"
                                 onClick={() => moveStep(idx, "up")}
-                                disabled={isFirst}
-                                className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-white disabled:opacity-20 disabled:cursor-not-allowed"
+                                disabled={idx <= 1}
+                                className="p-1 hover:bg-slate-200 disabled:opacity-30 rounded text-slate-600"
                                 title="Di chuyển lên"
                               >
-                                <ArrowUp size={12} />
+                                <ArrowUp size={11} />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => moveStep(idx, "down")}
-                                disabled={isLast}
-                                className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-white disabled:opacity-20 disabled:cursor-not-allowed"
+                                disabled={idx === 0 || idx >= steps.length - 1}
+                                className="p-1 hover:bg-slate-200 disabled:opacity-30 rounded text-slate-600"
                                 title="Di chuyển xuống"
                               >
-                                <ArrowDown size={12} />
+                                <ArrowDown size={11} />
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => removeStep(idx)}
-                                disabled={steps.length <= 1}
-                                className="p-1 rounded text-rose-400 hover:text-rose-600 hover:bg-white disabled:opacity-20 disabled:cursor-not-allowed"
-                                title="Xóa bước này"
-                              >
-                                <Trash2 size={12} />
-                              </button>
+                              {!isFirst && !isLast && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeStep(idx)}
+                                  className="p-1 hover:bg-red-50 text-red-500 rounded"
+                                  title="Xoá bước"
+                                >
+                                  <Trash2 size={11} />
+                                </button>
+                              )}
                             </div>
                           </div>
-
-                          {/* Lọc 2 cấp: Phòng ban -> Người ký đích danh */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-100">
+                          <div className="grid grid-cols-2 gap-2 text-xs">
                             <div>
                               <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Phòng ban</label>
                               <select
@@ -3460,11 +3663,9 @@ export default function IsoFormInstancePage() {
                                 onChange={(e) => handleStepDeptChange(idx, e.target.value)}
                                 className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-violet-400 font-medium"
                               >
-                                <option value="">— Tất cả phòng ban —</option>
+                                <option value="">Tất cả phòng ban</option>
                                 {PHONG_BAN_OPTIONS.map((pb) => (
-                                  <option key={pb} value={pb}>
-                                    Phòng ban {pb}
-                                  </option>
+                                  <option key={pb} value={pb}>{pb}</option>
                                 ))}
                               </select>
                             </div>
@@ -3550,120 +3751,160 @@ export default function IsoFormInstancePage() {
                     <p className="text-[11px] text-slate-400">Tự động lưu khi ký &amp; gửi</p>
                   </div>
                 </div>
-              </div>
-            )}
+              ) : (
+                /* Body: Timeline Stepper theo đúng ảnh 1 */
+                <div className="flex-1 flex flex-col justify-between">
+                  <ol className="relative p-5 pb-2">
+                    {/* Render N-step timeline */}
+                    {isNStepRecord && Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0 ? (
+                      instance.thu_tu_ky_json.map((step, i) => {
+                        const stepKey = `buoc_${i}`
+                        const signerInfo = instance.nguoi_ky?.[stepKey]
+                        const signedAt = signerInfo?.ky_at || (i === 0 && instance.ky_soan_thao_at ? instance.ky_soan_thao_at : null)
+                        const isDoneStep = isDone || (instance.buoc_hien_tai != null && i < instance.buoc_hien_tai) || !!signedAt
+                        const isCurrent = !isDone && instance.trang_thai !== "tra_ve" && instance.buoc_hien_tai === i
+                        const isMyTurn = isCurrent && canSignCurrentStep
+                        const displayName = signerInfo?.ten || (step.user_id ? (allApproverProfiles.find((p) => p.id === step.user_id)?.full_name || step.user_id) : step.ten || "Chưa chọn")
+                        const isLastStep = i === (instance.thu_tu_ky_json?.length ?? 1) - 1
 
-            {/* Tiến trình & Lịch sử (always shown when there is data) */}
-            {(isNStepRecord || instance.soan_thao || instance.xem_xet || instance.phe_duyet || logs.length > 0) && (
-              <div className="lg:flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <h2 className="text-sm font-extrabold text-slate-700 mb-3 flex items-center gap-2">
-                  <Clock size={14} className="text-slate-400" />
-                  Tiến trình &amp; Lịch sử
-                </h2>
-
-                {/* Dynamic N-step signing timeline */}
-                {isNStepRecord && Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0 ? (
-                  <div className="space-y-2 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400">Số bước ký</span>
-                      <span className="font-semibold text-slate-700">{instance.so_buoc_tong} bước</span>
-                    </div>
-                    {instance.thu_tu_ky_json.map((step, i) => {
-                      const stepKey = `buoc_${i}`
-                      const signerInfo = instance.nguoi_ky?.[stepKey]
-                      const signedAt = signerInfo?.ky_at
-                      const isDoneStep = !!signedAt
-                      const isCurrent = instance.buoc_hien_tai === i && instance.trang_thai !== "da_phe_duyet" && instance.trang_thai !== "tra_ve"
-                      const displayName = signerInfo?.ten || step.ten || (step.user_id ? (allApproverProfiles.find((p) => p.id === step.user_id)?.full_name || step.user_id) : "Chưa chọn")
-                      return (
-                        <div key={`timeline_${step.step || i + 1}_${i}`} className="flex justify-between items-start">
-                          <span className="text-slate-400 shrink-0 mr-2">{stepDisplayLabel(step)}</span>
-                          <div className="text-right">
-                            <span className={`font-semibold ${isDoneStep ? "text-emerald-600" : isCurrent ? "text-violet-600 font-bold" : "text-slate-700"}`}>
-                              {displayName}{isDoneStep ? " ✓" : isCurrent ? " (Đang xử lý)" : ""}
-                            </span>
-                            {signedAt && (
-                              <div className="text-[10px] text-slate-400">{fmtDate(signedAt)}</div>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  /* Legacy timeline */
-                  (instance.soan_thao || instance.xem_xet || instance.phe_duyet) && (
-                    <div className="space-y-2 text-xs">
-                      <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Cấp</span>
-                        <span className="font-semibold text-slate-700">{instance.cap_tl}</span>
-                      </div>
-                      {instance.soan_thao && (
-                        <div className="flex justify-between items-start">
-                          <span className="text-slate-400 shrink-0 mr-2">Soạn thảo</span>
-                          <div className="text-right">
-                            <span className={`font-semibold ${instance.ky_soan_thao_at ? "text-emerald-600" : "text-slate-700"}`}>
-                              {instance.soan_thao}{instance.ky_soan_thao_at ? " ✓" : ""}
-                            </span>
-                            {instance.ky_soan_thao_at && (
-                              <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_soan_thao_at)}</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {instance.xem_xet && (
-                        <div className="flex justify-between items-start">
-                          <span className="text-slate-400 shrink-0 mr-2">Xem xét</span>
-                          <div className="text-right">
-                            <span className={`font-semibold ${instance.ky_xem_xet_at ? "text-emerald-600" : "text-slate-700"}`}>
-                              {instance.xem_xet}{instance.ky_xem_xet_at ? " ✓" : ""}
-                            </span>
-                            {instance.ky_xem_xet_at && (
-                              <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_xem_xet_at)}</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {instance.phe_duyet && (
-                        <div className="flex justify-between items-start">
-                          <span className="text-slate-400 shrink-0 mr-2">Phê duyệt</span>
-                          <div className="text-right">
-                            <span className={`font-semibold ${instance.ky_phe_duyet_at ? "text-emerald-600" : "text-slate-700"}`}>
-                              {signAsPrefixLabel(instance.phe_duyet_sign_as)}{instance.phe_duyet}{instance.ky_phe_duyet_at ? " ✓" : ""}
-                            </span>
-                            {instance.ky_phe_duyet_at && (
-                              <div className="text-[10px] text-slate-400">{fmtDate(instance.ky_phe_duyet_at)}</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )
-                )}
-
-                {/* Log history */}
-                {logs.length > 0 && (
-                  <>
-                    {(instance.soan_thao || instance.xem_xet || instance.phe_duyet) && (
-                      <div className="border-t border-slate-100 my-3" />
+                        return (
+                          <TimelineStep
+                            key={`tl_${step.step || i + 1}_${i}`}
+                            label={i === 0 ? "Soạn thảo" : isLastStep ? "Phê duyệt" : `Bước ${i + 1}: ${stepDisplayLabel(step)}`}
+                            sublabel={displayName}
+                            done={isDoneStep}
+                            pending={isCurrent}
+                            isMyTurn={isMyTurn}
+                            at={signedAt || (i === 0 ? instance.created_at : null)}
+                            stepNo={i + 1}
+                            accentColor={i === 0 ? "#94a3b8" : isLastStep ? "#10b981" : "#f59e0b"}
+                            isLast={isLastStep}
+                          />
+                        )
+                      })
+                    ) : (
+                      /* Legacy 2-step / 3-step */
+                      <>
+                        <TimelineStep
+                          label="Soạn thảo"
+                          sublabel={instance.soan_thao || (instance.nguoi_tao ? (allApproverProfiles.find((p) => p.id === instance.nguoi_tao)?.full_name || instance.nguoi_tao) : "Người lập")}
+                          done={true}
+                          at={instance.ky_soan_thao_at || instance.created_at}
+                          accentColor="#94a3b8"
+                          isLast={false}
+                        />
+                        {instance.cap_tl !== "Cấp 2" && (
+                          <TimelineStep
+                            label="Xem xét"
+                            sublabel={instance.xem_xet || "Chờ xem xét"}
+                            done={isDone || instance.trang_thai === "cho_phe_duyet" || !!instance.ky_xem_xet_at}
+                            pending={instance.trang_thai === "cho_xem_xet"}
+                            isMyTurn={instance.trang_thai === "cho_xem_xet" && isXemXet}
+                            at={instance.ky_xem_xet_at}
+                            stepNo={2}
+                            accentColor="#f59e0b"
+                            isLast={false}
+                          />
+                        )}
+                        <TimelineStep
+                          label="Phê duyệt"
+                          sublabel={instance.phe_duyet ? `${signAsPrefixLabel(instance.phe_duyet_sign_as)}${instance.phe_duyet}` : "Chờ phê duyệt"}
+                          done={isDone || !!instance.ky_phe_duyet_at}
+                          pending={instance.trang_thai === "cho_phe_duyet"}
+                          isMyTurn={instance.trang_thai === "cho_phe_duyet" && isPheDuyet}
+                          at={instance.ky_phe_duyet_at}
+                          stepNo={instance.cap_tl === "Cấp 2" ? 2 : 3}
+                          accentColor="#10b981"
+                          isLast={true}
+                        />
+                      </>
                     )}
-                    <div className="space-y-2">
-                      {logs.map((log) => (
-                        <div key={log.id} className="flex items-start gap-3 text-xs">
-                          <User size={12} className="text-slate-400 mt-0.5 shrink-0" />
-                          <div className="flex-1">
-                            <span className="font-bold text-slate-700">{log.action}</span>
-                            {log.note && <span className="text-slate-500 ml-1">— {log.note}</span>}
-                            <span className="text-slate-300 ml-2">{fmtDate(log.created_at)}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+                  </ol>
 
+                  {/* Lịch sử thao tác (thu gọn dạng dropdown collapsible) */}
+                  {logs.length > 0 && (
+                    <div className="px-5 pb-3">
+                      <details open className="group border-t border-slate-100 pt-3 text-xs">
+                        <summary className="flex items-center justify-between cursor-pointer font-bold text-slate-500 hover:text-slate-800 list-none select-none">
+                          <span className="flex items-center gap-1.5">
+                            <Clock size={12} className="text-slate-400" />
+                            Lịch sử thao tác ({logs.length})
+                          </span>
+                          <ChevronDown size={14} className="group-open:rotate-180 transition-transform text-slate-400" />
+                        </summary>
+                        <div className="mt-2.5 space-y-2 max-h-52 overflow-y-auto pr-1">
+                          {logs.map((log) => {
+                            const meta = formatIsoLogAction(log.action)
+                            const actor = getLogUserName(log.user_id)
+                            const note = cleanLogNote(log.note)
+                            return (
+                              <div
+                                key={log.id}
+                                className="flex items-start gap-2.5 text-xs text-slate-600 bg-slate-50/80 hover:bg-slate-100/80 transition-colors p-2.5 rounded-lg border border-slate-100"
+                              >
+                                <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${meta.dotCls}`} />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${meta.badgeCls}`}>
+                                      {meta.label}
+                                    </span>
+                                    {actor && (
+                                      <span className="font-semibold text-slate-800 text-xs">
+                                        {actor}
+                                      </span>
+                                    )}
+                                    <span className="text-[10px] text-slate-400 ml-auto shrink-0 flex items-center gap-1">
+                                      <Clock size={10} />
+                                      {fmtDateTime(log.created_at)}
+                                    </span>
+                                  </div>
+                                  {note && (
+                                    <div className="text-[11px] text-slate-500 mt-1 pl-0.5 break-words">
+                                      {note}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </details>
+                    </div>
+                  )}
+
+                  {/* Khối tiến độ ở đáy — mirror 100% Ảnh 1 */}
+                  {(() => {
+                    const total = isNStepRecord
+                      ? (instance.so_buoc_tong || instance.thu_tu_ky_json?.length || 1)
+                      : (instance.cap_tl === "Cấp 2" ? 2 : 3)
+                    const doneCount = isDone
+                      ? total
+                      : isNStepRecord
+                        ? (instance.buoc_hien_tai ?? 0)
+                        : (instance.trang_thai === "cho_phe_duyet" ? (instance.cap_tl === "Cấp 2" ? 1 : 2) : instance.trang_thai === "cho_xem_xet" ? 1 : 0)
+                    const pct = Math.round((doneCount / total) * 100)
+                    const allDone = isDone
+
+                    return (
+                      <div className="mt-auto px-5 py-4 border-t border-slate-100 bg-slate-50/60">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tiến độ ký</span>
+                          <span className={`text-xs font-extrabold ${allDone ? "text-emerald-600" : "text-amber-600"}`}>
+                            {doneCount}/{total} bước
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${allDone ? "bg-emerald-500" : "bg-amber-500"}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
