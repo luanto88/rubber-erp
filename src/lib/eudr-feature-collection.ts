@@ -183,12 +183,56 @@ type AliasSource = { ten: string; dbRow: ForestPlotRow | null; staticFeature: Fe
  *
  * `ma_lo_full` CỐ Ý luôn `null` — không được mượn của bất kỳ nguồn nào, xem lý do ở nơi gọi.
  */
+/**
+ * Lấy giá trị KHÔNG NULL đầu tiên tìm được cho 1 trường trong danh sách nguồn (ưu tiên
+ * `dbRow`, dự phòng `staticFeature.properties` — cùng thứ tự ưu tiên `mergePlotProperties()`
+ * đang dùng cho lô thường). Nếu các nguồn có giá trị KHÁC NHAU, cảnh báo ra console (không
+ * chặn export) — các mảnh ghép qua `forest_plot_code_aliases` đã được xác nhận là CÙNG MỘT
+ * thửa đất thật (JTS `touches()`), nên đáng lẽ phải cùng Đội/Nông trường/Giống; khác nhau là
+ * dấu hiệu dữ liệu cần soát lại, không được âm thầm bỏ qua.
+ */
+function pickAliasField<T>(
+  sources: AliasSource[],
+  fieldLabel: string,
+  fromRow: (row: ForestPlotRow) => T | null,
+  fromRef: (props: EudrPlotProperties) => T | null,
+): T | null {
+  const found: T[] = []
+  for (const s of sources) {
+    const refProps = (s.staticFeature?.properties as EudrPlotProperties | undefined) || {}
+    const value = (s.dbRow ? fromRow(s.dbRow) : null) ?? fromRef(refProps)
+    if (value !== null && value !== undefined) found.push(value)
+  }
+  if (found.length > 1) {
+    const distinct = new Set(found.map((v) => JSON.stringify(v)))
+    if (distinct.size > 1) {
+      console.warn(
+        `[eudr-feature-collection] Bí danh "${sources.map((s) => s.ten).join("+")}" có ${fieldLabel} khác nhau giữa các mảnh nguồn (${[...distinct].join(", ")}) — kiểm tra lại đây có đúng là 1 thửa đất không.`,
+      )
+    }
+  }
+  return found[0] ?? null
+}
+
+/** Diện tích khai báo của 1 nguồn bí danh — dùng để xếp thứ tự đại diện, xem `combineAliasSources()`. */
+function aliasSourceDeclaredHa(s: AliasSource): number {
+  const refProps = (s.staticFeature?.properties as EudrPlotProperties | undefined) || {}
+  return parseFiniteNumber(s.dbRow?.dien_tich_ha ?? refProps.Dtich2026_ha ?? null) ?? 0
+}
+
 function combineAliasSources(sources: AliasSource[]): ForestPlotRow | null {
   const polygons: number[][][][] = []
   let totalDeclared = 0
   let anyDeclared = false
 
-  for (const s of sources) {
+  // Sắp theo diện tích khai báo GIẢM DẦN trước khi gộp thuộc tính — khi các mảnh nguồn có
+  // Giống/Năm trồng KHÁC NHAU thật sự (vd 2 đợt trồng khác nhau trên cùng 1 thửa đất bị chia
+  // khi digitize), mảnh chiếm diện tích LỚN HƠN đại diện hợp lý hơn cho giá trị hiển thị
+  // chung, thay vì phụ thuộc thứ tự tình cờ trong bảng `forest_plot_code_aliases`. Không ảnh
+  // hưởng geometry/diện tích tổng (không phụ thuộc thứ tự cộng dồn).
+  const orderedSources = [...sources].sort((a, b) => aliasSourceDeclaredHa(b) - aliasSourceDeclaredHa(a))
+
+  for (const s of orderedSources) {
     const rawGeometry =
       (s.dbRow?.geometry as Geometry | undefined) ?? (s.staticFeature?.geometry as Geometry | undefined) ?? null
     if (rawGeometry?.type === "Polygon") {
@@ -197,9 +241,8 @@ function combineAliasSources(sources: AliasSource[]): ForestPlotRow | null {
       polygons.push(...((rawGeometry as MultiPolygon).coordinates as number[][][][]))
     }
 
-    const refProps = (s.staticFeature?.properties as EudrPlotProperties | undefined) || {}
-    const declared = parseFiniteNumber(s.dbRow?.dien_tich_ha ?? refProps.Dtich2026_ha ?? null)
-    if (declared !== null) {
+    const declared = aliasSourceDeclaredHa(s)
+    if (declared > 0) {
       totalDeclared += declared
       anyDeclared = true
     }
@@ -208,15 +251,45 @@ function combineAliasSources(sources: AliasSource[]): ForestPlotRow | null {
   if (polygons.length === 0) return null
 
   return {
-    ten: sources.map((s) => s.ten).join("+"),
+    ten: orderedSources.map((s) => s.ten).join("+"),
     ma_lo_full: null,
     geometry: { type: "MultiPolygon", coordinates: polygons } as MultiPolygon,
-    nong_truong: null,
-    doi: null,
-    giong: null,
+    // Nông trường/Đội/Giống/Năm trồng/Năm mở cạo: các mảnh nguồn là CÙNG MỘT thửa đất bị chia
+    // khi digitize (đã xác nhận hình học khi seed `forest_plot_code_aliases`) nên các trường
+    // này phải giống nhau — lấy giá trị thật (ưu tiên mảnh diện tích lớn hơn) thay vì hard-code
+    // null (khác trước đây, làm bản đồ/GeoJSON/DDS của lô bí danh mất sạch thông tin Đội/Nông
+    // trường dù geometry vẫn đúng).
+    nong_truong: pickAliasField(
+      orderedSources,
+      "Nông trường",
+      (r) => r.nong_truong,
+      (p) => (p.Nong_truong ? String(p.Nong_truong) : null),
+    ),
+    doi: pickAliasField(
+      orderedSources,
+      "Đội",
+      (r) => r.doi,
+      (p) => parseFiniteNumber(p.Doi_2026),
+    ),
+    giong: pickAliasField(
+      orderedSources,
+      "Giống",
+      (r) => r.giong,
+      (p) => (p.Giong ? String(p.Giong) : null),
+    ),
     dien_tich_ha: anyDeclared ? totalDeclared : null,
-    nam_trong: null,
-    nam_cao_up: null,
+    nam_trong: pickAliasField(
+      orderedSources,
+      "Năm trồng",
+      (r) => r.nam_trong,
+      (p) => parseFiniteNumber(p.Nam_trong),
+    ),
+    nam_cao_up: pickAliasField(
+      orderedSources,
+      "Năm mở cạo",
+      (r) => r.nam_cao_up,
+      (p) => parseFiniteNumber(p.Nam_mo_cao),
+    ),
   }
 }
 
