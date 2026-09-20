@@ -16,6 +16,7 @@ const PolygonDrawMap = dynamic(
   }
 )
 import { supabase } from "@/lib/supabase"
+import { fetchSecureUrl } from "@/app/dashboard/_components/secure-file-open"
 import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
 import { isBlankNoteContent } from "@/lib/note-filter"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
@@ -2168,14 +2169,11 @@ export default function SettingsPage() {
   useEffect(() => {
     if (tab === "iso-vanban" && user && factoryId) {
       const loadSignInfo = async () => {
-        // Kiểm tra đã có ảnh chữ ký chưa
-        const sigPath = `signatures/${factoryId}/${user.id}/chu_ky.png`
-        const { data } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
-        // Thử fetch HEAD để check tồn tại
-        try {
-          const res = await fetch(data.publicUrl, { method: "HEAD" })
-          if (res.ok) setSignatureUrl(data.publicUrl + "?t=" + Date.now())
-        } catch { /* bỏ qua */ }
+        // Vá bảo mật 2026-09-21: bucket `iso-documents` không còn public — không thể tự
+        // getPublicUrl() rồi fetch HEAD thẳng URL đó (sẽ 403). Mint Signed URL qua route dùng
+        // chung (trả 404 nếu chưa có ảnh, coi như "chưa có" — không cần HEAD check riêng nữa).
+        const result = await fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(user.id)}`)
+        if (result.ok) setSignatureUrl(result.url)
 
         // Kiểm tra đã thiết lập PIN chưa
         const { data: pinRow } = await supabase
@@ -2925,7 +2923,10 @@ export default function SettingsPage() {
           setSensitiveActionError(json.error || "Không đổi được chữ ký")
           return
         }
-        setSignatureUrl(`${json.publicUrl}?t=${Date.now()}`)
+        // Vá bảo mật 2026-09-21: bucket private không còn dùng `json.publicUrl` (URL public
+        // thô, không mint qua route xác thực) — mint lại Signed URL cho đúng người dùng này.
+        const sigResult = await fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(user.id)}`)
+        if (sigResult.ok) setSignatureUrl(sigResult.url)
         setSigMsg({ ok: true, text: "Đã cập nhật chữ ký cá nhân" })
       } else {
         const res = await fetch("/api/account/change-password", {
@@ -2993,8 +2994,8 @@ export default function SettingsPage() {
         .from("iso-documents")
         .upload(sigPath, file, { contentType: "image/png", upsert: true })
       if (error) { setSigMsg({ ok: false, text: error.message }); return }
-      const { data } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
-      setSignatureUrl(data.publicUrl + "?t=" + Date.now())
+      const result = await fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(user.id)}`)
+      if (result.ok) setSignatureUrl(result.url)
       setSigMsg({ ok: true, text: "Tải lên thành công!" })
     } finally {
       setSignatureUploading(false)

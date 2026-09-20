@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
 import {
   CHE_DO_XEM_DESC,
   CHE_DO_XEM_LABEL,
@@ -396,15 +397,14 @@ export function EditDocModal({
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <a
-                  href={currentDisplayFile}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  type="button"
+                  onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
                   className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-all"
                 >
                   <Eye size={12} />
                   Xem file
-                </a>
+                </button>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}

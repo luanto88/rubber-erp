@@ -15,7 +15,7 @@ import { DistributionModal } from "../_components/distribution-modal"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { PageHeaderBanner } from "../../_components/page-header-banner"
 import { PageBackgroundMotif } from "../../_components/page-background-motif"
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
+import { openSecureFile } from "../../_components/secure-file-open"
 import {
   fmtDate,
   FORM_INSTANCE_STATUS_LABEL,
@@ -126,7 +126,7 @@ function TemplateCard({
   onSelect: () => void
 }) {
   const pct = Math.round(tmpl.similarity * 100)
-  const ext = tmpl.file_signed_office_type || (tmpl.file_signed_office_url ? "docx" : tmpl.file_goc_url?.split(".").pop() ?? "pdf")
+  const ext = tmpl.file_ext
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-violet-300 hover:shadow-md transition-all">
@@ -462,10 +462,13 @@ export default function IsoFormsPage() {
     setSearchError(null)
     setHasSearched(true)
     try {
+      const session = await getFreshAuthSession()
+      const token = session?.access_token
+      if (!token) { setSearchError("Phiên đăng nhập đã hết hạn, vui lòng tải lại trang."); return }
       const res = await fetch("/api/iso/forms/search", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: searchQuery.trim(), factoryId }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ query: searchQuery.trim() }),
       })
       const json = await res.json() as { results?: TemplateSearchResult[]; error?: string }
       if (!res.ok) { setSearchError(json.error ?? "Lỗi tìm kiếm"); return }
@@ -705,12 +708,9 @@ export default function IsoFormsPage() {
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         {(() => {
-                          // `<a download>` bị bỏ qua khi khác origin — dùng `?download=` của
-                          // Supabase Storage (xem lib/storage-download.ts).
-                          const downloadUrl = buildStorageDownloadUrl(
-                            inst.final_pdf_url || inst.final_office_url || inst.soan_thao_signed_url || inst.draft_file_url,
-                            inst.tieu_de || "Hồ sơ ISO",
-                          )
+                          // Vá bảo mật 2026-09-20: mint Signed URL qua route xác thực thay vì
+                          // build link tải từ URL public thô (bucket iso-documents sẽ private).
+                          const hasFile = !!(inst.final_pdf_url || inst.final_office_url || inst.soan_thao_signed_url || inst.draft_file_url)
                           return (
                             <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                               <button
@@ -720,18 +720,18 @@ export default function IsoFormsPage() {
                               >
                                 <Eye size={14} />
                               </button>
-                              {downloadUrl && (
-                                <a
-                                  href={downloadUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  download
+                              {hasFile && (
+                                <button
+                                  type="button"
                                   title="Tải xuống nhanh"
-                                  onClick={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void openSecureFile(`/api/iso/forms/${inst.id}/file-url?download=1`)
+                                  }}
                                   className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
                                 >
                                   <Download size={14} />
-                                </a>
+                                </button>
                               )}
                               {inst.trang_thai === "da_phe_duyet" && (
                                 <button

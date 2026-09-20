@@ -486,6 +486,10 @@ export const FORM_INSTANCE_STATUS_COLOR: Record<IsoFormInstanceStatus, string> =
   tu_choi: "bg-red-100 text-red-700",
 }
 
+// Vá bảo mật 2026-09-20: type này trước đây mang cả 3 cột URL file thật của `iso_documents`
+// (`file_signed_office_url`/`file_goc_url`/`file_signed_pdf_url`) — route `/api/iso/forms/search`
+// không xác thực trả thẳng ra ngoài. Route đã sửa để chỉ trả `file_ext` (chỉ dùng hiển thị badge
+// loại file), KHÔNG còn URL nào — không thêm lại 3 cột trên vào type này.
 export interface TemplateSearchResult {
   id: string
   ten_tai_lieu: string
@@ -494,10 +498,8 @@ export interface TemplateSearchResult {
   phong_ban: string | null
   lan_ban_hanh: string | null
   phan_loai_tl: string | null
-  file_signed_office_url: string | null
-  file_signed_office_type: string | null
-  file_goc_url: string | null
-  file_signed_pdf_url: string | null
+  file_ext: string
+  has_file: boolean
   mo_ta_tim_kiem: string | null
   similarity: number
 }

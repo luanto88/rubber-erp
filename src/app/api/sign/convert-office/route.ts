@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import { convertOfficeUrlToPdfDocumentWithRetry } from "../_lib/cloud-convert"
+import { mintSignedFileUrl } from "@/lib/secure-file-url"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 )
+
+const BUCKET = "iso-documents"
 
 export async function POST(req: NextRequest) {
   try {
@@ -53,7 +56,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Chi ho tro convert DOCX hoac XLSX sang PDF" }, { status: 400 })
     }
 
-    const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(fileUrl)
+    // Vá bảo mật 2026-09-21: bucket `iso-documents` sẽ chuyển private — CloudConvert (dịch vụ
+    // ngoài) tự fetch `fileUrl` qua `import/url`, nên KHÔNG được đưa thẳng URL public đã lưu
+    // trong DB (sẽ 403 với CloudConvert y hệt trình duyệt). Mint Signed URL riêng cho lượt gọi
+    // này — TTL dài hơn route mở file thường vì phải sống đủ tới khi CloudConvert fetch xong,
+    // job có thể xếp hàng vài phút trước khi CloudConvert thực sự tải file.
+    const signedSourceUrl = await mintSignedFileUrl(fileUrl, { bucket: BUCKET, ttlSeconds: 600 })
+    if (!signedSourceUrl) {
+      return NextResponse.json({ ok: false, error: "Khong tao duoc duong dan file de convert" }, { status: 500 })
+    }
+    const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(signedSourceUrl)
     const pdfBytes = await pdfDoc.save()
 
     const ts = Date.now()

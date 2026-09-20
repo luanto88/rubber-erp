@@ -16,7 +16,27 @@ import {
   Loader2,
 } from "lucide-react"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
+import { getFreshAuthSession } from "@/lib/auth"
 import type { ThuTuKyStep } from "@/app/dashboard/iso/_components/iso-types"
+
+/** Route `/file-hash` trả `{ hash }`, khác hình dạng `{ url }` của `fetchSecureUrl` dùng chung —
+ * viết riêng 1 hàm fetch nhỏ thay vì ép vào `fetchSecureUrl`. */
+async function fetchFileHash(instanceId: string): Promise<{ ok: true; hash: string } | { ok: false; error: string }> {
+  const session = await getFreshAuthSession()
+  const token = session?.access_token
+  if (!token) return { ok: false, error: "Phiên đăng nhập đã hết hạn, vui lòng tải lại trang." }
+  try {
+    const res = await fetch(`/api/iso/forms/${instanceId}/file-hash`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const json = (await res.json()) as { hash?: string; error?: string }
+    if (!res.ok || !json.hash) return { ok: false, error: json.error || "Không tính được mã băm" }
+    return { ok: true, hash: json.hash }
+  } catch {
+    return { ok: false, error: "Lỗi kết nối khi tính mã băm" }
+  }
+}
 
 export type SignerInfoEntry = {
   buoc?: number
@@ -71,38 +91,41 @@ function fmtDateTime(isoString: string | null | undefined): string {
 }
 
 export function IsoFormVerifyModal({ instance, onClose }: IsoFormVerifyModalProps) {
+  const hasPdf = !!(instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
+
   const [copied, setCopied] = useState(false)
   const [fileHash, setFileHash] = useState<string | null>(null)
-  const [calculatingHash, setCalculatingHash] = useState(false)
+  // Khởi tạo "đang tính" ngay từ giá trị ban đầu (thay vì gọi setState(true) đồng bộ trong
+  // effect) — tránh lỗi react-hooks/set-state-in-effect. Effect chỉ còn tắt cờ này khi xong.
+  const [calculatingHash, setCalculatingHash] = useState(hasPdf)
 
-  const pdfUrl = instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url
-
-  // Tính mã băm SHA-256 từ file PDF thật để chứng thực tính toàn vẹn (Integrity Proof)
+  // Vá bảo mật 2026-09-20: mã băm SHA-256 nay được tính TRỰC TIẾP ở server (route
+  // `/api/iso/forms/[id]/file-hash`, tải object bằng service role) thay vì trình duyệt tự
+  // `fetch()` nguyên file PDF từ URL public — bucket `iso-documents` sẽ chuyển private, và cách
+  // này còn đỡ tốn băng thông người dùng hơn hẳn.
   useEffect(() => {
+    if (!hasPdf) {
+      setCalculatingHash(false)
+      return
+    }
     let alive = true
-    if (!pdfUrl) return
-
-    setCalculatingHash(true)
     ;(async () => {
       try {
-        const res = await fetch(pdfUrl)
-        if (!res.ok) throw new Error("Không thể tải file")
-        const buf = await res.arrayBuffer()
-        const digest = await crypto.subtle.digest("SHA-256", buf)
-        const hashArray = Array.from(new Uint8Array(digest))
-        const hex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("")
-        if (alive) setFileHash(hex)
-      } catch (err) {
-        console.warn("[IsoFormVerifyModal] Calculate hash error:", err)
+        const result = await fetchFileHash(instance.id)
+        if (!alive) return
+        if (result.ok) {
+          setFileHash(result.hash)
+        } else {
+          console.warn("[IsoFormVerifyModal] Calculate hash error:", result.error)
+        }
       } finally {
         if (alive) setCalculatingHash(false)
       }
     })()
-
     return () => {
       alive = false
     }
-  }, [pdfUrl])
+  }, [hasPdf, instance.id])
 
   const handleCopyHash = () => {
     if (!fileHash) return
@@ -187,15 +210,14 @@ export function IsoFormVerifyModal({ instance, onClose }: IsoFormVerifyModalProp
       maxWidth="lg"
       footer={
         <div className="flex items-center justify-between w-full">
-          {pdfUrl && (
-            <a
-              href={pdfUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+          {hasPdf && (
+            <button
+              type="button"
+              onClick={() => void openSecureFile(`/api/iso/forms/${instance.id}/file-url`)}
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
             >
               <ExternalLink size={13} /> Mở bản PDF ký duyệt
-            </a>
+            </button>
           )}
           <button
             onClick={onClose}

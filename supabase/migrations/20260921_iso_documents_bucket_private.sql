@@ -1,0 +1,34 @@
+-- ⚠️ BƯỚC 2/2 — CHỈ CHẠY SAU KHI TOÀN BỘ CODE ĐÃ DEPLOY (Giai đoạn 0-5 của kế hoạch vá lỗ
+-- hổng "bucket iso-documents public"). Chạy sớm hơn sẽ làm MỌI nút "Xem file"/"Tải file" hiện
+-- có trên production (Tài liệu ISO, Hồ sơ thực hiện ISO, Văn bản nội bộ) 403 ngay lập tức, vì
+-- chúng vẫn đang đọc thẳng URL public từ DB cho tới khi các route "/api/.../file-url" (signed
+-- URL) được deploy và code client được cập nhật để gọi qua đó.
+--
+-- Chạy 20260921_iso_documents_bucket_write_lockdown.sql (BƯỚC 1) trước — migration đó AN TOÀN
+-- chạy ngay, không phụ thuộc gì ở đây.
+--
+-- Vì sao cần đổi cờ này: bucket `public = true` khiến endpoint
+-- `/storage/v1/object/public/iso-documents/{path}` phục vụ file cho BẤT KỲ ai có đúng URL,
+-- BỎ QUA HOÀN TOÀN RLS — không cần đăng nhập, không hết hạn, vĩnh viễn. Toàn bộ lớp "phải đăng
+-- nhập mới xem được" hiện tại (trang public /iso-doc/[id], redirect /login?next=..., quyền
+-- canOpenIsoFile()...) chỉ là rào ở TẦNG GIAO DIỆN — một khi URL đã lộ ra (devtools, Network
+-- tab, hoặc route /api/iso/forms/search trước khi được vá), URL đó hoạt động mãi mãi.
+--
+-- Sau khi chạy dòng UPDATE bên dưới: KHÔNG cần migrate dữ liệu, KHÔNG cần backfill — cột URL
+-- trong DB (`iso_documents.file_*_url`, `iso_form_instances.*_url`, `van_ban_documents.*_url`)
+-- vẫn giữ nguyên định dạng `.../object/public/iso-documents/{path}` như cũ, giờ chỉ dùng làm
+-- NGUỒN để trích ra `path` khi mint Signed URL qua service role (service role bypass RLS +
+-- bucket-public-flag hoàn toàn, không bị ảnh hưởng bởi việc bucket private).
+--
+-- Rollback tức thời nếu phát hiện lỗi nghiêm trọng sau khi chạy (an toàn, không phụ thuộc gì
+-- khác vì không có thay đổi schema/dữ liệu nào đi kèm):
+--   UPDATE storage.buckets SET public = true WHERE id = 'iso-documents';
+
+UPDATE storage.buckets SET public = false WHERE id = 'iso-documents';
+
+-- Kiểm chứng sau khi chạy:
+--   1. SELECT id, public FROM storage.buckets WHERE id = 'iso-documents'; -- public phải = false
+--   2. Mở 1 URL public CŨ đã biết trước (ghi lại trước khi chạy dòng UPDATE ở trên) trong tab ẩn
+--      danh, CHƯA đăng nhập -> phải nhận lỗi 400/"Bucket not found", không mở được file nữa.
+--   3. Đăng nhập, mở 1 tài liệu ISO/hồ sơ/văn bản đã ký qua nút "Xem"/"Tải" -> phải hoạt động
+--      bình thường (đi qua route signed-url mới, không phải URL public cũ).

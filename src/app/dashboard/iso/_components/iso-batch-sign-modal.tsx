@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import type { SessionUser } from "@/lib/auth"
+import { fetchSecureUrl } from "../../_components/secure-file-open"
 import {
   SIGN_AS_LABEL,
   type IsoDocument,
@@ -569,13 +570,15 @@ export function IsoBatchSignModal({
 
   const activeDoc = docItems[activeDocIndex] || null
 
-  // Tra cứu URL ảnh chữ ký cá nhân của người dùng
+  // Tra cứu URL ảnh chữ ký cá nhân của người dùng — qua route mint Signed URL (bucket private)
   useEffect(() => {
     if (!factoryId || !currentUser?.id) return
-    const sigPath = `signatures/${factoryId}/${currentUser.id}/chu_ky.png`
-    const { data } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
-    if (data?.publicUrl) {
-      setSigImgUrl(data.publicUrl)
+    let cancelled = false
+    void fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(currentUser.id)}`).then((result) => {
+      if (!cancelled && result.ok) setSigImgUrl(result.url)
+    })
+    return () => {
+      cancelled = true
     }
   }, [factoryId, currentUser?.id])
 
@@ -714,6 +717,18 @@ export function IsoBatchSignModal({
           setLoading(false)
           return
         }
+
+        // Vá bảo mật 2026-09-20: thay URL public thô (chỉ dùng để check đuôi .pdf ở trên) bằng
+        // Signed URL ngắn hạn TRƯỚC khi giao cho pdfjs fetch trong trình duyệt — bucket
+        // `iso-documents` sẽ chuyển private, URL public cũ không còn tải được nữa.
+        const signedUrls = await Promise.all(
+          rawDocs.map((rd) => fetchSecureUrl(`/api/iso/documents/${rd.docId}/file-url?variant=${rd.kind}`)),
+        )
+        rawDocs.forEach((rd, idx) => {
+          const result = signedUrls[idx]
+          if (result.ok) rd.url = result.url
+        })
+        if (cancelled) return
 
         // Tải toàn bộ mẫu vị trí liên quan từ bảng `mau_vi_tri`
         const tmplKeysToQuery = new Set<string>()

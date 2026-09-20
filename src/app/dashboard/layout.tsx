@@ -177,7 +177,11 @@ function isoPublicFallbackFor(pathname: string): string | null {
 
 function resolveUnauthenticatedRedirect(): string {
   if (typeof window === "undefined") return "/login"
-  return isoPublicFallbackFor(window.location.pathname) ?? "/login"
+  const path = window.location.pathname
+  // Giữ next=<path> để sau khi đăng nhập quay đúng lại route đang xem (vd hồ sơ thực hiện ISO
+  // quét từ QR) — trước đây fallback cứng "/login" làm mất ngữ cảnh, người dùng phải tự tìm lại.
+  // Route documents/[id] vẫn ưu tiên đưa về trang public /iso-doc/[id] như cũ.
+  return isoPublicFallbackFor(path) ?? `/login?next=${encodeURIComponent(path)}`
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -578,7 +582,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (isPublicStorageLookup) return
     if (authResolved === "unauthenticated") {
-      window.location.replace(isoPublicFallbackFor(pathname) ?? "/login")
+      window.location.replace(isoPublicFallbackFor(pathname) ?? `/login?next=${encodeURIComponent(pathname)}`)
     }
   }, [isPublicStorageLookup, authResolved, pathname])
 

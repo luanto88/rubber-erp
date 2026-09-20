@@ -132,7 +132,9 @@ export async function POST(req: NextRequest) {
         note: `Tạo từ mẫu PDF: ${template.ten_tai_lieu}`,
       })
 
-      return NextResponse.json({ instanceId, isPdfOnly: true, templatePdfUrl: draftUrl })
+      // Vá bảo mật 2026-09-21: không trả `templatePdfUrl` (URL public thô) — client chỉ đọc
+      // `instanceId`/`isPdfOnly` (đã grep xác nhận), bucket `iso-documents` sẽ chuyển private.
+      return NextResponse.json({ instanceId, isPdfOnly: true })
     }
 
     const ext = template.file_signed_office_type ||
@@ -208,7 +210,9 @@ export async function POST(req: NextRequest) {
       note: `Tạo từ mẫu: ${template.ten_tai_lieu}`,
     })
 
-    return NextResponse.json({ instanceId, draftFileUrl, ext })
+    // Vá bảo mật 2026-09-21: không trả `draftFileUrl` (URL public thô) — client chỉ đọc
+    // `instanceId` (đã grep xác nhận), bucket `iso-documents` sẽ chuyển private.
+    return NextResponse.json({ instanceId, ext })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })

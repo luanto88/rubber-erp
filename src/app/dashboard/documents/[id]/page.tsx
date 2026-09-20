@@ -8,6 +8,7 @@ import { Resizable } from "re-resizable"
 import { QRCodeSVG } from "qrcode.react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
+import { fetchSecureUrl, openSecureFile } from "@/app/dashboard/_components/secure-file-open"
 import { DocumentsShell } from "../_components/documents-shell"
 import { EditDocModal } from "../_components/edit-doc-modal"
 import {
@@ -1906,6 +1907,10 @@ export default function DocumentDetailPage() {
 
   // Modal ký duyệt (canvas PDF kéo-thả chữ ký hoặc info tag Office)
   const [signModal, setSignModal] = useState<"ky_buoc" | "phe_duyet" | null>(null)
+  // Vá bảo mật 2026-09-20: bucket iso-documents sẽ private — `SignPlacementModal` tự
+  // `pdfjs.getDocument({url})` trong trình duyệt nên nguồn PDF đưa vào modal PHẢI là Signed
+  // URL, không còn được là `docSourceUrl` (URL public thô) đọc thẳng từ DB.
+  const [signedSourceFileUrl, setSignedSourceFileUrl] = useState<string | null>(null)
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null)
 
   // Trả về modal
@@ -2014,10 +2019,10 @@ export default function DocumentDetailPage() {
       }
       setUser(sessionUser)
       void resolveUserDeptCode(sessionUser.id)
-      const { data: sigUrlData } = supabase.storage
-        .from("iso-documents")
-        .getPublicUrl(`signatures/${fid}/${sessionUser.id}/chu_ky.png`)
-      setSignatureUrl(sigUrlData.publicUrl)
+      // Vá bảo mật 2026-09-20: mint Signed URL thay vì getPublicUrl() trực tiếp (bucket
+      // iso-documents sẽ chuyển private).
+      const sigResult = await fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(sessionUser.id)}`)
+      if (sigResult.ok) setSignatureUrl(sigResult.url)
       setLoading(false)
     }
     void bootstrap()
@@ -2068,11 +2073,20 @@ export default function DocumentDetailPage() {
   // Office (DOCX/XLSX) không có khái niệm "vị trí" (dùng tag {{...}}) nên bỏ qua màn
   // này, gửi thẳng như cũ. Đây CHỈ là điều hướng UI — chưa đụng gì tới
   // api/documents/sign/route.ts hay logic đóng dấu PDF thật.
-  const handleGuiKy = () => {
+  const handleGuiKy = async () => {
     if (doc && docExt === "pdf" && docSourceUrl && doc.loai_van_ban) {
+      // Vá bảo mật 2026-09-20: `pdfUrl` không còn là URL public thô — màn "Cài đặt vị trí ký"
+      // tự `pdfjs.getDocument({url: pdfUrl})` trong trình duyệt, nên phải là Signed URL (bucket
+      // iso-documents sẽ chuyển private). `handleReplaceFile` đã persist DB ngay khi upload nên
+      // không có race condition "vừa thay file nhưng DB chưa kịp cập nhật" cần xử lý thêm.
+      const result = await fetchSecureUrl(`/api/documents/${doc.id}/file-url`)
+      if (!result.ok) {
+        setActionError(result.error)
+        return
+      }
       const qs = new URLSearchParams({
         loai: doc.loai_van_ban,
-        pdfUrl: docSourceUrl,
+        pdfUrl: result.url,
         docLabel: doc.ten_van_ban || doc.ma_van_ban || doc.loai_van_ban,
         returnTo: `/dashboard/documents/${doc.id}`,
         docId: doc.id,
@@ -2081,6 +2095,22 @@ export default function DocumentDetailPage() {
       return
     }
     void doAction("gui_ky")
+  }
+
+  /** Mint Signed URL cho `docSourceUrl` TRƯỚC khi mở modal ký — xem `signedSourceFileUrl`. */
+  const openSignModal = async (step: "ky_buoc" | "phe_duyet") => {
+    if (!doc) return
+    if (docExt === "pdf" && docSourceUrl) {
+      const result = await fetchSecureUrl(`/api/documents/${doc.id}/file-url`)
+      if (!result.ok) {
+        setActionError(result.error)
+        return
+      }
+      setSignedSourceFileUrl(result.url)
+    } else {
+      setSignedSourceFileUrl(null)
+    }
+    setSignModal(step)
   }
 
   // Quay lại từ màn "Cài đặt vị trí ký" (đã xác nhận vị trí, kể cả không đổi gì) — tự
@@ -2160,6 +2190,7 @@ export default function DocumentDetailPage() {
         return
       }
       setSignModal(null)
+      setSignedSourceFileUrl(null)
       setActionOk(action === "phe_duyet" ? "Phê duyệt thành công!" : "Ký thành công!")
       setTimeout(() => setActionOk(null), 3000)
       if (action === "phe_duyet") {
@@ -2457,15 +2488,14 @@ export default function DocumentDetailPage() {
         {/* Action buttons */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-shrink-0 sm:justify-end">
           {fileUrl && (
-            <a
-              href={fileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
               className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all"
             >
               <Eye size={15} />
               Xem file
-            </a>
+            </button>
           )}
           {canGuiKy && (
             <>
@@ -2520,7 +2550,7 @@ export default function DocumentDetailPage() {
           )}
           {canKyBuoc && (
             <button
-              onClick={() => setSignModal("ky_buoc")}
+              onClick={() => void openSignModal("ky_buoc")}
               disabled={acting}
               className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
             >
@@ -2530,7 +2560,7 @@ export default function DocumentDetailPage() {
           )}
           {canPheDuyet && (
             <button
-              onClick={() => setSignModal("phe_duyet")}
+              onClick={() => void openSignModal("phe_duyet")}
               disabled={acting}
               className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
             >
@@ -2768,7 +2798,7 @@ export default function DocumentDetailPage() {
       {signModal && (
         <SignPlacementModal
           stepLabel={signStepLabel}
-          sourceFileUrl={docSourceUrl}
+          sourceFileUrl={signedSourceFileUrl}
           fileExt={docExt}
           signatureUrl={signatureUrl}
           userName={user?.full_name || user?.username || "Người ký"}
@@ -2794,7 +2824,7 @@ export default function DocumentDetailPage() {
           userId={user?.id || ""}
           docId={doc.id}
           onConfirm={handleSignConfirm}
-          onClose={() => setSignModal(null)}
+          onClose={() => { setSignModal(null); setSignedSourceFileUrl(null) }}
         />
       )}
 

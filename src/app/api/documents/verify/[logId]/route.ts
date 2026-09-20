@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { verifyPadesSignature } from "@/lib/signing/verify-pades"
+import { parseStorageObjectPath } from "@/lib/secure-file-url"
 
 export const dynamic = "force-dynamic"
+
+const BUCKET = "iso-documents"
 
 // Route CÔNG KHAI (không yêu cầu đăng nhập) — mở khi bấm link nhúng trên đúng ô con dấu chữ ký
 // của tài liệu đã ký (xem `api/documents/sign/route.ts`'s performFileStamp cho Văn bản nội bộ và
@@ -206,8 +209,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       })
     }
 
-    const fileRes = await fetch(fileSignedPdfUrl)
-    if (!fileRes.ok) {
+    // Vá bảo mật 2026-09-20: bucket iso-documents sẽ chuyển private — `fetch()` thẳng URL public
+    // sẽ 403 dù route này chạy phía server. Tải object bằng service role (bypass cờ public/RLS)
+    // thay vì gọi HTTP thô ra URL đã lưu trong DB.
+    const objectPath = parseStorageObjectPath(fileSignedPdfUrl, BUCKET)
+    const download = objectPath ? await getSupabaseAdmin().storage.from(BUCKET).download(objectPath) : null
+    if (!objectPath || download?.error || !download?.data) {
       return NextResponse.json({
         ...base,
         valid: false,
@@ -216,7 +223,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       })
     }
 
-    const pdfBytes = Buffer.from(await fileRes.arrayBuffer())
+    const pdfBytes = Buffer.from(await download.data.arrayBuffer())
     const result = verifyPadesSignature(pdfBytes, sigIndexToVerify)
 
     return NextResponse.json({

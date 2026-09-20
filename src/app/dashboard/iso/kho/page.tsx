@@ -6,9 +6,10 @@ import { Archive, Eye, Download, AlertTriangle, BadgeCheck, ArrowUpRight } from 
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, type SessionUser } from "@/lib/auth"
 import { canOpenIsoFile, EXPIRED_FILE_HINT } from "@/app/dashboard/iso/_components/iso-file-access"
-// `<a download>` bị trình duyệt BỎ QUA khi file khác origin (Supabase Storage) — nút "Tải" khi đó
-// chỉ mở tab xem. Phải đi qua `?download=` của Storage, xem src/lib/storage-download.ts.
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
+// Vá bảo mật 2026-09-20: bucket iso-documents sẽ chuyển private — không còn dùng URL public
+// (`item.file_url`, chỉ để tính "có file hay không" ở dưới) để mở/tải trực tiếp. Mint Signed URL
+// qua route xác thực đúng module (documents/forms) — xem secure-file-open.ts.
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
 import { IsoShell } from "@/app/dashboard/iso/_components/iso-shell"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -45,6 +46,14 @@ function getFileUrl(doc: {
   file_goc_url: string | null
 }): string | null {
   return doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url || null
+}
+
+function fileUrlEndpoint(item: Pick<KhoItem, "docId" | "itemType">, download?: boolean): string {
+  const base = item.itemType === "form"
+    ? `/api/iso/forms/${item.docId}/file-url`
+    : `/api/iso/documents/${item.docId}/file-url?variant=main`
+  if (!download) return base
+  return `${base}${base.includes("?") ? "&" : "?"}download=1`
 }
 
 async function trackAction(docId: string, action: "view" | "download") {
@@ -560,34 +569,30 @@ export default function KhoPage() {
                             </div>
                           ) : (
                             <>
-                              <a
-                                href={item.file_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={() =>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void openSecureFile(fileUrlEndpoint(item))
                                   void trackAction(item.docId, "view")
-                                }
+                                }}
                                 className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
                                 title="Xem"
                               >
                                 <Eye size={12} />
                                 Xem
-                              </a>
-                              <a
-                                href={buildStorageDownloadUrl(
-                                  item.file_url,
-                                  `${item.ma_tai_lieu || "Tài liệu ISO"} ${item.ten_tai_lieu || ""}`.trim(),
-                                )}
-                                download
-                                onClick={() =>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void openSecureFile(fileUrlEndpoint(item, true))
                                   void trackAction(item.docId, "download")
-                                }
+                                }}
                                 className="flex items-center gap-1 px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded-lg transition-all"
                                 title="Tải xuống"
                               >
                                 <Download size={12} />
                                 Tải
-                              </a>
+                              </button>
                               {isHetHieuLuc && item.new_doc_id && (
                                 <Link
                                   href={`/dashboard/iso/documents/${item.new_doc_id}`}

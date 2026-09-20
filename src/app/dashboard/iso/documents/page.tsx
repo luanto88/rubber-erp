@@ -1,6 +1,7 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
@@ -26,9 +27,27 @@ import { DistributionModal } from "../_components/distribution-modal"
 import { DistributionManagement } from "../_components/distribution-management"
 import { PageHeaderBanner } from "../../_components/page-header-banner"
 import { PageBackgroundMotif } from "../../_components/page-background-motif"
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
+// Vá bảo mật 2026-09-20: bucket iso-documents đang chuyển private — mint Signed URL qua route
+// xác thực thay vì đọc thẳng cột file_*_url public.
+import { fetchSecureUrl, openSecureFile } from "../../_components/secure-file-open"
 
 export default function IsoDocumentsPage() {
+  const router = useRouter()
+
+  // Vá bảo mật 2026-09-20: mint Signed URL cho file TRƯỚC khi điều hướng sang màn Cài đặt vị
+  // trí ký (trang đó tự render PDF qua pdfjs, tự fetch(pdfUrl) trong trình duyệt) — thay vì
+  // truyền thẳng URL public như trước.
+  const goToMauViTri = async (targetId: string, loaiTaiLieu: string) => {
+    const result = await fetchSecureUrl(`/api/iso/documents/${targetId}/file-url?variant=main`)
+    if (!result.ok) {
+      alert(result.error)
+      return
+    }
+    router.push(
+      `/dashboard/ky/mau-vi-tri?modun=iso&docId=${targetId}&loaiTaiLieu=${encodeURIComponent(loaiTaiLieu)}&pdfUrl=${encodeURIComponent(result.url)}&returnTo=${encodeURIComponent("/dashboard/iso/documents")}`,
+    )
+  }
+
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [userRole, setUserRole] = useState("")
@@ -396,13 +415,8 @@ export default function IsoDocumentsPage() {
                         const isAdmin = userRole === "admin"
                         const canEditDoc = (doc.trang_thai === "draft" && (doc.soan_thao_user_id === userId || doc.created_by === userId)) || isAdmin
                         const canDeleteDoc = (doc.trang_thai === "draft" && (doc.soan_thao_user_id === userId || doc.created_by === userId)) || isAdmin
-                        // `<a download>` bị bỏ qua khi khác origin (file nằm trên Supabase
-                        // Storage) — phải dùng `?download=` của Storage, xem storage-download.ts.
                         const canOpenDocFile = canOpenIsoFile(doc.trang_thai, user, doc, userId)
-                        const downloadUrl = buildStorageDownloadUrl(
-                          doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url,
-                          `${doc.ma_tai_lieu || "Tài liệu ISO"} ${doc.ten_tai_lieu || ""}`.trim(),
-                        )
+                        const hasDocFile = !!(doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url)
                         return (
                           <div className="inline-flex items-center gap-1">
                             <Link
@@ -419,18 +433,18 @@ export default function IsoDocumentsPage() {
                               >
                                 <Download size={14} />
                               </span>
-                            ) : downloadUrl ? (
-                              <a
-                                href={downloadUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                download
+                            ) : hasDocFile ? (
+                              <button
+                                type="button"
                                 title="Tải xuống"
-                                onClick={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void openSecureFile(`/api/iso/documents/${doc.id}/file-url?variant=main&download=1`)
+                                }}
                                 className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
                               >
                                 <Download size={14} />
-                              </a>
+                              </button>
                             ) : (
                               <Link
                                 href={`/dashboard/iso/documents/${doc.id}`}
@@ -458,14 +472,18 @@ export default function IsoDocumentsPage() {
                                 <Pencil size={14} />
                               </Link>
                             )}
-                            {(doc.file_signed_pdf_url || doc.file_goc_url) && canEditDoc && (
-                              <Link
-                                href={`/dashboard/ky/mau-vi-tri?modun=iso&docId=${doc.id}&loaiTaiLieu=${encodeURIComponent(doc.loai_tai_lieu || doc.ma_tai_lieu || "")}&pdfUrl=${encodeURIComponent(doc.file_signed_pdf_url || doc.file_goc_url || "")}&returnTo=${encodeURIComponent("/dashboard/iso/documents")}`}
+                            {hasDocFile && canEditDoc && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void goToMauViTri(doc.id, doc.loai_tai_lieu || doc.ma_tai_lieu || "")
+                                }}
                                 title="Cài đặt mẫu vị trí ký"
                                 className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-700 transition-colors"
                               >
                                 <FileSignature size={14} />
-                              </Link>
+                              </button>
                             )}
                             {canDeleteDoc && (
                               <button
@@ -506,10 +524,7 @@ export default function IsoDocumentsPage() {
                           const canEditChild = (child.trang_thai === "draft" && (child.soan_thao_user_id === userId || child.created_by === userId)) || isAdmin
                           const canDeleteChild = (child.trang_thai === "draft" && (child.soan_thao_user_id === userId || child.created_by === userId)) || isAdmin
                           const canOpenChildFile = canOpenIsoFile(child.trang_thai, user, child, userId)
-                          const childDownloadUrl = buildStorageDownloadUrl(
-                            child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url,
-                            `${child.ma_tai_lieu || "Hồ sơ ISO"} ${child.ten_tai_lieu || ""}`.trim(),
-                          )
+                          const hasChildFile = !!(child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url)
                           return (
                             <div className="inline-flex items-center gap-1">
                               <Link
@@ -526,18 +541,18 @@ export default function IsoDocumentsPage() {
                                 >
                                   <Download size={14} />
                                 </span>
-                              ) : childDownloadUrl ? (
-                                <a
-                                  href={childDownloadUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  download
+                              ) : hasChildFile ? (
+                                <button
+                                  type="button"
                                   title="Tải xuống"
-                                  onClick={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void openSecureFile(`/api/iso/documents/${child.id}/file-url?variant=main&download=1`)
+                                  }}
                                   className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
                                 >
                                   <Download size={14} />
-                                </a>
+                                </button>
                               ) : (
                                 <Link
                                   href={`/dashboard/iso/documents/${child.id}`}
@@ -556,14 +571,18 @@ export default function IsoDocumentsPage() {
                                   <Pencil size={14} />
                                 </Link>
                               )}
-                              {(child.file_signed_pdf_url || child.file_goc_url) && canEditChild && (
-                                <Link
-                                  href={`/dashboard/ky/mau-vi-tri?modun=iso&docId=${child.id}&loaiTaiLieu=${encodeURIComponent(child.loai_tai_lieu || child.ma_tai_lieu || "")}&pdfUrl=${encodeURIComponent(child.file_signed_pdf_url || child.file_goc_url || "")}&returnTo=${encodeURIComponent("/dashboard/iso/documents")}`}
+                              {hasChildFile && canEditChild && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void goToMauViTri(child.id, child.loai_tai_lieu || child.ma_tai_lieu || "")
+                                  }}
                                   title="Cài đặt mẫu vị trí ký cho biểu mẫu này"
                                   className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-700 transition-colors"
                                 >
                                   <FileSignature size={14} />
-                                </Link>
+                                </button>
                               )}
                               {canDeleteChild && (
                                 <button

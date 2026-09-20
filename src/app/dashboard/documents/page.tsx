@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import type { SessionUser } from "@/lib/auth"
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
 import { DocumentsShell } from "./_components/documents-shell"
 import { EditDocModal } from "./_components/edit-doc-modal"
 import {
@@ -563,17 +563,19 @@ export default function DocumentsPage() {
                               <Eye size={15} />
                             </Link>
                             {downloadUrl && (
-                              // Tải về máy: dùng ?download= của Supabase Storage. Trước đây dùng
-                              // <a download target="_blank"> nhưng thuộc tính `download` KHÔNG có
-                              // tác dụng vì file khác origin với app → thực chất chỉ mở tab.
-                              <a
-                                href={buildStorageDownloadUrl(downloadUrl, `${doc.ma_van_ban || "Van ban"} ${doc.ten_van_ban || ""}`)}
-                                onClick={(e) => e.stopPropagation()}
+                              // Vá bảo mật 2026-09-20: mint Signed URL qua route xác thực thay vì
+                              // build link tải từ URL public thô (bucket iso-documents sẽ private).
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void openSecureFile(`/api/documents/${doc.id}/file-url?download=1`)
+                                }}
                                 className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
                                 title="Tải văn bản về máy"
                               >
                                 <Download size={15} />
-                              </a>
+                              </button>
                             )}
                             {canEditDoc(doc) && (
                               <button

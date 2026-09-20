@@ -4,9 +4,10 @@ import { Fragment, type RefObject, useCallback, useEffect, useRef, useState } fr
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
-// `<a download>` bị trình duyệt BỎ QUA khi file khác origin (Supabase Storage) — nút "Tải" khi đó
-// chỉ mở tab xem. Phải đi qua `?download=` của Storage, xem src/lib/storage-download.ts.
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
+// Vá bảo mật 2026-09-20: bucket iso-documents đang chuyển private — mọi nơi mở/tải file/ảnh
+// chữ ký phải mint Signed URL qua route xác thực thay vì đọc thẳng cột file_*_url/getPublicUrl
+// (trước đây dùng buildStorageDownloadUrl + <a href> trực tiếp trên URL public).
+import { fetchSecureUrl, openSecureFile } from "../../../_components/secure-file-open"
 import { IsoShell } from "../../_components/iso-shell"
 import { ModalShell } from "../../../_components/modal-shell"
 import {
@@ -2326,8 +2327,19 @@ export default function IsoDocumentDetailPage() {
     fileTotal: number,
   ) => {
     if (!factoryId || !user) return
-    const sigPath = `signatures/${factoryId}/${user.id}/chu_ky.png`
-    const { data: sigUrlData } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
+
+    // Vá bảo mật 2026-09-20: bucket iso-documents đã/sẽ chuyển private — không còn dùng
+    // getPublicUrl() trực tiếp. Mint Signed URL qua route xác thực TRƯỚC khi nạp PDF vào pdfjs
+    // (getDocument tự fetch(url) trong trình duyệt) và trước khi hiển thị ảnh chữ ký preview.
+    const pdfUrlResult = await fetchSecureUrl(`/api/iso/documents/${task.docId}/file-url?variant=${task.kind}`)
+    if (!pdfUrlResult.ok) {
+      setSaveError(pdfUrlResult.error)
+      return
+    }
+    // Ảnh chữ ký chỉ để xem trước — người dùng có thể chưa upload, không chặn mở modal nếu lỗi.
+    const sigUrlResult = await fetchSecureUrl(`/api/account/signature-url?userId=${user.id}`)
+    const sigImgUrl = sigUrlResult.ok ? sigUrlResult.url : ""
+
     const item = task.docId === doc?.id ? doc : childDocs.find((child) => child.id === task.docId)
     const currentStep = item ? resolveWorkflowStepForAction(item, action) : null
     const isSoanThaoStep = currentStep === "soan_thao"
@@ -2493,9 +2505,11 @@ export default function IsoDocumentDetailPage() {
       realChucVu = chucVuByKey.chinh_quyen
     }
 
+    const previewSignatures = useSignedPdfAsBackground || task.kind !== "main" ? [] : await buildPreviewSignatures(action)
+
     setPlacementModal({
       show: true,
-      sourcePdfUrl: task.url,
+      sourcePdfUrl: pdfUrlResult.url,
       docId: task.docId,
       fileKind: task.kind,
       fileLabel: task.label,
@@ -2523,8 +2537,8 @@ export default function IsoDocumentDetailPage() {
       totalPages: 1,
       canvasScale: 1,
       pdfPageHeight: 842,
-      sigImgUrl: sigUrlData.publicUrl,
-      previewSignatures: useSignedPdfAsBackground || task.kind !== "main" ? [] : buildPreviewSignatures(action),
+      sigImgUrl,
+      previewSignatures,
       signerName: realName,
       signerChucVu: realChucVu,
       chucVuKey: soanThaoCvKey,
@@ -2792,7 +2806,7 @@ export default function IsoDocumentDetailPage() {
     return p ? (p.full_name || p.username) : ""
   }
 
-  const buildPreviewSignatures = (action?: PinModalAction) => {
+  const buildPreviewSignatures = async (action?: PinModalAction): Promise<PreviewSignature[]> => {
     if (!doc || !factoryId || !user) return [] as PreviewSignature[]
 
     const nameByUserId: Record<string, string> = {}
@@ -2823,13 +2837,15 @@ export default function IsoDocumentDetailPage() {
       ] : []),
     ]
 
-    return candidates.flatMap((entry) => {
-      if (!entry.signerUserId || !entry.placement || !entry.signedAt || entry.signerUserId === user.id) return []
-      const sigPath = `signatures/${factoryId}/${entry.signerUserId}/chu_ky.png`
-      const { data } = supabase.storage.from("iso-documents").getPublicUrl(sigPath)
-      return [{
+    const resolved = await Promise.all(candidates.map(async (entry) => {
+      if (!entry.signerUserId || !entry.placement || !entry.signedAt || entry.signerUserId === user.id) return null
+      // Vá bảo mật 2026-09-20: mint Signed URL cho ảnh chữ ký của NGƯỜI KHÁC (đã ký bước trước)
+      // thay vì getPublicUrl() trực tiếp — xem src/app/api/account/signature-url/route.ts.
+      const sigResult = await fetchSecureUrl(`/api/account/signature-url?userId=${entry.signerUserId}`)
+      if (!sigResult.ok) return null
+      return {
         signerUserId: entry.signerUserId,
-        url: data.publicUrl,
+        url: sigResult.url,
         page: Number(entry.placement.page ?? 0),
         x: Number(entry.placement.x ?? 0),
         y: Number(entry.placement.y ?? 0),
@@ -2841,8 +2857,10 @@ export default function IsoDocumentDetailPage() {
         nameWidth: Number(entry.placement.nameWidth ?? 80),
         nameHeight: Number(entry.placement.nameHeight ?? 20),
         signerName: nameByUserId[entry.signerUserId] || profileName(entry.signerUserId) || "",
-      }]
-    }).filter((entry) => entry.page > 0 && entry.width > 0 && entry.height > 0)
+      }
+    }))
+
+    return resolved.filter((entry) => entry !== null && entry.page > 0 && entry.width > 0 && entry.height > 0) as PreviewSignature[]
   }
 
   const activeDocTypes = docTypes.length > 0 ? docTypes : isoDocumentTypeFallback()
@@ -3009,6 +3027,37 @@ export default function IsoDocumentDetailPage() {
     ? `DOCX/XLSX \u0111\u00e3 c\u1eadp nh\u1eadt tag`
     : (uploadedFileName || "File t\u00e0i li\u1ec7u")
 
+  // V\u00e1 b\u1ea3o m\u1eadt 2026-09-20: \u0111i\u1ec1u h\u01b0\u1edbng sang m\u00e0n "C\u00e0i \u0111\u1eb7t v\u1ecb tr\u00ed k\u00fd" (mau-vi-tri) kh\u00f4ng c\u00f2n truy\u1ec1n
+  // th\u1eb3ng URL public \u2014 route \u0111\u00f3 mint URL t\u1eeb trang chi ti\u1ebft mau-vi-tri s\u1ebd t\u1ef1 fetch b\u1eb1ng pdfjs, n\u00ean
+  // URL ph\u1ea3i l\u00e0 Signed URL. Route mint URL \u0111\u1ecdc t\u1eeb c\u1ed9t `file_goc_url` trong DB \u2014 n\u1ebfu ng\u01b0\u1eddi d\u00f9ng
+  // v\u1eeba "Thay file"/upload m\u1edbi nh\u01b0ng CH\u01afA b\u1ea5m L\u01b0u (uploadedFileUrl kh\u00e1c doc.file_goc_url \u0111\u00e3 l\u01b0u),
+  // ph\u1ea3i l\u01b0u TR\u01af\u1edaC (ch\u1ec9 \u0111\u00fang 1 c\u1ed9t, kh\u00f4ng \u0111\u1ee5ng c\u00e1c tr\u01b0\u1eddng form kh\u00e1c \u0111ang s\u1eeda d\u1edf) \u0111\u1ec3 route \u0111\u1ecdc
+  // \u0111\u00fang file m\u1edbi nh\u1ea5t \u2014 n\u1ebfu kh\u00f4ng s\u1ebd mint nh\u1ea7m URL c\u1ee7a file C\u0168 ho\u1eb7c b\u00e1o l\u1ed7i "ch\u01b0a c\u00f3 file".
+  const goToTemplateSetup = async () => {
+    if (!docId || !factoryId) return
+    if (uploadedFileUrl && uploadedFileUrl !== doc?.file_goc_url) {
+      const { error } = await supabase
+        .from("iso_documents")
+        .update({ file_goc_url: uploadedFileUrl, file_signed_pdf_url: null, file_signed_office_url: null })
+        .eq("id", docId)
+        .eq("factory_id", factoryId)
+      if (error) {
+        setSaveError("Kh\u00f4ng l\u01b0u \u0111\u01b0\u1ee3c file tr\u01b0\u1edbc khi c\u00e0i \u0111\u1eb7t v\u1ecb tr\u00ed k\u00fd: " + error.message)
+        return
+      }
+      setDoc((prev) => prev ? { ...prev, file_goc_url: uploadedFileUrl, file_signed_pdf_url: null, file_signed_office_url: null } : prev)
+    }
+    const result = await fetchSecureUrl(`/api/iso/documents/${docId}/file-url?variant=main`)
+    if (!result.ok) {
+      setSaveError(result.error)
+      return
+    }
+    const loai = doc?.loai_tai_lieu || form.loai_tai_lieu || doc?.ma_tai_lieu || ""
+    const label = doc?.ma_tai_lieu ? `${doc.ma_tai_lieu} \u00b7 ${doc.ten_tai_lieu || ""}` : (doc?.ten_tai_lieu || loai)
+    const url = `/dashboard/ky/mau-vi-tri?modun=iso&docId=${docId}&loaiTaiLieu=${encodeURIComponent(loai)}&pdfUrl=${encodeURIComponent(result.url)}&docLabel=${encodeURIComponent(label)}&returnTo=${encodeURIComponent(`/dashboard/iso/documents/${docId}`)}`
+    router.push(url)
+  }
+
   const renderSavedChildDocs = () => {
     if (childDocs.length === 0) return null
     return (
@@ -3035,17 +3084,22 @@ export default function IsoDocumentDetailPage() {
                   {url && !canOpenChild && <ExpiredFileNotice />}
                   {url && canOpenChild && (
                     <>
-                      <a href={url} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem hồ sơ">
+                      <button
+                        type="button"
+                        onClick={() => void openSecureFile(`/api/iso/documents/${child.id}/file-url?variant=main`)}
+                        className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100"
+                        title="Xem hồ sơ"
+                      >
                         <Eye size={14} />
-                      </a>
-                      <a
-                        href={buildStorageDownloadUrl(url, `${child.ma_tai_lieu || "Hồ sơ ISO"} ${child.ten_tai_lieu || ""}`.trim())}
-                        download
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void openSecureFile(`/api/iso/documents/${child.id}/file-url?variant=main&download=1`)}
                         className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200"
                         title="Tải hồ sơ"
                       >
                         <Download size={14} />
-                      </a>
+                      </button>
                     </>
                   )}
                   {isEditable && (
@@ -3965,26 +4019,22 @@ export default function IsoDocumentDetailPage() {
             {/* Xem / Tải file */}
             {!isNew && mainFileUrl && canOpenThisFile && (
               <>
-                <a
-                  href={mainFileUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main`)}
                   title="Xem file"
                   className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-sm font-semibold shadow-2xs transition-all"
                 >
                   <Eye size={15} /> <span className="hidden sm:inline">Xem file</span>
-                </a>
-                <a
-                  href={buildStorageDownloadUrl(
-                    mainFileUrl,
-                    `${doc?.ma_tai_lieu || "Tài liệu ISO"} ${doc?.ten_tai_lieu || ""}`.trim(),
-                  )}
-                  download
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main&download=1`)}
                   title="Tải file"
                   className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 text-sm font-semibold shadow-2xs transition-all"
                 >
                   <Download size={15} /> <span className="hidden sm:inline">Tải file</span>
-                </a>
+                </button>
               </>
             )}
 
@@ -4002,13 +4052,7 @@ export default function IsoDocumentDetailPage() {
                 {(doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl) && !templateConfirmed ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      const pdfToUse = doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl || ""
-                      const loai = doc?.loai_tai_lieu || form.loai_tai_lieu || doc?.ma_tai_lieu || ""
-                      const label = doc?.ma_tai_lieu ? `${doc.ma_tai_lieu} · ${doc.ten_tai_lieu || ""}` : (doc?.ten_tai_lieu || loai)
-                      const url = `/dashboard/ky/mau-vi-tri?modun=iso&docId=${docId}&loaiTaiLieu=${encodeURIComponent(loai)}&pdfUrl=${encodeURIComponent(pdfToUse)}&docLabel=${encodeURIComponent(label)}&returnTo=${encodeURIComponent(`/dashboard/iso/documents/${docId}`)}`
-                      router.push(url)
-                    }}
+                    onClick={() => void goToTemplateSetup()}
                     disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
                     className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 text-sm font-semibold shadow-2xs transition-all disabled:opacity-50"
                     title="Cài đặt mẫu vị trí ký cho quy trình và các biểu mẫu trước khi gửi duyệt"
@@ -4021,13 +4065,7 @@ export default function IsoDocumentDetailPage() {
                     {(doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl) && (
                       <button
                         type="button"
-                        onClick={() => {
-                          const pdfToUse = doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl || ""
-                          const loai = doc?.loai_tai_lieu || form.loai_tai_lieu || doc?.ma_tai_lieu || ""
-                          const label = doc?.ma_tai_lieu ? `${doc.ma_tai_lieu} · ${doc.ten_tai_lieu || ""}` : (doc?.ten_tai_lieu || loai)
-                          const url = `/dashboard/ky/mau-vi-tri?modun=iso&docId=${docId}&loaiTaiLieu=${encodeURIComponent(loai)}&pdfUrl=${encodeURIComponent(pdfToUse)}&docLabel=${encodeURIComponent(label)}&returnTo=${encodeURIComponent(`/dashboard/iso/documents/${docId}`)}`
-                          router.push(url)
-                        }}
+                        onClick={() => void goToTemplateSetup()}
                         className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 text-sm font-semibold shadow-2xs transition-all"
                         title="Chỉnh sửa lại vị trí ký đã cài đặt"
                       >
@@ -4492,7 +4530,15 @@ export default function IsoDocumentDetailPage() {
                           <FileText size={16} className="text-amber-600 shrink-0" />
                           <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
                           {!canOpenThisFile && <ExpiredFileNotice />}
-                        {canOpenThisFile && <a href={doc?.file_phieu_yeu_cau_thay_doi_signed_url || reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg"><Eye size={13} className="text-amber-600" /></a>}
+                        {canOpenThisFile && (
+                          <button
+                            type="button"
+                            onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=change_request`)}
+                            className="shrink-0 p-1 hover:bg-amber-100 rounded-lg"
+                          >
+                            <Eye size={13} className="text-amber-600" />
+                          </button>
+                        )}
                         </div>
                       )}
                       <button type="button" onClick={() => reviewChangeFileInputRef.current?.click()} disabled={fileUploading} className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-amber-400 text-slate-500 hover:text-amber-700 text-xs font-medium rounded-xl transition-all">
@@ -4506,7 +4552,15 @@ export default function IsoDocumentDetailPage() {
                           <FileText size={16} className="text-sky-600 shrink-0" />
                           <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
                           {!canOpenThisFile && <ExpiredFileNotice />}
-                        {canOpenThisFile && <a href={doc?.file_de_nghi_soat_xet_signed_url || reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg"><Eye size={13} className="text-sky-600" /></a>}
+                        {canOpenThisFile && (
+                          <button
+                            type="button"
+                            onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=review_request`)}
+                            className="shrink-0 p-1 hover:bg-sky-100 rounded-lg"
+                          >
+                            <Eye size={13} className="text-sky-600" />
+                          </button>
+                        )}
                         </div>
                       )}
                       <button type="button" onClick={() => reviewRequestFileInputRef.current?.click()} disabled={fileUploading} className="mt-2 w-full px-3 py-2 border border-dashed border-slate-300 hover:border-sky-400 text-slate-500 hover:text-sky-700 text-xs font-medium rounded-xl transition-all">
@@ -4632,17 +4686,22 @@ export default function IsoDocumentDetailPage() {
                           {sibUrl && !canOpenSib && <ExpiredFileNotice />}
                           {sibUrl && canOpenSib && (
                             <>
-                              <a href={sibUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100" title="Xem file">
+                              <button
+                                type="button"
+                                onClick={() => void openSecureFile(`/api/iso/documents/${sib.id}/file-url?variant=main`)}
+                                className="shrink-0 rounded-lg p-1 text-sky-700 hover:bg-sky-100"
+                                title="Xem file"
+                              >
                                 <Eye size={13} />
-                              </a>
-                              <a
-                                href={buildStorageDownloadUrl(sibUrl, `${sib.ma_tai_lieu || "Hồ sơ ISO"} ${sib.ten_tai_lieu || ""}`.trim())}
-                                download
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void openSecureFile(`/api/iso/documents/${sib.id}/file-url?variant=main&download=1`)}
                                 className="shrink-0 rounded-lg p-1 text-slate-700 hover:bg-slate-200"
                                 title="Tải file"
                               >
                                 <Download size={13} />
-                              </a>
+                              </button>
                             </>
                           )}
                           {isEditable && (
@@ -5116,9 +5175,15 @@ export default function IsoDocumentDetailPage() {
                         <FileText size={16} className="text-amber-600 shrink-0" />
                         <span className="text-xs text-slate-700 flex-1 truncate">{reviewChangeFileName}</span>
                         {!canOpenThisFile && <ExpiredFileNotice />}
-                        {canOpenThisFile && <a href={doc?.file_phieu_yeu_cau_thay_doi_signed_url || reviewChangeFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-amber-100 rounded-lg">
-                          <Eye size={13} className="text-amber-600" />
-                        </a>}
+                        {canOpenThisFile && (
+                          <button
+                            type="button"
+                            onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=change_request`)}
+                            className="shrink-0 p-1 hover:bg-amber-100 rounded-lg"
+                          >
+                            <Eye size={13} className="text-amber-600" />
+                          </button>
+                        )}
                       </div>
                     ) : null}
                     {isEditable && (
@@ -5139,9 +5204,15 @@ export default function IsoDocumentDetailPage() {
                         <FileText size={16} className="text-sky-600 shrink-0" />
                         <span className="text-xs text-slate-700 flex-1 truncate">{reviewRequestFileName}</span>
                         {!canOpenThisFile && <ExpiredFileNotice />}
-                        {canOpenThisFile && <a href={doc?.file_de_nghi_soat_xet_signed_url || reviewRequestFileUrl} target="_blank" rel="noreferrer" className="shrink-0 p-1 hover:bg-sky-100 rounded-lg">
-                          <Eye size={13} className="text-sky-600" />
-                        </a>}
+                        {canOpenThisFile && (
+                          <button
+                            type="button"
+                            onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=review_request`)}
+                            className="shrink-0 p-1 hover:bg-sky-100 rounded-lg"
+                          >
+                            <Eye size={13} className="text-sky-600" />
+                          </button>
+                        )}
                       </div>
                     ) : null}
                     {isEditable && (

@@ -16,6 +16,7 @@ import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import { fetchSecureUrl, openSecureFile } from "../../../_components/secure-file-open"
 import { formatFactoryDateVN, formatFactoryDateTimeVN } from "@/lib/date-utils"
 import {
   ResizeHandleIcon,
@@ -2249,11 +2250,10 @@ export default function IsoFormInstancePage() {
             (staff.chuc_vu_chinh_quyen as string) || (staff.chuc_vu as string) || "",
           )
         }
-        // Load user's signature URL
-        const { data: sigUrlData } = supabase.storage
-          .from("iso-documents")
-          .getPublicUrl(`signatures/${fid}/${uid}/chu_ky.png`)
-        setSignatureUrl(sigUrlData.publicUrl)
+        // Load user's signature URL — vá bảo mật 2026-09-20: mint Signed URL thay vì
+        // getPublicUrl() trực tiếp (bucket iso-documents sẽ chuyển private).
+        const sigResult = await fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(uid)}`)
+        if (sigResult.ok) setSignatureUrl(sigResult.url)
       } finally {
         setLoading(false)
       }
@@ -2595,22 +2595,11 @@ export default function IsoFormInstancePage() {
 
   const handleDownload = async () => {
     if (!fileUrl || !instance) return
-    const urlExt = fileUrl.split("?")[0].split(".").pop()?.toLowerCase() ?? ""
-    const ext = ["docx", "xlsx", "pdf"].includes(urlExt) ? urlExt : (instance.draft_file_type || "docx")
-    const filename = `${instance.tieu_de || "ho_so"}.${ext}`
-    try {
-      const res = await fetch(fileUrl)
-      const blob = await res.blob()
-      const a = document.createElement("a")
-      a.href = URL.createObjectURL(blob)
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(a.href)
-    } catch {
-      window.open(fileUrl, "_blank")
-    }
+    // Vá bảo mật 2026-09-20: `fileUrl` giờ chỉ là URL public CŨ lưu trong DB, không còn tải
+    // được trực tiếp khi bucket private — mint Signed URL qua route riêng (server tự set
+    // Content-Disposition theo tiêu đề hồ sơ), rồi mở URL đó thay vì tự fetch/blob.
+    const result = await openSecureFile(`/api/iso/forms/${instanceId}/file-url?download=1`)
+    if (!result.ok) setUploadError(result.error)
   }
 
   const loadDocxPreview = async (file: File) => {
@@ -2824,11 +2813,30 @@ export default function IsoFormInstancePage() {
     }
   }
 
+  // Vá bảo mật 2026-09-20: bucket `iso-documents` sẽ chuyển private — `SignPlacementModal` tự
+  // `pdfjs.getDocument({url: sourceFileUrl})` trong trình duyệt, nên `sourceFileUrl` bắt buộc
+  // phải là Signed URL, không còn được là URL public thô đọc thẳng từ cột DB. Route
+  // `/api/iso/forms/[id]/file-url` tự tính đúng priority (draft khi đang editable, ưu tiên
+  // final_pdf/final_office/soan_thao_signed khi đã gửi đi) — thay thế toàn bộ logic tự chọn
+  // `draft_file_url`/`final_pdf_url`/`soan_thao_signed_url` từng viết tay ở mỗi hàm dưới đây
+  // (đã đối chiếu: hội tụ về đúng cùng kết quả cho mọi trạng thái thực tế các hàm này chạy tới).
+  // Signed URL luôn khác nhau mỗi lần mint nên tự thay thế được vai trò "cache-busting" của các
+  // query param `?_ts=`/`?_nocache=` cũ, không cần giữ lại.
+  const mintInstanceFileUrl = async (): Promise<string | null> => {
+    const result = await fetchSecureUrl(`/api/iso/forms/${instanceId}/file-url`)
+    if (!result.ok) {
+      setUploadError(result.error)
+      return null
+    }
+    return result.url
+  }
+
   const openSendModal = async () => {
     if (!instance || !factoryId) return
     const reloaded = await persistApprovalConfig()
     if (!reloaded) return
-    const fileSrc = reloaded.draft_file_url ?? instance.draft_file_url
+    const fileSrc = await mintInstanceFileUrl()
+    if (!fileSrc) return
 
     if ((reloaded.so_buoc_tong ?? 0) > 0) {
       setSignModal({
@@ -2845,36 +2853,32 @@ export default function IsoFormInstancePage() {
   /** Lưu cấu hình TRƯỚC rồi mới sang màn cài đặt vị trí ký — xem cảnh báo ở `persistApprovalConfig`. */
   const goToTemplateSetup = async () => {
     const reloaded = await persistApprovalConfig()
-    if (!reloaded) return
-    const rawPdf = [
-      urlIsPdf(reloaded.draft_file_url) ? reloaded.draft_file_url : null,
-      urlIsPdf(template?.file_signed_pdf_url ?? null) ? template?.file_signed_pdf_url ?? null : null,
-      urlIsPdf(template?.file_goc_url ?? null) ? template?.file_goc_url ?? null : null,
-    ].find(Boolean) ?? null
-    if (!rawPdf || !templateSignSetupKey) return
-    const freshPdf = rawPdf.includes("?") ? `${rawPdf}&_t=${Date.now()}` : `${rawPdf}?_t=${Date.now()}`
+    if (!reloaded || !templateSignSetupKey) return
+    const useInstanceDraft = urlIsPdf(reloaded.draft_file_url)
+    const templatePdfOk = !useInstanceDraft && !!template && (urlIsPdf(template.file_signed_pdf_url ?? null) || urlIsPdf(template.file_goc_url ?? null))
+    if (!useInstanceDraft && !templatePdfOk) return
+    const endpoint = useInstanceDraft
+      ? `/api/iso/forms/${instanceId}/file-url`
+      : `/api/iso/documents/${template!.id}/file-url?variant=main`
+    const result = await fetchSecureUrl(endpoint)
+    if (!result.ok) {
+      setUploadError(result.error)
+      return
+    }
     const targetUrl = `/dashboard/ky/mau-vi-tri?modun=iso&loai=${encodeURIComponent(templateSignSetupKey)}`
-      + `&pdfUrl=${encodeURIComponent(freshPdf)}`
+      + `&pdfUrl=${encodeURIComponent(result.url)}`
       + `&docLabel=${encodeURIComponent(template?.ma_tai_lieu || template?.ten_tai_lieu || reloaded.tieu_de)}`
       + `&formInstanceId=${encodeURIComponent(instanceId)}`
       + `&returnTo=${encodeURIComponent(`/dashboard/iso/forms/${instanceId}?confirmedSignTemplate=1`)}`
     router.push(targetUrl)
   }
 
-  const openSignStepModal = () => {
+  const openSignStepModal = async () => {
     if (!instance) return
-    const isDraftPdf = instance.draft_file_type === "pdf"
     const curIdx = instance.buoc_hien_tai ?? 0
     const total = instance.so_buoc_tong ?? 1
     const isFinalStep = curIdx + 1 >= total
-    // Nếu đang ở bước 0 hoặc hồ sơ đang ở draft/tra_ve, nguồn ký BẮT BUỘC là file draft vừa thay mới
-    const isFirstStepOrDraft = curIdx === 0 || instance.trang_thai === "draft" || instance.trang_thai === "tra_ve"
-    const rawSrc = isFirstStepOrDraft
-      ? instance.draft_file_url
-      : isDraftPdf
-        ? (instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
-        : (instance.soan_thao_signed_url || instance.draft_file_url)
-    const src = rawSrc ? (rawSrc.includes("?") ? `${rawSrc}&_ts=${Date.now()}` : `${rawSrc}?_ts=${Date.now()}`) : null
+    const src = await mintInstanceFileUrl()
     setSignModal({
       action: isFinalStep ? "phe_duyet" : "ky_buoc",
       stepIndex: curIdx,
@@ -2883,20 +2887,15 @@ export default function IsoFormInstancePage() {
     })
   }
 
-  const openXemXetModal = () => {
+  const openXemXetModal = async () => {
     if (!instance) return
-    const rawSrc = instance.soan_thao_signed_url || instance.draft_file_url
-    const src = rawSrc ? (rawSrc.includes("?") ? `${rawSrc}&_ts=${Date.now()}` : `${rawSrc}?_ts=${Date.now()}`) : null
+    const src = await mintInstanceFileUrl()
     setSignModal({ action: "xem_xet", sourceFileUrl: src })
   }
 
-  const openPheDuyetModal = () => {
+  const openPheDuyetModal = async () => {
     if (!instance) return
-    const isDraftPdf = instance.draft_file_type === "pdf"
-    const rawSrc = isDraftPdf
-      ? (instance.final_pdf_url || instance.soan_thao_signed_url || instance.draft_file_url)
-      : (instance.soan_thao_signed_url || instance.draft_file_url)
-    const src = rawSrc ? (rawSrc.includes("?") ? `${rawSrc}&_ts=${Date.now()}` : `${rawSrc}?_ts=${Date.now()}`) : null
+    const src = await mintInstanceFileUrl()
     setSignModal({ action: "phe_duyet", sourceFileUrl: src })
   }
 
@@ -3173,15 +3172,14 @@ export default function IsoFormInstancePage() {
           <div className="flex items-center gap-2 flex-wrap sm:flex-shrink-0 sm:justify-end">
             {/* Nút Xem file (màu xanh lam như Ảnh 1) */}
             {fileUrl && (
-              <a
-                href={fileUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all shadow-2xs"
               >
                 <Eye size={15} />
                 Xem file
-              </a>
+              </button>
             )}
 
             {/* Nút Phân phối (màu tím như Ảnh 1) */}
@@ -3400,14 +3398,13 @@ export default function IsoFormInstancePage() {
                       <div className="flex-1 text-xs">
                         <p className="font-semibold text-amber-800">Biểu mẫu gốc chỉ có dạng PDF</p>
                         <p className="text-slate-600 mt-0.5">Tải PDF về làm mẫu → điền nội dung → upload lại file (.docx, .xlsx, hoặc .pdf).</p>
-                        <a
-                          href={(template.file_signed_pdf_url || template.file_goc_url) ?? ""}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => void openSecureFile(`/api/iso/documents/${template.id}/file-url?variant=main&download=1`)}
                           className="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg"
                         >
                           <Download size={12} /> Tải PDF mẫu
-                        </a>
+                        </button>
                       </div>
                     </div>
                   )}
@@ -3425,14 +3422,13 @@ export default function IsoFormInstancePage() {
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <a
-                          href={(instance.final_pdf_url || instance.final_office_url) ?? ""}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
                           className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-white hover:bg-emerald-100 border border-emerald-200 rounded-lg shadow-2xs transition-all"
                         >
                           <Eye size={13} /> Xem
-                        </a>
+                        </button>
                         <button
                           onClick={handleDownload}
                           className="p-1.5 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors"
@@ -3457,15 +3453,14 @@ export default function IsoFormInstancePage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        <a
-                          href={fileUrl ?? ""}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
                           className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
                           title="Xem file"
                         >
                           <Eye size={15} />
-                        </a>
+                        </button>
                         <button
                           onClick={handleDownload}
                           className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
@@ -3476,7 +3471,8 @@ export default function IsoFormInstancePage() {
                         {canManageDraft && (
                           <button
                             onClick={() => fileInputRef.current?.click()}
-                            className="flex items-center gap-1 px-2 py-1 text-xs font-bold text-violet-700 hover:bg-violet-50 rounded-lg transition-colors"
+                            disabled={uploading}
+                            className="flex items-center gap-1 px-2 py-1 text-xs font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-50 rounded-lg transition-colors"
                             title="Thay file"
                           >
                             <RotateCcw size={12} /> Thay file
@@ -3484,6 +3480,26 @@ export default function IsoFormInstancePage() {
                         )}
                       </div>
                     </div>
+                  )}
+
+                  {/* Hidden file input dùng chung cho cả Tải lên lần đầu và Thay file */}
+                  {canManageDraft && (
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".docx,.xlsx,.pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) {
+                          setUploadFile(f)
+                          setDocxPreviewHtml(null)
+                          if (f.name.toLowerCase().endsWith(".docx")) void loadDocxPreview(f)
+                          void handleUpload(f)
+                        }
+                        e.target.value = ""
+                      }}
+                    />
                   )}
 
                   {/* Upload spinner */}
@@ -3497,21 +3513,6 @@ export default function IsoFormInstancePage() {
                   {/* Upload zone khi chưa có file */}
                   {canManageDraft && !uploading && !instance.draft_file_url && (
                     <div>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".docx,.xlsx,.pdf"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0]
-                          if (f) {
-                            setUploadFile(f)
-                            setDocxPreviewHtml(null)
-                            if (f.name.toLowerCase().endsWith(".docx")) void loadDocxPreview(f)
-                            void handleUpload(f)
-                          }
-                        }}
-                      />
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         className="w-full py-3 border-2 border-dashed border-slate-300 hover:border-violet-300 hover:bg-violet-50 rounded-xl text-xs text-slate-500 hover:text-violet-600 transition-colors flex items-center justify-center gap-2 font-medium"
@@ -3519,10 +3520,11 @@ export default function IsoFormInstancePage() {
                         <Upload size={14} />
                         Tải lên file hồ sơ (.docx, .xlsx, .pdf)
                       </button>
-                      {uploadError && (
-                        <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={11} />{uploadError}</p>
-                      )}
                     </div>
+                  )}
+
+                  {uploadError && (
+                    <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1"><AlertTriangle size={11} />{uploadError}</p>
                   )}
 
                   {/* DOCX preview */}

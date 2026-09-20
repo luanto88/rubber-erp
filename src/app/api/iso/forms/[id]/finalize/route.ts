@@ -7,6 +7,7 @@ import QRCode from "qrcode"
 import JSZip from "jszip"
 import { randomUUID } from "crypto"
 import { convertOfficeUrlToPdfDocumentWithRetry } from "@/app/api/sign/_lib/cloud-convert"
+import { mintSignedUrlForPath } from "@/lib/secure-file-url"
 import { SIGN_AS_OPTIONS, type SignAsType, type ThuTuKyStep, stepSignerUserId, type IsoFormInstanceStatus } from "@/app/dashboard/iso/_components/iso-types"
 import { clampRectToBox, findRoleBoxForStep } from "@/lib/signing/template-layout"
 import { getSignatureImage } from "@/lib/signing/signature-image"
@@ -663,11 +664,12 @@ export async function POST(
           }
         }
 
+        // Vá bảo mật 2026-09-21: không trả `fileUrl` (URL public thô) — không có call site nào
+        // ở client đọc field này (đã grep xác nhận), bucket `iso-documents` sẽ chuyển private.
         return NextResponse.json({
           success: true,
           trang_thai: nextStatus,
           buoc_hien_tai: nextBuoc,
-          fileUrl: signedUrlData?.publicUrl,
         })
       } else {
         // ── Bước phê duyệt cuối cùng ──
@@ -716,8 +718,11 @@ export async function POST(
                 ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               await supabaseAdmin.storage.from(BUCKET).upload(tempPath, new Blob([Buffer.from(finalBytes)], { type: mime }), { upsert: true })
-              const { data: tempUrlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(tempPath)
-              const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(tempUrlData.publicUrl)
+              // Vá bảo mật 2026-09-21: CloudConvert (dịch vụ ngoài) tự fetch URL này qua
+              // import/url — bucket private nên phải mint Signed URL, không dùng getPublicUrl().
+              const tempSignedUrl = await mintSignedUrlForPath(tempPath, { bucket: BUCKET, ttlSeconds: 600 })
+              if (!tempSignedUrl) throw new Error("Khong tao duoc duong dan file tam de convert CloudConvert")
+              const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(tempSignedUrl)
               const pdfBuf = await pdfDoc.save()
               finalBytes = new Uint8Array(pdfBuf)
               finalExt = "pdf"
@@ -888,11 +893,12 @@ export async function POST(
           }
         }
 
+        // Vá bảo mật 2026-09-21: không trả `finalUrl` (URL public thô) — không có call site nào
+        // ở client đọc field này (đã grep xác nhận), bucket `iso-documents` sẽ chuyển private.
         return NextResponse.json({
           success: true,
           trang_thai: "da_phe_duyet",
           buoc_hien_tai: soBuocTong,
-          finalUrl: finalUrlData?.publicUrl,
         })
       }
     }
@@ -1148,8 +1154,11 @@ export async function POST(
             await supabaseAdmin.storage
               .from(BUCKET)
               .upload(tempPath, new Blob([Buffer.from(finalBytes)], { type: mime }), { upsert: true })
-            const { data: tempUrlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(tempPath)
-            const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(tempUrlData.publicUrl)
+            // Vá bảo mật 2026-09-21: CloudConvert (dịch vụ ngoài) tự fetch URL này qua
+            // import/url — bucket private nên phải mint Signed URL, không dùng getPublicUrl().
+            const tempSignedUrl = await mintSignedUrlForPath(tempPath, { bucket: BUCKET, ttlSeconds: 600 })
+            if (!tempSignedUrl) throw new Error("Khong tao duoc duong dan file tam de convert CloudConvert")
+            const pdfDoc = await convertOfficeUrlToPdfDocumentWithRetry(tempSignedUrl)
             const pdfBuf = await pdfDoc.save()
             finalBytes = new Uint8Array(pdfBuf)
             finalExt = "pdf"
@@ -1301,7 +1310,10 @@ export async function POST(
         action: "phe_duyet",
         note: lyDo || null,
       })
-      return NextResponse.json({ success: true, trang_thai: "da_phe_duyet", finalUrl: finalUrlData?.publicUrl })
+      // Vá bảo mật 2026-09-21: không trả `finalUrl` (URL public thô) trong response nữa — bucket
+      // `iso-documents` sẽ chuyển private, và không có call site nào ở client đọc field này
+      // (đã grep xác nhận). Client mở/tải file sau khi ký qua route `[id]/file-url` (Signed URL).
+      return NextResponse.json({ success: true, trang_thai: "da_phe_duyet" })
     }
 
     return NextResponse.json({ error: "Action không hợp lệ" }, { status: 400 })

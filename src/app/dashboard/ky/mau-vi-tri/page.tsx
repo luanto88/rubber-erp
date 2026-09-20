@@ -39,6 +39,7 @@ import {
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { fetchSecureUrl } from "@/app/dashboard/_components/secure-file-open"
 import {
   SIGN_TEMPLATE_SIGN_AS_OPTIONS,
   SIGN_TEMPLATE_SIGN_AS_LABEL,
@@ -771,7 +772,7 @@ export default function SignTemplateEditorPage() {
               .eq("factory_id", factoryId)
               .single()
             if (!cancelled && formInst && !fErr) {
-              if (formInst.draft_file_url) {
+              if (formInst.draft_file_url && formInst.draft_file_url.split("?")[0].toLowerCase().endsWith(".pdf")) {
                 const freshDraft = formInst.draft_file_url.includes("?")
                   ? `${formInst.draft_file_url}&_cb=${Date.now()}`
                   : `${formInst.draft_file_url}?_cb=${Date.now()}`
@@ -2241,7 +2242,7 @@ export default function SignTemplateEditorPage() {
                   }}
                 >
                   {previewMode ? (
-                    <PreviewContent role={role} color={color.fg} signer={docSignerByRoleId[role.id]} factoryId={factoryId} ptToPx={ptToPx} />
+                    <PreviewContent role={role} color={color.fg} signer={docSignerByRoleId[role.id]} ptToPx={ptToPx} />
                   ) : (
                     <span
                       className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-white pointer-events-none whitespace-nowrap"
@@ -2511,16 +2512,34 @@ function PreviewContent({
   role,
   color,
   signer,
-  factoryId,
   ptToPx,
 }: {
   role: EditorRole
   color: string
   signer?: DocSignerInfo
-  factoryId: string | null
   /** Hệ số quy đổi point (PDF) → pixel theo bề rộng trang đang hiển thị. */
   ptToPx: number
 }) {
+  // Vá bảo mật 2026-09-21: bucket `iso-documents` không còn public — không thể set thẳng
+  // `getPublicUrl(...)` vào `<img src>` nữa (sẽ 403). Phải mint signed URL qua route đã có sẵn
+  // cho preview chữ ký (`/api/account/signature-url`, cùng route iso-batch-sign-modal.tsx đang
+  // dùng). Hook đặt TRƯỚC mọi early-return bên dưới — bắt buộc theo Rules of Hooks.
+  const [sigUrl, setSigUrl] = useState<string | null>(null)
+  const sigUserId = signer?.kind === "ca_nhan" && signer.hasSignature ? signer.userId : null
+  useEffect(() => {
+    if (!sigUserId) { setSigUrl(null); return }
+    let alive = true
+    ;(async () => {
+      try {
+        const result = await fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(sigUserId)}`)
+        if (alive && result.ok) setSigUrl(result.url)
+      } finally {
+        // no-op — try/finally giữ đúng pattern đã xác nhận hết lỗi react-hooks/set-state-in-effect
+      }
+    })()
+    return () => { alive = false }
+  }, [sigUserId])
+
   if (role.loai === "qr") {
     return (
       <div className="grid grid-cols-5 gap-[1px] w-full h-full">
@@ -2578,15 +2597,17 @@ function PreviewContent({
     return (
       <SignBoxPreviewLayout
         sigNode={
-          signer.hasSignature && factoryId ? (
+          signer.hasSignature && sigUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={supabase.storage.from("iso-documents").getPublicUrl(`signatures/${factoryId}/${signer.userId}/chu_ky.png`).data.publicUrl}
+              src={sigUrl}
               alt="Chữ ký"
               className="w-full h-full object-contain"
             />
           ) : (
-            <span className="text-[8.5px] italic text-slate-400">Chưa có ảnh chữ ký</span>
+            <span className="text-[8.5px] italic text-slate-400">
+              {signer.hasSignature ? "Đang tải ảnh chữ ký..." : "Chưa có ảnh chữ ký"}
+            </span>
           )
         }
         nameText={signer.fullName || "(chưa rõ tên)"}

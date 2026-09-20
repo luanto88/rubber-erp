@@ -98,7 +98,9 @@ export function DistributionModal({
       const { data } = await supabase
         .from("iso_documents")
         .select(
-          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh, file_signed_pdf_url, file_signed_office_url, file_goc_url",
+          // Vá bảo mật 2026-09-20: bỏ 3 cột file_*_url (URL public thật, không dùng render ở
+          // đây) — không cần thiết cho việc chọn tài liệu/phòng ban để phân phối.
+          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh",
         )
         .eq("factory_id", factoryId)
         .eq("trang_thai", "co_hieu_luc")

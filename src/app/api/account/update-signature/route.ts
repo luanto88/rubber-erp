@@ -57,8 +57,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    const { data } = supabaseAdmin.storage.from("iso-documents").getPublicUrl(sigPath)
-    return NextResponse.json({ ok: true, publicUrl: data.publicUrl })
+    // Vá bảo mật 2026-09-21: không trả `publicUrl` thô nữa — bucket `iso-documents` sẽ chuyển
+    // private, URL public không còn dùng được. Client tự mint lại Signed URL qua
+    // `/api/account/signature-url` sau khi nhận `ok: true`.
+    return NextResponse.json({ ok: true })
   } catch (err) {
     return accountErrorResponse(err, "Lỗi máy chủ")
   }
