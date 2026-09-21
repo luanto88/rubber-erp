@@ -2496,7 +2496,7 @@ export default function IsoFormInstancePage() {
       const timestamp = Date.now()
       const storagePath = `${factoryId}/iso/instances/${instanceId}/draft_${timestamp}.${ext}`
       const { error } = await supabase.storage.from("iso-documents").upload(storagePath, fileToUpload, { upsert: true })
-      if (error) { setUploadError(error.message); return }
+      if (error) { setUploadError(`${error.message} [debug: factoryId=${factoryId}, path=${storagePath}]`); return }
       const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(storagePath)
       const freshDraftUrl = `${urlData.publicUrl}?v=${timestamp}`
 
