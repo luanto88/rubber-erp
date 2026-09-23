@@ -246,20 +246,68 @@ function clampPct(value: number, sizePct: number): number {
   return Math.min(Math.max(value, 0), Math.max(0, 100 - sizePct))
 }
 
-function makeBaseRole(baseId: BaseRoleId, isIso = false, isExempt = false): EditorRole {
-  if (isIso && (baseId in ISO_ROLE_DEFS)) {
-    const def = ISO_ROLE_DEFS[baseId as IsoSignRoleId]
+const ISO_DYNAMIC_PALETTE: { fg: string; bg: string }[] = [
+  { fg: "#0284c7", bg: "rgba(2,132,199,.14)" }, // sky/blue (Bước 1 / Người lập)
+  { fg: "#f59e0b", bg: "rgba(245,158,11,.14)" }, // amber (Bước 2 / Thực hiện)
+  { fg: "#8b5cf6", bg: "rgba(139,92,246,.14)" }, // purple (Bước 3 / Giám sát)
+  { fg: "#ec4899", bg: "rgba(236,72,153,.14)" }, // pink (Bước 4)
+  { fg: "#06b6d4", bg: "rgba(6,182,212,.14)" }, // cyan (Bước 5)
+  { fg: "#ea580c", bg: "rgba(234,88,12,.14)" }, // orange (Bước 6)
+  { fg: "#10b981", bg: "rgba(16,185,129,.14)" }, // emerald (Phê duyệt)
+]
+
+function makeBaseRole(
+  baseId: string,
+  isIso = false,
+  isExempt = false,
+  customLabel?: string,
+  stepNo?: number,
+  totalSteps?: number,
+): EditorRole {
+  if (isIso) {
+    if (baseId in ISO_ROLE_DEFS) {
+      const def = ISO_ROLE_DEFS[baseId as IsoSignRoleId]
+      return {
+        id: baseId,
+        baseId: baseId as BaseRoleId,
+        label: customLabel || def.label,
+        loai: def.loai,
+        batBuoc: isExempt ? false : def.batBuoc,
+        isClone: false,
+        placed: false,
+        anchor: "dau",
+        page: 1,
+        box: { ...def.defaultBox },
+        showName: false,
+        showChucVu: false,
+        chucVuKey: null,
+        signAs: null,
+        outOfBounds: false,
+        hiddenForDoc: false,
+      }
+    }
+    const num = stepNo || 1
+    const tot = totalSteps || 1
+    let defaultXPct = 8
+    if (tot === 2) {
+      defaultXPct = num === 1 ? 8 : 66
+    } else if (tot === 3) {
+      defaultXPct = num === 1 ? 8 : num === 2 ? 37 : 66
+    } else if (tot >= 4) {
+      const span = 80 / Math.max(1, tot - 1)
+      defaultXPct = Math.min(74, Math.max(6, 6 + (num - 1) * span))
+    }
     return {
       id: baseId,
-      baseId,
-      label: def.label,
-      loai: def.loai,
-      batBuoc: isExempt ? false : def.batBuoc,
+      baseId: baseId as BaseRoleId,
+      label: customLabel || `Bước ${num}`,
+      loai: "chu_ky",
+      batBuoc: isExempt ? false : true,
       isClone: false,
       placed: false,
       anchor: "dau",
       page: 1,
-      box: { ...def.defaultBox },
+      box: { xPct: defaultXPct, yPct: 74, wPct: 26, hPct: 14 },
       showName: false,
       showChucVu: false,
       chucVuKey: null,
@@ -268,11 +316,11 @@ function makeBaseRole(baseId: BaseRoleId, isIso = false, isExempt = false): Edit
       hiddenForDoc: false,
     }
   }
-  const def = BASE_ROLE_DEFS[baseId] || BASE_ROLE_DEFS.ky_buoc
+  const def = BASE_ROLE_DEFS[baseId as BaseRoleId] || BASE_ROLE_DEFS.ky_buoc
   return {
     id: baseId,
-    baseId,
-    label: def.label,
+    baseId: baseId as BaseRoleId,
+    label: customLabel || def.label,
     loai: def.loai,
     batBuoc: def.batBuoc,
     isClone: false,
@@ -291,14 +339,22 @@ function makeBaseRole(baseId: BaseRoleId, isIso = false, isExempt = false): Edit
 
 // Tách riêng từ duplicateRole() để dùng chung cho cả nhân bản thủ công lẫn tự "pad" thêm slot
 // khớp số bước thật của văn bản (xem reconcileForDoc bên dưới).
-function makeCloneRole(baseId: BaseRoleId, n: number, sourceBox: PctBox, isIso = false): EditorRole {
-  if (isIso && (baseId in ISO_ROLE_DEFS)) {
-    const def = ISO_ROLE_DEFS[baseId as IsoSignRoleId]
+function makeCloneRole(
+  baseId: string,
+  n: number,
+  sourceBox: PctBox,
+  isIso = false,
+  baseLabel?: string,
+): EditorRole {
+  const cleanLabel = baseLabel ? baseLabel.replace(/\s*·\s*bản\s*\d+$/i, "").trim() : ""
+  if (isIso) {
+    const fallbackDef = (baseId in ISO_ROLE_DEFS) ? ISO_ROLE_DEFS[baseId as IsoSignRoleId] : null
+    const label = `${cleanLabel || fallbackDef?.label || "Người ký"} · bản ${n}`
     return {
       id: `${baseId}__ban${n}`,
-      baseId,
-      label: `${def.label} · bản ${n}`,
-      loai: def.loai,
+      baseId: baseId as BaseRoleId,
+      label,
+      loai: fallbackDef?.loai || "chu_ky",
       batBuoc: false,
       isClone: true,
       placed: false,
@@ -313,11 +369,12 @@ function makeCloneRole(baseId: BaseRoleId, n: number, sourceBox: PctBox, isIso =
       hiddenForDoc: false,
     }
   }
-  const def = BASE_ROLE_DEFS[baseId] || BASE_ROLE_DEFS.ky_buoc
+  const def = BASE_ROLE_DEFS[baseId as BaseRoleId] || BASE_ROLE_DEFS.ky_buoc
+  const label = `${cleanLabel || def.label} · bản ${n}`
   return {
     id: `${baseId}__ban${n}`,
-    baseId,
-    label: `${def.label} · bản ${n}`,
+    baseId: baseId as BaseRoleId,
+    label,
     loai: def.loai,
     batBuoc: false,
     isClone: true,
@@ -341,17 +398,27 @@ function roleCloneIndex(role: EditorRole): number {
   return m ? parseInt(m[1], 10) : 2
 }
 
-// Chỉ đa sắc cho các slot nhân bản của "ky_buoc" (nhiều người cùng ký 1 bước) — các vai trò khác
-// giữ nguyên đúng 1 màu cố định trong ROLE_COLORS kể cả khi bị nhân bản.
+// Bảng màu cho vai trò: hỗ trợ cả N-bước động ISO và Văn bản
 function getRoleColor(role: EditorRole, isIso = false): { fg: string; bg: string } {
-  if (isIso && (role.baseId in ISO_ROLE_COLORS)) {
-    if (role.baseId === "xem_xet" && role.isClone) {
-      const idx = roleCloneIndex(role) - 1
-      return KY_BUOC_CLONE_PALETTE[idx % KY_BUOC_CLONE_PALETTE.length]
+  if (isIso) {
+    if (role.baseId === "qr") return { fg: "#7c3aed", bg: "rgba(124,58,237,.14)" }
+    if (role.baseId === "ngay_ky") return { fg: "#e11d48", bg: "rgba(225,29,72,.14)" }
+    if (role.baseId === "ghi_chu") return { fg: "#0d9488", bg: "rgba(13,148,136,.14)" }
+    if (role.baseId === "soan_thao" || (role.baseId as string) === "buoc_1") return ISO_DYNAMIC_PALETTE[0]
+    if (role.baseId === "phe_duyet") return { fg: "#059669", bg: "rgba(5,150,105,.14)" }
+    if (String(role.baseId).startsWith("buoc_")) {
+      const match = /^buoc_(\d+)/.exec(String(role.baseId))
+      if (match) {
+        const stepNum = parseInt(match[1], 10)
+        return ISO_DYNAMIC_PALETTE[(stepNum - 1) % ISO_DYNAMIC_PALETTE.length]
+      }
     }
-    return ISO_ROLE_COLORS[role.baseId as IsoSignRoleId]
+    if ((role.baseId as unknown as string) in ISO_ROLE_COLORS) {
+      return ISO_ROLE_COLORS[role.baseId as unknown as IsoSignRoleId]
+    }
+    return { fg: "#0284c7", bg: "rgba(2,132,199,.14)" }
   }
-  if (role.baseId !== "ky_buoc") return ROLE_COLORS[role.baseId] ?? { fg: "#059669", bg: "rgba(5,150,105,.14)" }
+  if (role.baseId !== "ky_buoc") return ROLE_COLORS[role.baseId as BaseRoleId] ?? { fg: "#059669", bg: "rgba(5,150,105,.14)" }
   const idx = (roleCloneIndex(role) - 1) % KY_BUOC_CLONE_PALETTE.length
   return KY_BUOC_CLONE_PALETTE[idx]
 }
@@ -705,24 +772,29 @@ export default function SignTemplateEditorPage() {
         for (const box of template.khung) {
           const resolved = boxPctFromTemplate(box, pageDims, numPages)
           if (!resolved) continue
-          const baseId = (box.clone_of || box.vai_tro) as BaseRoleId
-          const def = roleDefs[baseId]
-          if (!def) continue
-          const isClone = !!box.clone_of
-          if (isClone) seq[baseId] = (seq[baseId] || 1) + 1
+          const isClone = !!box.clone_of || /__ban\d+$/.test(box.vai_tro)
+          const baseId = String(box.clone_of || box.vai_tro.replace(/__ban\d+$/, ""))
+          const def = (roleDefs as Record<string, { label?: string; loai?: SignTemplateBoxLoai; batBuoc?: boolean; showNameDefault?: boolean }>)[baseId]
+          if (isClone) {
+            const m = /__ban(\d+)$/.exec(box.vai_tro)
+            const cloneNum = m ? parseInt(m[1], 10) : (seq[baseId] || 1) + 1
+            seq[baseId] = Math.max(seq[baseId] || 1, cloneNum)
+          }
+          const defaultLabel = def?.label || (baseId.startsWith("buoc_") ? `Bước ${baseId.replace("buoc_", "")}` : baseId)
+          const label = box.nhan || (isClone ? `${defaultLabel} · bản ${seq[baseId] || 2}` : defaultLabel)
           const role: EditorRole = {
             id: box.vai_tro,
-            baseId,
-            label: isClone ? `${def.label} · bản ${seq[baseId]}` : def.label,
-            loai: box.loai,
-            batBuoc: !isClone && (isExemptIsoDoc ? false : def.batBuoc),
+            baseId: baseId as BaseRoleId,
+            label,
+            loai: box.loai || def?.loai || "chu_ky",
+            batBuoc: !isClone && (isExemptIsoDoc ? false : (box.bat_buoc ?? def?.batBuoc ?? true)),
             isClone,
             placed: true,
             anchor: box.neo_trang,
             page: resolved.page,
             box: resolved.pct,
-            showName: box.show_name ?? def.showNameDefault,
-            showChucVu: box.show_chuc_vu ?? (isIso ? false : (box.show_name ?? def.showNameDefault)),
+            showName: box.show_name ?? def?.showNameDefault ?? false,
+            showChucVu: box.show_chuc_vu ?? (isIso ? false : (box.show_name ?? def?.showNameDefault ?? false)),
             chucVuKey: box.chuc_vu_key ?? null,
             signAs: box.sign_as ?? null,
             outOfBounds: false,
@@ -742,6 +814,11 @@ export default function SignTemplateEditorPage() {
             const hasOriginal = placedForBase.some((r) => r.id === baseId)
             if (!hasOriginal) result.push(makeBaseRole(baseId as BaseRoleId, isIso, isExemptIsoDoc))
             result.push(...placedForBase)
+          }
+        }
+        for (const [bId, bRoles] of byBase.entries()) {
+          if (!roleOrder.includes(bId as BaseRoleId)) {
+            result.push(...bRoles)
           }
         }
         setRoles(result)
@@ -772,11 +849,13 @@ export default function SignTemplateEditorPage() {
               .eq("factory_id", factoryId)
               .single()
             if (!cancelled && formInst && !fErr) {
-              if (formInst.draft_file_url && formInst.draft_file_url.split("?")[0].toLowerCase().endsWith(".pdf")) {
-                const freshDraft = formInst.draft_file_url.includes("?")
-                  ? `${formInst.draft_file_url}&_cb=${Date.now()}`
-                  : `${formInst.draft_file_url}?_cb=${Date.now()}`
-                setActivePdfUrl(freshDraft)
+              // ⚠️ Bucket iso-documents đã chuyển private: giữ nguyên `activePdfUrl` nếu đã được
+              // truyền vào từ trang gọi (Signed URL hợp lệ). Chỉ mint Signed URL mới khi chưa có.
+              if (!activePdfUrl && formInst.draft_file_url && formInst.draft_file_url.split("?")[0].toLowerCase().endsWith(".pdf")) {
+                const fileRes = await fetchSecureUrl(`/api/iso/forms/${formInstanceId}/file-url`)
+                if (!cancelled && fileRes.ok) {
+                  setActivePdfUrl(fileRes.url)
+                }
               }
               let stUid = formInst.nguoi_tao || ""
               let xxUid = formInst.xem_xet_user_id || ""
@@ -840,8 +919,15 @@ export default function SignTemplateEditorPage() {
             return
           }
           setIsoDocData(data)
-          const pdfToLoad = data.file_signed_pdf_url || data.file_goc_url || ""
-          if (pdfToLoad) setActivePdfUrl((prev) => prev || pdfToLoad)
+          if (!activePdfUrl) {
+            const pdfToLoad = data.file_signed_pdf_url || data.file_goc_url || ""
+            if (pdfToLoad && pdfToLoad.split("?")[0].toLowerCase().endsWith(".pdf")) {
+              const fileRes = await fetchSecureUrl(`/api/iso/documents/${docId}/file-url?variant=main`)
+              if (!cancelled && fileRes.ok) {
+                setActivePdfUrl(fileRes.url)
+              }
+            }
+          }
           if (data.loai_tai_lieu) setActiveLoai((prev) => prev || data.loai_tai_lieu || "")
           const defaultLabel = data.ma_tai_lieu ? `${data.ma_tai_lieu} · ${data.ten_tai_lieu || ""}` : (data.ten_tai_lieu || data.loai_tai_lieu || "")
           if (defaultLabel) setActiveDocLabel((prev) => prev || defaultLabel)
@@ -1008,103 +1094,89 @@ export default function SignTemplateEditorPage() {
     reconciledRef.current = true
     if ((!docId && !formInstanceId) || !docFetchOk) return
     if (isIso) {
-      const steps = Array.isArray(isoDocData?.thu_tu_ky_json) ? isoDocData.thu_tu_ky_json : null
-      const totalSteps = isoDocData?.so_buoc_tong || (steps ? steps.length : 0)
-      const isTwoSteps =
-        isoDocData?.cap_tl === "Cấp 2" ||
-        totalSteps === 2 ||
-        (steps && steps.length === 2)
+      const steps = Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null
+      const totalSteps = steps ? steps.length : (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3))
 
       setRoles((prev) => {
-        cloneSeqRef.current.xem_xet = 1
+        const nextRoles: EditorRole[] = []
+        const usedRoleIds = new Set<string>()
 
-        let soanThaoRole = prev.find((r) => r.baseId === "soan_thao")
-        if (!soanThaoRole) {
-          soanThaoRole = makeBaseRole("soan_thao", true)
-        }
-        const step0Ten = steps ? steps[0]?.ten?.trim() : undefined
-        if (step0Ten) {
-          soanThaoRole = { ...soanThaoRole, label: step0Ten, hiddenForDoc: false }
-        }
+        // 1. Quét qua N bước thật của quy trình
+        for (let i = 0; i < totalSteps; i++) {
+          const stepKey = `buoc_${i + 1}`
+          const defaultLabel = i === 0 ? "Người lập" : i === totalSteps - 1 ? "Phê duyệt" : (totalSteps === 3 && i === 1 ? "Xem xét" : `Bước ${i + 1}`)
+          const stepLabel = steps?.[i]?.ten?.trim() || defaultLabel
 
-        let pheDuyetRole = prev.find((r) => r.baseId === "phe_duyet")
-        if (!pheDuyetRole) {
-          pheDuyetRole = makeBaseRole("phe_duyet", true)
-        }
-        const lastStepTen = steps && totalSteps > 1 ? steps[totalSteps - 1]?.ten?.trim() : undefined
-        if (lastStepTen) {
-          pheDuyetRole = { ...pheDuyetRole, label: lastStepTen, hiddenForDoc: false }
-        }
-
-        const otherNonReviewRoles = prev.filter(
-          (r) => r.baseId !== "soan_thao" && r.baseId !== "phe_duyet" && r.baseId !== "xem_xet",
-        )
-
-        let reviewFamily: EditorRole[] = []
-        if (isTwoSteps) {
-          reviewFamily = prev
-            .filter((r) => r.baseId === "xem_xet")
-            .map((r) => ({ ...r, hiddenForDoc: true }))
-        } else {
-          const reviewCount = Math.max(1, totalSteps > 2 ? totalSteps - 2 : 1)
-          const existingXemXet = prev
-            .filter((r) => r.baseId === "xem_xet")
-            .slice()
-            .sort((a, b) => {
-              const diff = roleCloneIndex(a) - roleCloneIndex(b)
-              if (diff !== 0) return diff
-              return (a.box?.xPct ?? 0) - (b.box?.xPct ?? 0)
-            })
-
-          const baseXemXet = existingXemXet[0] || makeBaseRole("xem_xet", true)
-          const sourceBox =
-            baseXemXet.box ??
-            (ISO_ROLE_DEFS as unknown as Record<string, { defaultBox: PctBox }>).xem_xet.defaultBox
-
-          reviewFamily.push({
-            ...baseXemXet,
-            label: (steps && steps[1]?.ten?.trim()) || baseXemXet.label || "Xem xét",
-            hiddenForDoc: false,
+          // Tìm các khung trong prev tương ứng với bước này
+          const matched = prev.filter((r) => {
+            if (usedRoleIds.has(r.id)) return false
+            if (r.baseId === stepKey || r.id === stepKey || r.id.startsWith(`${stepKey}__`)) return true
+            if (r.label === stepLabel || r.label.startsWith(`${stepLabel} · bản`)) return true
+            // Legacy matches
+            if (i === 0 && (r.baseId === "soan_thao" || r.id === "soan_thao" || r.id.startsWith("soan_thao__"))) return true
+            if (i === totalSteps - 1 && (r.baseId === "phe_duyet" || r.id === "phe_duyet" || r.id.startsWith("phe_duyet__"))) return true
+            if (i > 0 && i < totalSteps - 1 && (r.baseId === "xem_xet" || r.id === "xem_xet" || r.id.startsWith("xem_xet__"))) return true
+            return false
           })
 
-          for (let i = 1; i < reviewCount; i++) {
-            cloneSeqRef.current.xem_xet = (cloneSeqRef.current.xem_xet || 1) + 1
-            const cloneNum = cloneSeqRef.current.xem_xet
-            const stepIdx = i + 1
-            const stepLabel = (steps && steps[stepIdx]?.ten?.trim()) || `Bước ${stepIdx + 1}`
-
-            let cloneRole = existingXemXet[i]
-            if (!cloneRole) {
-              const offsetBox = {
-                ...sourceBox,
-                xPct: Math.min(74, sourceBox.xPct + i * 4),
-              }
-              cloneRole = makeCloneRole("xem_xet", cloneNum, offsetBox, true)
-            }
-            reviewFamily.push({
-              ...cloneRole,
+          let baseRole = matched.find((r) => !r.isClone) || matched[0]
+          if (!baseRole) {
+            baseRole = makeBaseRole(stepKey, true, isExemptIsoDoc, stepLabel, i + 1, totalSteps)
+          } else {
+            usedRoleIds.add(baseRole.id)
+            baseRole = {
+              ...baseRole,
+              id: baseRole.isClone ? baseRole.id : stepKey,
+              baseId: stepKey as BaseRoleId,
               label: stepLabel,
+              batBuoc: isExemptIsoDoc ? false : true,
+              hiddenForDoc: false,
+            }
+          }
+          nextRoles.push(baseRole)
+
+          // Bảo lưu toàn bộ các khung bản sao của bước này ở mọi trang
+          let cloneSeq = 1
+          const clones = matched.filter((r) => r.id !== baseRole?.id)
+          clones.forEach((cloneRole) => {
+            usedRoleIds.add(cloneRole.id)
+            const cIdx = roleCloneIndex(cloneRole)
+            cloneSeq = Math.max(cloneSeq, cIdx)
+            nextRoles.push({
+              ...cloneRole,
+              baseId: stepKey as BaseRoleId,
+              label: `${stepLabel} · bản ${cIdx}`,
               hiddenForDoc: false,
             })
-          }
+          })
+          cloneSeqRef.current[stepKey] = Math.max(cloneSeqRef.current[stepKey] || 1, cloneSeq)
+        }
 
-          for (let i = reviewCount; i < existingXemXet.length; i++) {
-            reviewFamily.push({
-              ...existingXemXet[i],
-              hiddenForDoc: true,
+        // 2. Thêm các vai trò phụ (QR, Ngày ký, Ghi chú)
+        const auxOrder = ["qr", "ngay_ky", "ghi_chu"]
+        for (const auxId of auxOrder) {
+          const matchedAux = prev.filter((r) => (r.baseId === auxId || r.id === auxId || r.id.startsWith(`${auxId}__`)) && !usedRoleIds.has(r.id))
+          if (matchedAux.length > 0) {
+            matchedAux.forEach((r) => {
+              usedRoleIds.add(r.id)
+              nextRoles.push({ ...r, hiddenForDoc: false })
             })
+          } else {
+            nextRoles.push(makeBaseRole(auxId, true, isExemptIsoDoc))
           }
         }
 
-        const next = [
-          soanThaoRole,
-          ...reviewFamily.filter((r) => !r.hiddenForDoc),
-          pheDuyetRole,
-          ...otherNonReviewRoles,
-          ...reviewFamily.filter((r) => r.hiddenForDoc),
-        ]
-        setInitialSnapshot(JSON.stringify(next))
-        return next
+        // 3. Giữ lại bất kỳ khung nào đã đặt khác để không bao giờ bị mất
+        const remaining = prev.filter((r) => !usedRoleIds.has(r.id))
+        remaining.forEach((r) => {
+          nextRoles.push({
+            ...r,
+            hiddenForDoc: !r.placed,
+          })
+        })
+
+        setInitialSnapshot(JSON.stringify(nextRoles))
+        return nextRoles
       })
       return
     }
@@ -1152,7 +1224,13 @@ export default function SignTemplateEditorPage() {
     }
 
     setActiveDocId(targetDocId)
-    setActivePdfUrl(targetUrl)
+    // Mint Signed URL cho tài liệu con khi chuyển tab thay vì truyền URL public thô từ DB
+    const fileRes = await fetchSecureUrl(`/api/iso/documents/${targetDocId}/file-url?variant=main`)
+    if (fileRes.ok) {
+      setActivePdfUrl(fileRes.url)
+    } else {
+      setActivePdfUrl(targetUrl)
+    }
     setActiveLoai(targetLoai)
     setActiveDocLabel(targetLabel)
     setTemplateLoaded(false)
@@ -1198,50 +1276,11 @@ export default function SignTemplateEditorPage() {
       const steps = Array.isArray(isoDocData?.thu_tu_ky_json) ? isoDocData.thu_tu_ky_json : null
 
       if (steps && steps.length > 0) {
-        // Step 0: soan_thao
-        const step0 = steps[0]
-        if (step0?.user_id) {
-          const info = signerInfoById[step0.user_id]
-          map["soan_thao"] = {
-            kind: "ca_nhan",
-            userId: step0.user_id,
-            fullName: info?.fullName || step0.ten || isoDocData?.soan_thao || "",
-            chucVu: info?.chucVu || "",
-            chucVuByKey: info?.chucVuByKey,
-            hasSignature: info?.hasSignature ?? true,
-          }
-        }
-
-        // Final step: phe_duyet
-        const lastStep = steps[steps.length - 1]
-        if (lastStep?.user_id) {
-          const info = signerInfoById[lastStep.user_id]
-          map["phe_duyet"] = {
-            kind: "ca_nhan",
-            userId: lastStep.user_id,
-            fullName: info?.fullName || lastStep.ten || isoDocData?.phe_duyet || "",
-            chucVu: info?.chucVu || "",
-            chucVuByKey: info?.chucVuByKey,
-            hasSignature: info?.hasSignature ?? true,
-          }
-        }
-
-        // Review steps: intermediate steps between step 0 and last step
-        // Matched 1-to-1 with xemXetFamily sorted by roleCloneIndex
-        const xemXetFamily = roles
-          .filter((r) => r.baseId === "xem_xet" && !r.hiddenForDoc)
-          .slice()
-          .sort((a, b) => {
-            const diff = roleCloneIndex(a) - roleCloneIndex(b)
-            if (diff !== 0) return diff
-            return (a.box?.xPct ?? 0) - (b.box?.xPct ?? 0)
-          })
-
-        xemXetFamily.forEach((role, idx) => {
-          const step = steps[idx + 1]
+        steps.forEach((step, idx) => {
+          const stepKey = `buoc_${idx + 1}`
           if (step?.user_id) {
             const info = signerInfoById[step.user_id]
-            map[role.id] = {
+            const signerObj: DocSignerInfo = {
               kind: "ca_nhan",
               userId: step.user_id,
               fullName: info?.fullName || step.ten || "",
@@ -1249,12 +1288,16 @@ export default function SignTemplateEditorPage() {
               chucVuByKey: info?.chucVuByKey,
               hasSignature: info?.hasSignature ?? true,
             }
+            map[stepKey] = signerObj
+            if (idx === 0) map["soan_thao"] = signerObj
+            if (idx === steps.length - 1) map["phe_duyet"] = signerObj
+            if (steps.length === 3 && idx === 1) map["xem_xet"] = signerObj
           }
         })
       } else {
         if (isoDocData?.soan_thao_user_id) {
           const info = signerInfoById[isoDocData.soan_thao_user_id]
-          map["soan_thao"] = {
+          const stObj: DocSignerInfo = {
             kind: "ca_nhan",
             userId: isoDocData.soan_thao_user_id,
             fullName: info?.fullName || isoDocData.soan_thao || "",
@@ -1262,10 +1305,12 @@ export default function SignTemplateEditorPage() {
             chucVuByKey: info?.chucVuByKey,
             hasSignature: info?.hasSignature ?? true,
           }
+          map["soan_thao"] = stObj
+          map["buoc_1"] = stObj
         }
         if (isoDocData?.xem_xet_user_id && isoDocData.cap_tl !== "Cấp 2") {
           const info = signerInfoById[isoDocData.xem_xet_user_id]
-          map["xem_xet"] = {
+          const xxObj: DocSignerInfo = {
             kind: "ca_nhan",
             userId: isoDocData.xem_xet_user_id,
             fullName: info?.fullName || isoDocData.xem_xet || "",
@@ -1273,10 +1318,12 @@ export default function SignTemplateEditorPage() {
             chucVuByKey: info?.chucVuByKey,
             hasSignature: info?.hasSignature ?? true,
           }
+          map["xem_xet"] = xxObj
+          map["buoc_2"] = xxObj
         }
         if (isoDocData?.phe_duyet_user_id) {
           const info = signerInfoById[isoDocData.phe_duyet_user_id]
-          map["phe_duyet"] = {
+          const pdObj: DocSignerInfo = {
             kind: "ca_nhan",
             userId: isoDocData.phe_duyet_user_id,
             fullName: info?.fullName || isoDocData.phe_duyet || "",
@@ -1284,10 +1331,13 @@ export default function SignTemplateEditorPage() {
             chucVuByKey: info?.chucVuByKey,
             hasSignature: info?.hasSignature ?? true,
           }
+          map["phe_duyet"] = pdObj
+          map["buoc_3"] = pdObj
+          if (isoDocData.cap_tl === "Cấp 2") map["buoc_2"] = pdObj
         }
       }
 
-      // Kế thừa người ký cho các vai trò bản sao (ví dụ phe_duyet__ban2 kế thừa từ phe_duyet)
+      // Kế thừa người ký cho các vai trò bản sao (ví dụ buoc_2__ban2 kế thừa từ buoc_2)
       roles.forEach((r) => {
         if (r.baseId && map[r.baseId] && !map[r.id]) {
           map[r.id] = map[r.baseId]
@@ -1344,6 +1394,7 @@ export default function SignTemplateEditorPage() {
   const isRequiredForConfirm = useCallback(
     (role: EditorRole) => {
       if (isExemptIsoDoc) return false
+      if (role.isClone || role.id.includes("__ban") || role.loai !== "chu_ky") return false
       return role.batBuoc || ((!!docId || !!formInstanceId) && !!docSignerByRoleId[role.id])
     },
     [isExemptIsoDoc, docId, formInstanceId, docSignerByRoleId],
@@ -1471,9 +1522,20 @@ export default function SignTemplateEditorPage() {
   }
 
   const removeRole = (roleId: string) => {
-    // Slot ứng với MỘT BƯỚC KÝ THẬT của văn bản đang mở thì không được xoá khỏi danh sách: xoá đi
-    // là mẫu thiếu khung cho bước đó, và khi tới lượt người ấy hệ thống rơi về luồng kéo-thả tự do
-    // thay vì ký theo mẫu. Chỉ cho "gỡ khung" (đưa về trạng thái chưa đặt) để đặt lại chỗ khác —
+    const targetRole = roles.find((r) => r.id === roleId)
+    if (!targetRole) return
+
+    // 1. Đối với vai trò bản sao (role.isClone === true hoặc role.id chứa __ban): XÓA HẲN khỏi mảng roles
+    if (targetRole.isClone || targetRole.id.includes("__ban")) {
+      setRoles((prev) => prev.filter((r) => r.id !== roleId))
+      if (selectedRoleId === roleId) setSelectedRoleId(null)
+      showToast(`Đã xóa ${targetRole.label}`)
+      return
+    }
+
+    // 2. Đối với vai trò gốc/chính (!role.isClone):
+    // Slot ứng với MỘT BƯỚC KÝ THẬT của văn bản đang mở thì không được xoá khỏi danh sách:
+    // Chỉ cho "gỡ khung" (đưa về trạng thái chưa đặt) để đặt lại chỗ khác —
     // lúc đó `missingRequired` vẫn chặn gửi đi cho tới khi đặt đủ.
     if (docSignerByRoleId[roleId]) {
       setRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, placed: false, outOfBounds: false } : r)))
@@ -1481,11 +1543,12 @@ export default function SignTemplateEditorPage() {
       showToast("Đã gỡ khung — bước ký này bắt buộc phải có vị trí, hãy đặt lại trước khi gửi đi")
       return
     }
+
+    // 3. Reset vai trò gốc về chưa đặt
     setRoles((prev) => {
       const role = prev.find((r) => r.id === roleId)
       if (!role) return prev
-      if (role.isClone) return prev.filter((r) => r.id !== roleId)
-      return prev.map((r) => (r.id === roleId ? { ...makeBaseRole(role.baseId) } : r))
+      return prev.map((r) => (r.id === roleId ? { ...makeBaseRole(role.baseId, isIso, isExemptIsoDoc, role.label) } : r))
     })
     if (selectedRoleId === roleId) setSelectedRoleId(null)
   }
@@ -1493,11 +1556,11 @@ export default function SignTemplateEditorPage() {
   const duplicateRole = (roleId: string) => {
     const original = roles.find((r) => r.id === roleId)
     if (!original) return
-    const baseId = original.baseId
+    const baseId = original.baseId || original.id
     cloneSeqRef.current[baseId] = (cloneSeqRef.current[baseId] || 1) + 1
     const n = cloneSeqRef.current[baseId]
     const clone: EditorRole = {
-      ...makeCloneRole(baseId, n, original.box),
+      ...makeCloneRole(baseId, n, original.box, isIso, original.label),
       page: currentPage,
       showName: original.showName,
       showChucVu: original.showChucVu,
@@ -1632,15 +1695,14 @@ export default function SignTemplateEditorPage() {
     return roles
       .filter((r) => r.placed)
       .map((r): SignTemplateBox | null => {
-        const dim = pageDims[r.page]
-        if (!dim) return null
+        const dim = pageDims[r.page] || pageDims[1] || { w: 595.28, h: 841.89 }
         const w_pt = (r.box.wPct / 100) * dim.w
         const h_pt = (r.box.hPct / 100) * dim.h
         const x_pt = (r.box.xPct / 100) * dim.w
         const y_pt = dim.h - (r.box.yPct / 100) * dim.h - h_pt
         return {
           vai_tro: r.id,
-          clone_of: r.isClone ? r.baseId : null,
+          clone_of: r.isClone ? (r.baseId || r.id.replace(/__ban\d+$/, "")) : null,
           neo_trang: r.anchor,
           so_trang: r.anchor === "cuoi" ? 0 : r.anchor === "moi_trang" ? 0 : r.page,
           x_pt, y_pt, w_pt, h_pt,
@@ -1852,6 +1914,15 @@ export default function SignTemplateEditorPage() {
                           <Trash2 size={12} />
                         </button>
                       </>
+                    )}
+                    {!role.placed && (role.isClone || role.id.includes("__ban")) && (
+                      <button
+                        onClick={() => removeRole(role.id)}
+                        title="Xóa bản nhân bản thừa này"
+                        className="p-1.5 rounded text-slate-400 hover:text-red-600"
+                      >
+                        <Trash2 size={12} />
+                      </button>
                     )}
                   </div>
                 </div>

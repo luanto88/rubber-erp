@@ -160,16 +160,43 @@ function TemplateCard({
 function StatusBadge({ status, inst }: { status: IsoFormInstanceStatus; inst?: IsoFormInstance }) {
   let label = FORM_INSTANCE_STATUS_LABEL[status] ?? status
   let color = FORM_INSTANCE_STATUS_COLOR[status] ?? "bg-slate-100 text-slate-600"
-  if (inst && (inst.so_buoc_tong ?? 0) > 0) {
-    if (status === "cho_xem_xet" && (inst.so_buoc_tong ?? 0) > 3) {
-      const cur = inst.buoc_hien_tai ?? 0
-      const stepName = inst.thu_tu_ky_json?.[cur]?.ten || `Bước ${cur + 1}`
-      label = `Chờ ký bước ${cur + 1}: ${stepName}`
+
+  if (inst) {
+    const steps = Array.isArray(inst.thu_tu_ky_json) && inst.thu_tu_ky_json.length > 0 ? inst.thu_tu_ky_json : null
+    const cur = inst.buoc_hien_tai ?? 0
+
+    if (status === "da_phe_duyet") {
+      const lastStepTen = steps ? steps[steps.length - 1]?.ten?.trim() : undefined
+      label = lastStepTen
+        ? (lastStepTen.toLowerCase().startsWith("phê duyệt") ? "Đã phê duyệt" : `Đã ${lastStepTen.toLowerCase()}`)
+        : "Đã phê duyệt"
+      color = "bg-emerald-100 text-emerald-700"
+    } else if (status === "tra_ve") {
+      label = "Bị trả về"
+      color = "bg-rose-100 text-rose-700"
+    } else if (status === "draft") {
+      label = "Bản nháp"
+      color = "bg-slate-100 text-slate-600"
+    } else if (steps) {
+      const currentStep = steps[cur]
+      const stepName = currentStep?.ten?.trim()
+      const isLast = cur >= steps.length - 1
+      if (isLast) {
+        label = stepName ? `Chờ ${stepName.toLowerCase()}` : "Chờ phê duyệt"
+        color = "bg-emerald-100 text-emerald-800 border border-emerald-200"
+      } else {
+        label = stepName ? `Chờ ${stepName}` : `Chờ ký bước ${cur + 1}`
+        color = "bg-amber-100 text-amber-800 border border-amber-200"
+      }
+    } else if (status === "cho_xem_xet") {
+      label = "Chờ xem xét"
+      color = "bg-amber-100 text-amber-800"
     } else if (status === "cho_phe_duyet") {
       label = "Chờ phê duyệt"
-      color = "bg-orange-100 text-orange-700"
+      color = "bg-emerald-100 text-emerald-800"
     }
   }
+
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${color}`}>
       {label}

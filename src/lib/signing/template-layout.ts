@@ -502,12 +502,14 @@ export function findRoleBoxForStep(
       const vt = String(k.vai_tro || "")
       const cloneOf = String(k.clone_of || "")
       if (isNonSig(vt, k.loai)) return false
+      if (vt === "buoc_1" || vt.startsWith("buoc_1__") || cloneOf === "buoc_1") return true
       if (vt === "soan_thao" || vt.startsWith("soan_thao") || cloneOf === "soan_thao") return true
       if (vt === "buoc_0" || (stepKey && vt === stepKey)) return true
       if (vt === "ky_buoc" || vt.startsWith("ky_buoc") || cloneOf === "ky_buoc") return true
       return false
     })
     return (stepName ? firstStepBoxes.find((k) => k.nhan && String(k.nhan).trim().toLowerCase() === stepName.trim().toLowerCase()) : null)
+      || firstStepBoxes.find((k) => k.vai_tro === "buoc_1" || k.clone_of === "buoc_1")
       || firstStepBoxes.find((k) => k.vai_tro === "soan_thao")
       || firstStepBoxes.find((k) => (stepKey && k.vai_tro === stepKey) || (action && k.vai_tro === action))
       || firstStepBoxes[0]
@@ -515,15 +517,18 @@ export function findRoleBoxForStep(
   }
 
   if (isFinalStep) {
+    const stepNum = totalSteps > 0 ? totalSteps : stepIndex + 1
     const finalStepBoxes = khung.filter((k) => {
       const vt = String(k.vai_tro || "")
       const cloneOf = String(k.clone_of || "")
       if (isNonSig(vt, k.loai)) return false
+      if (vt === `buoc_${stepNum}` || vt.startsWith(`buoc_${stepNum}__`) || cloneOf === `buoc_${stepNum}`) return true
       if (vt === "phe_duyet" || vt.startsWith("phe_duyet") || cloneOf === "phe_duyet") return true
       if ((stepKey && vt === stepKey) || (action && vt === action)) return true
       return false
     })
     return (stepName ? finalStepBoxes.find((k) => k.nhan && String(k.nhan).trim().toLowerCase() === stepName.trim().toLowerCase()) : null)
+      || finalStepBoxes.find((k) => k.vai_tro === `buoc_${stepNum}` || k.clone_of === `buoc_${stepNum}`)
       || finalStepBoxes.find((k) => k.vai_tro === "phe_duyet")
       || finalStepBoxes.find((k) => (stepKey && k.vai_tro === stepKey) || (action && k.vai_tro === action))
       || finalStepBoxes[0]
@@ -531,13 +536,16 @@ export function findRoleBoxForStep(
   }
 
   // Intermediate steps: Thực hiện (idx 0), Giám sát (idx 1), etc.
+  const currentStepNum = stepIndex + 1
   const intermediateIdx = Math.max(0, stepIndex - 1)
   const intermediateBoxes = khung.filter((k) => {
     const vt = String(k.vai_tro || "")
     const cloneOf = String(k.clone_of || "")
     if (isNonSig(vt, k.loai)) return false
-    if (vt === "soan_thao" || vt.startsWith("soan_thao") || cloneOf === "soan_thao") return false
-    if (vt === "phe_duyet" || vt.startsWith("phe_duyet") || cloneOf === "phe_duyet") return false
+    if (vt === "buoc_1" || cloneOf === "buoc_1" || vt === "soan_thao" || cloneOf === "soan_thao") return false
+    if (totalSteps > 0 && (vt === `buoc_${totalSteps}` || cloneOf === `buoc_${totalSteps}`)) return false
+    if (vt === "phe_duyet" || cloneOf === "phe_duyet") return false
+    if (vt === `buoc_${currentStepNum}` || cloneOf === `buoc_${currentStepNum}` || vt.startsWith(`buoc_${currentStepNum}__`)) return true
     if (vt === "xem_xet" || vt.startsWith("xem_xet") || cloneOf === "xem_xet") return true
     if (vt === "ky_buoc" || vt.startsWith("ky_buoc") || cloneOf === "ky_buoc") return true
     if ((stepKey && vt === stepKey) || (action && vt === action)) return true
@@ -559,17 +567,21 @@ export function findRoleBoxForStep(
     return num(a.y_pt, 0) - num(b.y_pt, 0)
   })
 
-  const targetRoleKeys: string[] = []
+  const targetRoleKeys: string[] = [
+    `buoc_${currentStepNum}`,
+    `buoc_${currentStepNum}__ban1`,
+    `buoc_${stepIndex}`,
+  ]
   if (stepIndex === 1 || intermediateIdx === 0) {
-    targetRoleKeys.push("xem_xet", "xem_xet__ban1", "ky_buoc", "ky_buoc__ban1", "buoc_1")
+    targetRoleKeys.push("xem_xet", "xem_xet__ban1", "ky_buoc", "ky_buoc__ban1")
   } else {
-    targetRoleKeys.push(`xem_xet__ban${stepIndex}`, `ky_buoc__ban${stepIndex}`, `buoc_${stepIndex}`)
+    targetRoleKeys.push(`xem_xet__ban${stepIndex}`, `ky_buoc__ban${stepIndex}`)
     targetRoleKeys.push(`xem_xet__ban${intermediateIdx + 1}`, `ky_buoc__ban${intermediateIdx + 1}`)
   }
   if (stepKey) targetRoleKeys.push(stepKey)
 
   return (stepName ? intermediateBoxes.find((k) => k.nhan && String(k.nhan).trim().toLowerCase() === stepName.trim().toLowerCase()) : null)
-    || intermediateBoxes.find((k) => targetRoleKeys.includes(String(k.vai_tro || "")))
+    || intermediateBoxes.find((k) => targetRoleKeys.includes(String(k.vai_tro || "")) || (k.clone_of && targetRoleKeys.includes(String(k.clone_of))))
     || intermediateBoxes[intermediateIdx]
     || intermediateBoxes[intermediateBoxes.length - 1]
     || null

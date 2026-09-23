@@ -12,10 +12,59 @@ import {
   FORM_INSTANCE_STATUS_COLOR,
   FORM_INSTANCE_STATUS_LABEL,
   type IsoFormInstance,
+  type IsoFormInstanceStatus,
   stepSignerUserId,
 } from "../_components/iso-types"
 import { PageHeaderBanner } from "../../_components/page-header-banner"
 import { PageBackgroundMotif } from "../../_components/page-background-motif"
+
+// ─── Status badge ─────────────────────────────────────────────────────────────
+function StatusBadge({ status, inst }: { status: IsoFormInstanceStatus; inst?: IsoFormInstance | null }) {
+  let label = FORM_INSTANCE_STATUS_LABEL[status] ?? status
+  let color = FORM_INSTANCE_STATUS_COLOR[status] ?? "bg-slate-100 text-slate-600"
+
+  if (inst) {
+    const steps = Array.isArray(inst.thu_tu_ky_json) && inst.thu_tu_ky_json.length > 0 ? inst.thu_tu_ky_json : null
+    const cur = inst.buoc_hien_tai ?? 0
+
+    if (status === "da_phe_duyet") {
+      const lastStepTen = steps ? steps[steps.length - 1]?.ten?.trim() : undefined
+      label = lastStepTen
+        ? (lastStepTen.toLowerCase().startsWith("phê duyệt") ? "Đã phê duyệt" : `Đã ${lastStepTen.toLowerCase()}`)
+        : "Đã phê duyệt"
+      color = "bg-emerald-100 text-emerald-700"
+    } else if (status === "tra_ve") {
+      label = "Bị trả về"
+      color = "bg-rose-100 text-rose-700"
+    } else if (status === "draft") {
+      label = "Bản nháp"
+      color = "bg-slate-100 text-slate-600"
+    } else if (steps) {
+      const currentStep = steps[cur]
+      const stepName = currentStep?.ten?.trim()
+      const isLast = cur >= steps.length - 1
+      if (isLast) {
+        label = stepName ? `Chờ ${stepName.toLowerCase()}` : "Chờ phê duyệt"
+        color = "bg-emerald-100 text-emerald-800 border border-emerald-200"
+      } else {
+        label = stepName ? `Chờ ${stepName}` : `Chờ ký bước ${cur + 1}`
+        color = "bg-amber-100 text-amber-800 border border-amber-200"
+      }
+    } else if (status === "cho_xem_xet") {
+      label = "Chờ xem xét"
+      color = "bg-amber-100 text-amber-800"
+    } else if (status === "cho_phe_duyet") {
+      label = "Chờ phê duyệt"
+      color = "bg-emerald-100 text-emerald-800"
+    }
+  }
+
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${color}`}>
+      {label}
+    </span>
+  )
+}
 
 type IsoTaskGroup = {
   doc: IsoDocument
@@ -355,9 +404,7 @@ export default function IsoMyTasksPage() {
                             </span>
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${FORM_INSTANCE_STATUS_COLOR[inst.trang_thai]}`}>
-                              {FORM_INSTANCE_STATUS_LABEL[inst.trang_thai]}
-                            </span>
+                            <StatusBadge status={inst.trang_thai} inst={inst} />
                           </td>
                           <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">
                             {fmtDate(inst.created_at)}
@@ -421,9 +468,7 @@ export default function IsoMyTasksPage() {
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${FORM_INSTANCE_STATUS_COLOR[inst.trang_thai]}`}>
-                              {FORM_INSTANCE_STATUS_LABEL[inst.trang_thai]}
-                            </span>
+                            <StatusBadge status={inst.trang_thai} inst={inst} />
                           </td>
                           <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">
                             {fmtDate(inst.updated_at)}

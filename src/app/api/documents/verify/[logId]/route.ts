@@ -37,20 +37,44 @@ type LogRow = {
 
 const SUPPORTED_DOC_TYPES = new Set(["van_ban", "iso", "iso_form"])
 
-/** "Ký bước 2" / "Phê duyệt" — nhãn hiển thị cho người xem, không phải mã nội bộ. */
-function buocLabel(row: LogRow): string {
+/** "Ký bước 2" / "Phê duyệt" — nhãn hiển thị cho người xem, lấy động từ cấu hình bước nếu có. */
+function getBuocLabel(
+  row: LogRow,
+  thuTuKyJson?: Array<{ ten?: string }> | null,
+  totalSteps?: number,
+): string {
+  if (Array.isArray(thuTuKyJson) && typeof row.buoc_ky === "number" && row.buoc_ky >= 1) {
+    const step = thuTuKyJson[row.buoc_ky - 1]
+    if (step?.ten?.trim()) return step.ten.trim()
+  }
+
   if (row.doc_type === "iso" || row.doc_type === "iso_form") {
+    if (row.action === "phe_duyet" || (totalSteps && row.buoc_ky === totalSteps)) return "Phê duyệt"
     if (row.action === "soan_thao" || row.buoc_ky === 1) return "Soạn thảo / Người lập"
-    if (row.action === "xem_xet" || row.buoc_ky === 2) return "Xem xét / Soát xét"
-    if (row.action === "phe_duyet") return "Phê duyệt ban hành"
+    if (row.action === "xem_xet" || row.buoc_ky === 2) return "Xem xét"
     if (row.buoc_ky != null) return `Ký bước ${row.buoc_ky}`
     return row.pades_sig_index === null || row.pades_sig_index === undefined
       ? "Đóng dấu xác nhận"
-      : "Phê duyệt ban hành"
+      : "Phê duyệt"
   }
   if (row.action === "phe_duyet") return "Phê duyệt"
   if (row.buoc_ky != null) return `Ký bước ${row.buoc_ky}`
   return "Ký xác nhận"
+}
+
+function resolveSignerName(
+  r: LogRow,
+  pMap: Map<string, string>,
+  nguoiKy?: Record<string, { ten?: string } | undefined> | null,
+): string {
+  if (r.user_id && pMap.has(r.user_id) && pMap.get(r.user_id)) {
+    return pMap.get(r.user_id)!
+  }
+  if (nguoiKy && typeof r.buoc_ky === "number") {
+    const nk = nguoiKy[String(r.buoc_ky)]
+    if (nk?.ten) return nk.ten
+  }
+  return "Không rõ"
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ logId: string }> }) {
@@ -82,46 +106,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     const isIso = log.doc_type === "iso"
     const isIsoForm = log.doc_type === "iso_form"
 
-    // Tải thông tin người ký hiện tại và lịch sử các bước ký của tài liệu này
-    const [profileRes, siblingLogsRes] = await Promise.all([
-      log.user_id
-        ? supabase.from("profiles").select("full_name, username").eq("id", log.user_id).maybeSingle()
-        : Promise.resolve({ data: null }),
-      supabase
-        .from("doc_approval_log")
-        .select("id, user_id, action, buoc_ky, created_at, pades_sig_index")
-        .eq("doc_id", log.doc_id)
-        .order("created_at", { ascending: true }),
-    ])
-
-    const profile = profileRes.data
-    const siblingLogs = (siblingLogsRes.data || []) as LogRow[]
-    const siblingUserIds = [...new Set(siblingLogs.map((l) => l.user_id).filter(Boolean))] as string[]
-    const { data: siblingProfiles } = siblingUserIds.length > 0
-      ? await supabase.from("profiles").select("id, full_name, username").in("id", siblingUserIds)
-      : { data: [] }
-    const profileMap = new Map((siblingProfiles || []).map((p) => [p.id, (p.full_name as string) || (p.username as string) || ""]))
-
-    const signingHistory = siblingLogs.map((l) => ({
-      id: l.id,
-      signerName: (l.user_id ? profileMap.get(l.user_id) : "") || "Không rõ",
-      buoc: buocLabel(l),
-      action: l.action,
-      kyLuc: l.created_at,
-      isCurrent: l.id === log?.id,
-      hasPades: l.pades_sig_index != null,
-    }))
-
     let docRow: Record<string, unknown> | null = null
     let trangThai: string | null = null
     let maTaiLieu: string | null = null
     let tenTaiLieu: string | null = null
     let fileSignedPdfUrl: string | null = null
+    let thuTuKy: Array<{ ten?: string; user_id?: string }> | null = null
+    let nguoiKyMap: Record<string, { ten?: string }> | null = null
+    let soBuocTong: number | null = null
 
     if (isIsoForm) {
       const { data: formInst } = await supabase
         .from("iso_form_instances")
-        .select("id, tieu_de, trang_thai, final_pdf_url, template_doc_id")
+        .select("id, tieu_de, trang_thai, final_pdf_url, template_doc_id, thu_tu_ky_json, nguoi_ky, so_buoc_tong")
         .eq("id", log.doc_id)
         .maybeSingle()
 
@@ -139,6 +136,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       maTaiLieu = tmplDoc?.ma_tai_lieu || formInst?.tieu_de || null
       tenTaiLieu = tmplDoc?.ten_tai_lieu || formInst?.tieu_de || null
       fileSignedPdfUrl = (formInst?.final_pdf_url as string) || null
+      thuTuKy = (formInst?.thu_tu_ky_json as Array<{ ten?: string; user_id?: string }>) || null
+      nguoiKyMap = (formInst?.nguoi_ky as Record<string, { ten?: string }>) || null
+      soBuocTong = (formInst?.so_buoc_tong as number) || null
     } else {
       const { data: doc } = await (isIso
         ? supabase
@@ -159,10 +159,45 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       tenTaiLieu = ((isIso ? docRow?.ten_tai_lieu : docRow?.ten_van_ban) as string) || null
     }
 
+    // Tải thông tin người ký hiện tại và lịch sử các bước ký của tài liệu này
+    const siblingLogsRes = await supabase
+      .from("doc_approval_log")
+      .select("id, user_id, action, buoc_ky, created_at, pades_sig_index")
+      .eq("doc_id", log.doc_id)
+      .order("created_at", { ascending: true })
+
+    const siblingLogs = (siblingLogsRes.data || []) as LogRow[]
+    const candidateUserIds = [
+      log.user_id,
+      ...siblingLogs.map((l) => l.user_id),
+      ...(thuTuKy ? thuTuKy.map((s) => s.user_id) : []),
+    ].filter(Boolean) as string[]
+    const uniqueUserIds = [...new Set(candidateUserIds)]
+
+    const { data: profiles } = uniqueUserIds.length > 0
+      ? await supabase.from("profiles").select("id, full_name, username").in("id", uniqueUserIds)
+      : { data: [] }
+    const profileMap = new Map((profiles || []).map((p) => [p.id, (p.full_name as string) || (p.username as string) || ""]))
+
+    const effectiveTotalSteps = soBuocTong || (thuTuKy?.length ?? siblingLogs.length)
+
+    const signingHistory = siblingLogs.map((l) => ({
+      id: l.id,
+      signerName: resolveSignerName(l, profileMap, nguoiKyMap),
+      buoc: getBuocLabel(l, thuTuKy, effectiveTotalSteps),
+      action: l.action,
+      kyLuc: l.created_at,
+      isCurrent: l.id === log?.id,
+      hasPades: l.pades_sig_index != null,
+    }))
+
+    const currentSignerName = resolveSignerName(log, profileMap, nguoiKyMap)
+    const currentBuocLabel = getBuocLabel(log, thuTuKy, effectiveTotalSteps)
+
     const base = {
       docType: log.doc_type,
-      signerName: (profile?.full_name as string) || (profile?.username as string) || "Không rõ",
-      buoc: buocLabel(log),
+      signerName: currentSignerName,
+      buoc: currentBuocLabel,
       kyLuc: log.created_at,
       maTaiLieu,
       tenTaiLieu,
@@ -229,6 +264,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     return NextResponse.json({
       ...base,
       ...result,
+      // Đảm bảo signerName giữ đúng người ký của bước này, không bị tên trên chứng thư niêm phong cuối ghi đè
+      signerName: base.signerName !== "Không rõ" ? base.signerName : (result.valid ? result.signerName : "Không rõ"),
+      padesSignerName: result.valid ? result.signerName : undefined,
       inheritedNote: isInheritedSeal && result.valid ? "Chữ ký hợp lệ — Đã được niêm phong theo quy trình ban hành tài liệu" : undefined,
       severity: severityFor(result.valid),
     })

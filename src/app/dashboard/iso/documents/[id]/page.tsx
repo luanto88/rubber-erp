@@ -1054,7 +1054,7 @@ export default function IsoDocumentDetailPage() {
       const folder = target === "main" ? "iso" : "iso/review-attachments"
       const path = `${factoryId}/${folder}/${Date.now()}_${safeName}`
       const { error } = await supabase.storage.from("iso-documents").upload(path, file, { upsert: true })
-      if (error) { setSaveError(`${error.message} [debug: factoryId=${factoryId}, path=${path}]`); return }
+      if (error) { setSaveError(error.message); return }
       const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(path)
       if (target === "change") {
         setReviewChangeFileUrl(urlData.publicUrl)
@@ -1120,7 +1120,7 @@ export default function IsoDocumentDetailPage() {
         }
         const path = `${factoryId}/iso/child-records/${Date.now()}_${uploaded.length}_${safeName}`
         const { error } = await supabase.storage.from("iso-documents").upload(path, file, { upsert: true })
-        if (error) { setSaveError(`${error.message} [debug: factoryId=${factoryId}, path=${path}]`); return }
+        if (error) { setSaveError(error.message); return }
         const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(path)
         uploaded.push({ name: file.name, url: urlData.publicUrl })
       }
@@ -1149,7 +1149,7 @@ export default function IsoDocumentDetailPage() {
       const safeName = sanitizeStorageFileName(file.name)
       const path = `${factoryId}/iso/child-records/${Date.now()}_${safeName}`
       const { error } = await supabase.storage.from("iso-documents").upload(path, file, { upsert: true })
-      if (error) { setSaveError(`${error.message} [debug: factoryId=${factoryId}, path=${path}]`); return }
+      if (error) { setSaveError(error.message); return }
       const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(path)
       const isDraftRow = childDraftRows.some((row) => row.id === rowId)
       if (isDraftRow) {
@@ -2986,7 +2986,7 @@ export default function IsoDocumentDetailPage() {
       const safeName = sanitizeStorageFileName(file.name)
       const filePath = `${factoryId}/iso/child-records/${Date.now()}_${safeName}`
       const { error } = await supabase.storage.from("iso-documents").upload(filePath, file, { upsert: true })
-      if (error) { setSaveError(`${error.message} [debug: factoryId=${factoryId}, path=${filePath}]`); return }
+      if (error) { setSaveError(error.message); return }
       const { data: urlData } = supabase.storage.from("iso-documents").getPublicUrl(filePath)
       const inferred = parseDocNameFromFileName(file.name)
       setChildReviewRows((rows) => rows.map((row) => {
