@@ -547,8 +547,8 @@ export default function SignTemplateEditorPage() {
   const [showMobilePagePicker, setShowMobilePagePicker] = useState(false)
 
   // ── Đồng bộ dữ liệu người ký thật của văn bản đang mở (chỉ khi có docId) ──
-  const [docLoaded, setDocLoaded] = useState(!docId)
-  const [docFetchOk, setDocFetchOk] = useState(!docId)
+  const [docLoaded, setDocLoaded] = useState(!docId && !formInstanceId)
+  const [docFetchOk, setDocFetchOk] = useState(!docId && !formInstanceId)
   const [docSteps, setDocSteps] = useState<DocStepLite[]>([])
   const [docPheDuyetUserId, setDocPheDuyetUserId] = useState<string | null>(null)
   const [signerInfoById, setSignerInfoById] = useState<
@@ -749,9 +749,26 @@ export default function SignTemplateEditorPage() {
             >)
           : BASE_ROLE_DEFS
 
-        if (!template) {
+        if (!template || !template.khung.length) {
           setTemplateExisted(false)
-          const fresh = roleOrder.map((id) => makeBaseRole(id as BaseRoleId, isIso, isExemptIsoDoc))
+          let fresh: EditorRole[] = []
+          if (isIso) {
+            const steps = Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null
+            const totalSteps = steps ? steps.length : (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3))
+            for (let i = 0; i < totalSteps; i++) {
+              const stepKey = `buoc_${i + 1}`
+              const defaultLabel = i === 0 ? "Người lập" : i === totalSteps - 1 ? "Phê duyệt" : (totalSteps === 3 && i === 1 ? "Xem xét" : `Bước ${i + 1}`)
+              const stepLabel = steps?.[i]?.ten?.trim() || defaultLabel
+              fresh.push(makeBaseRole(stepKey, true, isExemptIsoDoc, stepLabel, i + 1, totalSteps))
+            }
+            fresh.push(
+              makeBaseRole("qr", true, isExemptIsoDoc),
+              makeBaseRole("ngay_ky", true, isExemptIsoDoc),
+              makeBaseRole("ghi_chu", true, isExemptIsoDoc),
+            )
+          } else {
+            fresh = roleOrder.map((id) => makeBaseRole(id as BaseRoleId, isIso, isExemptIsoDoc))
+          }
           setRoles(fresh)
           setInitialSnapshot(JSON.stringify(fresh))
           setLoading(false)
@@ -759,70 +776,103 @@ export default function SignTemplateEditorPage() {
           return
         }
         setTemplateExisted(true)
-        if (!template.khung.length) {
-          const fresh = roleOrder.map((id) => makeBaseRole(id as BaseRoleId, isIso, isExemptIsoDoc))
-          setRoles(fresh)
-          setInitialSnapshot(JSON.stringify(fresh))
-          setLoading(false)
-          setTemplateLoaded(true)
-          return
-        }
-        const byBase = new Map<string, EditorRole[]>()
-        const seq: Record<string, number> = {}
-        for (const box of template.khung) {
-          const resolved = boxPctFromTemplate(box, pageDims, numPages)
-          if (!resolved) continue
-          const isClone = !!box.clone_of || /__ban\d+$/.test(box.vai_tro)
-          const baseId = String(box.clone_of || box.vai_tro.replace(/__ban\d+$/, ""))
-          const def = (roleDefs as Record<string, { label?: string; loai?: SignTemplateBoxLoai; batBuoc?: boolean; showNameDefault?: boolean }>)[baseId]
-          if (isClone) {
-            const m = /__ban(\d+)$/.exec(box.vai_tro)
-            const cloneNum = m ? parseInt(m[1], 10) : (seq[baseId] || 1) + 1
-            seq[baseId] = Math.max(seq[baseId] || 1, cloneNum)
+        if (isIso) {
+          const loadedRoles: EditorRole[] = []
+          const seq: Record<string, number> = {}
+          for (const box of template.khung) {
+            const resolved = boxPctFromTemplate(box, pageDims, numPages)
+            if (!resolved) continue
+            const isClone = !!box.clone_of || /__ban\d+$/.test(box.vai_tro)
+            const baseId = String(box.clone_of || box.vai_tro.replace(/__ban\d+$/, ""))
+            const def = (ISO_ROLE_DEFS as Record<string, { label?: string; loai?: SignTemplateBoxLoai; batBuoc?: boolean; showNameDefault?: boolean }>)[baseId]
+            if (isClone) {
+              const m = /__ban(\d+)$/.exec(box.vai_tro)
+              const cloneNum = m ? parseInt(m[1], 10) : (seq[baseId] || 1) + 1
+              seq[baseId] = Math.max(seq[baseId] || 1, cloneNum)
+            }
+            const defaultLabel = def?.label || (baseId.startsWith("buoc_") ? `Bước ${baseId.replace("buoc_", "")}` : baseId)
+            const label = box.nhan || (isClone ? `${defaultLabel} · bản ${seq[baseId] || 2}` : defaultLabel)
+            const role: EditorRole = {
+              id: box.vai_tro,
+              baseId: baseId as BaseRoleId,
+              label,
+              loai: box.loai || def?.loai || "chu_ky",
+              batBuoc: !isClone && (isExemptIsoDoc ? false : (box.bat_buoc ?? def?.batBuoc ?? true)),
+              isClone,
+              placed: true,
+              anchor: box.neo_trang,
+              page: resolved.page,
+              box: resolved.pct,
+              showName: box.show_name ?? def?.showNameDefault ?? false,
+              showChucVu: box.show_chuc_vu ?? false,
+              chucVuKey: box.chuc_vu_key ?? null,
+              signAs: box.sign_as ?? null,
+              outOfBounds: false,
+              hiddenForDoc: false,
+            }
+            loadedRoles.push(role)
           }
-          const defaultLabel = def?.label || (baseId.startsWith("buoc_") ? `Bước ${baseId.replace("buoc_", "")}` : baseId)
-          const label = box.nhan || (isClone ? `${defaultLabel} · bản ${seq[baseId] || 2}` : defaultLabel)
-          const role: EditorRole = {
-            id: box.vai_tro,
-            baseId: baseId as BaseRoleId,
-            label,
-            loai: box.loai || def?.loai || "chu_ky",
-            batBuoc: !isClone && (isExemptIsoDoc ? false : (box.bat_buoc ?? def?.batBuoc ?? true)),
-            isClone,
-            placed: true,
-            anchor: box.neo_trang,
-            page: resolved.page,
-            box: resolved.pct,
-            showName: box.show_name ?? def?.showNameDefault ?? false,
-            showChucVu: box.show_chuc_vu ?? (isIso ? false : (box.show_name ?? def?.showNameDefault ?? false)),
-            chucVuKey: box.chuc_vu_key ?? null,
-            signAs: box.sign_as ?? null,
-            outOfBounds: false,
-            hiddenForDoc: false,
+          cloneSeqRef.current = seq
+          setRoles(loadedRoles)
+          setInitialSnapshot(JSON.stringify(loadedRoles))
+        } else {
+          const byBase = new Map<string, EditorRole[]>()
+          const seq: Record<string, number> = {}
+          for (const box of template.khung) {
+            const resolved = boxPctFromTemplate(box, pageDims, numPages)
+            if (!resolved) continue
+            const isClone = !!box.clone_of || /__ban\d+$/.test(box.vai_tro)
+            const baseId = String(box.clone_of || box.vai_tro.replace(/__ban\d+$/, ""))
+            const def = (roleDefs as Record<string, { label?: string; loai?: SignTemplateBoxLoai; batBuoc?: boolean; showNameDefault?: boolean }>)[baseId]
+            if (isClone) {
+              const m = /__ban(\d+)$/.exec(box.vai_tro)
+              const cloneNum = m ? parseInt(m[1], 10) : (seq[baseId] || 1) + 1
+              seq[baseId] = Math.max(seq[baseId] || 1, cloneNum)
+            }
+            const defaultLabel = def?.label || (baseId.startsWith("buoc_") ? `Bước ${baseId.replace("buoc_", "")}` : baseId)
+            const label = box.nhan || (isClone ? `${defaultLabel} · bản ${seq[baseId] || 2}` : defaultLabel)
+            const role: EditorRole = {
+              id: box.vai_tro,
+              baseId: baseId as BaseRoleId,
+              label,
+              loai: box.loai || def?.loai || "chu_ky",
+              batBuoc: !isClone && (box.bat_buoc ?? def?.batBuoc ?? true),
+              isClone,
+              placed: true,
+              anchor: box.neo_trang,
+              page: resolved.page,
+              box: resolved.pct,
+              showName: box.show_name ?? def?.showNameDefault ?? false,
+              showChucVu: box.show_chuc_vu ?? (box.show_name ?? def?.showNameDefault ?? false),
+              chucVuKey: box.chuc_vu_key ?? null,
+              signAs: box.sign_as ?? null,
+              outOfBounds: false,
+              hiddenForDoc: false,
+            }
+            const list = byBase.get(baseId) || []
+            list.push(role)
+            byBase.set(baseId, list)
           }
-          const list = byBase.get(baseId) || []
-          list.push(role)
-          byBase.set(baseId, list)
-        }
-        cloneSeqRef.current = seq
-        const result: EditorRole[] = []
-        for (const baseId of roleOrder) {
-          const placedForBase = byBase.get(baseId) || []
-          if (placedForBase.length === 0) {
-            result.push(makeBaseRole(baseId as BaseRoleId, isIso, isExemptIsoDoc))
-          } else {
-            const hasOriginal = placedForBase.some((r) => r.id === baseId)
-            if (!hasOriginal) result.push(makeBaseRole(baseId as BaseRoleId, isIso, isExemptIsoDoc))
-            result.push(...placedForBase)
+          cloneSeqRef.current = seq
+          const result: EditorRole[] = []
+          for (const baseId of roleOrder) {
+            const placedForBase = byBase.get(baseId) || []
+            if (placedForBase.length === 0) {
+              result.push(makeBaseRole(baseId as BaseRoleId, isIso, isExemptIsoDoc))
+            } else {
+              const hasOriginal = placedForBase.some((r) => r.id === baseId)
+              if (!hasOriginal) result.push(makeBaseRole(baseId as BaseRoleId, isIso, isExemptIsoDoc))
+              result.push(...placedForBase)
+            }
           }
-        }
-        for (const [bId, bRoles] of byBase.entries()) {
-          if (!roleOrder.includes(bId as BaseRoleId)) {
-            result.push(...bRoles)
+          for (const [bId, bRoles] of byBase.entries()) {
+            if (!roleOrder.includes(bId as BaseRoleId)) {
+              result.push(...bRoles)
+            }
           }
+          setRoles(result)
+          setInitialSnapshot(JSON.stringify(result))
         }
-        setRoles(result)
-        setInitialSnapshot(JSON.stringify(result))
       } catch (err) {
         setError(err instanceof Error ? err.message : "Lỗi tải mẫu vị trí")
       } finally {
@@ -1107,38 +1157,50 @@ export default function SignTemplateEditorPage() {
           const defaultLabel = i === 0 ? "Người lập" : i === totalSteps - 1 ? "Phê duyệt" : (totalSteps === 3 && i === 1 ? "Xem xét" : `Bước ${i + 1}`)
           const stepLabel = steps?.[i]?.ten?.trim() || defaultLabel
 
-          // Tìm các khung trong prev tương ứng với bước này
-          const matched = prev.filter((r) => {
-            if (usedRoleIds.has(r.id)) return false
-            if (r.baseId === stepKey || r.id === stepKey || r.id.startsWith(`${stepKey}__`)) return true
-            if (r.label === stepLabel || r.label.startsWith(`${stepLabel} · bản`)) return true
-            // Legacy matches
-            if (i === 0 && (r.baseId === "soan_thao" || r.id === "soan_thao" || r.id.startsWith("soan_thao__"))) return true
-            if (i === totalSteps - 1 && (r.baseId === "phe_duyet" || r.id === "phe_duyet" || r.id.startsWith("phe_duyet__"))) return true
-            if (i > 0 && i < totalSteps - 1 && (r.baseId === "xem_xet" || r.id === "xem_xet" || r.id.startsWith("xem_xet__"))) return true
-            return false
-          })
+          // Tìm khung chính trong prev:
+          // Ưu tiên 1: khung chính không phải clone khớp đúng stepKey
+          let mainRole = prev.find((r) => !usedRoleIds.has(r.id) && !r.isClone && !r.id.includes("__ban") && (r.id === stepKey || r.baseId === stepKey))
+          // Ưu tiên 2: fallback legacy (soan_thao cho bước 1, phe_duyet cho bước cuối, xem_xet cho bước 2)
+          if (!mainRole) {
+            mainRole = prev.find((r) => {
+              if (usedRoleIds.has(r.id) || r.isClone || r.id.includes("__ban")) return false
+              if (i === 0 && (r.id === "soan_thao" || r.baseId === "soan_thao")) return true
+              if (i === totalSteps - 1 && (r.id === "phe_duyet" || r.baseId === "phe_duyet")) return true
+              if (totalSteps === 3 && i === 1 && (r.id === "xem_xet" || r.baseId === "xem_xet")) return true
+              return false
+            })
+          }
+          // Ưu tiên 3: khung theo nhãn (nếu có nhãn trùng)
+          if (!mainRole) {
+            mainRole = prev.find((r) => !usedRoleIds.has(r.id) && !r.isClone && !r.id.includes("__ban") && r.label === stepLabel)
+          }
 
-          let baseRole = matched.find((r) => !r.isClone) || matched[0]
-          if (!baseRole) {
-            baseRole = makeBaseRole(stepKey, true, isExemptIsoDoc, stepLabel, i + 1, totalSteps)
-          } else {
-            usedRoleIds.add(baseRole.id)
-            baseRole = {
-              ...baseRole,
-              id: baseRole.isClone ? baseRole.id : stepKey,
+          if (mainRole) {
+            usedRoleIds.add(mainRole.id)
+            nextRoles.push({
+              ...mainRole,
+              id: stepKey,
               baseId: stepKey as BaseRoleId,
               label: stepLabel,
               batBuoc: isExemptIsoDoc ? false : true,
+              isClone: false,
               hiddenForDoc: false,
-            }
+            })
+          } else {
+            nextRoles.push(makeBaseRole(stepKey, true, isExemptIsoDoc, stepLabel, i + 1, totalSteps))
           }
-          nextRoles.push(baseRole)
 
-          // Bảo lưu toàn bộ các khung bản sao của bước này ở mọi trang
+          // Bảo lưu toàn bộ các khung BẢN SAO THẬT SỰ của bước này (chỉ r.isClone hoặc r.id có __ban)
+          const genuineClones = prev.filter((r) => {
+            if (usedRoleIds.has(r.id)) return false
+            if (!r.isClone && !r.id.includes("__ban")) return false
+            if (r.baseId === stepKey || r.id.startsWith(`${stepKey}__`)) return true
+            if (mainRole && (r.baseId === mainRole.id || r.id.startsWith(`${mainRole.id}__`))) return true
+            return false
+          })
+
           let cloneSeq = 1
-          const clones = matched.filter((r) => r.id !== baseRole?.id)
-          clones.forEach((cloneRole) => {
+          genuineClones.forEach((cloneRole) => {
             usedRoleIds.add(cloneRole.id)
             const cIdx = roleCloneIndex(cloneRole)
             cloneSeq = Math.max(cloneSeq, cIdx)
@@ -1146,6 +1208,7 @@ export default function SignTemplateEditorPage() {
               ...cloneRole,
               baseId: stepKey as BaseRoleId,
               label: `${stepLabel} · bản ${cIdx}`,
+              isClone: true,
               hiddenForDoc: false,
             })
           })
@@ -1153,7 +1216,7 @@ export default function SignTemplateEditorPage() {
         }
 
         // 2. Thêm các vai trò phụ (QR, Ngày ký, Ghi chú)
-        const auxOrder = ["qr", "ngay_ky", "ghi_chu"]
+        const auxOrder: BaseRoleId[] = ["qr", "ngay_ky", "ghi_chu"]
         for (const auxId of auxOrder) {
           const matchedAux = prev.filter((r) => (r.baseId === auxId || r.id === auxId || r.id.startsWith(`${auxId}__`)) && !usedRoleIds.has(r.id))
           if (matchedAux.length > 0) {
@@ -1166,13 +1229,10 @@ export default function SignTemplateEditorPage() {
           }
         }
 
-        // 3. Giữ lại bất kỳ khung nào đã đặt khác để không bao giờ bị mất
-        const remaining = prev.filter((r) => !usedRoleIds.has(r.id))
-        remaining.forEach((r) => {
-          nextRoles.push({
-            ...r,
-            hiddenForDoc: !r.placed,
-          })
+        // 3. Nếu có khung khác ĐÃ ĐẶT (placed === true) trên canvas thì bảo toàn:
+        const remainingPlaced = prev.filter((r) => !usedRoleIds.has(r.id) && r.placed)
+        remainingPlaced.forEach((r) => {
+          nextRoles.push({ ...r, hiddenForDoc: false })
         })
 
         setInitialSnapshot(JSON.stringify(nextRoles))
@@ -1691,6 +1751,34 @@ export default function SignTemplateEditorPage() {
     showToast("Đã đặt lại về mẫu đã lưu gần nhất.")
   }
 
+  const resetToBlankTemplate = () => {
+    let fresh: EditorRole[] = []
+    if (isIso) {
+      const steps = Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null
+      const totalSteps = steps ? steps.length : (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3))
+      fresh = []
+      for (let i = 0; i < totalSteps; i++) {
+        const stepKey = `buoc_${i + 1}`
+        const defaultLabel = i === 0 ? "Người lập" : i === totalSteps - 1 ? "Phê duyệt" : (totalSteps === 3 && i === 1 ? "Xem xét" : `Bước ${i + 1}`)
+        const stepLabel = steps?.[i]?.ten?.trim() || defaultLabel
+        fresh.push(makeBaseRole(stepKey, true, isExemptIsoDoc, stepLabel, i + 1, totalSteps))
+      }
+      fresh.push(
+        makeBaseRole("qr", true, isExemptIsoDoc),
+        makeBaseRole("ngay_ky", true, isExemptIsoDoc),
+        makeBaseRole("ghi_chu", true, isExemptIsoDoc),
+      )
+    } else {
+      fresh = ROLE_ORDER.map((id) => makeBaseRole(id as BaseRoleId, false, false))
+    }
+    fresh = fresh.map((r) => ({ ...r, placed: false, outOfBounds: false }))
+    cloneSeqRef.current = {}
+    setRoles(fresh)
+    setSelectedRoleId(null)
+    setArmedRoleId(null)
+    showToast("Đã làm mới: Tất cả khung về trạng thái chưa đặt")
+  }
+
   const buildKhungPayload = (): SignTemplateBox[] => {
     return roles
       .filter((r) => r.placed)
@@ -2062,6 +2150,14 @@ export default function SignTemplateEditorPage() {
           <button onClick={handleCancel} className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
             Huỷ
           </button>
+          <button
+            onClick={resetToBlankTemplate}
+            className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-amber-200 hover:text-amber-100"
+            title="Xóa toàn bộ các khung đã đặt và tạo mẫu mới từ đầu"
+          >
+            <span className="hidden sm:inline">Mẫu mới</span>
+            <span className="sm:hidden">Mới</span>
+          </button>
           {templateExisted && (
             <button onClick={resetToSaved} className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
               <span className="hidden sm:inline">Đặt lại mẫu đã lưu</span>
@@ -2321,6 +2417,20 @@ export default function SignTemplateEditorPage() {
                     >
                       {role.label}
                     </span>
+                  )}
+                  {!previewMode && (role.isClone || role.id.includes("__ban")) && (
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeRole(role.id)
+                      }}
+                      className="absolute -top-2.5 -right-2.5 p-1 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-md transition-transform hover:scale-110 z-20 cursor-pointer pointer-events-auto"
+                      title="Xóa bản nhân bản này"
+                    >
+                      <Trash2 size={11} />
+                    </button>
                   )}
                   {!previewMode && (
                     <div

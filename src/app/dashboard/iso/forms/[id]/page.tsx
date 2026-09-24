@@ -15,7 +15,7 @@ import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession, hasPermission, type SessionUser } from "@/lib/auth"
 import { fetchSecureUrl, openSecureFile } from "../../../_components/secure-file-open"
 import { formatFactoryDateVN, formatFactoryDateTimeVN } from "@/lib/date-utils"
 import {
@@ -694,7 +694,7 @@ function SignPlacementModal({
   const isFinalStep = typeof totalSteps === "number" && typeof stepIndex === "number"
     ? stepIndex + 1 >= totalSteps
     : action === "phe_duyet"
-  const stepKey = typeof stepIndex === "number" ? `buoc_${stepIndex}` : action
+  const stepKey = typeof stepIndex === "number" ? `buoc_${stepIndex + 1}` : action
 
   // Luồng ký chia 2 bước: PIN phải xác thực đúng (chặn, gọi /api/sign/verify)
   // TRƯỚC khi hiện canvas PDF đặt vị trí chữ ký — mirror iso/documents/[id]/page.tsx
@@ -723,6 +723,7 @@ function SignPlacementModal({
   const containerRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfDocRef = useRef<any>(null)
+  const pdfPageDimsRef = useRef<Record<number, { w: number; h: number }>>({})
   const [currentPage, setCurrentPage] = useState(1)
   const [numPages, setNumPages] = useState(1)
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({})
@@ -848,6 +849,7 @@ function SignPlacementModal({
       pdf: any,
       scale: number,
       pageH: number,
+      pageDims: Record<number, { w: number; h: number }>,
       isCancelled: () => boolean,
     ) => {
       if (!factoryId) {
@@ -1011,6 +1013,7 @@ function SignPlacementModal({
 
           // Tự động quét và nạp tất cả các khung nhân bản (clones) thuộc về bước này
           const roleBaseKey = String(roleBox.vai_tro || "")
+          const stepKeyVal = typeof stepIndex === "number" ? `buoc_${stepIndex + 1}` : action
           const cloneBoxes = khung.filter((k) => {
             if (k === roleBox) return false
             const vt = String(k.vai_tro || "")
@@ -1018,9 +1021,11 @@ function SignPlacementModal({
             const l = String(k.loai || "")
             if (l === "qr" || l === "ngay_ky" || l === "ghi_chu" || vt === "qr" || vt === "ngay_ky" || vt === "ghi_chu") return false
             return (
-              (cloneOf && (cloneOf === roleBaseKey || (roleBox.clone_of && cloneOf === String(roleBox.clone_of)))) ||
+              cloneOf === roleBaseKey ||
+              cloneOf === stepKeyVal ||
+              (roleBox.clone_of && cloneOf === String(roleBox.clone_of)) ||
               vt.startsWith(`${roleBaseKey}__ban`) ||
-              (stepKey && (cloneOf === stepKey || vt.startsWith(`${stepKey}__ban`))) ||
+              vt.startsWith(`${stepKeyVal}__ban`) ||
               (action && (cloneOf === action || vt.startsWith(`${action}__ban`))) ||
               (roleBox.nhan && k.nhan && String(k.nhan).trim().toLowerCase().startsWith(String(roleBox.nhan).trim().toLowerCase()) && vt.includes("__ban"))
             )
@@ -1041,24 +1046,48 @@ function SignPlacementModal({
               const cSigPt = clampRectToBox(cSub.sig, cBoxPt)
               const cNamePt = clampRectToBox(cSub.name ?? cFull.name ?? cSub.sig, cBoxPt)
 
-              const cSigCanvas = toCanvas(cSigPt)
-              const cNameCanvas = toCanvas(cNamePt)
-              const cRoleCanvas = toCanvas(cBoxPt)
+              const cPage = num(cBox.so_trang, 0) || (cBox.neo_trang === "cuoi" ? (pdf.numPages || 1) : 1)
+              const cDim = pageDims[cPage] || pageDims[1] || { w: 595.28, h: curPageH }
+              const cPageH = cDim.h
+
+              const cToCanvas = (r: { x: number; y: number; width: number; height: number }): ElemState => ({
+                x: r.x * curScale,
+                y: (cPageH - r.y - r.height) * curScale,
+                w: r.width * curScale,
+                h: r.height * curScale,
+              })
+
+              const cSigCanvas = cToCanvas(cSigPt)
+              const cNameCanvas = cToCanvas(cNamePt)
+              const cRoleCanvas = cToCanvas(cBoxPt)
               const cSnugName = computeSnugBoxSize(userName, "name", 1.0)
               const cSnugNameW = Math.min(cRoleCanvas.w, cSnugName.w)
               const cSnugNameX = Math.max(cRoleCanvas.x, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugNameW) / 2))
 
-              const cPage = num(cBox.so_trang, 0) || (cBox.neo_trang === "cuoi" ? (pdf.numPages || 1) : 1)
+              let finalSigX = cSigCanvas.x
+              let finalSigY = cSigCanvas.y
+              let finalNameX = cSnugNameX
+              let finalNameY = cNameCanvas.y
+
+              // Nếu cùng trang và toạ độ trùng với khung chính, tự động offset hiển thị để không bị che khuất
+              const mainSigCanvas = toCanvas(sigPt)
+              if (cPage === effectiveMainPage && Math.abs(finalSigX - mainSigCanvas.x) < 8 && Math.abs(finalSigY - mainSigCanvas.y) < 8) {
+                const offset = 30 * (idx + 1)
+                finalSigX += offset
+                finalSigY += offset
+                finalNameX += offset
+                finalNameY += offset
+              }
 
               return {
                 id: Date.now() + Math.random() + idx,
                 page: cPage,
-                sigX: cSigCanvas.x,
-                sigY: cSigCanvas.y,
+                sigX: finalSigX,
+                sigY: finalSigY,
                 sigW: cSigCanvas.w,
                 sigH: cSigCanvas.h,
-                nameX: cSnugNameX,
-                nameY: cNameCanvas.y,
+                nameX: finalNameX,
+                nameY: finalNameY,
                 nameW: cSnugNameW,
                 nameH: cNameCanvas.h,
                 showSignature: true,
@@ -1180,6 +1209,20 @@ function SignPlacementModal({
       const dims = await renderPdfPage(pdf, 1)
       if (cancelled) return
 
+      // Lưu kích thước thật (pt) của từng trang để quy đổi toạ độ chính xác cho các khung bản sao
+      const pageDims: Record<number, { w: number; h: number }> = {}
+      for (let p = 1; p <= pdf.numPages; p++) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const pg: any = await pdf.getPage(p)
+          const vp1 = pg.getViewport({ scale: 1 })
+          pageDims[p] = { w: vp1.width, h: vp1.height }
+        } catch {
+          // ignore
+        }
+      }
+      pdfPageDimsRef.current = pageDims
+
       const cH = canvasRef.current?.height || 0
       const cW = canvasRef.current?.width || 0
 
@@ -1195,7 +1238,7 @@ function SignPlacementModal({
       // Mẫu chỉ GỢI Ý vị trí ban đầu — người ký vẫn kéo/chỉnh tự do trước khi ký, khác
       // "vị trí CỨNG" của module Văn bản. Lỗi nạp mẫu không được chặn luồng ký.
       if (dims) {
-        await applyTemplate(pdf, dims.scale, dims.pageH, () => cancelled)
+        await applyTemplate(pdf, dims.scale, dims.pageH, pageDims, () => cancelled)
       } else {
         if (!cancelled) setTemplateLoaded(true)
       }
@@ -1367,14 +1410,22 @@ function SignPlacementModal({
 
       if (extraSigBoxes.length > 0) {
         placement.extraPlacements = extraSigBoxes.map((box) => {
-          const sPdf = toPdf(box.sigX, box.sigY, box.sigW, box.sigH)
-          const nPdf = toPdf(box.nameX, box.nameY, box.nameW, box.nameH)
+          const bPage = box.page || currentPage
+          const bDim = pdfPageDimsRef.current[bPage] || pdfPageDimsRef.current[1] || { w: 595.28, h: pdfPageH }
+          const sX = box.sigX / pdfScale
+          const sW = box.sigW / pdfScale
+          const sH = box.sigH / pdfScale
+          const sY = bDim.h - (box.sigY + box.sigH) / pdfScale
+          const nX = box.nameX / pdfScale
+          const nW = box.nameW / pdfScale
+          const nH = box.nameH / pdfScale
+          const nY = bDim.h - (box.nameY + box.nameH) / pdfScale
           return {
-            page: box.page || currentPage,
-            x: sPdf.x, y: sPdf.y, width: sPdf.width, height: sPdf.height,
+            page: bPage,
+            x: sX, y: sY, width: sW, height: sH,
             showSignature: true,
             showSignerName: box.showSignerName,
-            nameX: nPdf.x, nameY: nPdf.y, nameWidth: nPdf.width, nameHeight: nPdf.height,
+            nameX: nX, nameY: nY, nameWidth: nW, nameHeight: nH,
           }
         })
       }
@@ -2169,6 +2220,7 @@ export default function IsoFormInstancePage() {
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
   const [userName, setUserName] = useState("")
   const [userRole, setUserRole] = useState<string | null>(null)
   const [userChucVu, setUserChucVu] = useState("")
@@ -2241,11 +2293,12 @@ export default function IsoFormInstancePage() {
       try {
         const fid = await getActiveFactoryId()
         if (!fid) { setLoading(false); return }
-        const session = await getFreshAuthSession()
+        const { session, user: authUser } = await hydrateActiveSession()
         const uid = session?.user?.id
         if (!uid) { setLoading(false); return }
         setFactoryId(fid)
         setUserId(uid)
+        setCurrentUser(authUser)
         // Load user profile for full name & role
         const { data: profile } = await supabase
           .from("profiles")
@@ -2504,11 +2557,14 @@ export default function IsoFormInstancePage() {
       try {
         const { data } = await supabase
           .from("mau_vi_tri")
-          .select("id")
+          .select("id, khung")
           .eq("factory_id", factoryId)
           .in("loai_tai_lieu", keys)
           .limit(1)
-        if (alive) setTemplateExists((data?.length ?? 0) > 0)
+        if (alive) {
+          const hasValidKhung = (data?.length ?? 0) > 0 && Array.isArray((data as any)[0]?.khung) && (data as any)[0].khung.length > 0
+          setTemplateExists(hasValidKhung)
+        }
       } catch {
         // Lỗi mạng → để `null`, KHÔNG chặn gửi ký (thà cho gửi còn hơn khoá cứng người dùng
         // ngoài hiện trường vì một lần query hỏng).
@@ -3147,15 +3203,17 @@ export default function IsoFormInstancePage() {
     : (steps.length > 0 ? steps[0] : null)
   const firstStepSignerId = firstStep ? stepSignerUserId(firstStep) : null
   const isDrafter = firstStepSignerId === userId
-  const canManageDraft = isEditable && (isNguoiTao || isDrafter || userRole === "admin")
-  const canSignStep1 = isEditable && (isDrafter || userRole === "admin")
+  const isStep1Signer = isDrafter || isNguoiTao
+  const hasSignPerm = hasPermission(currentUser, "iso.sign") || hasPermission(currentUser, "iso.create") || hasPermission(currentUser, "iso.signature") || userRole === "admin"
+  const canManageDraft = isEditable && (isNguoiTao || isDrafter || hasPermission(currentUser, "iso.create") || userRole === "admin")
+  const canSignStep1 = isEditable && hasSignPerm && (isStep1Signer || userRole === "admin")
   const canChangeSigner = !isEditable && !isDone && instance.trang_thai !== "tra_ve" && (
-    isNguoiTao || isDrafter || userRole === "admin"
+    isNguoiTao || isDrafter || hasPermission(currentUser, "iso.create") || userRole === "admin"
   )
 
   // Hồ sơ PDF mới có khái niệm "vị trí ký"; file Office thay tag nên không cần mẫu.
   const needsSignTemplate = instance.draft_file_type === "pdf" || urlIsPdf(instance.draft_file_url)
-  const mustSetupTemplate = needsSignTemplate && templateExists === false
+  const mustSetupTemplate = needsSignTemplate && templateExists !== true
 
   const signStepsReady = isNStep
     ? steps.length > 0 && steps.every((s) => !!stepSignerUserId(s))
@@ -3231,14 +3289,12 @@ export default function IsoFormInstancePage() {
               </button>
             )}
 
-            {canSignStep1 && (
+            {/* Nút Ký & Gửi: Ẩn hoàn toàn khi chưa có mẫu vị trí ký (mustSetupTemplate) */}
+            {canSignStep1 && (!needsSignTemplate || templateExists === true) && (
               <button
                 onClick={openSendModal}
-                disabled={saving || !instance.draft_file_url || mustSetupTemplate}
+                disabled={saving || !instance.draft_file_url}
                 className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-md transition-all"
-                title={mustSetupTemplate
-                  ? "Biểu mẫu này chưa có mẫu vị trí ký — bấm 'Cài đặt vị trí ký' trước"
-                  : undefined}
               >
                 {saving ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
                 {isNStepRecord || steps.length > 0
@@ -3305,13 +3361,18 @@ export default function IsoFormInstancePage() {
               </button>
             )}
 
+            {/* Nút Cài đặt vị trí ký: nổi bật rực rỡ khi hồ sơ chưa có mẫu vị trí ký */}
             {isEditable && canManageDraft && templateSignSetupUrl && (
               <button
                 onClick={() => void goToTemplateSetup()}
                 disabled={!signStepsReady || saving}
-                className="flex items-center gap-2 px-4 py-2 bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 text-sm font-bold rounded-xl border border-sky-200 transition-all"
+                className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-xl transition-all ${
+                  mustSetupTemplate
+                    ? "bg-violet-600 hover:bg-violet-700 text-white border border-violet-600 shadow-md ring-2 ring-violet-300 animate-pulse"
+                    : "bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 border border-sky-200"
+                }`}
                 title={signStepsReady
-                  ? "Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng"
+                  ? (mustSetupTemplate ? "Cần cài đặt vị trí ký trước khi ký & gửi hồ sơ" : "Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng")
                   : "Chọn đủ người ký ở 'Cấu hình phê duyệt' trước khi cài đặt vị trí ký"}
               >
                 <LayoutTemplate size={15} /> Cài đặt vị trí ký
