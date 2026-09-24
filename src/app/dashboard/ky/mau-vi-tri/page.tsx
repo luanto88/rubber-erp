@@ -913,9 +913,10 @@ export default function SignTemplateEditorPage() {
               .eq("factory_id", factoryId)
               .single()
             if (!cancelled && formInst && !fErr) {
-              // ⚠️ Bucket iso-documents đã chuyển private: giữ nguyên `activePdfUrl` nếu đã được
-              // truyền vào từ trang gọi (Signed URL hợp lệ). Chỉ mint Signed URL mới khi chưa có.
-              if (!activePdfUrl && formInst.draft_file_url && formInst.draft_file_url.split("?")[0].toLowerCase().endsWith(".pdf")) {
+              // ⚠️ Bucket iso-documents đã chuyển private: nếu `activePdfUrl` chưa có hoặc còn là URL public
+              // (bị chặn 400/403), bắt buộc mint Signed URL mới có quyền truy cập.
+              const needsSignedUrl = !activePdfUrl || activePdfUrl.includes("/object/public/iso-documents/")
+              if (needsSignedUrl && formInst.draft_file_url && formInst.draft_file_url.split("?")[0].toLowerCase().endsWith(".pdf")) {
                 const fileRes = await fetchSecureUrl(`/api/iso/forms/${formInstanceId}/file-url`)
                 if (!cancelled && fileRes.ok) {
                   setActivePdfUrl(fileRes.url)
