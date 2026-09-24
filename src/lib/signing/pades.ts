@@ -1,4 +1,5 @@
 import forge from "node-forge"
+import crypto from "node:crypto"
 import {
   PDFDocument as CantooPDFDocument, PDFArray, PDFNumber, PDFName, PDFHexString, PDFString, PDFInvalidObject,
 } from "@cantoo/pdf-lib"
@@ -100,13 +101,35 @@ export function diagnosePadesEnv(): {
   certParseError: string | null
   keyParseOk: boolean
   keyParseError: string | null
+  certSubject?: string | null
+  certFingerprint256?: string | null
+  rootCaVersion?: string | null
 } {
   const certPem = normalizePem(process.env.SIGN_PADES_ROOT_CA_CERT_PEM)
   const keyPem = normalizePem(process.env.SIGN_PADES_ROOT_CA_KEY_PEM)
   let certParseOk = false
   let certParseError: string | null = null
+  let certSubject: string | null = null
+  let certFingerprint256: string | null = null
+  let rootCaVersion: string | null = null
+
   try {
-    if (certPem) { forge.pki.certificateFromPem(certPem); certParseOk = true }
+    if (certPem) {
+      forge.pki.certificateFromPem(certPem)
+      certParseOk = true
+      try {
+        const x509 = new crypto.X509Certificate(certPem)
+        certSubject = x509.subject
+        certFingerprint256 = x509.fingerprint256
+        if (certFingerprint256.toUpperCase() === "3C:C7:33:41:18:DD:43:64:2F:DD:33:97:B3:25:39:1F:01:76:34:36:BE:8B:25:6E:01:D7:9F:53:4B:1A:DC:83") {
+          rootCaVersion = "Root CA v1 (Chứng thư lịch sử)"
+        } else if (certFingerprint256.toUpperCase() === "7A:97:F7:9F:67:2F:DF:19:C5:3E:C2:31:9E:97:66:8F:EE:16:8E:44:BF:3F:9D:F7:B9:50:EE:94:35:E9:9A:FE") {
+          rootCaVersion = "Root CA v2 (Chứng thư hiện hành)"
+        } else {
+          rootCaVersion = certSubject.includes("v2") ? "Root CA v2" : "Root CA tùy chỉnh"
+        }
+      } catch {}
+    }
   } catch (err) {
     certParseError = err instanceof Error ? err.message : String(err)
   }
@@ -130,6 +153,9 @@ export function diagnosePadesEnv(): {
     certParseError,
     keyParseOk,
     keyParseError,
+    certSubject,
+    certFingerprint256,
+    rootCaVersion,
   }
 }
 

@@ -56,6 +56,30 @@ sboENj3j8onI5Jd41m53hpIVrhOTxhztMl1HXC+HUxTwkjxI45xNJ5+6/Fdj+e5Y
 XyemfNkos1DeK5c57mLsB1qH
 -----END CERTIFICATE-----`
 
+/**
+ * Chứng thư công khai của Root CA v2 (khởi tạo 24/09/2026, lưu trong public/rubber-erp-signing-root-ca-v2.pem).
+ * Gốc chứng thư hiện hành cho các chữ ký số mới kể từ đợt xoay vòng 2026.
+ */
+export const ROOT_CA_V2_CERT_PEM = `-----BEGIN CERTIFICATE-----
+MIIDFDCCAfygAwIBAgIBAjANBgkqhkiG9w0BAQsFADA+MScwJQYDVQQDEx5SdWJi
+ZXIgRVJQIEludGVybmFsIFJvb3QgQ0EgdjIxEzARBgNVBAoTClJ1YmJlciBFUlAw
+HhcNMjYwOTI0MTQxODM5WhcNNDYwOTI0MTQxODM5WjA+MScwJQYDVQQDEx5SdWJi
+ZXIgRVJQIEludGVybmFsIFJvb3QgQ0EgdjIxEzARBgNVBAoTClJ1YmJlciBFUlAw
+ggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDKbzQHUom74fwDtrF5DMpj
+vARmFmxNInOXOdh9YXxYX8e1RCNacpPbGC6K60Rf8hBinrb/vdEEqTddCG/f5RmY
+ZBIm1KtcWKbo0YR7e/aTwMt6wm0qeLZomHpz8XUmg1czIV+VGrTBnqAOa43anum1
+hBXhEyMGmXe8269tvhuSDTrF9UY3WtkDAHR9AVmhmlRAuk3yiBtnzu6elBzkXsTK
+E4Rpct3dyxgYWLJf7t8iuLaIxQecezrKfphXOxutsNoReBILO9OQxhS/IE65h4RQ
+JxpmQedq/Bqha32MPhuFh3+UTp3xfgGhWfZOefQSsWMKev1mNfBbIUXWYPDqq9YP
+AgMBAAGjHTAbMAwGA1UdEwQFMAMBAf8wCwYDVR0PBAQDAgGGMA0GCSqGSIb3DQEB
+CwUAA4IBAQBzHzQiFoh9Jy6tmTeRGFmbZUevquK0lQYtLraRHbYccSk3YwRJdQfJ
+lJJACCuvOkub1uXtwXUFgt4dQpSNxZDPGCpzl8KMEgegb7r3CXqhdahxr6SCfUpH
+Gmh5DRy9mj92vf18hXq9tfA0seTsIo1LjCIDLlPuC5WIalJAusJcGDlmjlqYbWam
+K3VpmRztQ0VjLGzFAueHOOkP5BYxspoH1CIDVDskKek6DKxifhrbIvikd7us+2DD
+KI+P3c9GjvHDkRZqIs5pdyuvqZM0ozm/G/CTyLiGEQO10wDDCqyiqRlo8/6Xa4TI
+OQzSb4farZUtTPLzp0bv1ILug2FC8FAm
+-----END CERTIFICATE-----`
+
 export type TrustedRootCaInfo = {
   id: string
   name: string
@@ -83,16 +107,29 @@ export function getTrustedRootCas(): TrustedRootCaInfo[] {
     console.error("[Multi-Root CA] Lỗi khởi tạo Root CA v1:", err)
   }
 
-  // 2. Root CA từ biến môi trường SIGN_PADES_ROOT_CA_CERT_PEM (nếu đã xoay vòng sang v2)
+  // 2. Root CA v2 (Chứng thư công khai cố định của v2)
+  try {
+    const v2Cert = new crypto.X509Certificate(ROOT_CA_V2_CERT_PEM)
+    list.push({
+      id: "v2",
+      name: "Root CA v2 (Chứng thư hiện hành)",
+      fingerprint256: v2Cert.fingerprint256,
+      isHistorical: false,
+    })
+  } catch (err) {
+    console.error("[Multi-Root CA] Lỗi khởi tạo Root CA v2:", err)
+  }
+
+  // 3. Root CA từ biến môi trường SIGN_PADES_ROOT_CA_CERT_PEM (nếu có chứng thư tùy biến hoặc v3 sau này)
   const envCertPem = normalizePem(process.env.SIGN_PADES_ROOT_CA_CERT_PEM)
   if (envCertPem) {
     try {
       const currentCert = new crypto.X509Certificate(envCertPem)
-      const isSameAsV1 = list.some((c) => c.fingerprint256 === currentCert.fingerprint256)
-      if (!isSameAsV1) {
+      const isAlreadyInList = list.some((c) => c.fingerprint256.toUpperCase() === currentCert.fingerprint256.toUpperCase())
+      if (!isAlreadyInList) {
         list.push({
-          id: "v2",
-          name: "Root CA v2 (Chứng thư hiện hành)",
+          id: "env_custom",
+          name: "Root CA (Biến môi trường)",
           fingerprint256: currentCert.fingerprint256,
           isHistorical: false,
         })
