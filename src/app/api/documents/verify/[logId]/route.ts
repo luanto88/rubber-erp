@@ -37,26 +37,36 @@ type LogRow = {
 
 const SUPPORTED_DOC_TYPES = new Set(["van_ban", "iso", "iso_form"])
 
-/** "Ký bước 2" / "Phê duyệt" — nhãn hiển thị cho người xem, lấy động từ cấu hình bước nếu có. */
+/** "Người lập" / "Thực hiện" / "Phê duyệt" — nhãn hiển thị cho người xem, lấy động từ cấu hình bước nếu có. */
 function getBuocLabel(
   row: LogRow,
   thuTuKyJson?: Array<{ ten?: string }> | null,
   totalSteps?: number,
+  docRow?: Record<string, unknown> | null,
 ): string {
+  // 1. Ưu tiên lấy từ cấu hình các bước trong thu_tu_ky_json (dành cho Biểu mẫu ISO N bước)
   if (Array.isArray(thuTuKyJson) && typeof row.buoc_ky === "number" && row.buoc_ky >= 1) {
     const step = thuTuKyJson[row.buoc_ky - 1]
     if (step?.ten?.trim()) return step.ten.trim()
   }
 
+  // 2. Nếu là Tài liệu ISO hoặc Biểu mẫu ISO
   if (row.doc_type === "iso" || row.doc_type === "iso_form") {
+    const is2Step = docRow?.chon_quy_trinh === "2_step" || docRow?.cap_tl === "cap_2" || docRow?.cap_tl === "Cấp 2"
+    if (is2Step) {
+      if (row.action === "phe_duyet" || row.buoc_ky === 2 || (totalSteps && row.buoc_ky === totalSteps)) return "Phê duyệt"
+      if (row.action === "soan_thao" || row.buoc_ky === 1) return "Soạn thảo / Người lập"
+    }
+
     if (row.action === "phe_duyet" || (totalSteps && row.buoc_ky === totalSteps)) return "Phê duyệt"
     if (row.action === "soan_thao" || row.buoc_ky === 1) return "Soạn thảo / Người lập"
-    if (row.action === "xem_xet" || row.buoc_ky === 2) return "Xem xét"
+    if (row.action === "xem_xet" || row.buoc_ky === 2) return "Xem xét / Soát xét"
     if (row.buoc_ky != null) return `Ký bước ${row.buoc_ky}`
     return row.pades_sig_index === null || row.pades_sig_index === undefined
       ? "Đóng dấu xác nhận"
       : "Phê duyệt"
   }
+
   if (row.action === "phe_duyet") return "Phê duyệt"
   if (row.buoc_ky != null) return `Ký bước ${row.buoc_ky}`
   return "Ký xác nhận"
@@ -65,16 +75,64 @@ function getBuocLabel(
 function resolveSignerName(
   r: LogRow,
   pMap: Map<string, string>,
-  nguoiKy?: Record<string, { ten?: string } | undefined> | null,
+  nguoiKy?: Record<string, { ten?: string; user_id?: string } | undefined> | null,
+  docRow?: Record<string, unknown> | null,
 ): string {
+  // 1. Ưu tiên lấy từ nguoi_ky (snapshot lúc ký của iso_form_instances)
+  if (nguoiKy && typeof r.buoc_ky === "number") {
+    const nk = nguoiKy[String(r.buoc_ky)]
+    if (nk?.ten && nk.ten.trim()) return nk.ten.trim()
+  }
+
+  // 2. Tra từ user_id trong profileMap
   if (r.user_id && pMap.has(r.user_id) && pMap.get(r.user_id)) {
     return pMap.get(r.user_id)!
   }
+
+  // 3. Với tài liệu ISO: snapshot lưu trong các cột soan_thao, xem_xet, phe_duyet
+  if (docRow && (r.doc_type === "iso" || r.doc_type === "iso_form")) {
+    if ((r.action === "soan_thao" || r.buoc_ky === 1) && typeof docRow.soan_thao === "string" && docRow.soan_thao.trim()) {
+      return docRow.soan_thao.trim()
+    }
+    if ((r.action === "xem_xet" || r.buoc_ky === 2) && typeof docRow.xem_xet === "string" && docRow.xem_xet.trim()) {
+      return docRow.xem_xet.trim()
+    }
+    if (r.action === "phe_duyet" && typeof docRow.phe_duyet === "string" && docRow.phe_duyet.trim()) {
+      return docRow.phe_duyet.trim()
+    }
+  }
+
+  return "Không rõ"
+}
+
+function resolveKyLuc(
+  r: LogRow,
+  nguoiKy?: Record<string, { ky_at?: string } | undefined> | null,
+  docRow?: Record<string, unknown> | null,
+): string | null {
+  // 1. Nếu có trong nguoi_ky (của iso_form_instances)
   if (nguoiKy && typeof r.buoc_ky === "number") {
     const nk = nguoiKy[String(r.buoc_ky)]
-    if (nk?.ten) return nk.ten
+    if (nk?.ky_at) return nk.ky_at
   }
-  return "Không rõ"
+
+  // 2. Nếu có trong docRow (của iso_documents)
+  if (docRow) {
+    if (r.action === "soan_thao" || r.buoc_ky === 1) {
+      const at = (docRow.soan_thao_at || docRow.ngay_gui_duyet || docRow.ngay_tao) as string | undefined
+      if (at) return at
+    }
+    if (r.action === "xem_xet" || r.buoc_ky === 2) {
+      const at = (docRow.xem_xet_at || docRow.ngay_xem_xet) as string | undefined
+      if (at) return at
+    }
+    if (r.action === "phe_duyet") {
+      const at = (docRow.phe_duyet_at || docRow.ngay_ban_hanh) as string | undefined
+      if (at) return at
+    }
+  }
+
+  return r.created_at || null
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ logId: string }> }) {
@@ -112,7 +170,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     let tenTaiLieu: string | null = null
     let fileSignedPdfUrl: string | null = null
     let thuTuKy: Array<{ ten?: string; user_id?: string }> | null = null
-    let nguoiKyMap: Record<string, { ten?: string }> | null = null
+    let nguoiKyMap: Record<string, { ten?: string; ky_at?: string; user_id?: string }> | null = null
     let soBuocTong: number | null = null
 
     if (isIsoForm) {
@@ -137,13 +195,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       tenTaiLieu = tmplDoc?.ten_tai_lieu || formInst?.tieu_de || null
       fileSignedPdfUrl = (formInst?.final_pdf_url as string) || null
       thuTuKy = (formInst?.thu_tu_ky_json as Array<{ ten?: string; user_id?: string }>) || null
-      nguoiKyMap = (formInst?.nguoi_ky as Record<string, { ten?: string }>) || null
+      nguoiKyMap = (formInst?.nguoi_ky as Record<string, { ten?: string; ky_at?: string; user_id?: string }>) || null
       soBuocTong = (formInst?.so_buoc_tong as number) || null
     } else {
       const { data: doc } = await (isIso
         ? supabase
             .from("iso_documents")
-            .select("ma_tai_lieu, ten_tai_lieu, trang_thai, file_signed_pdf_url")
+            .select("ma_tai_lieu, ten_tai_lieu, trang_thai, file_signed_pdf_url, soan_thao, xem_xet, phe_duyet, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id, chon_quy_trinh, cap_tl, soan_thao_at, xem_xet_at, phe_duyet_at, ngay_ban_hanh, ngay_gui_duyet, ngay_tao")
             .eq("id", log.doc_id)
             .maybeSingle()
         : supabase
@@ -171,6 +229,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       log.user_id,
       ...siblingLogs.map((l) => l.user_id),
       ...(thuTuKy ? thuTuKy.map((s) => s.user_id) : []),
+      (docRow?.soan_thao_user_id as string | undefined),
+      (docRow?.xem_xet_user_id as string | undefined),
+      (docRow?.phe_duyet_user_id as string | undefined),
     ].filter(Boolean) as string[]
     const uniqueUserIds = [...new Set(candidateUserIds)]
 
@@ -183,22 +244,23 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
 
     const signingHistory = siblingLogs.map((l) => ({
       id: l.id,
-      signerName: resolveSignerName(l, profileMap, nguoiKyMap),
-      buoc: getBuocLabel(l, thuTuKy, effectiveTotalSteps),
+      signerName: resolveSignerName(l, profileMap, nguoiKyMap, docRow),
+      buoc: getBuocLabel(l, thuTuKy, effectiveTotalSteps, docRow),
       action: l.action,
-      kyLuc: l.created_at,
+      kyLuc: resolveKyLuc(l, nguoiKyMap, docRow),
       isCurrent: l.id === log?.id,
       hasPades: l.pades_sig_index != null,
     }))
 
-    const currentSignerName = resolveSignerName(log, profileMap, nguoiKyMap)
-    const currentBuocLabel = getBuocLabel(log, thuTuKy, effectiveTotalSteps)
+    const currentSignerName = resolveSignerName(log, profileMap, nguoiKyMap, docRow)
+    const currentBuocLabel = getBuocLabel(log, thuTuKy, effectiveTotalSteps, docRow)
+    const currentKyLuc = resolveKyLuc(log, nguoiKyMap, docRow)
 
     const base = {
       docType: log.doc_type,
       signerName: currentSignerName,
       buoc: currentBuocLabel,
-      kyLuc: log.created_at,
+      kyLuc: currentKyLuc,
       maTaiLieu,
       tenTaiLieu,
       trangThai,
@@ -261,13 +323,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     const pdfBytes = Buffer.from(await download.data.arrayBuffer())
     const result = verifyPadesSignature(pdfBytes, sigIndexToVerify)
 
+    const finalSignerName = base.signerName !== "Không rõ" ? base.signerName : (result.valid ? result.signerName : "Không rõ")
+    const padesSealSignerName = result.valid ? result.signerName : undefined
+
     return NextResponse.json({
       ...base,
       ...result,
-      // Đảm bảo signerName giữ đúng người ký của bước này, không bị tên trên chứng thư niêm phong cuối ghi đè
-      signerName: base.signerName !== "Không rõ" ? base.signerName : (result.valid ? result.signerName : "Không rõ"),
-      padesSignerName: result.valid ? result.signerName : undefined,
-      inheritedNote: isInheritedSeal && result.valid ? "Chữ ký hợp lệ — Đã được niêm phong theo quy trình ban hành tài liệu" : undefined,
+      signerName: finalSignerName,
+      padesSignerName: padesSealSignerName,
+      isInheritedSeal,
+      inheritedNote: isInheritedSeal && result.valid ? "Chữ ký điện tử nội bộ hợp lệ — Đã được niêm phong bảo chứng theo quy trình ban hành tài liệu" : undefined,
       severity: severityFor(result.valid),
     })
   } catch (err) {

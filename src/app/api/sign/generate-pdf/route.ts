@@ -1318,18 +1318,25 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const allPlacements: Array<{ signerUserId: string | null; placement: SignPlacement | null }> = [
+    const soanCreatedAt = (doc.soan_thao_at || doc.ngay_gui_duyet || doc.ngay_tao || doc.created_at) as string | undefined
+    const xemCreatedAt = (doc.xem_xet_at || doc.ngay_xem_xet) as string | undefined
+    const pheCreatedAt = (doc.phe_duyet_at || doc.ngay_ban_hanh || new Date().toISOString()) as string
+
+    const allPlacements: Array<{ signerUserId: string | null; placement: SignPlacement | null; createdAt?: string }> = [
       {
         signerUserId: (docPlacements?.soan_thao_user_id ?? null) as string | null,
         placement: (docPlacements?.soan_thao_placement ?? null) as SignPlacement | null,
+        createdAt: soanCreatedAt,
       },
       {
         signerUserId: (docPlacements?.xem_xet_user_id ?? null) as string | null,
         placement: (docPlacements?.xem_xet_placement ?? null) as SignPlacement | null,
+        createdAt: xemCreatedAt,
       },
       {
         signerUserId: (docPlacements?.phe_duyet_user_id ?? null) as string | null,
         placement: (docPlacements?.phe_duyet_placement ?? null) as SignPlacement | null,
+        createdAt: pheCreatedAt,
       },
     ]
 
@@ -1939,6 +1946,7 @@ export async function POST(req: NextRequest) {
       stepIndex: number
       action: string
       padesSigIndex?: number | null
+      createdAt?: string
     }
     const stepLogs: StepLogEntry[] = []
 
@@ -1973,6 +1981,7 @@ export async function POST(req: NextRequest) {
               stepIndex: idx + 1,
               action: actionName,
               padesSigIndex: isFinalStep ? 0 : null,
+              createdAt: entry.createdAt,
             })
 
             const targets: VerifyLinkTarget[] = []
@@ -2079,6 +2088,7 @@ export async function POST(req: NextRequest) {
           action: sLog.action,
           buoc_ky: sLog.stepIndex,
           content_hash: signedContentHash,
+          created_at: sLog.createdAt || new Date().toISOString(),
           ip_address: req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "",
           user_agent: req.headers.get("user-agent") || "",
         }

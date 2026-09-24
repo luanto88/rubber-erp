@@ -468,6 +468,17 @@ export default function SignTemplateEditorPage() {
   const returnTo = searchParams.get("returnTo") || ""
   const docId = searchParams.get("docId") || ""
   const formInstanceId = searchParams.get("formInstanceId") || ""
+  const paramSoBuocTong = searchParams.get("soBuocTong") ? parseInt(searchParams.get("soBuocTong")!, 10) : null
+  const paramStepsJson = useMemo(() => {
+    const raw = searchParams.get("stepsJson")
+    if (!raw) return null
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) && parsed.length > 0 ? (parsed as Array<{ user_id?: string; ten?: string }>) : null
+    } catch {
+      return null
+    }
+  }, [searchParams])
 
   const [activePdfUrl, setActivePdfUrl] = useState<string>(paramPdfUrl)
   const [activeLoai, setActiveLoai] = useState<string>(paramLoai)
@@ -753,8 +764,11 @@ export default function SignTemplateEditorPage() {
           setTemplateExisted(false)
           let fresh: EditorRole[] = []
           if (isIso) {
-            const steps = Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null
-            const totalSteps = steps ? steps.length : (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3))
+            const steps = paramStepsJson
+              || (Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null)
+            const totalSteps = steps
+              ? steps.length
+              : (paramSoBuocTong || (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3)))
             for (let i = 0; i < totalSteps; i++) {
               const stepKey = `buoc_${i + 1}`
               const defaultLabel = i === 0 ? "Người lập" : i === totalSteps - 1 ? "Phê duyệt" : (totalSteps === 3 && i === 1 ? "Xem xét" : `Bước ${i + 1}`)
@@ -1144,8 +1158,11 @@ export default function SignTemplateEditorPage() {
     reconciledRef.current = true
     if ((!docId && !formInstanceId) || !docFetchOk) return
     if (isIso) {
-      const steps = Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null
-      const totalSteps = steps ? steps.length : (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3))
+      const steps = paramStepsJson
+        || (Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null)
+      const totalSteps = steps
+        ? steps.length
+        : (paramSoBuocTong || (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3)))
 
       setRoles((prev) => {
         const nextRoles: EditorRole[] = []
@@ -1229,11 +1246,8 @@ export default function SignTemplateEditorPage() {
           }
         }
 
-        // 3. Nếu có khung khác ĐÃ ĐẶT (placed === true) trên canvas thì bảo toàn:
-        const remainingPlaced = prev.filter((r) => !usedRoleIds.has(r.id) && r.placed)
-        remainingPlaced.forEach((r) => {
-          nextRoles.push({ ...r, hiddenForDoc: false })
-        })
+        // ⚠️ TUYỆT ĐỐI KHÔNG lưu lại các khung dư (remainingPlaced) từ các mẫu cũ không tương thích (vd mẫu 5 bước sang quy trình 2 bước).
+        // Chỉ lưu giữ chính xác N bước của quy trình hiện tại + clone hợp lệ + vai trò phụ.
 
         setInitialSnapshot(JSON.stringify(nextRoles))
         return nextRoles
@@ -1751,11 +1765,36 @@ export default function SignTemplateEditorPage() {
     showToast("Đã đặt lại về mẫu đã lưu gần nhất.")
   }
 
-  const resetToBlankTemplate = () => {
+  const resetToBlankTemplate = async () => {
     let fresh: EditorRole[] = []
+    let totalSteps = 2
     if (isIso) {
-      const steps = Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null
-      const totalSteps = steps ? steps.length : (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3))
+      let steps = paramStepsJson
+        || (Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null)
+      let capTl = isoDocData?.cap_tl
+      let soBuocTong = paramSoBuocTong || isoDocData?.so_buoc_tong
+
+      // Nếu có formInstanceId, đọc trực tiếp để đảm bảo 100% chuẩn xác số bước mới nhất của hồ sơ
+      if (formInstanceId) {
+        try {
+          const { data: fInst } = await supabase
+            .from("iso_form_instances")
+            .select("thu_tu_ky_json, cap_tl, so_buoc_tong")
+            .eq("id", formInstanceId)
+            .single()
+          if (fInst) {
+            if (Array.isArray(fInst.thu_tu_ky_json) && fInst.thu_tu_ky_json.length > 0) {
+              steps = fInst.thu_tu_ky_json as Array<{ user_id?: string; ten?: string }>
+            }
+            if (fInst.cap_tl) capTl = fInst.cap_tl
+            if (typeof fInst.so_buoc_tong === "number") soBuocTong = fInst.so_buoc_tong
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      totalSteps = steps ? steps.length : (capTl === "Cấp 2" || soBuocTong === 2 ? 2 : (soBuocTong || 3))
       fresh = []
       for (let i = 0; i < totalSteps; i++) {
         const stepKey = `buoc_${i + 1}`
@@ -1773,10 +1812,13 @@ export default function SignTemplateEditorPage() {
     }
     fresh = fresh.map((r) => ({ ...r, placed: false, outOfBounds: false }))
     cloneSeqRef.current = {}
+    reconciledRef.current = true
     setRoles(fresh)
+    setTemplateExisted(false)
+    setInitialSnapshot(JSON.stringify(fresh))
     setSelectedRoleId(null)
     setArmedRoleId(null)
-    showToast("Đã làm mới: Tất cả khung về trạng thái chưa đặt")
+    showToast(`Đã làm mới: Hiển thị đúng ${totalSteps} bước theo quy trình hiện tại`)
   }
 
   const buildKhungPayload = (): SignTemplateBox[] => {

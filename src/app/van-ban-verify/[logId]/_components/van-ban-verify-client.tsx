@@ -41,6 +41,9 @@ type VerifyResponse = {
   validTo?: string
   keyAlgorithm?: string
   digestAlgorithm?: string
+  padesSignerName?: string
+  isInheritedSeal?: boolean
+  inheritedNote?: string
   signingHistory?: SigningStep[]
 }
 
@@ -228,6 +231,19 @@ export function VanBanVerifyClient({ logId }: { logId: string }) {
       {data.valid && (
         <div className="border-t border-slate-100 p-6 space-y-2 text-xs bg-slate-50/60">
           <p className="font-bold text-slate-500 mb-1">Thông tin kỹ thuật chữ ký số</p>
+          {data.inheritedNote && (
+            <div className="p-2.5 rounded-xl bg-violet-50/80 border border-violet-200/70 text-violet-800 text-xs mb-3 font-medium leading-relaxed">
+              {data.inheritedNote}
+            </div>
+          )}
+          {data.padesSignerName && (
+            <div className="flex justify-between">
+              <span className="text-slate-400">
+                {data.isInheritedSeal ? "Niêm phong PAdES bởi" : "Người ký chứng thư số"}
+              </span>
+              <span className="font-bold text-slate-800 text-right">{data.padesSignerName}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-slate-400">Thuật toán</span>
             <span className="font-semibold text-slate-600">

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState, Fragment } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react"
 import type { CSSProperties, RefObject } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
@@ -613,6 +613,7 @@ function ExtraDraggableBox({
   position,
   onDrag,
   onStop,
+  bounds = "parent",
   zIndex = 12,
   children,
 }: {
@@ -621,6 +622,7 @@ function ExtraDraggableBox({
   onDrag?: (e: any, d: { x: number; y: number }) => void
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onStop?: (e: any, d: { x: number; y: number }) => void
+  bounds?: { left: number; top: number; right: number; bottom: number } | string
   zIndex?: number
   children: React.ReactNode
 }) {
@@ -631,7 +633,7 @@ function ExtraDraggableBox({
       position={position}
       onDrag={onDrag}
       onStop={onStop}
-      bounds="parent"
+      bounds={bounds}
       cancel={`.${RESIZE_HANDLE_CLASS},button,button *,a,.no-drag`}
     >
       <div ref={nodeRef} style={{ position: "absolute", top: 0, left: 0, zIndex, cursor: "move" }}>
@@ -639,6 +641,20 @@ function ExtraDraggableBox({
       </div>
     </Draggable>
   )
+}
+
+type ExtraBoxItem = {
+  id: number
+  page: number
+  templateBox: ElemState
+  sigX: number; sigY: number; sigW: number; sigH: number
+  nameX: number; nameY: number; nameW: number; nameH: number
+  cvX: number; cvY: number; cvW: number; cvH: number
+  showSignature: boolean
+  showSignerName: boolean
+  showChucVu: boolean
+  tmplAllowName: boolean
+  tmplAllowChucVu: boolean
 }
 
 // ─── Sign Placement Modal ─────────────────────────────────────────────────────
@@ -694,6 +710,21 @@ function SignPlacementModal({
   const isFinalStep = typeof totalSteps === "number" && typeof stepIndex === "number"
     ? stepIndex + 1 >= totalSteps
     : action === "phe_duyet"
+
+  // Màu sắc nhận diện chuẩn của người ký theo bước (đồng bộ 100% với bảng màu cài đặt trong mau-vi-tri)
+  const activeStepColor = useMemo(() => {
+    if (isFinalStep) return { fg: "#059669", bg: "rgba(5,150,105,0.35)", border: "border-emerald-600", dot: "bg-emerald-600" }
+    const sIdx = typeof stepIndex === "number" ? Math.max(0, stepIndex) : 0
+    const pal = [
+      { fg: "#0284c7", bg: "rgba(2,132,199,0.35)", border: "border-sky-600", dot: "bg-sky-500" }, // Bước 1 (Người lập)
+      { fg: "#f59e0b", bg: "rgba(245,158,11,0.35)", border: "border-amber-500", dot: "bg-amber-500" }, // Bước 2 (Thực hiện)
+      { fg: "#8b5cf6", bg: "rgba(139,92,246,0.35)", border: "border-purple-500", dot: "bg-purple-500" }, // Bước 3 (Giám sát / Xem xét)
+      { fg: "#ec4899", bg: "rgba(236,72,153,0.35)", border: "border-pink-500", dot: "bg-pink-500" }, // Bước 4
+      { fg: "#06b6d4", bg: "rgba(6,182,212,0.35)", border: "border-cyan-500", dot: "bg-cyan-500" }, // Bước 5
+      { fg: "#ea580c", bg: "rgba(234,88,12,0.35)", border: "border-orange-500", dot: "bg-orange-500" }, // Bước 6
+    ]
+    return pal[sIdx % pal.length]
+  }, [isFinalStep, stepIndex])
   const stepKey = typeof stepIndex === "number" ? `buoc_${stepIndex + 1}` : action
 
   // Luồng ký chia 2 bước: PIN phải xác thực đúng (chặn, gọi /api/sign/verify)
@@ -769,13 +800,24 @@ function SignPlacementModal({
   // Ngày đóng dấu chuẩn ISO: tick xanh + "Hồ sơ được ký dd/mm/yyyy hh:mm:ss"
   const [ngayKyPreview] = useState(() => `Hồ sơ được ký ${formatFactoryDateTimeVN(new Date())}`)
   const [mainBoxPage, setMainBoxPage] = useState<number>(1)
-  const [extraSigBoxes, setExtraSigBoxes] = useState<Array<{
-    id: number
-    page: number
-    sigX: number; sigY: number; sigW: number; sigH: number
-    nameX: number; nameY: number; nameW: number; nameH: number
-    showSignature: boolean; showSignerName: boolean
-  }>>([])
+  const [extraSigBoxes, setExtraSigBoxes] = useState<ExtraBoxItem[]>([])
+  // Theo dõi các trang có khung ký đã được người ký duyệt qua (Reviewed Pages)
+  const [reviewedPages, setReviewedPages] = useState<Set<number>>(() => new Set([1]))
+
+  const signingPages: number[] = useMemo(() => {
+    return Array.from(new Set([mainBoxPage, ...extraSigBoxes.map((b) => b.page || 1)])).sort((a, b) => a - b)
+  }, [mainBoxPage, extraSigBoxes])
+  const totalSigs = 1 + extraSigBoxes.length
+  const unreviewedPages: number[] = useMemo(() => {
+    return signingPages.filter((p: number) => !reviewedPages.has(p))
+  }, [signingPages, reviewedPages])
+  const allPagesReviewed = unreviewedPages.length === 0
+
+  useEffect(() => {
+    if (step === "placement") {
+      setReviewedPages((prev) => new Set([...prev, currentPage]))
+    }
+  }, [currentPage, step])
 
   // Cập nhật toạ độ và kích thước 2 khối con bên trong khung Ghi chú (ô text và chữ ký nháy)
   const setNoteRect = (which: "text" | "ky_nhay", x: number, y: number, w: number, h: number) => {
@@ -1045,6 +1087,7 @@ function SignPlacementModal({
               const cFull = computeDefaultSubLayout(cBoxPt, { withName: true, withChucVu: true })
               const cSigPt = clampRectToBox(cSub.sig, cBoxPt)
               const cNamePt = clampRectToBox(cSub.name ?? cFull.name ?? cSub.sig, cBoxPt)
+              const cCvPt = clampRectToBox(cSub.chuc_vu ?? cFull.chuc_vu ?? cSub.sig, cBoxPt)
 
               const cPage = num(cBox.so_trang, 0) || (cBox.neo_trang === "cuoi" ? (pdf.numPages || 1) : 1)
               const cDim = pageDims[cPage] || pageDims[1] || { w: 595.28, h: curPageH }
@@ -1059,39 +1102,36 @@ function SignPlacementModal({
 
               const cSigCanvas = cToCanvas(cSigPt)
               const cNameCanvas = cToCanvas(cNamePt)
+              const cCvCanvas = cToCanvas(cCvPt)
               const cRoleCanvas = cToCanvas(cBoxPt)
               const cSnugName = computeSnugBoxSize(userName, "name", 1.0)
+              const cSnugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.0)
               const cSnugNameW = Math.min(cRoleCanvas.w, cSnugName.w)
               const cSnugNameX = Math.max(cRoleCanvas.x, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugNameW) / 2))
-
-              let finalSigX = cSigCanvas.x
-              let finalSigY = cSigCanvas.y
-              let finalNameX = cSnugNameX
-              let finalNameY = cNameCanvas.y
-
-              // Nếu cùng trang và toạ độ trùng với khung chính, tự động offset hiển thị để không bị che khuất
-              const mainSigCanvas = toCanvas(sigPt)
-              if (cPage === effectiveMainPage && Math.abs(finalSigX - mainSigCanvas.x) < 8 && Math.abs(finalSigY - mainSigCanvas.y) < 8) {
-                const offset = 30 * (idx + 1)
-                finalSigX += offset
-                finalSigY += offset
-                finalNameX += offset
-                finalNameY += offset
-              }
+              const cSnugCvW = Math.min(cRoleCanvas.w, cSnugCv.w)
+              const cSnugCvX = Math.max(cRoleCanvas.x, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugCvW) / 2))
 
               return {
                 id: Date.now() + Math.random() + idx,
                 page: cPage,
-                sigX: finalSigX,
-                sigY: finalSigY,
+                templateBox: cRoleCanvas,
+                sigX: cSigCanvas.x,
+                sigY: cSigCanvas.y,
                 sigW: cSigCanvas.w,
                 sigH: cSigCanvas.h,
-                nameX: finalNameX,
-                nameY: finalNameY,
+                nameX: cSnugNameX,
+                nameY: cNameCanvas.y,
                 nameW: cSnugNameW,
                 nameH: cNameCanvas.h,
+                cvX: cSnugCvX,
+                cvY: cCvCanvas.y,
+                cvW: cSnugCvW,
+                cvH: cCvCanvas.h,
                 showSignature: true,
                 showSignerName: cShowName,
+                showChucVu: cShowCv && !!userChucVu,
+                tmplAllowName: cShowName,
+                tmplAllowChucVu: cShowCv,
               }
             })
             setExtraSigBoxes(extraBoxes)
@@ -1352,6 +1392,12 @@ function SignPlacementModal({
       return
     }
 
+    if (showCanvas && unreviewedPages.length > 0) {
+      goToPage(unreviewedPages[0])
+      setConfirmError(`Bạn chưa kiểm tra vị trí ký tại Trang ${unreviewedPages[0]}. Vui lòng duyệt qua tất cả các vị trí ký trước khi xác nhận.`)
+      return
+    }
+
     let placement: FullPlacement
     if (showCanvas && canvasReady) {
       // Kẹp lại vào vùng cho phép bằng ĐÚNG hàm mà module Văn bản và server dùng
@@ -1420,12 +1466,18 @@ function SignPlacementModal({
           const nW = box.nameW / pdfScale
           const nH = box.nameH / pdfScale
           const nY = bDim.h - (box.nameY + box.nameH) / pdfScale
+          const cX = box.cvX / pdfScale
+          const cW = box.cvW / pdfScale
+          const cH = box.cvH / pdfScale
+          const cY = bDim.h - (box.cvY + box.cvH) / pdfScale
           return {
             page: bPage,
             x: sX, y: sY, width: sW, height: sH,
             showSignature: true,
-            showSignerName: box.showSignerName,
+            showSignerName: box.tmplAllowName && box.showSignerName,
             nameX: nX, nameY: nY, nameWidth: nW, nameHeight: nH,
+            showChucVu: box.tmplAllowChucVu && box.showChucVu && !!userChucVu,
+            chucVuX: cX, chucVuY: cY, chucVuWidth: cW, chucVuHeight: cH,
           }
         })
       }
@@ -1583,6 +1635,43 @@ function SignPlacementModal({
         </div>
       </div>
 
+      {/* Banner thông báo trạng thái duyệt các khung ký */}
+      {showCanvas && (
+        <div className={`px-5 py-2.5 flex items-center justify-between gap-3 text-xs font-medium border-b shrink-0 transition-colors ${
+          allPagesReviewed
+            ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+            : "bg-amber-50 border-amber-200 text-amber-900"
+        }`}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-base shrink-0">{allPagesReviewed ? "✓" : "📋"}</span>
+            <div className="truncate">
+              <span className="font-bold">
+                {allPagesReviewed
+                  ? `Đã kiểm tra đầy đủ ${totalSigs} vị trí ký trên ${signingPages.length} trang.`
+                  : `Hồ sơ có tổng cộng ${totalSigs} vị trí cần ký trên ${signingPages.length} trang (Trang ${signingPages.join(", ")}).`}
+              </span>{" "}
+              <span className="hidden sm:inline">
+                {allPagesReviewed
+                  ? "Bạn có thể kiểm tra lại lần cuối hoặc nhấn Xác nhận ký."
+                  : unreviewedPages.length > 0
+                    ? `Bạn chưa xem vị trí ký tại Trang ${unreviewedPages.join(", ")}. Vui lòng duyệt qua tất cả các trang trước khi lưu.`
+                    : "Đang hiển thị vị trí ký."}
+              </span>
+            </div>
+          </div>
+          {!allPagesReviewed && unreviewedPages.length > 0 && (
+            <button
+              type="button"
+              onClick={() => goToPage(unreviewedPages[0])}
+              className="px-3 py-1 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-lg shadow-xs text-xs shrink-0 flex items-center gap-1 transition-all"
+            >
+              <span>Xem vị trí tiếp theo (Trang {unreviewedPages[0]})</span>
+              <ChevronRight size={13} />
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="flex-1 overflow-hidden flex flex-row bg-slate-100 min-h-0">
         {/* Left Thumbnail Rail */}
         {showCanvas && numPages > 1 && (
@@ -1620,23 +1709,53 @@ function SignPlacementModal({
                       </div>
                     )}
                     {hasSigningOnPage && (
-                      <span className="absolute top-1 right-1 px-1 py-0.5 bg-emerald-600 text-white text-[9px] font-extrabold rounded shadow flex items-center gap-0.5">
+                      <span className="absolute top-1 right-1 px-1 py-0.5 bg-emerald-600 text-white text-[9px] font-extrabold rounded shadow flex items-center gap-0.5 z-10">
                         ✍️ {totalSigsOnPage}
                       </span>
                     )}
-                    {isCurrent && canvasRef.current && canvasRef.current.width > 0 && canvasRef.current.height > 0 && hasSigningOnPage && (
-                      <span
-                        className="absolute pointer-events-none rounded-[1px] border border-violet-600 bg-violet-600/30"
-                        style={{
-                          left: `${Math.max(0, Math.min(100, ((templateBox ? templateBox.x : sigState.x) / canvasRef.current.width) * 100))}%`,
-                          top: `${Math.max(0, Math.min(100, ((templateBox ? templateBox.y : sigState.y) / canvasRef.current.height) * 100))}%`,
-                          width: `${Math.max(4, Math.min(100, ((templateBox ? templateBox.w : sigState.w) / canvasRef.current.width) * 100))}%`,
-                          height: `${Math.max(3, Math.min(100, ((templateBox ? templateBox.h : sigState.h) / canvasRef.current.height) * 100))}%`,
-                        }}
-                      />
+                    {/* Vẽ mini-rectangles mô phỏng tất cả vị trí khung ký trên trang này - cùng màu với bước ký đang thực hiện */}
+                    {hasSigningOnPage && (
+                      <>
+                        {hasMainSig && templateBox && (
+                          <span
+                            className="absolute pointer-events-none rounded-[1px] z-5 shadow-xs"
+                            style={{
+                              left: `${Math.max(0, Math.min(92, (templateBox.x / (canvasRef.current?.width || 800)) * 100))}%`,
+                              top: `${Math.max(0, Math.min(92, (templateBox.y / (canvasRef.current?.height || 1100)) * 100))}%`,
+                              width: `${Math.max(8, Math.min(100, (templateBox.w / (canvasRef.current?.width || 800)) * 100))}%`,
+                              height: `${Math.max(6, Math.min(100, (templateBox.h / (canvasRef.current?.height || 1100)) * 100))}%`,
+                              border: `1.5px solid ${activeStepColor.fg}`,
+                              backgroundColor: activeStepColor.bg,
+                            }}
+                            title="Khung ký chính"
+                          />
+                        )}
+                        {extraSigBoxes
+                          .filter((b) => (b.page || 1) === pageNum)
+                          .map((b, bIdx) => (
+                            <span
+                              key={`mini-extra-${pageNum}-${bIdx}`}
+                              className="absolute pointer-events-none rounded-[1px] z-5 shadow-xs"
+                              style={{
+                                left: `${Math.max(0, Math.min(92, (b.templateBox.x / (canvasRef.current?.width || 800)) * 100))}%`,
+                                top: `${Math.max(0, Math.min(92, (b.templateBox.y / (canvasRef.current?.height || 1100)) * 100))}%`,
+                                width: `${Math.max(8, Math.min(100, (b.templateBox.w / (canvasRef.current?.width || 800)) * 100))}%`,
+                                height: `${Math.max(6, Math.min(100, (b.templateBox.h / (canvasRef.current?.height || 1100)) * 100))}%`,
+                                border: `1.5px solid ${activeStepColor.fg}`,
+                                backgroundColor: activeStepColor.bg,
+                              }}
+                              title={`Khung ký bản sao ${bIdx + 1}`}
+                            />
+                          ))}
+                      </>
                     )}
                   </div>
-                  <span className={`text-[10px] font-bold mt-1 flex items-center gap-1 ${isCurrent ? "text-violet-700" : hasSigningOnPage ? "text-emerald-700" : "text-slate-500"}`}>
+                  <span
+                    className={`text-[10px] font-bold mt-1 flex items-center gap-1 ${
+                      isCurrent ? "font-extrabold" : hasSigningOnPage ? "text-emerald-700" : "text-slate-500"
+                    }`}
+                    style={isCurrent ? { color: activeStepColor.fg } : undefined}
+                  >
                     Trang {pageNum}
                   </span>
                 </button>
@@ -1996,14 +2115,37 @@ function SignPlacementModal({
                   </Draggable>
                 )}
 
-                {/* Extra duplicate signature and name boxes (hiển thị theo đúng trang được đặt) */}
+                {/* Extra duplicate signature boxes (hiển thị theo đúng trang được đặt) */}
                 {extraSigBoxes
                   .filter((box) => (box.page || 1) === currentPage)
                   .map((box, idx) => (
                   <Fragment key={box.id}>
+                    {/* 1. Khung theo mẫu bao ngoài của bản sao */}
+                    {box.templateBox && (
+                      <div
+                        className="absolute rounded pointer-events-none"
+                        style={{
+                          left: box.templateBox.x,
+                          top: box.templateBox.y,
+                          width: box.templateBox.w,
+                          height: box.templateBox.h,
+                          border: "2px dashed #0ea5e9",
+                          background: "rgba(14,165,233,.07)",
+                          zIndex: 9,
+                        }}
+                      >
+                        <span className="absolute -top-5 left-0 text-[10px] font-bold px-1 rounded bg-white/90 text-sky-700 whitespace-nowrap">
+                          Khung theo mẫu (Bản sao {idx + 1}) — chỉ đặt chữ ký trong vùng này
+                        </span>
+                      </div>
+                    )}
+
+                    {/* 2. Khối Chữ ký bản sao — Bắt buộc, kẹp chặt trong templateBox */}
                     <ExtraDraggableBox
                       position={{ x: box.sigX, y: box.sigY }}
                       onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, sigX: d.x, sigY: d.y } : b))}
+                      bounds={box.templateBox ? boundsIn(box.templateBox, box.sigW, box.sigH) : "parent"}
+                      zIndex={11}
                     >
                       <Resizable
                         size={{ width: box.sigW, height: box.sigH }}
@@ -2011,81 +2153,118 @@ function SignPlacementModal({
                           setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, sigW: b.sigW + delta.width, sigH: b.sigH + delta.height } : b))}
                         enable={{ right: true, bottom: true, bottomRight: true }}
                         minWidth={40} minHeight={20}
+                        {...(box.templateBox ? maxSizeIn(box.templateBox, { w: box.sigW, h: box.sigH, x: box.sigX, y: box.sigY }) : {})}
                         handleComponent={{ bottomRight: <ResizeHandleIcon color="#059669" title="Kéo để co giãn khung chữ ký bản sao" /> }}
                         handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                         handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                       >
                         <div className="w-full h-full border border-dashed border-emerald-500 bg-emerald-50/70 rounded relative select-none">
-                          {box.showSignature && signatureUrl && (
+                          {signatureUrl ? (
                             <img src={signatureUrl} alt="Chữ ký bản sao" className="w-full h-full object-contain opacity-90" />
-                          )}
-                          {box.showSignature && !signatureUrl && (
+                          ) : (
                             <div className="w-full h-full flex items-center justify-center">
-                              <span className="text-[10px] text-slate-400">Chữ ký bản sao {idx + 1}</span>
+                              <span className="text-[10px] text-slate-400">Chữ ký</span>
                             </div>
                           )}
-                          {!box.showSignature && (
-                            <div className="w-full h-full flex items-center justify-center bg-slate-100/80">
-                              <span className="text-[10px] text-slate-400">Ẩn chữ ký bản sao</span>
-                            </div>
-                          )}
-                          <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onTouchStart={(e) => e.stopPropagation()}
-                              onTouchEnd={(e) => e.stopPropagation()}
-                              onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.filter((b) => b.id !== box.id)) }}
-                              className="w-7 h-7 sm:w-5 sm:h-5 bg-red-500 border border-red-600 text-white rounded-full shadow flex items-center justify-center hover:bg-red-600 text-xs font-bold active:scale-95 transition-transform"
-                              title="Tắt / Xóa bản sao này"
-                            >
-                              ×
-                            </button>
-                          </div>
                         </div>
                       </Resizable>
                     </ExtraDraggableBox>
 
-                    <ExtraDraggableBox
-                      position={{ x: box.nameX, y: box.nameY }}
-                      onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameX: d.x, nameY: d.y } : b))}
-                    >
-                      <Resizable
-                        size={{ width: box.nameW, height: box.nameH }}
-                        onResizeStop={(_, __, ___, delta) =>
-                          setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
-                        enable={{ right: true, bottom: true, bottomRight: true }}
-                        minWidth={50} minHeight={16}
-                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên bản sao" /> }}
-                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                    {/* 3. Khối Họ tên bản sao — kẹp trong templateBox, có Eye/EyeOff */}
+                    {box.tmplAllowName && (
+                      <ExtraDraggableBox
+                        position={{ x: box.nameX, y: box.nameY }}
+                        onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameX: d.x, nameY: d.y } : b))}
+                        bounds={box.templateBox ? boundsIn(box.templateBox, box.nameW, box.nameH) : "parent"}
+                        zIndex={11}
                       >
-                        <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/70 rounded relative select-none flex items-center justify-center">
-                          {box.showSignerName ? (
-                            <span
-                              className="font-bold text-violet-700 truncate px-1"
-                              style={previewTextStyle(userName || "Người ký", box.nameW)}
-                            >
-                              {userName || "Người ký"}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-slate-400">Ẩn tên bản sao</span>
-                          )}
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onTouchStart={(e) => e.stopPropagation()}
-                            onTouchEnd={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignerName: !b.showSignerName } : b)) }}
-                            className="absolute -top-3 -right-3 w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
-                            style={{ zIndex: 20 }}
-                            title={box.showSignerName ? "Ẩn tên bản sao" : "Hiện tên bản sao"}
-                          >
-                            {box.showSignerName ? <Eye size={12} /> : <EyeOff size={12} />}
-                          </button>
-                        </div>
-                      </Resizable>
-                    </ExtraDraggableBox>
+                        <Resizable
+                          size={{ width: box.nameW, height: box.nameH }}
+                          onResizeStop={(_, __, ___, delta) =>
+                            setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
+                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          minWidth={50} minHeight={16}
+                          {...(box.templateBox ? maxSizeIn(box.templateBox, { w: box.nameW, h: box.nameH, x: box.nameX, y: box.nameY }) : {})}
+                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên bản sao" /> }}
+                          handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                          handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                        >
+                          <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/70 rounded relative select-none flex items-center justify-center">
+                            {box.showSignerName ? (
+                              <span
+                                className="font-bold text-violet-700 truncate px-1"
+                                style={previewTextStyle(userName || "Người ký", box.nameW)}
+                              >
+                                {userName || "Người ký"}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">Ẩn tên</span>
+                            )}
+                            <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onTouchEnd={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showSignerName: !b.showSignerName } : b)) }}
+                                className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
+                                title={box.showSignerName ? "Ẩn tên bản sao" : "Hiện tên bản sao"}
+                              >
+                                {box.showSignerName ? <Eye size={12} /> : <EyeOff size={12} />}
+                              </button>
+                            </div>
+                          </div>
+                        </Resizable>
+                      </ExtraDraggableBox>
+                    )}
+
+                    {/* 4. Khối Chức vụ bản sao — kẹp trong templateBox, có Eye/EyeOff */}
+                    {box.tmplAllowChucVu && !!userChucVu && (
+                      <ExtraDraggableBox
+                        position={{ x: box.cvX, y: box.cvY }}
+                        onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, cvX: d.x, cvY: d.y } : b))}
+                        bounds={box.templateBox ? boundsIn(box.templateBox, box.cvW, box.cvH) : "parent"}
+                        zIndex={11}
+                      >
+                        <Resizable
+                          size={{ width: box.cvW, height: box.cvH }}
+                          onResizeStop={(_, __, ___, delta) =>
+                            setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, cvW: b.cvW + delta.width, cvH: b.cvH + delta.height } : b))}
+                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          minWidth={45} minHeight={14}
+                          {...(box.templateBox ? maxSizeIn(box.templateBox, { w: box.cvW, h: box.cvH, x: box.cvX, y: box.cvY }) : {})}
+                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ bản sao" /> }}
+                          handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                          handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                        >
+                          <div className="w-full h-full border border-dashed border-sky-400 bg-sky-50/70 rounded relative select-none flex items-center justify-center">
+                            {box.showChucVu ? (
+                              <span
+                                className="text-sky-700 truncate px-1"
+                                style={previewTextStyle(userChucVu, box.cvW)}
+                              >
+                                {userChucVu}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">Ẩn chức vụ</span>
+                            )}
+                            <div className="absolute -top-3 -right-3 flex items-center gap-1" style={{ zIndex: 20 }}>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onTouchStart={(e) => e.stopPropagation()}
+                                onTouchEnd={(e) => e.stopPropagation()}
+                                onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showChucVu: !b.showChucVu } : b)) }}
+                                className="w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
+                                title={box.showChucVu ? "Ẩn chức vụ bản sao" : "Hiện chức vụ bản sao"}
+                              >
+                                {box.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
+                              </button>
+                            </div>
+                          </div>
+                        </Resizable>
+                      </ExtraDraggableBox>
+                    )}
                   </Fragment>
                 ))}
               </>
@@ -2958,10 +3137,14 @@ export default function IsoFormInstancePage() {
       setUploadError(result.error)
       return
     }
+    const curSteps = reloaded.thu_tu_ky_json || instance?.thu_tu_ky_json || []
+    const curTotalSteps = reloaded.so_buoc_tong || instance?.so_buoc_tong || (Array.isArray(curSteps) && curSteps.length > 0 ? curSteps.length : 2)
     const targetUrl = `/dashboard/ky/mau-vi-tri?modun=iso&loai=${encodeURIComponent(templateSignSetupKey)}`
       + `&pdfUrl=${encodeURIComponent(result.url)}`
       + `&docLabel=${encodeURIComponent(template?.ma_tai_lieu || template?.ten_tai_lieu || reloaded.tieu_de)}`
       + `&formInstanceId=${encodeURIComponent(instanceId)}`
+      + `&soBuocTong=${encodeURIComponent(String(curTotalSteps))}`
+      + `&stepsJson=${encodeURIComponent(JSON.stringify(curSteps))}`
       + `&returnTo=${encodeURIComponent(`/dashboard/iso/forms/${instanceId}?confirmedSignTemplate=1`)}`
     router.push(targetUrl)
   }
@@ -3208,7 +3391,7 @@ export default function IsoFormInstancePage() {
   const canManageDraft = isEditable && (isNguoiTao || isDrafter || hasPermission(currentUser, "iso.create") || userRole === "admin")
   const canSignStep1 = isEditable && hasSignPerm && (isStep1Signer || userRole === "admin")
   const canChangeSigner = !isEditable && !isDone && instance.trang_thai !== "tra_ve" && (
-    isNguoiTao || isDrafter || hasPermission(currentUser, "iso.create") || userRole === "admin"
+    isStep1Signer
   )
 
   // Hồ sơ PDF mới có khái niệm "vị trí ký"; file Office thay tag nên không cần mẫu.
@@ -3230,11 +3413,15 @@ export default function IsoFormInstancePage() {
     : template?.loai_tai_lieu
       ? `iso:loai:${template.loai_tai_lieu}`
       : null
+  const curInstanceSteps = instance.thu_tu_ky_json || []
+  const curInstanceTotalSteps = instance.so_buoc_tong || (Array.isArray(curInstanceSteps) && curInstanceSteps.length > 0 ? curInstanceSteps.length : 2)
   const templateSignSetupUrl = templateSignSetupPdf && templateSignSetupKey
     ? `/dashboard/ky/mau-vi-tri?modun=iso&loai=${encodeURIComponent(templateSignSetupKey)}`
       + `&pdfUrl=${encodeURIComponent(templateSignSetupPdf)}`
       + `&docLabel=${encodeURIComponent(template?.ma_tai_lieu || template?.ten_tai_lieu || instance.tieu_de)}`
       + `&formInstanceId=${encodeURIComponent(instanceId)}`
+      + `&soBuocTong=${encodeURIComponent(String(curInstanceTotalSteps))}`
+      + `&stepsJson=${encodeURIComponent(JSON.stringify(curInstanceSteps))}`
       + `&returnTo=${encodeURIComponent(`/dashboard/iso/forms/${instanceId}?confirmedSignTemplate=1`)}`
     : null
 

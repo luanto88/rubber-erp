@@ -542,6 +542,7 @@ export async function POST(
       const newNguoiKy = {
         ...prevNguoiKy,
         [stepKey]: {
+          user_id: userId,
           ten: signerName,
           chuc_vu: effectivePlacement.chucVuText || currentStep.chuc_vu || "",
           ky_at: new Date().toISOString(),
@@ -675,7 +676,7 @@ export async function POST(
         // ── Bước phê duyệt cuối cùng ──
         let finalBytes: Uint8Array
         let finalExt = draftExt
-        const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }> = []
+        const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null; createdAt?: string }> = []
 
         if (draftExt === "pdf") {
           // Vẽ lại TẤT CẢ placement từ file gốc
@@ -683,16 +684,18 @@ export async function POST(
           for (let i = 0; i < soBuocTong; i++) {
             const sk = String(i + 1)
             const p = (i === buocHienTai ? effectivePlacement : newPlacementKy[sk]) as SignPlacement
-            const nk = (i === buocHienTai ? newNguoiKy[sk] : prevNguoiKy[sk]) as { ten?: string; sign_as?: SignAsType }
+            const nk = (i === buocHienTai ? newNguoiKy[sk] : prevNguoiKy[sk]) as { user_id?: string; ten?: string; ky_at?: string; sign_as?: SignAsType } | undefined
             const stp = thuTuKy[i]
-            const uId = (i === buocHienTai ? userId : (stp?.user_id || instance.nguoi_tao)) as string
+            const uId = (nk?.user_id || (i === buocHienTai ? userId : (stp?.user_id || instance.nguoi_tao))) as string
             const pfx = nk?.sign_as && nk.sign_as !== "none" ? `${nk.sign_as}.` : null
+            const stepCreatedAt = nk?.ky_at || (i === buocHienTai ? new Date().toISOString() : undefined)
             if (p) {
               allPlacements.push({
                 userId: uId,
                 placement: p,
                 signerName: nk?.ten || "",
                 prefixText: pfx,
+                createdAt: stepCreatedAt,
               })
             }
           }
@@ -742,6 +745,7 @@ export async function POST(
           stepIndex: number
           action: string
           padesSigIndex?: number | null
+          createdAt?: string
         }
         const stepLogs: StepLogEntry[] = []
 
@@ -760,6 +764,7 @@ export async function POST(
                 stepIndex: idx + 1,
                 action: actionName,
                 padesSigIndex: isFinalStep ? 0 : null,
+                createdAt: item.createdAt,
               })
 
               const targets: VerifyLinkTarget[] = []
@@ -850,6 +855,7 @@ export async function POST(
               content_hash: signedContentHash,
               pades_sig_index: sLog.padesSigIndex,
               pades_error: sLog.padesSigIndex !== null ? padesError : null,
+              created_at: sLog.createdAt || new Date().toISOString(),
             })
           }
         } else {
@@ -1096,7 +1102,7 @@ export async function POST(
 
       const fileBytes = await downloadFile(sourceUrl)
       const sourceIsPdf = sourceUrl.toLowerCase().includes(".pdf") || draftExt === "pdf"
-      const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }> = []
+      const allPlacements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null; createdAt?: string }> = []
 
       // Ký thay (KT./TM./TL./TUQ.) — chỉ áp dụng cho bước Phê duyệt, chỉ vẽ riêng
       // trên PDF (hộp draggable riêng), KHÔNG ghép vào signerName dùng cho tag
@@ -1110,6 +1116,7 @@ export async function POST(
           userId: instance.nguoi_tao as string,
           placement: soanThaoPlacement,
           signerName: (instance.soan_thao as string) || "",
+          createdAt: (instance.ky_soan_thao_at || instance.created_at) as string,
         })
       }
 
@@ -1119,11 +1126,18 @@ export async function POST(
           userId: instance.xem_xet_user_id as string,
           placement: instance.xem_xet_placement as SignPlacement,
           signerName: (instance.xem_xet as string) || "",
+          createdAt: (instance.ky_xem_xet_at || instance.created_at) as string,
         })
       }
 
       // Thêm placement phê duyệt
-      allPlacements.push({ userId, placement, signerName, prefixText: prefixTextPD })
+      allPlacements.push({
+        userId,
+        placement,
+        signerName,
+        prefixText: prefixTextPD,
+        createdAt: new Date().toISOString(),
+      })
 
       let finalBytes: Uint8Array
       let finalExt = "pdf"
@@ -1179,6 +1193,7 @@ export async function POST(
         stepIndex: number
         action: string
         padesSigIndex?: number | null
+        createdAt?: string
       }
       const stepLogs: StepLogEntry[] = []
 
@@ -1197,6 +1212,7 @@ export async function POST(
               stepIndex: idx + 1,
               action: actionName,
               padesSigIndex: isFinalStep ? 0 : null,
+              createdAt: item.createdAt,
             })
 
             const targets: VerifyLinkTarget[] = []
@@ -1287,6 +1303,7 @@ export async function POST(
             content_hash: signedContentHash,
             pades_sig_index: sLog.padesSigIndex,
             pades_error: sLog.padesSigIndex !== null ? padesError : null,
+            created_at: sLog.createdAt || new Date().toISOString(),
           })
         }
       } else {
