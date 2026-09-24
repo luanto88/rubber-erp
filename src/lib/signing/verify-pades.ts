@@ -1,5 +1,6 @@
 import forge from "node-forge"
 import crypto from "node:crypto"
+import { normalizePem } from "./pades"
 
 // Verify lại 1 chữ ký PAdES/CMS đã nhúng trong file PDF — "mirror ngược" đúng những gì
 // `applyPadesSignature()`/`ForgeCmsSigner.sign()` (`./pades.ts`) đã làm lúc ký, dùng cùng thư
@@ -30,6 +31,100 @@ interface ForgeLowLevel {
 }
 const forgeLL = forge as unknown as ForgeLowLevel
 
+/**
+ * Chứng thư công khai của Root CA v1 (khởi tạo 30/08/2026, lưu trong public/rubber-erp-signing-root-ca.pem).
+ * Luôn được lưu trong danh bạ Trusted Historical Certificates để đảm bảo 100% tài liệu lịch sử
+ * đã ký trước ngày kích hoạt Root CA v2 vẫn luôn xác thực thành công vĩnh viễn.
+ */
+export const ROOT_CA_V1_CERT_PEM = `-----BEGIN CERTIFICATE-----
+MIIDDjCCAfagAwIBAgIBATANBgkqhkiG9w0BAQsFADA7MSQwIgYDVQQDExtSdWJi
+ZXIgRVJQIEludGVybmFsIFJvb3QgQ0ExEzARBgNVBAoTClJ1YmJlciBFUlAwHhcN
+MjYwODMwMTAzNjI4WhcNNDYwODMwMTAzNjI4WjA7MSQwIgYDVQQDExtSdWJiZXIg
+RVJQIEludGVybmFsIFJvb3QgQ0ExEzARBgNVBAoTClJ1YmJlciBFUlAwggEiMA0G
+CSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDeAUpEFdn1ACSd1umWvj8MOYbO++yf
+mrSF5QBp7jnczZvrtQ/XoAW++GaHxoDYzb6yJfWADoiYoNrzSyuBjAKMA1fajLFf
+TaCH4pv+OjgrG4BNbDu/yAUWrcWL1X5k+ud0AMC6ycymXXW83crTypvzdUgUqwpx
+ybk/TofqWH61pU7tCRCmFOruDEeoNL1+PIS2Eyv6PSwDjDcliXT0fWob+xDADgUz
+SqgCD1QgGd1g3gNBk2FSgiLDK4hrlF86t8rR5h2uRXvJ3m+Lx2ei/WOhTvDynPoM
+dWBydeOKj2BDjf/dDFCbFmVyhtWMLOchetGizPIA5u87ZOjpakrJGN1tAgMBAAGj
+HTAbMAwGA1UdEwQFMAMBAf8wCwYDVR0PBAQDAgGGMA0GCSqGSIb3DQEBCwUAA4IB
+AQCG3kdTHccovcw9qvgUAUdol+g65AQzH6BVvVnoHaLCt+2QCnNFp/BGEwiphoWy
+jfl4NRpbP8PiadNxSwHiIk0F3CFXz+9C7V6Kgxp9rjYDeekYpNAn91XA2DFVwC7W
+XspBZFrERNiviSxSDaapP457eQ5E/6pVtBCQR+2wOQUmdl9rDPVi/k5mQpzXevGv
+r+DiiAocC1OmgeRNKSSJC07XRX+JajsdbaB+gXIHErL9g59wrtj3L62voWW3jEXD
+sboENj3j8onI5Jd41m53hpIVrhOTxhztMl1HXC+HUxTwkjxI45xNJ5+6/Fdj+e5Y
+XyemfNkos1DeK5c57mLsB1qH
+-----END CERTIFICATE-----`
+
+export type TrustedRootCaInfo = {
+  id: string
+  name: string
+  fingerprint256: string
+  isHistorical: boolean
+}
+
+/**
+ * Danh bạ Multi-Root CA: tập hợp tất cả các Root CA được tin cậy bởi Rubber ERP.
+ * Hỗ trợ đồng thời Root CA v1 lịch sử + Root CA v2 hiện hành + các Root CA mở rộng trong tương lai.
+ */
+export function getTrustedRootCas(): TrustedRootCaInfo[] {
+  const list: TrustedRootCaInfo[] = []
+
+  // 1. Root CA v1 (Chứng thư lịch sử cố định, dùng bảo chứng vĩnh viễn cho hồ sơ cũ)
+  try {
+    const v1Cert = new crypto.X509Certificate(ROOT_CA_V1_CERT_PEM)
+    list.push({
+      id: "v1",
+      name: "Root CA v1 (Chứng thư lịch sử)",
+      fingerprint256: v1Cert.fingerprint256,
+      isHistorical: true,
+    })
+  } catch (err) {
+    console.error("[Multi-Root CA] Lỗi khởi tạo Root CA v1:", err)
+  }
+
+  // 2. Root CA từ biến môi trường SIGN_PADES_ROOT_CA_CERT_PEM (nếu đã xoay vòng sang v2)
+  const envCertPem = normalizePem(process.env.SIGN_PADES_ROOT_CA_CERT_PEM)
+  if (envCertPem) {
+    try {
+      const currentCert = new crypto.X509Certificate(envCertPem)
+      const isSameAsV1 = list.some((c) => c.fingerprint256 === currentCert.fingerprint256)
+      if (!isSameAsV1) {
+        list.push({
+          id: "v2",
+          name: "Root CA v2 (Chứng thư hiện hành)",
+          fingerprint256: currentCert.fingerprint256,
+          isHistorical: false,
+        })
+      }
+    } catch (err) {
+      console.warn("[Multi-Root CA] Lỗi nạp SIGN_PADES_ROOT_CA_CERT_PEM:", err)
+    }
+  }
+
+  // 3. Khả năng mở rộng: chứng thư phụ từ SIGN_PADES_EXTRA_TRUSTED_CERTS (nếu có)
+  const extraPems = process.env.SIGN_PADES_EXTRA_TRUSTED_CERTS
+  if (extraPems) {
+    const blocks = extraPems.split("-----END CERTIFICATE-----").filter((b) => b.includes("-----BEGIN CERTIFICATE-----"))
+    blocks.forEach((blk, idx) => {
+      try {
+        const fullPem = `${blk.trim()}\n-----END CERTIFICATE-----`
+        const c = new crypto.X509Certificate(normalizePem(fullPem))
+        if (!list.some((existing) => existing.fingerprint256 === c.fingerprint256)) {
+          list.push({
+            id: `extra_${idx + 1}`,
+            name: `Root CA Bổ sung (${idx + 1})`,
+            fingerprint256: c.fingerprint256,
+            isHistorical: true,
+          })
+        }
+      } catch {}
+    })
+  }
+
+  return list
+}
+
 export type VerifyPadesResult =
   | {
       valid: true
@@ -41,6 +136,9 @@ export type VerifyPadesResult =
       validTo: string
       keyAlgorithm: string
       digestAlgorithm: string
+      rootCaId?: string
+      rootCaName?: string
+      isHistoricalRoot?: boolean
     }
   | { valid: false; reason: string }
 
@@ -201,15 +299,17 @@ export function verifyPadesSignature(pdfBytes: Buffer, padesSigIndex: number): V
       return { valid: false, reason: "Chữ ký số không hợp lệ về mặt toán học" }
     }
 
-    // 5. Chứng thư root nhúng trong CMS phải khớp đúng root CA hệ thống đang cấu hình hiện tại.
-    const configuredRootPem = process.env.SIGN_PADES_ROOT_CA_CERT_PEM
-    if (!configuredRootPem) {
+    // 5. Chứng thư root nhúng trong CMS phải nằm trong danh bạ Multi-Root CA được tin cậy
+    const trustedCas = getTrustedRootCas()
+    if (trustedCas.length === 0) {
       return { valid: false, reason: "Hệ thống chưa cấu hình chứng thư gốc để đối chiếu" }
     }
     const rootDer = forge.asn1.toDer(forge.pki.certificateToAsn1(rootCert)).getBytes()
     const embeddedFingerprint = new crypto.X509Certificate(Buffer.from(rootDer, "binary")).fingerprint256
-    const configuredFingerprint = new crypto.X509Certificate(configuredRootPem).fingerprint256
-    if (embeddedFingerprint !== configuredFingerprint) {
+    const matchedRoot = trustedCas.find(
+      (ca) => ca.fingerprint256.toUpperCase() === embeddedFingerprint.toUpperCase()
+    )
+    if (!matchedRoot) {
       return { valid: false, reason: "Chứng thư không do hệ thống Rubber ERP phát hành" }
     }
 
@@ -228,6 +328,9 @@ export function verifyPadesSignature(pdfBytes: Buffer, padesSigIndex: number): V
       validTo: leafCert.validity.notAfter.toISOString(),
       keyAlgorithm: `RSA-${leafPublicKey.n.bitLength()}`,
       digestAlgorithm: "SHA-256",
+      rootCaId: matchedRoot.id,
+      rootCaName: matchedRoot.name,
+      isHistoricalRoot: matchedRoot.isHistorical,
     }
   } catch (err) {
     return { valid: false, reason: err instanceof Error ? err.message : "Lỗi không xác định khi xác thực" }

@@ -41,6 +41,9 @@ type VerifyResponse = {
   validTo?: string
   keyAlgorithm?: string
   digestAlgorithm?: string
+  rootCaId?: string
+  rootCaName?: string
+  isHistoricalRoot?: boolean
   padesSignerName?: string
   isInheritedSeal?: boolean
   inheritedNote?: string
@@ -258,6 +261,14 @@ export function VanBanVerifyClient({ logId }: { logId: string }) {
                 : "Hệ thống Rubber ERP (Xác thực toàn vẹn SHA-256)"}
             </span>
           </div>
+          {data.rootCaName && (
+            <div className="flex justify-between">
+              <span className="text-slate-400">Gốc chứng thư (Root CA)</span>
+              <span className="font-semibold text-slate-600 text-right">
+                {data.rootCaName}
+              </span>
+            </div>
+          )}
           {data.serialNumber && (
             <div className="flex justify-between">
               <span className="text-slate-400">Số hiệu chứng thư</span>

@@ -16,6 +16,9 @@ type VerifyResponse = {
   validTo?: string
   keyAlgorithm?: string
   digestAlgorithm?: string
+  rootCaId?: string
+  rootCaName?: string
+  isHistoricalRoot?: boolean
 }
 
 const VAI_TRO_LABEL: Record<string, string> = {
@@ -110,6 +113,14 @@ export function SignVerifyClient({ nguoiKyId }: { nguoiKyId: string }) {
               Chứng thư số nội bộ do hệ thống Rubber ERP tự phát hành
             </span>
           </div>
+          {data.rootCaName && (
+            <div className="flex justify-between">
+              <span className="text-slate-400">Gốc chứng thư (Root CA)</span>
+              <span className="font-semibold text-slate-600 text-right">
+                {data.rootCaName}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-slate-400">Số hiệu chứng thư</span>
             <span className="font-mono font-semibold text-slate-600">{data.serialNumber}</span>
