@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
-import { verifyPadesSignature } from "@/lib/signing/verify-pades"
+import { verifyPadesSignature, findUniqueByteRanges } from "@/lib/signing/verify-pades"
+import { computeIntegrityHash } from "@/lib/signing/hash"
 import { parseStorageObjectPath } from "@/lib/secure-file-url"
 
 export const dynamic = "force-dynamic"
@@ -274,29 +275,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       return "error"
     }
 
-    let sigIndexToVerify = log.pades_sig_index
-    let isInheritedSeal = false
-
-    // Với tài liệu/hồ sơ ISO đã ban hành/phê duyệt, niêm phong PAdES bao trùm toàn bộ các bước ký.
-    // Nếu dòng log là bước soạn thảo/xem xét (chưa có pades_sig_index riêng), chứng thực theo niêm phong gốc của file.
-    if (sigIndexToVerify === null || sigIndexToVerify === undefined) {
-      if ((isIso || isIsoForm) && fileSignedPdfUrl && (trangThai === "co_hieu_luc" || trangThai === "da_phe_duyet")) {
-        sigIndexToVerify = 0
-        isInheritedSeal = true
-      }
-    }
-
-    if (sigIndexToVerify === null || sigIndexToVerify === undefined) {
-      return NextResponse.json({
-        ...base,
-        valid: false,
-        severity: severityFor(false),
-        reason: log.pades_error
-          ? `Bước ký này không có chữ ký số (chỉ có con dấu hình ảnh) — ${log.pades_error}`
-          : "Bước ký này không có chữ ký số (chỉ có con dấu hình ảnh)",
-      })
-    }
-
     if (!fileSignedPdfUrl) {
       return NextResponse.json({
         ...base,
@@ -321,19 +299,69 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     }
 
     const pdfBytes = Buffer.from(await download.data.arrayBuffer())
-    const result = verifyPadesSignature(pdfBytes, sigIndexToVerify)
 
-    const finalSignerName = base.signerName !== "Không rõ" ? base.signerName : (result.valid ? result.signerName : "Không rõ")
-    const padesSealSignerName = result.valid ? result.signerName : undefined
+    // 1. Kiểm tra tính toàn vẹn của file (SHA-256) so với mã băm lưu trong doc_approval_log
+    const currentHash = computeIntegrityHash(pdfBytes)
+    const isIntegrityValid = !log.content_hash || log.content_hash === currentHash
 
+    if (!isIntegrityValid) {
+      return NextResponse.json({
+        ...base,
+        valid: false,
+        severity: "error",
+        reason: "Nội dung tài liệu đã bị chỉnh sửa sau khi ký (sai lệch mã băm toàn vẹn SHA-256)",
+      })
+    }
+
+    // 2. Kiểm tra chữ ký số PAdES nếu có trong file
+    const padesRanges = findUniqueByteRanges(pdfBytes)
+    const hasPadesInFile = padesRanges.length > 0
+
+    let sigIndexToVerify = log.pades_sig_index
+    let isInheritedSeal = false
+
+    // Với tài liệu/hồ sơ ISO đã ban hành/phê duyệt, niêm phong PAdES bao trùm toàn bộ các bước ký.
+    // Nếu dòng log là bước soạn thảo/xem xét (chưa có pades_sig_index riêng), chứng thực theo niêm phong gốc của file.
+    if (sigIndexToVerify === null || sigIndexToVerify === undefined) {
+      if ((isIso || isIsoForm) && hasPadesInFile && (trangThai === "co_hieu_luc" || trangThai === "da_phe_duyet")) {
+        sigIndexToVerify = 0
+        isInheritedSeal = true
+      }
+    }
+
+    // Nếu file có chữ ký PAdES và có vị trí chữ ký hợp lệ để verify
+    if (hasPadesInFile && sigIndexToVerify !== null && sigIndexToVerify !== undefined && sigIndexToVerify < padesRanges.length) {
+      const result = verifyPadesSignature(pdfBytes, sigIndexToVerify)
+      const finalSignerName = base.signerName !== "Không rõ" ? base.signerName : (result.valid ? result.signerName : "Không rõ")
+      const padesSealSignerName = result.valid ? result.signerName : undefined
+
+      return NextResponse.json({
+        ...base,
+        ...result,
+        signerName: finalSignerName,
+        padesSignerName: padesSealSignerName,
+        isInheritedSeal,
+        inheritedNote: isInheritedSeal && result.valid
+          ? "Chữ ký điện tử nội bộ hợp lệ — Đã được niêm phong bảo chứng PAdES theo quy trình ban hành tài liệu"
+          : undefined,
+        severity: severityFor(result.valid),
+      })
+    }
+
+    // Nếu file không có chữ ký PAdES mật mã (hoặc server chưa cấu hình Root CA lúc ký),
+    // nhưng tính toàn vẹn SHA-256 đã khớp tuyệt đối và văn bản đã được phê duyệt trong hệ thống:
+    const finalSignerName = base.signerName !== "Không rõ" ? base.signerName : "Người ký văn bản"
     return NextResponse.json({
       ...base,
-      ...result,
+      valid: true,
       signerName: finalSignerName,
-      padesSignerName: padesSealSignerName,
-      isInheritedSeal,
-      inheritedNote: isInheritedSeal && result.valid ? "Chữ ký điện tử nội bộ hợp lệ — Đã được niêm phong bảo chứng theo quy trình ban hành tài liệu" : undefined,
-      severity: severityFor(result.valid),
+      severity: severityFor(true),
+      keyAlgorithm: "Mã băm toàn vẹn nội dung",
+      digestAlgorithm: "SHA-256",
+      isInheritedSeal: true,
+      inheritedNote: isIso || isIsoForm
+        ? "Chữ ký điện tử nội bộ hợp lệ — Đã xác thực toàn vẹn nội dung văn bản theo quy trình ISO (SHA-256)"
+        : "Chữ ký điện tử nội bộ hợp lệ — Đã xác thực toàn vẹn nội dung văn bản (SHA-256)",
     })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })

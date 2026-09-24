@@ -33,14 +33,25 @@ import { Signer, DEFAULT_BYTE_RANGE_PLACEHOLDER, DEFAULT_SIGNATURE_LENGTH } from
 
 let cachedRootCa: { cert: forge.pki.Certificate; privateKey: forge.pki.rsa.PrivateKey } | null = null
 
+export function normalizePem(pem?: string | null): string {
+  if (!pem) return ""
+  let clean = pem.trim()
+  if ((clean.startsWith('"') && clean.endsWith('"')) || (clean.startsWith("'") && clean.endsWith("'"))) {
+    clean = clean.slice(1, -1).trim()
+  }
+  return clean.replace(/\\n/g, "\n").trim()
+}
+
 export function hasPadesRootCa(): boolean {
-  return !!(process.env.SIGN_PADES_ROOT_CA_CERT_PEM && process.env.SIGN_PADES_ROOT_CA_KEY_PEM)
+  const cert = normalizePem(process.env.SIGN_PADES_ROOT_CA_CERT_PEM)
+  const key = normalizePem(process.env.SIGN_PADES_ROOT_CA_KEY_PEM)
+  return !!(cert && key)
 }
 
 function loadRootCa(): { cert: forge.pki.Certificate; privateKey: forge.pki.rsa.PrivateKey } {
   if (cachedRootCa) return cachedRootCa
-  const certPem = process.env.SIGN_PADES_ROOT_CA_CERT_PEM
-  const keyPem = process.env.SIGN_PADES_ROOT_CA_KEY_PEM
+  const certPem = normalizePem(process.env.SIGN_PADES_ROOT_CA_CERT_PEM)
+  const keyPem = normalizePem(process.env.SIGN_PADES_ROOT_CA_KEY_PEM)
   if (!certPem || !keyPem) {
     throw new Error("Chưa cấu hình SIGN_PADES_ROOT_CA_CERT_PEM/SIGN_PADES_ROOT_CA_KEY_PEM")
   }
@@ -90,8 +101,8 @@ export function diagnosePadesEnv(): {
   keyParseOk: boolean
   keyParseError: string | null
 } {
-  const certPem = process.env.SIGN_PADES_ROOT_CA_CERT_PEM || ""
-  const keyPem = process.env.SIGN_PADES_ROOT_CA_KEY_PEM || ""
+  const certPem = normalizePem(process.env.SIGN_PADES_ROOT_CA_CERT_PEM)
+  const keyPem = normalizePem(process.env.SIGN_PADES_ROOT_CA_KEY_PEM)
   let certParseOk = false
   let certParseError: string | null = null
   try {

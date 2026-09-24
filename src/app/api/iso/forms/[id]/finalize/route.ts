@@ -763,7 +763,7 @@ export async function POST(
                 userId: item.userId,
                 stepIndex: idx + 1,
                 action: actionName,
-                padesSigIndex: isFinalStep ? 0 : null,
+                padesSigIndex: null,
                 createdAt: item.createdAt,
               })
 
@@ -812,10 +812,21 @@ export async function POST(
               (userProfile?.auth_email as string) || "",
             )
             finalBytes = new Uint8Array(sealedBuf)
-            padesSigIndex = 0
+            const hasPades = sealedBuf.indexOf(Buffer.from("/ByteRange")) !== -1
+            padesSigIndex = hasPades ? 0 : null
+            if (!hasPades && !padesError) {
+              padesError = "Chưa cấu hình Root CA trên môi trường máy chủ"
+            }
+            if (stepLogs.length > 0) {
+              stepLogs[stepLogs.length - 1].padesSigIndex = padesSigIndex
+            }
           } catch (sealErr) {
             console.warn("[finalize N-step] sealPdfWithVerifyLinks warning:", sealErr)
             padesError = sealErr instanceof Error ? sealErr.message : "Lỗi niêm phong chữ ký số"
+            padesSigIndex = null
+            if (stepLogs.length > 0) {
+              stepLogs[stepLogs.length - 1].padesSigIndex = null
+            }
           }
         }
 

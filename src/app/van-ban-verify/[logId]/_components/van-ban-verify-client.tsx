@@ -253,25 +253,33 @@ export function VanBanVerifyClient({ logId }: { logId: string }) {
           <div className="flex justify-between">
             <span className="text-slate-400">Tổ chức phát hành</span>
             <span className="font-semibold text-slate-600 text-right">
-              Chứng thư số nội bộ do hệ thống Rubber ERP tự phát hành
+              {data.serialNumber
+                ? "Chứng thư số nội bộ do hệ thống Rubber ERP tự phát hành"
+                : "Hệ thống Rubber ERP (Xác thực toàn vẹn SHA-256)"}
             </span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-slate-400">Số hiệu chứng thư</span>
-            <span className="font-mono font-semibold text-slate-600">{data.serialNumber}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-slate-400">Hiệu lực từ</span>
-            <span className="font-semibold text-slate-600">
-              {data.validFrom ? new Date(data.validFrom).toLocaleString("vi-VN") : "—"}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-slate-400">Hiệu lực đến</span>
-            <span className="font-semibold text-slate-600">
-              {data.validTo ? new Date(data.validTo).toLocaleString("vi-VN") : "—"}
-            </span>
-          </div>
+          {data.serialNumber && (
+            <div className="flex justify-between">
+              <span className="text-slate-400">Số hiệu chứng thư</span>
+              <span className="font-mono font-semibold text-slate-600">{data.serialNumber}</span>
+            </div>
+          )}
+          {data.validFrom && (
+            <div className="flex justify-between">
+              <span className="text-slate-400">Hiệu lực từ</span>
+              <span className="font-semibold text-slate-600">
+                {new Date(data.validFrom).toLocaleString("vi-VN")}
+              </span>
+            </div>
+          )}
+          {data.validTo && (
+            <div className="flex justify-between">
+              <span className="text-slate-400">Hiệu lực đến</span>
+              <span className="font-semibold text-slate-600">
+                {new Date(data.validTo).toLocaleString("vi-VN")}
+              </span>
+            </div>
+          )}
           {data.contentHash && (
             <div className="pt-2 border-t border-slate-200/70">
               <p className="text-slate-400 mb-0.5">Mã băm toàn vẹn nội dung (SHA-256)</p>

@@ -53,7 +53,7 @@ type ByteRange = [number, number, number, number]
  * trùng lặp qua các lần incremental save kế tiếp — hiện tượng vô hại nhưng phải dedupe trước
  * khi dùng làm chỉ mục theo thứ tự ký).
  */
-function findUniqueByteRanges(pdf: Buffer): ByteRange[] {
+export function findUniqueByteRanges(pdf: Buffer): ByteRange[] {
   const seen = new Set<string>()
   const result: ByteRange[] = []
   let offset = 0
