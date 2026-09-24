@@ -239,14 +239,35 @@ export function VanBanVerifyClient({ logId }: { logId: string }) {
               {data.inheritedNote}
             </div>
           )}
-          {data.padesSignerName && (
+          {data.padesSignerName ? (
             <div className="flex justify-between">
               <span className="text-slate-400">
                 {data.isInheritedSeal ? "Niêm phong PAdES bởi" : "Người ký chứng thư số"}
               </span>
               <span className="font-bold text-slate-800 text-right">{data.padesSignerName}</span>
             </div>
+          ) : data.signerName ? (
+            <div className="flex justify-between">
+              <span className="text-slate-400">Người ký xác thực</span>
+              <span className="font-bold text-slate-800 text-right">{data.signerName}</span>
+            </div>
+          ) : null}
+          {!data.padesSignerName && data.kyLuc && (
+            <div className="flex justify-between">
+              <span className="text-slate-400">Thời gian ký duyệt</span>
+              <span className="font-semibold text-slate-600 text-right">
+                {new Date(data.kyLuc).toLocaleString("vi-VN")}
+              </span>
+            </div>
           )}
+          <div className="flex justify-between">
+            <span className="text-slate-400">Cấp độ bảo mật</span>
+            <span className="font-semibold text-slate-600 text-right">
+              {data.serialNumber
+                ? "Cấp độ 2 — Chữ ký số PAdES niêm phong mật mã RSA-2048"
+                : "Cấp độ 1 — Xác thực toàn vẹn nội dung & Nhật ký phê duyệt"}
+            </span>
+          </div>
           <div className="flex justify-between">
             <span className="text-slate-400">Thuật toán</span>
             <span className="font-semibold text-slate-600">

@@ -19,6 +19,7 @@ type VerifyResponse = {
   rootCaId?: string
   rootCaName?: string
   isHistoricalRoot?: boolean
+  contentHash?: string
 }
 
 const VAI_TRO_LABEL: Record<string, string> = {
@@ -101,6 +102,9 @@ export function SignVerifyClient({ nguoiKyId }: { nguoiKyId: string }) {
       {data.valid && (
         <div className="border-t border-slate-100 p-6 space-y-2 text-xs bg-slate-50/60">
           <p className="font-bold text-slate-500 mb-1">Thông tin kỹ thuật chữ ký số</p>
+          <div className="p-2.5 rounded-xl bg-violet-50/80 border border-violet-200/70 text-violet-800 text-xs mb-3 font-medium leading-relaxed">
+            Chữ ký điện tử nội bộ hợp lệ — Đã được niêm phong bảo chứng PAdES theo quy trình ban hành tài liệu
+          </div>
           <div className="flex justify-between">
             <span className="text-slate-400">Thuật toán</span>
             <span className="font-semibold text-slate-600">
@@ -137,6 +141,12 @@ export function SignVerifyClient({ nguoiKyId }: { nguoiKyId: string }) {
               {data.validTo ? new Date(data.validTo).toLocaleString("vi-VN") : "—"}
             </span>
           </div>
+          {data.contentHash && (
+            <div className="pt-2 border-t border-slate-200/70">
+              <p className="text-slate-400 mb-0.5">Mã băm toàn vẹn nội dung (SHA-256)</p>
+              <p className="font-mono text-[10px] text-slate-600 break-all">{data.contentHash}</p>
+            </div>
+          )}
         </div>
       )}
     </div>

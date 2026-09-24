@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { verifyPadesSignature } from "@/lib/signing/verify-pades"
+import { computeIntegrityHash } from "@/lib/signing/hash"
 
 export const dynamic = "force-dynamic"
 
@@ -99,11 +100,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ ngu
     }
     const pdfBytes = Buffer.from(await fileRes.arrayBuffer())
     const result = verifyPadesSignature(pdfBytes, nguoiKy.pades_sig_index as number)
+    const contentHash = computeIntegrityHash(pdfBytes)
 
     return NextResponse.json({
       signerName,
       vaiTro: nguoiKy.vai_tro,
       kyLuc: nguoiKy.ky_luc,
+      contentHash,
       ...result,
     })
   } catch (err) {
