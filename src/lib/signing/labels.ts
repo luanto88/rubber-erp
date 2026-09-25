@@ -34,7 +34,21 @@ export function loaiTaiLieuLabel(loaiTaiLieu: string): string {
   return LOAI_TAI_LIEU_LABEL[loaiTaiLieu] || loaiTaiLieu
 }
 
-/** Nhãn 1 dòng mô tả hồ sơ, vd: "Biên bản bảo dưỡng MT-030925/001 · Bảo trì" */
+/**
+ * Format mã hồ sơ hiển thị: nếu là ngày YYYY-MM-DD thuần túy thì chuyển sang DD/MM/YYYY.
+ */
+export function formatMaHoSoDisplay(maHoSo?: string | null): string {
+  if (!maHoSo) return ""
+  const trimmed = maHoSo.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const [y, m, d] = trimmed.split("-")
+    return `${d}/${m}/${y}`
+  }
+  return trimmed
+}
+
+/** Nhãn 1 dòng mô tả hồ sơ, vd: "Bảng phân xe 25/09/2026 · Điều xe" hoặc "Biên bản sự cố 25/09/2026 - Mủ tạp - MC1 · Bảo trì" */
 export function signingDocLabel(modun: string, loaiTaiLieu: string, maHoSo?: string | null): string {
-  return `${loaiTaiLieuLabel(loaiTaiLieu)}${maHoSo ? ` ${maHoSo}` : ""} · ${modunLabel(modun)}`
+  const displayMaHoSo = formatMaHoSoDisplay(maHoSo)
+  return `${loaiTaiLieuLabel(loaiTaiLieu)}${displayMaHoSo ? ` ${displayMaHoSo}` : ""} · ${modunLabel(modun)}`
 }

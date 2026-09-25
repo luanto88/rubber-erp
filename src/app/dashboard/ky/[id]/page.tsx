@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation"
 import { ChevronDown, ChevronUp, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { hydrateActiveSession, type SessionUser } from "@/lib/auth"
-import { modunLabel, loaiTaiLieuLabel } from "@/lib/signing/labels"
+import { modunLabel, loaiTaiLieuLabel, formatMaHoSoDisplay } from "@/lib/signing/labels"
+import { fetchSecureUrl } from "@/app/dashboard/_components/secure-file-open"
 
 // Màn hình ký dùng chung cho MỌI module (Giai đoạn 3 — Hệ thống ký số dùng chung).
 // Bám sát mockup đã duyệt cung_cap_dl/thiet_ke_man_hinh_ky.html, thu gọn 1 điểm so
@@ -132,8 +133,17 @@ export default function SignScreenPage() {
   const [returnError, setReturnError] = useState("")
   const [returning, setReturning] = useState(false)
 
+  const [mySigUrl, setMySigUrl] = useState("")
+
   const loadData = useCallback(async (uid: string) => {
-    void uid
+    // Tải signed URL cho chữ ký của người ký hiện tại (để preview trong khung ký)
+    try {
+      const sigRes = await fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(uid)}`)
+      if (sigRes.ok && sigRes.url) {
+        setMySigUrl(sigRes.url)
+      }
+    } catch { /* Chưa có chữ ký hoặc lỗi mạng — fallback hiển thị nhãn */ }
+
     const { data: ycData, error: ycErr } = await supabase
       .from("yeu_cau_ky")
       .select("*")
@@ -592,7 +602,7 @@ export default function SignScreenPage() {
             {loaiTaiLieuLabel(yeuCau.loai_tai_lieu)}
             {yeuCau.ma_ho_so && (
               <span className="rounded-md bg-white/15 px-2 py-0.5 font-mono text-xs font-semibold">
-                {yeuCau.ma_ho_so}
+                {formatMaHoSoDisplay(yeuCau.ma_ho_so)}
               </span>
             )}
             <span className="rounded-full border border-white/30 bg-white/15 px-2.5 py-1 text-[11px] font-bold">
@@ -719,9 +729,7 @@ export default function SignScreenPage() {
                   // Chưa ký: hiện NGAY chữ ký thật của người đang xem tại đúng khung, cho phép
                   // kéo/resize trước khi xác nhận (thay vì chỉ thấy kết quả sau khi đã ký).
                   const box = adjust[f.id] ?? numBoxFromDefault(f, dim)
-                  const sigUrl = me && yeuCau
-                    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/iso-documents/signatures/${yeuCau.factory_id}/${me.id}/chu_ky.png`
-                    : ""
+                  const sigUrl = mySigUrl
                   return (
                     <div
                       key={f.id}
@@ -744,13 +752,20 @@ export default function SignScreenPage() {
                           src={sigUrl}
                           alt="Chữ ký"
                           className="pointer-events-none h-full w-full object-contain"
-                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
+                          onError={(e) => {
+                            const target = e.currentTarget as HTMLImageElement
+                            target.style.display = "none"
+                            const sibling = target.nextElementSibling as HTMLElement | null
+                            if (sibling) sibling.style.display = "block"
+                          }}
                         />
-                      ) : (
-                        <span className="block truncate px-1 text-center text-[9px] font-bold leading-tight text-sky-700">
-                          {f.nhan || f.loai}
-                        </span>
-                      )}
+                      ) : null}
+                      <span
+                        className="truncate px-1 text-center text-[9px] font-bold leading-tight text-sky-700"
+                        style={{ display: sigUrl ? "none" : "block" }}
+                      >
+                        {f.nhan || f.loai}
+                      </span>
                       <div
                         title="Kéo để đổi kích thước"
                         className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-sm border border-white bg-emerald-600 shadow"

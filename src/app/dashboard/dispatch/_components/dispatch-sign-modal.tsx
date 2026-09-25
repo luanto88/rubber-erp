@@ -22,6 +22,15 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+function formatDispatchDate(dateStr: string): string {
+  if (!dateStr) return ""
+  const parts = dateStr.slice(0, 10).split("-")
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`
+  }
+  return dateStr
+}
+
 export function DispatchSignModal({
   open,
   onClose,
@@ -112,7 +121,7 @@ export function DispatchSignModal({
           factoryId,
           modun: "dispatch",
           loaiTaiLieu: "dispatch_bang_phan_xe",
-          maHoSo: entry.id,
+          maHoSo: formatDispatchDate(entry.ngay) || entry.id,
           banGhiId: entry.id,
           fileBase64: bytesToBase64(bytes),
           fileExt: "pdf",

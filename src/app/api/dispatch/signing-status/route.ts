@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
 
     let q = supabaseAdmin
       .from("yeu_cau_ky")
-      .select("id, ma_ho_so, trang_thai, nguoi_tao, file_hien_tai, tao_luc, tra_ve_ly_do")
+      .select("id, ma_ho_so, ban_ghi_id, trang_thai, nguoi_tao, file_hien_tai, tao_luc, tra_ve_ly_do")
       .eq("factory_id", factoryId)
       .eq("modun", "dispatch")
       .eq("loai_tai_lieu", "dispatch_bang_phan_xe")
@@ -48,7 +48,9 @@ export async function GET(req: NextRequest) {
       .order("tao_luc", { ascending: false })
     if (entryIdsParam) {
       const ids = entryIdsParam.split(",").filter(Boolean)
-      if (ids.length) q = q.in("ma_ho_so", ids)
+      if (ids.length) {
+        q = q.or(`ban_ghi_id.in.(${ids.join(",")}),ma_ho_so.in.(${ids.join(",")})`)
+      }
     }
 
     const { data: yeuCauRows, error } = await q
@@ -73,14 +75,11 @@ export async function GET(req: NextRequest) {
       signersByYeuCau.set(r.yeu_cau_id, list)
     }
 
-    // Đã order tao_luc desc — dòng đầu tiên gặp mỗi "ma_ho_so" là mới nhất, giữ lại. Từ
-    // migration 20260904, unique index `uniq_yeu_cau_ky_active_business_key` đã chặn
-    // trùng ma_ho_so ở tầng DB cho MỌI module (bao gồm dispatch), nên về lý thuyết mỗi
-    // entryId chỉ còn đúng 1 dòng active — vẫn giữ dedupe này để an toàn nếu có dữ liệu
-    // cũ hoặc thay đổi migration sau này.
+    // Đã order tao_luc desc — dòng đầu tiên gặp mỗi bản ghi là mới nhất, giữ lại.
+    // ban_ghi_id lưu entryId (UUID), fallback sang ma_ho_so cho các bản ghi lịch sử cũ.
     const seen = new Map<string, Row>()
     for (const r of yeuCauRows) {
-      const key = r.ma_ho_so as string
+      const key = (r.ban_ghi_id as string) || (r.ma_ho_so as string)
       if (!key || seen.has(key)) continue
       seen.set(key, {
         entryId: key,

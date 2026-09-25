@@ -177,7 +177,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     if (isIsoForm) {
       const { data: formInst } = await supabase
         .from("iso_form_instances")
-        .select("id, tieu_de, trang_thai, final_pdf_url, template_doc_id, thu_tu_ky_json, nguoi_ky, so_buoc_tong")
+        .select("id, tieu_de, trang_thai, final_pdf_url, soan_thao_signed_url, draft_file_url, final_office_url, template_doc_id, thu_tu_ky_json, nguoi_ky, so_buoc_tong")
         .eq("id", log.doc_id)
         .maybeSingle()
 
@@ -194,7 +194,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       trangThai = formInst?.trang_thai === "da_phe_duyet" ? "co_hieu_luc" : (formInst?.trang_thai || null)
       maTaiLieu = tmplDoc?.ma_tai_lieu || formInst?.tieu_de || null
       tenTaiLieu = tmplDoc?.ten_tai_lieu || formInst?.tieu_de || null
-      fileSignedPdfUrl = (formInst?.final_pdf_url as string) || null
       thuTuKy = (formInst?.thu_tu_ky_json as Array<{ ten?: string; user_id?: string }>) || null
       nguoiKyMap = (formInst?.nguoi_ky as Record<string, { ten?: string; ky_at?: string; user_id?: string }>) || null
       soBuocTong = (formInst?.so_buoc_tong as number) || null
@@ -202,7 +201,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       const { data: doc } = await (isIso
         ? supabase
             .from("iso_documents")
-            .select("ma_tai_lieu, ten_tai_lieu, trang_thai, file_signed_pdf_url, soan_thao, xem_xet, phe_duyet, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id, chon_quy_trinh, cap_tl, soan_thao_at, xem_xet_at, phe_duyet_at, ngay_ban_hanh, ngay_gui_duyet, ngay_tao")
+            .select("ma_tai_lieu, ten_tai_lieu, trang_thai, file_signed_pdf_url, file_de_nghi_soat_xet_signed_url, file_phieu_yeu_cau_thay_doi_signed_url, file_goc_url, file_signed_office_url, soan_thao, xem_xet, phe_duyet, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id, chon_quy_trinh, cap_tl, soan_thao_at, xem_xet_at, phe_duyet_at, ngay_ban_hanh, ngay_gui_duyet, ngay_tao")
             .eq("id", log.doc_id)
             .maybeSingle()
         : supabase
@@ -213,10 +212,27 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
 
       docRow = (doc ?? null) as Record<string, unknown> | null
       trangThai = (docRow?.trang_thai as string) || null
-      fileSignedPdfUrl = (docRow?.file_signed_pdf_url as string) || null
       maTaiLieu = ((isIso ? docRow?.ma_tai_lieu : docRow?.ma_van_ban) as string) || null
       tenTaiLieu = ((isIso ? docRow?.ten_tai_lieu : docRow?.ten_van_ban) as string) || null
     }
+
+    // Tập hợp danh sách URL ứng viên theo thứ tự ưu tiên
+    const candidateUrls: string[] = isIsoForm
+      ? [
+          docRow?.final_pdf_url,
+          docRow?.soan_thao_signed_url,
+          docRow?.draft_file_url,
+          docRow?.final_office_url,
+        ].filter(Boolean) as string[]
+      : isIso
+        ? [
+            docRow?.file_signed_pdf_url,
+            docRow?.file_de_nghi_soat_xet_signed_url,
+            docRow?.file_phieu_yeu_cau_thay_doi_signed_url,
+            docRow?.file_goc_url,
+            docRow?.file_signed_office_url,
+          ].filter(Boolean) as string[]
+        : [docRow?.file_signed_pdf_url].filter(Boolean) as string[]
 
     // Tải thông tin người ký hiện tại và lịch sử các bước ký của tài liệu này
     const siblingLogsRes = await supabase
@@ -275,7 +291,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       return "error"
     }
 
-    if (!fileSignedPdfUrl) {
+    if (candidateUrls.length === 0) {
       return NextResponse.json({
         ...base,
         valid: false,
@@ -287,9 +303,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     // Vá bảo mật 2026-09-20: bucket iso-documents sẽ chuyển private — `fetch()` thẳng URL public
     // sẽ 403 dù route này chạy phía server. Tải object bằng service role (bypass cờ public/RLS)
     // thay vì gọi HTTP thô ra URL đã lưu trong DB.
-    const objectPath = parseStorageObjectPath(fileSignedPdfUrl, BUCKET)
-    const download = objectPath ? await getSupabaseAdmin().storage.from(BUCKET).download(objectPath) : null
-    if (!objectPath || download?.error || !download?.data) {
+    // Duyệt qua candidateUrls để tìm file có mã băm SHA-256 khớp với log.content_hash
+    let pdfBytes: Buffer | null = null
+    let isIntegrityValid = false
+
+    for (const url of candidateUrls) {
+      const objectPath = parseStorageObjectPath(url, BUCKET)
+      if (!objectPath) continue
+      const download = await getSupabaseAdmin().storage.from(BUCKET).download(objectPath)
+      if (download?.error || !download?.data) continue
+      const bytes = Buffer.from(await download.data.arrayBuffer())
+      const currentHash = computeIntegrityHash(bytes)
+
+      if (!log.content_hash || log.content_hash === currentHash) {
+        pdfBytes = bytes
+        isIntegrityValid = true
+        break
+      }
+
+      if (!pdfBytes) {
+        pdfBytes = bytes
+      }
+    }
+
+    if (!pdfBytes) {
       return NextResponse.json({
         ...base,
         valid: false,
@@ -298,12 +335,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       })
     }
 
-    const pdfBytes = Buffer.from(await download.data.arrayBuffer())
-
     // 1. Kiểm tra tính toàn vẹn của file (SHA-256) so với mã băm lưu trong doc_approval_log
-    const currentHash = computeIntegrityHash(pdfBytes)
-    const isIntegrityValid = !log.content_hash || log.content_hash === currentHash
-
     if (!isIntegrityValid) {
       return NextResponse.json({
         ...base,
@@ -320,10 +352,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     let sigIndexToVerify = log.pades_sig_index
     let isInheritedSeal = false
 
-    // Với tài liệu/hồ sơ ISO đã ban hành/phê duyệt, niêm phong PAdES bao trùm toàn bộ các bước ký.
+    // Với tài liệu/hồ sơ ISO đã ban hành/phê duyệt hoặc file đã được niêm phong PAdES:
     // Nếu dòng log là bước soạn thảo/xem xét (chưa có pades_sig_index riêng), chứng thực theo niêm phong gốc của file.
     if (sigIndexToVerify === null || sigIndexToVerify === undefined) {
-      if ((isIso || isIsoForm) && hasPadesInFile && (trangThai === "co_hieu_luc" || trangThai === "da_phe_duyet")) {
+      if ((isIso || isIsoForm) && hasPadesInFile) {
         sigIndexToVerify = 0
         isInheritedSeal = true
       }

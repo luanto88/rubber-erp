@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
 
     let q = supabaseAdmin
       .from("yeu_cau_ky")
-      .select("id, ma_ho_so, trang_thai, nguoi_tao, file_hien_tai, tao_luc, tra_ve_ly_do")
+      .select("id, ma_ho_so, ban_ghi_id, trang_thai, nguoi_tao, file_hien_tai, tao_luc, tra_ve_ly_do")
       .eq("factory_id", factoryId)
       .eq("modun", "maintenance")
       .in("loai_tai_lieu", MAINTENANCE_SIGN_BUNDLES)
@@ -54,18 +54,19 @@ export async function GET(req: NextRequest) {
       .order("tao_luc", { ascending: false })
     if (recordIdsParam) {
       const ids = recordIdsParam.split(",").filter(Boolean)
-      if (ids.length) q = q.in("ma_ho_so", ids)
+      if (ids.length) {
+        q = q.or(`ban_ghi_id.in.(${ids.join(",")}),ma_ho_so.in.(${ids.join(",")})`)
+      }
     }
 
     const { data: yeuCauRows, error } = await q
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     if (!yeuCauRows?.length) return NextResponse.json([])
 
-    // Dedupe theo ma_ho_so, giữ dòng mới nhất — unique index `uniq_yeu_cau_ky_active_business_key`
-    // (migration 20260904) đã chặn trùng ở tầng DB, nhưng vẫn dedupe phòng dữ liệu cũ.
+    // Dedupe theo ban_ghi_id (UUID của record), fallback sang ma_ho_so cho bản ghi lịch sử cũ.
     const seenYeuCau = new Map<string, typeof yeuCauRows[number]>()
     for (const r of yeuCauRows) {
-      const key = r.ma_ho_so as string
+      const key = (r.ban_ghi_id as string) || (r.ma_ho_so as string)
       if (key && !seenYeuCau.has(key)) seenYeuCau.set(key, r)
     }
     const yeuCauIds = Array.from(seenYeuCau.values()).map((r) => r.id as string)

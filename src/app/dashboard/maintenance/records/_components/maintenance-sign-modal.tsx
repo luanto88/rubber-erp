@@ -57,6 +57,25 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+function formatMaintenanceDate(dateStr: string): string {
+  if (!dateStr) return ""
+  const parts = dateStr.slice(0, 10).split("-")
+  if (parts.length === 3) {
+    return `${parts[2]}/${parts[1]}/${parts[0]}`
+  }
+  return dateStr
+}
+
+function buildMaintenanceMaHoSo(record: RecordData): string {
+  const dateFormatted = formatMaintenanceDate(record.ngay)
+  const boPhan = (record.bo_phan || "").trim()
+  const maTbList = Array.from(new Set((record.lines || []).map((l) => l.ma_tb?.trim()).filter(Boolean)))
+  const maTbStr = maTbList.join(", ")
+
+  const parts = [dateFormatted, boPhan, maTbStr].filter(Boolean)
+  return parts.length > 0 ? parts.join(" - ") : record.id
+}
+
 // Tải lại toàn bộ dữ liệu biên bản trực tiếp từ DB (không dùng state form đang sửa của trang
 // chi tiết — form đó dùng shape DraftLine/DraftMaterial khác hẳn RecordData/LineData của
 // maintenance-pdf.ts) — mirror đúng cách maintenance/print/page.tsx tải dữ liệu cho su_co_nho.
@@ -198,7 +217,7 @@ export function MaintenanceSignModal({
           factoryId,
           modun: "maintenance",
           loaiTaiLieu: bundle,
-          maHoSo: recordId,
+          maHoSo: buildMaintenanceMaHoSo(loaded.record),
           banGhiId: recordId,
           fileBase64: bytesToBase64(bytes),
           fileExt: "pdf",
