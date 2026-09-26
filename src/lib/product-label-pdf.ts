@@ -2,6 +2,14 @@ import jsPDF from "jspdf"
 import { ensurePdfFont, addQrImage, safeName, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
 import { buildProductLabelLookupUrl, type KienLetter } from "@/lib/product-label"
 import { buildShortLotLabel } from "@/lib/product-lot-config"
+import {
+  ICON_BOC,
+  ICON_CALENDAR,
+  ICON_FACTORY,
+  ICON_KG,
+  ICON_WORKER,
+  loadIconPng,
+} from "@/lib/product-label-icons"
 
 export type ProductLabelItem = {
   factoryId: string
@@ -22,7 +30,7 @@ export type ProductLabelItem = {
 export type ProductLabelPdfOptions = {
   companyLine1?: string
   companyLine2?: string
-  footerText?: string
+  companyLine3?: string
 }
 
 // Logo gốc (631x809, dọc) = vòng tròn + dòng chữ viết tắt "VRG PHUOC HOA KAMPONG THOM" bên
@@ -34,7 +42,7 @@ const LOGO_PATH = "/logo-phk-moi.png"
 const LOGO_ASPECT = 631 / 809 // width / height gốc
 const DEFAULT_COMPANY_LINE_1 = "CÔNG TY TNHH PHÁT TRIỂN CAO SU"
 const DEFAULT_COMPANY_LINE_2 = "PHƯỚC HÒA KAMPONG THOM"
-const DEFAULT_FOOTER_TEXT = "Nhà máy chế biến PHK"
+const DEFAULT_COMPANY_LINE_3 = "NHÀ MÁY CHẾ BIẾN"
 
 let logoBase64Promise: Promise<string> | null = null
 
@@ -60,20 +68,119 @@ async function loadLogoBase64(): Promise<string> {
   return logoBase64Promise
 }
 
-// Lưới cố định 2 cột x 2 hàng = 4 nhãn / trang A4 (khác nhãn ngăn — nhãn kiện cần to,
-// rõ, có chỗ ghi tay ngày/ca sản xuất). Xem .claude/rules/06-module-production.md mục "4.6".
-const PAGE_MARGIN_MM = 10
-const CELL_GAP_X_MM = 6
-const CELL_GAP_Y_MM = 6
+// Lưới cố định 2 cột x 3 hàng = 6 nhãn / trang A4, các nhãn nằm sát nhau — chỉ chừa khe nhỏ
+// đủ để cắt bằng kéo. Xem .claude/rules/06-module-production.md mục "4.6".
+const PAGE_MARGIN_MM = 6
+const CELL_GAP_X_MM = 2
+const CELL_GAP_Y_MM = 2
+const LABEL_COLS = 2
+const LABEL_ROWS = 3
 
-function computeFixedFourPerPageLayout(doc: jsPDF) {
+function computeSixPerPageLayout(doc: jsPDF) {
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
   const usableWidth = pageWidth - PAGE_MARGIN_MM * 2
   const usableHeight = pageHeight - PAGE_MARGIN_MM * 2
-  const cellWidth = (usableWidth - CELL_GAP_X_MM) / 2
-  const cellHeight = (usableHeight - CELL_GAP_Y_MM) / 2
-  return { cols: 2, rows: 2, perPage: 4, cellWidth, cellHeight, marginX: PAGE_MARGIN_MM, marginY: PAGE_MARGIN_MM }
+  const cellWidth = (usableWidth - CELL_GAP_X_MM * (LABEL_COLS - 1)) / LABEL_COLS
+  const cellHeight = (usableHeight - CELL_GAP_Y_MM * (LABEL_ROWS - 1)) / LABEL_ROWS
+  return {
+    cols: LABEL_COLS,
+    rows: LABEL_ROWS,
+    perPage: LABEL_COLS * LABEL_ROWS,
+    cellWidth,
+    cellHeight,
+    marginX: PAGE_MARGIN_MM,
+    marginY: PAGE_MARGIN_MM,
+  }
+}
+
+type LabelIcons = {
+  kg: string | null
+  boc: string | null
+  calendar: string | null
+  factory: string | null
+  worker: string | null
+}
+
+async function loadLabelIcons(): Promise<LabelIcons> {
+  const [kg, boc, calendar, factory, worker] = await Promise.all([
+    loadIconPng(ICON_KG),
+    loadIconPng(ICON_BOC),
+    loadIconPng(ICON_CALENDAR),
+    loadIconPng(ICON_FACTORY),
+    loadIconPng(ICON_WORKER),
+  ])
+  return { kg, boc, calendar, factory, worker }
+}
+
+function drawIcon(doc: jsPDF, dataUrl: string | null, x: number, y: number, size: number) {
+  if (!dataUrl) return
+  try {
+    doc.addImage(dataUrl, "PNG", x, y, size, size)
+  } catch {
+    // icon lỗi không chặn in nhãn
+  }
+}
+
+// Chọn cỡ chữ lớn nhất ≤ maxSize để text vừa maxWidth (đo bằng font đang set)
+function fitFontSize(doc: jsPDF, text: string, maxWidth: number, maxSize: number, minSize: number) {
+  let size = maxSize
+  doc.setFontSize(size)
+  while (size > minSize && doc.getTextWidth(text) > maxWidth) {
+    size -= 0.5
+    doc.setFontSize(size)
+  }
+  return size
+}
+
+// Thanh tỷ lệ lấp đầy ngăn: phần đã đầy tô chuyển dần trắng → đen (vẽ bằng nhiều dải rect liền
+// nhau vì jsPDF không có gradient đơn giản), kèm số % nhỏ ngay mép phần đầy.
+function drawFillProgressBar(doc: jsPDF, x: number, y: number, w: number, h: number, pct: number) {
+  const radius = h / 2
+  const shown = Math.round(Math.max(0, pct))
+  const fillW = (w * Math.min(100, Math.max(0, pct))) / 100
+
+  doc.setFillColor(255, 255, 255)
+  doc.roundedRect(x, y, w, h, radius, radius, "F")
+
+  if (fillW > 0) {
+    const steps = 48
+    const stepW = fillW / steps
+    for (let i = 0; i < steps; i++) {
+      const t = (i + 1) / steps
+      const gray = Math.round(235 - 215 * t)
+      doc.setFillColor(gray, gray, gray)
+      // Phủ lấn nhẹ sang dải kế tiếp để không lộ khe trắng giữa các dải
+      const sx = x + i * stepW
+      const sw = Math.min(stepW + 0.05, x + fillW - sx)
+      // Bo góc giả ở 2 đầu bằng cách thu chiều cao dải theo cung tròn
+      const edgeDist = Math.min(sx + sw / 2 - x, x + w - (sx + sw / 2))
+      let inset = 0
+      if (edgeDist < radius) {
+        const dy = radius - Math.sqrt(Math.max(0, radius * radius - (radius - edgeDist) ** 2))
+        inset = dy
+      }
+      doc.rect(sx, y + inset, sw, h - inset * 2, "F")
+    }
+  }
+
+  doc.setDrawColor(0, 0, 0)
+  doc.setLineWidth(0.3)
+  doc.roundedRect(x, y, w, h, radius, radius, "S")
+
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(5.8)
+  const label = `${shown}%`
+  const labelW = doc.getTextWidth(label)
+  const textY = y + h / 2 + 0.75
+  if (fillW + 1 + labelW <= w - radius / 2) {
+    doc.setTextColor(0, 0, 0)
+    doc.text(label, x + fillW + 0.8, textY)
+  } else {
+    doc.setTextColor(255, 255, 255)
+    doc.text(label, x + Math.max(radius, fillW - labelW - 1.2), textY)
+  }
+  doc.setTextColor(0, 0, 0)
 }
 
 // Hầu hết giá trị loai_boc đã có sẵn tiền tố "Bọc" (vd "Bọc trơn 0,04", "Bọc nhãn 0,04 VRG
@@ -112,16 +219,11 @@ function dashedGrayLine(doc: jsPDF, x1: number, x2: number, y: number) {
   doc.setDrawColor(0, 0, 0)
 }
 
-function fillPercentColor(pct: number): [number, number, number] {
-  if (pct >= 100) return [4, 120, 87] // emerald-700
-  if (pct >= 80) return [180, 83, 9] // amber-700
-  return [71, 85, 105] // slate-600
-}
-
 async function renderLabelCell(
   doc: jsPDF,
   item: ProductLabelItem,
   logoDataUrl: string | null,
+  icons: LabelIcons,
   opts: Required<ProductLabelPdfOptions>,
   cellX: number,
   cellY: number,
@@ -129,173 +231,148 @@ async function renderLabelCell(
   cellHeight: number,
 ) {
   doc.setDrawColor(0, 0, 0)
-  doc.setLineWidth(0.25)
+  doc.setLineWidth(0.3)
   doc.rect(cellX, cellY, cellWidth, cellHeight)
 
-  const padX = 4
+  const padX = 3.5
   doc.setTextColor(0, 0, 0)
 
-  // ── Khối 1: logo (tỷ lệ gốc, không ép vuông) + tên công ty (font +20% cộng
-  // dồn từ mức +10% trước đó — 8.25pt → 9.9pt) ─────────────────────────────
-  // Tỷ lệ giảm nhẹ (0.185 → 0.16) để nhường chỗ cho khối 4 (Ngày/Giờ/Ca SX) thêm dòng —
-  // không ảnh hưởng logo (vẫn bị chặn ở mức tối đa 16mm) hay 2 dòng tên công ty.
-  const headerHeight = cellHeight * 0.16
-  const logoHeight = Math.min(headerHeight - 4, 16)
+  // ── Khối 1: logo (tỷ lệ gốc) + 3 dòng tên công ty / nhà máy (chữ thường, không đậm) ──
+  const headerHeight = cellHeight * 0.21
+  const logoHeight = headerHeight - 3
   const logoWidth = logoHeight * LOGO_ASPECT
+  const logoX = cellX + padX + 2
   if (logoDataUrl) {
     try {
-      doc.addImage(logoDataUrl, "PNG", cellX + padX, cellY + (headerHeight - logoHeight) / 2, logoWidth, logoHeight)
+      doc.addImage(logoDataUrl, "PNG", logoX, cellY + (headerHeight - logoHeight) / 2, logoWidth, logoHeight)
     } catch {
       // bỏ qua nếu logo lỗi định dạng — không chặn in nhãn
     }
   }
-  const companyTextX = cellX + padX + logoWidth + 3
-  const companyTextWidth = cellWidth - padX * 2 - logoWidth - 3
-  doc.setFont(PDF_FONT_NAME, "bold")
-  doc.setFontSize(9.9) // 8.25 * 1.2 (cộng dồn từ mức +10% trước đó, tổng +32% so với 7.5pt gốc)
-  const line1 = doc.splitTextToSize(opts.companyLine1, companyTextWidth)
-  const line2 = doc.splitTextToSize(opts.companyLine2, companyTextWidth)
-  let companyLineY = cellY + headerHeight / 2 - ((line1.length + line2.length) * 4.2 - 4.2) / 2 + 3.2
-  ;[...line1, ...line2].forEach((line: string) => {
+  const companyTextX = logoX + logoWidth + 7
+  const companyTextWidth = cellX + cellWidth - padX - companyTextX
+  doc.setFont(PDF_FONT_NAME, "normal")
+  const companyLines = [opts.companyLine1, opts.companyLine2, opts.companyLine3].filter(Boolean)
+  const companySize = Math.min(
+    ...companyLines.map((line) => fitFontSize(doc, line, companyTextWidth, 11.5, 7)),
+  )
+  doc.setFontSize(companySize)
+  const companyLineH = companySize * 0.42
+  let companyLineY = cellY + headerHeight / 2 - ((companyLines.length - 1) * companyLineH) / 2 + companySize * 0.14
+  companyLines.forEach((line) => {
     doc.text(line, companyTextX, companyLineY)
-    companyLineY += 4.2
+    companyLineY += companyLineH
   })
 
   const afterHeaderY = cellY + headerHeight
   dashedHLine(doc, cellX, cellX + cellWidth, afterHeaderY)
 
-  // ── Khối 2: QR + mã ngăn + % lấp đầy (trái) | CSR/mã lô/kiện (phải) ─────
-  const midBlockHeight = cellHeight * 0.42
+  // ── Khối 2: QR + mã ngăn + thanh lấp đầy (trái) | CSR / SỐ LÔ (nổi bật) / Kiện (phải) ──
+  const midBlockHeight = cellHeight * 0.51
   const midTop = afterHeaderY
   const midBottom = midTop + midBlockHeight
-  const colDividerX = cellX + cellWidth * 0.46
-  dashedVLine(doc, colDividerX, midTop + 2, midBottom - 2)
+  const colDividerX = cellX + cellWidth * 0.43
+  dashedVLine(doc, colDividerX, midTop + 2.5, midBottom - 2.5)
 
-  // Đo trước mã ngăn (đặt font trước khi splitTextToSize để đo đúng độ rộng) để biết số dòng
-  // thực tế, từ đó tính tổng chiều cao nội dung (QR + mã ngăn + % lấp đầy) rồi CĂN GIỮA cả
-  // nhóm theo chiều dọc trong khối — thay vì neo cứng QR ở mép trên (fix test tay 2026-07-08:
-  // "QR, mã ngăn, tỷ lệ lắp đầy canh giữa vào ô chứa").
-  const qrColWidth = colDividerX - cellX - padX * 2
-  doc.setFont(PDF_FONT_NAME, "normal")
-  doc.setFontSize(6.5)
-  doc.setTextColor(0, 0, 0)
+  const leftColWidth = colDividerX - cellX - padX * 2
+  const hasFill = item.nganFillPercent != null
   const nganLabel = (item.nganMa || item.nganTen || "").trim() || "—"
-  const nganLines: string[] = doc.splitTextToSize(nganLabel, qrColWidth).slice(0, 2)
-  const belowQrLineHeight = 3
-  const gapAfterQr = 3.2
-  const belowQrLines = nganLines.length + (item.nganFillPercent != null ? 1 : 0)
-  const qrSize = Math.min(qrColWidth, midBlockHeight - gapAfterQr - belowQrLines * belowQrLineHeight)
-  const qrContentHeight = qrSize + gapAfterQr + belowQrLines * belowQrLineHeight
-  const qrX = cellX + padX + (qrColWidth - qrSize) / 2
-  const qrY = midTop + (midBlockHeight - qrContentHeight) / 2
+  doc.setFont(PDF_FONT_NAME, "normal")
+  const nganSize = fitFontSize(doc, nganLabel, leftColWidth, 7.5, 5)
+  const nganLineH = nganSize * 0.42
+  const barH = 1.9
+  const gapAfterQr = 1.6
+  const belowQrHeight = nganLineH + 1.2 + (hasFill ? barH + 0.6 : 0)
+  const qrSize = Math.min(leftColWidth - 2, midBlockHeight - 4 - gapAfterQr - belowQrHeight)
+  const contentHeight = qrSize + gapAfterQr + belowQrHeight
+  const leftCenterX = cellX + padX + leftColWidth / 2
+  const qrX = leftCenterX - qrSize / 2
+  const qrY = midTop + (midBlockHeight - contentHeight) / 2
   const qrUrl = buildProductLabelLookupUrl(item.factoryId, item.maLo, item.kien)
   await addQrImage(doc, qrUrl, qrX, qrY, qrSize)
 
-  // Mã ngăn dưới QR
   doc.setFont(PDF_FONT_NAME, "normal")
-  doc.setFontSize(6.5)
+  doc.setFontSize(nganSize)
   doc.setTextColor(0, 0, 0)
-  let nganLineY = qrY + qrSize + gapAfterQr
-  nganLines.forEach((line) => {
-    doc.text(line, cellX + padX + qrColWidth / 2, nganLineY, { align: "center" })
-    nganLineY += belowQrLineHeight
-  })
+  const nganY = qrY + qrSize + gapAfterQr + nganLineH * 0.8
+  doc.text(nganLabel, leftCenterX, nganY, { align: "center" })
 
-  // Tỷ lệ lấp đầy của ngăn nguồn — tính cả KL "có chủ" của kiện dở dang một phần thuộc lô
-  // dở dang khác (xem getReservedKgForPartialKien), không chỉ real + predicted thô.
-  if (item.nganFillPercent != null) {
-    doc.setFont(PDF_FONT_NAME, "bold")
-    doc.setFontSize(7)
-    const pct = Math.round(Math.max(0, item.nganFillPercent))
-    const [r, g, b] = fillPercentColor(pct)
-    doc.setTextColor(r, g, b)
-    doc.text(`Đầy ${pct}%`, cellX + padX + qrColWidth / 2, nganLineY, { align: "center" })
-    doc.setTextColor(0, 0, 0)
+  if (hasFill) {
+    const barW = Math.min(leftColWidth, qrSize + 2)
+    drawFillProgressBar(doc, leftCenterX - barW / 2, nganY + 1.6, barW, barH, item.nganFillPercent || 0)
   }
 
-  // Cột phải: 3 dòng to đậm — +50% so với gốc (15pt → 22.5pt), +10% (→ 24.75pt), rồi thêm
-  // +10% cộng dồn nữa theo yêu cầu tăng thêm kích thước chữ CSR/Kiện/Số lô (→ 27.225pt),
-  // vẫn giữ in đậm.
-  const rightColX = colDividerX + (cellWidth - (colDividerX - cellX)) / 2
-  const rightColWidth = cellX + cellWidth - padX - colDividerX
+  // Cột phải: CSR / SỐ LÔ (to nhất) / Kiện — tự co cỡ chữ cho vừa cột
+  const rightColLeft = colDividerX
+  const rightColWidth = cellX + cellWidth - padX - rightColLeft - 2
+  const rightColX = rightColLeft + (cellX + cellWidth - rightColLeft) / 2
+  const csrText = (item.loaiCsr || "—").trim()
+  const maLoText = buildShortLotLabel(item.num, item.suffix)
+  const kienText = `Kiện ${item.kien}`
+  doc.setFont(PDF_FONT_NAME, "normal")
+  const sideSize = Math.min(
+    fitFontSize(doc, csrText, rightColWidth, 30, 12),
+    fitFontSize(doc, kienText, rightColWidth, 30, 12),
+  )
   doc.setFont(PDF_FONT_NAME, "bold")
-  doc.setFontSize(27.225)
-  const csrLine = doc.splitTextToSize(item.loaiCsr || "—", rightColWidth)
-  const maLoLine = buildShortLotLabel(item.num, item.suffix)
-  const kienLine = `Kiện ${item.kien}`
-  const rightLines = [...csrLine, maLoLine, kienLine]
-  const rightLineHeight = 12.705 // 7 * 1.5 * 1.1 * 1.1
-  let rightY = midTop + (midBlockHeight - rightLines.length * rightLineHeight) / 2 + rightLineHeight * 0.75
-  rightLines.forEach((line) => {
-    doc.text(line, rightColX, rightY, { align: "center" })
-    rightY += rightLineHeight
-  })
+  const loSize = fitFontSize(doc, maLoText, rightColWidth - 3, 48, 16)
+  const sideH = sideSize * 0.35
+  const loH = loSize * 0.35
+  const gap = 4.5
+  const totalH = sideH + gap + loH + gap + sideH
+  let y = midTop + (midBlockHeight - totalH) / 2
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(sideSize)
+  doc.text(csrText, rightColX, y + sideH, { align: "center" })
+  y += sideH + gap
+  // Font PDF chỉ có bản Regular (ensurePdfFont đăng ký "bold" trỏ cùng file) — giả đậm bằng
+  // chế độ tô + viền nét cùng màu để số lô nổi bật như mẫu nhãn.
+  doc.setFont(PDF_FONT_NAME, "bold")
+  doc.setFontSize(loSize)
+  doc.setDrawColor(0, 0, 0)
+  doc.setLineWidth(loSize * 0.016)
+  doc.text(maLoText, rightColX, y + loH, { align: "center", renderingMode: "fillThenStroke" })
+  doc.setLineWidth(0.2)
+  y += loH + gap
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(sideSize)
+  doc.text(kienText, rightColX, y + sideH, { align: "center" })
 
   dashedHLine(doc, cellX, cellX + cellWidth, midBottom)
 
-  // ── Khối 3: Bành / Bọc — cân đối 2 dòng thành 1 nhóm căn giữa khung theo chiều dọc,
-  // khoảng cách đều nhau (cùng kỹ thuật với khối 2 — cột CSR/Số lô/Kiện — thay vì 2 mốc
-  // tỷ lệ cố định 0.42/0.85 lệch nhau như trước). Tỷ lệ chiều cao giảm nhẹ (0.16 → 0.15) —
-  // khối 4 bên dưới có 3 dòng (Ngày/Giờ/Ca SX) nên phải rộng hơn khối 2 dòng này.
-  const infoBlockHeight = cellHeight * 0.15
+  // ── Khối 3: [icon KG] Bành ... · [icon lá] Bọc ... — cùng 1 hàng ──
+  const infoHeight = cellHeight * 0.15
   const infoTop = midBottom
+  const iconSize = infoHeight * 0.55
+  const infoCenterY = infoTop + infoHeight / 2
+  const banhText = `Bành ${item.loaiBanh || "—"} kg`
+  const bocText = bocDisplayLine(item.boc)
+  const bocColX = cellX + cellWidth * 0.36
   doc.setFont(PDF_FONT_NAME, "normal")
-  doc.setFontSize(11)
-  const infoLines = [`Bành ${item.loaiBanh || "—"} kg`, bocDisplayLine(item.boc)]
-  const infoLineHeight = 6
-  let infoY = infoTop + (infoBlockHeight - infoLines.length * infoLineHeight) / 2 + infoLineHeight * 0.75
-  infoLines.forEach((line) => {
-    doc.text(line, cellX + padX, infoY)
-    infoY += infoLineHeight
-  })
+  drawIcon(doc, icons.kg, cellX + padX, infoCenterY - iconSize / 2, iconSize)
+  const banhX = cellX + padX + iconSize + 2.5
+  const banhSize = fitFontSize(doc, banhText, bocColX - banhX - 1.5, 13, 7)
+  drawIcon(doc, icons.boc, bocColX, infoCenterY - iconSize / 2, iconSize)
+  const bocX = bocColX + iconSize + 2.5
+  const bocSize = fitFontSize(doc, bocText, cellX + cellWidth - padX - bocX, 13, 6.5)
+  const infoSize = Math.min(banhSize, bocSize)
+  doc.setFontSize(infoSize)
+  const infoTextY = infoCenterY + infoSize * 0.13
+  doc.text(banhText, banhX, infoTextY)
+  doc.text(bocText, bocX, infoTextY)
 
-  const afterInfoY = infoTop + infoBlockHeight
-  dashedHLine(doc, cellX, cellX + cellWidth, afterInfoY)
-
-  // ── Khối 4: Ngày SX / Giờ SX / Ca SX (để trống ghi tay) — chia đều 3 hàng bằng nhau,
-  // dùng CHUNG 1 công thức nhất quán cho cả 3 dòng để đảm bảo "3 dòng cách đều nhau" —
-  // không còn hiệu chỉnh lệch riêng cho dòng Ca SX như trước (từng phá vỡ tính đều nhau).
-  // Đường kẻ nét đứt xám nằm ngay mép dưới mỗi hàng.
-  const blankBlockHeight = cellHeight * 0.2
-  const blankTop = afterInfoY
-  const rowH = blankBlockHeight / 3
-  doc.setFont(PDF_FONT_NAME, "normal")
-  doc.setFontSize(10)
-
-  // Hàng 1-2: Ngày SX / Giờ SX — mỗi hàng 1 cột chạy hết chiều rộng nhãn
-  const blankRows: { label: string; dashOffset: number }[] = [
-    { label: "Ngày SX:", dashOffset: 18 },
-    { label: "Giờ SX:", dashOffset: 16 },
-  ]
-  blankRows.forEach((row, i) => {
-    const rowTop = blankTop + rowH * i
-    doc.text(row.label, cellX + padX, rowTop + rowH * 0.62)
-    dashedGrayLine(doc, cellX + padX + row.dashOffset, cellX + cellWidth - padX, rowTop + rowH - 0.8)
-  })
-
-  // Hàng 3: Ca SX / Trực ca — tách 2 cột trên cùng 1 hàng theo yêu cầu bổ sung thông tin
-  // người trực ca cạnh ca sản xuất, thay vì để nguyên 1 cột full-width như 2 hàng trên.
-  const caRowTop = blankTop + rowH * 2
-  const caLabelY = caRowTop + rowH * 0.62
-  const caDashY = caRowTop + rowH - 0.8
-  const caColWidth = (cellWidth - padX * 2) / 2
-  doc.text("Ca SX:", cellX + padX, caLabelY)
-  dashedGrayLine(doc, cellX + padX + 16, cellX + padX + caColWidth - 3, caDashY)
-  doc.text("Trực ca:", cellX + padX + caColWidth + 3, caLabelY)
-  dashedGrayLine(doc, cellX + padX + caColWidth + 3 + 18, cellX + cellWidth - padX, caDashY)
-
-  const afterBlankY = blankTop + blankBlockHeight
-  doc.setDrawColor(0, 0, 0)
-  doc.setLineWidth(0.3)
-  doc.line(cellX, afterBlankY, cellX + cellWidth, afterBlankY)
-
-  // ── Footer (font +10%) ────────────────────────────────────────────────────
-  const footerTop = afterBlankY
-  const footerBottom = cellY + cellHeight
-  doc.setFont(PDF_FONT_NAME, "bold")
-  doc.setFontSize(9.35) // 8.5 * 1.1
-  doc.text(opts.footerText, cellX + cellWidth / 2, footerTop + (footerBottom - footerTop) / 2 + 1.5, {
-    align: "center",
+  // ── Khối 4: 3 ô ghi tay — [lịch] Ngày SX · [nhà máy] Ca SX · [công nhân] Trực ca ──
+  const blankTop = infoTop + infoHeight
+  const blankHeight = cellY + cellHeight - blankTop
+  const blankIcon = Math.min(blankHeight * 0.66, 11)
+  const blankIconY = blankTop + (blankHeight - blankIcon) / 2 - 0.6
+  const lineY = blankIconY + blankIcon - 0.6
+  const colW = (cellWidth - padX * 2) / 3
+  const blankIcons = [icons.calendar, icons.factory, icons.worker]
+  blankIcons.forEach((icon, i) => {
+    const colX = cellX + padX + colW * i
+    drawIcon(doc, icon, colX, blankIconY, blankIcon)
+    dashedGrayLine(doc, colX + blankIcon + 1.2, colX + colW - 1.5, lineY)
   })
 }
 
@@ -323,7 +400,7 @@ export async function downloadProductLabelPdf(
   const opts: Required<ProductLabelPdfOptions> = {
     companyLine1: options.companyLine1 || DEFAULT_COMPANY_LINE_1,
     companyLine2: options.companyLine2 || DEFAULT_COMPANY_LINE_2,
-    footerText: options.footerText || DEFAULT_FOOTER_TEXT,
+    companyLine3: options.companyLine3 || DEFAULT_COMPANY_LINE_3,
   }
 
   // In 2 bản giống nhau / kiện — lặp mỗi item 2 lần liên tiếp
@@ -332,7 +409,8 @@ export async function downloadProductLabelPdf(
     duplicated.push(item, item)
   }
 
-  const layout = computeFixedFourPerPageLayout(doc)
+  const icons = await loadLabelIcons()
+  const layout = computeSixPerPageLayout(doc)
 
   for (let i = 0; i < duplicated.length; i++) {
     const indexInPage = i % layout.perPage
@@ -343,7 +421,7 @@ export async function downloadProductLabelPdf(
     const cellX = layout.marginX + col * (layout.cellWidth + CELL_GAP_X_MM)
     const cellY = layout.marginY + row * (layout.cellHeight + CELL_GAP_Y_MM)
 
-    await renderLabelCell(doc, duplicated[i], logoDataUrl, opts, cellX, cellY, layout.cellWidth, layout.cellHeight)
+    await renderLabelCell(doc, duplicated[i], logoDataUrl, icons, opts, cellX, cellY, layout.cellWidth, layout.cellHeight)
   }
 
   const fileSuffix = safeName(`${items.length}-kien-${new Date().toISOString().slice(0, 10)}`)

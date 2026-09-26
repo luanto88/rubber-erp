@@ -395,15 +395,20 @@ Khi 1 lô thật đang "Dở dang" có kiện đã có sản lượng thật nh�
 - `cancelPredictionLot()` nhận thêm tham số `isAdmin`, kiểm tra chặn cứng ở tầng server action (không chỉ ẩn nút UI).
 - Nút "Sửa" vẫn theo `product.predict_manage` như cũ (không đổi).
 
-### Nhãn in (redesign 2026-07-09, theo mẫu `cung_cap_dl/Nhãn dán pallet.png`)
+### Nhãn in lớn (redesign 2026-09-26, 6 nhãn/trang + icon + thanh lấp đầy)
 
-A4 portrait, **cố định 4 nhãn/trang** (lưới 2×2, khác lưới nhỏ nhiều-nhãn/trang của QR ngăn), mỗi nhãn gồm 4 khối ngăn cách bằng đường kẻ đứt + 1 footer viền liền:
+A4 portrait, **cố định 6 nhãn/trang** (lưới 2×3, các nhãn sát nhau, khe 2mm để cắt kéo, lề trang 6mm — `computeSixPerPageLayout` trong `src/lib/product-label-pdf.ts`). Mỗi nhãn gồm 4 khối, không còn footer:
 
-1. Logo công ty (`public/logo-phk-moi.png`) + tên công ty 2 dòng.
-2. QR (trỏ `/product-label?f=...&lo=...&kien=...`) + mã ngăn nguồn gốc của đúng kiện đó bên dưới QR | CSR/mã lô rút gọn không năm/"Kiện {X}" (to đậm, cột phải).
-3. "Bành {loại_bành} kg" + "Bọc {tên đầy đủ}".
-4. "Ngày SX:" + "Ca SX:" — để trống, ca trực tự viết tay khi dán nhãn lên pallet.
-5. Footer viền liền: "Nhà máy chế biến {tên}" (hiện đang hard-code "PHK", **chưa có quyết định cách rút gọn động cho nhà máy khác** — xem `ProductLabelPdfOptions.footerText` trong `product-label-pdf.ts` để tuỳ biến).
+1. Logo (`public/logo-phk-moi.png`, giữ tỷ lệ gốc) + 3 dòng chữ thường: tên công ty 2 dòng + "NHÀ MÁY CHẾ BIẾN" (`ProductLabelPdfOptions.companyLine1/2/3`).
+2. Trái: QR (trỏ `/product-label?f=...&lo=...&kien=...`) + mã ngăn 1 dòng (tự co chữ) + **thanh tỷ lệ lấp đầy** (`drawFillProgressBar`: phần đầy tô chuyển dần trắng→đen bằng 48 dải rect, chỉ hiện số `X%`, >~85% thì số đặt trong phần đầy màu trắng, >100% vẫn hiện số thật). Phải: CSR / **SỐ LÔ (to nhất, giả đậm)** / "Kiện {X}", tự co chữ cho vừa cột.
+3. Một hàng: [icon quả cân KG] "Bành {x} kg" · [icon lá tái chế] "Bọc ...".
+4. Ghi tay, **không nhãn chữ**: [icon lịch] = Ngày SX · [icon nhà máy] = Ca SX · [icon công nhân] = Trực ca, mỗi ô 1 đường kẻ đứt xám. Đã bỏ "Giờ SX" và footer "Nhà máy chế biến PHK".
+
+Icon: SVG vẽ tay trong `src/lib/product-label-icons.ts`, chuyển PNG qua canvas (`loadIconPng`, có cache, lỗi → bỏ icon, không chặn in).
+
+⚠️ Font PDF (`ensurePdfFont`) chỉ có NotoSans **Regular** — style "bold" trỏ cùng file nên `setFont(...,"bold")` KHÔNG đậm. Số lô giả đậm bằng `renderingMode: "fillThenStroke"` + `setLineWidth(size*0.016)`; nét dày hơn (~0.03) làm chữ số dính nhau.
+
+PDF đã lưu Storage trước 2026-09-26 (`pdf_large_url`) vẫn là layout cũ 4 nhãn/trang — không hồi tố. Nhãn QR nhỏ (16/trang) không đổi.
 
 In đen trắng hoàn toàn (logo màu vẫn nhúng nguyên bản — máy in đen trắng tự rasterize thành grayscale khi in, không cần xử lý trước). Mỗi kiện in đúng 2 bản giống nhau. Thuật ngữ hiển thị dùng **"Bành"** (dấu huyền), không phải "Bánh" — xem mục "Đính chính thuật ngữ" trong lịch sử plan, chỉ áp dụng phạm vi tính năng này, không đụng module Xuất hàng (rule 08 khóa cứng "bánh").
 
