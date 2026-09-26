@@ -64,6 +64,11 @@ const KIEN_COLS: {
 
 type SuffixOption = { code: string; name: string };
 
+const THAM_OPTIONS = ["Cũ", "Mới"];
+const THAM_DEFAULT = "Cũ";
+// Giá trị sentinel của option "-- Chọn hậu tố --" (không trùng được mã hậu tố thật nào).
+const SUFFIX_UNSET = "__unset__";
+
 function normalizeDayChuyenFromLoaiNl(loaiNl: string) {
   return (loaiNl || "").toLowerCase().includes("nước") || (loaiNl || "").toLowerCase().includes("nuoc")
     ? "Mủ nước"
@@ -91,8 +96,11 @@ export default function ProductPredictPage() {
   const [loaiCsr, setLoaiCsr] = useState("");
   const [loaiBanh, setLoaiBanh] = useState(35);
   const [boc, setBoc] = useState("");
-  const [tham, setTham] = useState("");
-  const [suffix, setSuffix] = useState("");
+  // Thảm bắt buộc, dropdown cứng Cũ/Mới (mặc định Cũ) — cùng bộ giá trị module Thành phẩm dùng.
+  const [tham, setTham] = useState<string>(THAM_DEFAULT);
+  // null = CHƯA chọn hậu tố (bắt buộc chọn rõ ràng); "" = đã chọn "Trống (không hậu tố)".
+  const [suffix, setSuffix] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [suffixOptions, setSuffixOptions] = useState<SuffixOption[]>([]);
   const [requestedLotCount, setRequestedLotCount] = useState<number | "">("");
   // Số kiện lẻ (0-3) của lô "đuôi" — chỉ có ý nghĩa/hiển thị khi chọn đúng 1 ngăn; multi-ngăn
@@ -213,11 +221,7 @@ export default function ProductPredictPage() {
         .order("code");
       const suffixList = (suffixRows as SuffixOption[]) || [];
       setSuffixOptions(suffixList);
-      // Gợi ý sẵn "cs" — hậu tố phổ biến nhất, mirror mặc định của product/page.tsx
-      // (session.suffix mặc định "cs"). Chỉ set khi danh mục thật sự có mã này.
-      if (suffixList.some((s) => s.code === "cs")) {
-        setSuffix("cs");
-      }
+      // Không tự chọn sẵn hậu tố — người dùng phải chọn rõ ràng (kể cả "Trống").
       setLoading(false);
     };
     void bootstrap();
@@ -373,7 +377,7 @@ export default function ProductPredictPage() {
     let alive = true;
     setOverrideStartNumChecking(true);
     const timer = window.setTimeout(() => {
-      void checkLotNumTaken(factoryId, suffix, currentYear2(), num)
+      void checkLotNumTaken(factoryId, suffix ?? "", currentYear2(), num)
         .then((res) => {
           if (!alive) return;
           setOverrideStartNumError(res.taken ? `Mã lô ${res.maLo} đã tồn tại, vui lòng chọn số khác.` : null);
@@ -427,6 +431,8 @@ export default function ProductPredictPage() {
     !!loaiCsr &&
     !!loaiBanh &&
     !!boc &&
+    !!tham &&
+    suffix !== null &&
     !outOfCapacity &&
     !singleNganZeroZero &&
     !overrideStartNumError &&
@@ -446,7 +452,7 @@ export default function ProductPredictPage() {
         loaiBanh,
         boc,
         tham,
-        suffix,
+        suffix: suffix ?? "",
         year: currentYear2(),
         requestedLotCount: requestedLotCount === "" ? null : Number(requestedLotCount),
         carryResolution: pendingCarry ? carryResolution : null,
@@ -830,6 +836,7 @@ export default function ProductPredictPage() {
                     setSelectedNganIds([]);
                     setLoaiCsr("");
                     setBoc("");
+                    setTham(THAM_DEFAULT);
                     setRequestedLotCount("");
                     setTrailingKienCount("");
                     setClosesNganChecked(true);
@@ -911,7 +918,7 @@ export default function ProductPredictPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Loại bọc</label>
+                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Loại bọc *</label>
                       <select
                         value={boc}
                         onChange={(e) => setBoc(e.target.value)}
@@ -927,20 +934,29 @@ export default function ProductPredictPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Thảm (tuỳ chọn)</label>
-                      <input
+                      <label className="mb-1.5 block text-xs font-bold text-slate-600">Thảm *</label>
+                      <select
                         value={tham}
                         onChange={(e) => setTham(e.target.value)}
                         className="w-full min-h-[42px] rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
-                      />
+                      >
+                        {THAM_OPTIONS.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="sm:col-span-2">
                       <label className="mb-1.5 block text-xs font-bold text-slate-600">Hậu tố mã lô *</label>
                       <select
-                        value={suffix}
-                        onChange={(e) => setSuffix(e.target.value)}
-                        className="w-full min-h-[42px] rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                        value={suffix ?? SUFFIX_UNSET}
+                        onChange={(e) => setSuffix(e.target.value === SUFFIX_UNSET ? null : e.target.value)}
+                        className={`w-full min-h-[42px] rounded-xl border px-3 py-2 text-sm outline-none focus:border-emerald-500 ${suffix === null ? "border-amber-400" : "border-slate-300"}`}
                       >
+                        <option value={SUFFIX_UNSET} disabled>
+                          -- Chọn hậu tố --
+                        </option>
                         <option value="">Trống (không hậu tố)</option>
                         {suffixOptions.map((s) => (
                           <option key={s.code} value={s.code}>
@@ -1109,8 +1125,17 @@ export default function ProductPredictPage() {
                       Đánh dấu (các) ngăn đã chọn là đã dự kiến xong (không gợi ý lại)
                     </label>
 
+                    {(!boc || suffix === null) && (
+                      <div className="text-xs font-semibold text-amber-700">
+                        Vui lòng chọn đủ {[!boc && "Loại bọc", suffix === null && "Hậu tố mã lô"].filter(Boolean).join(" và ")} trước khi tạo.
+                      </div>
+                    )}
+
                     <button
-                      onClick={() => void handleCreate()}
+                      onClick={() => {
+                        setCreateError(null);
+                        setConfirmOpen(true);
+                      }}
                       disabled={!canCreate || creating}
                       className="min-h-[46px] w-full rounded-xl bg-emerald-600 py-3 font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                     >
@@ -1297,6 +1322,77 @@ export default function ProductPredictPage() {
             ))
           )}
         </div>
+      )}
+
+      {confirmOpen && (
+        <ModalShell
+          title="Xác nhận thông tin dự đoán"
+          onClose={() => setConfirmOpen(false)}
+          maxWidth="md"
+          footer={
+            <>
+              <button
+                onClick={() => setConfirmOpen(false)}
+                disabled={creating}
+                className="rounded-xl px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+              >
+                Quay lại sửa
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmOpen(false);
+                  void handleCreate();
+                }}
+                disabled={!canCreate || creating}
+                className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-md hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Xác nhận &amp; tạo
+              </button>
+            </>
+          }
+        >
+          <p className="mb-3 text-sm text-slate-600">
+            Kiểm tra lại các lựa chọn bên dưới. Sau khi xác nhận, hệ thống mới tạo dự đoán và cho in nhãn.
+          </p>
+          <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200 text-sm">
+            {(
+              [
+                ["Ngăn (thứ tự tiêu thụ)", orderedNganIds.map((id) => ngansById.get(id)?.ma_ngan || "?").join(" → ")],
+                ["Loại CSR", loaiCsr],
+                ["Loại bành", `${loaiBanh} kg`],
+                ["Loại bọc", boc],
+                ["Thảm", tham],
+                ["Hậu tố mã lô", suffix ? `${suffix}${suffixOptions.find((s) => s.code === suffix)?.name ? ` - ${suffixOptions.find((s) => s.code === suffix)?.name}` : ""}` : "Trống (không hậu tố)"],
+                [
+                  "Số lô",
+                  requestedLotCount === ""
+                    ? `Tối đa theo đề xuất${preview ? ` (~${preview.suggestedLotCount} lô)` : ""}`
+                    : `${requestedLotCount} lô`,
+                ],
+                ...(singleNgan && liveCalc ? [["Kiện lẻ cuối", String(liveCalc.trailingKienClamped)]] : []),
+                ...(pendingCarry
+                  ? [
+                      [
+                        "Lô dở dang",
+                        carryResolution === "continue"
+                          ? `Tiếp tục ${pendingCarry.ma_lo}`
+                          : `Bỏ qua, bắt đầu lô mới${overrideStartNum ? ` từ số ${overrideStartNum}` : ""}`,
+                      ],
+                    ]
+                  : overrideStartNum
+                    ? [["Số lô bắt đầu", overrideStartNum]]
+                    : []),
+                ...(singleNgan && liveCalc ? [["Tỷ lệ ngăn sau khi tạo", `~${liveCalc.livePct.toFixed(1)}%`]] : []),
+                ["Đánh dấu ngăn đã dự kiến xong", closesNganChecked ? "Có" : "Không"],
+              ] as [string, string][]
+            ).map(([label, value]) => (
+              <div key={label} className="flex items-start justify-between gap-3 px-3 py-2">
+                <dt className="shrink-0 text-slate-500">{label}</dt>
+                <dd className="text-right font-bold text-slate-800">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </ModalShell>
       )}
 
       {editingLot && (

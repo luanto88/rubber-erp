@@ -446,6 +446,27 @@ bộ đó đã **code xong và qua ≥1 vòng test tay** tính đến 2026-07-22
    `.claude/history/06-module-production-history-4.6.md` mục "Kế hoạch phiên sau (2026-07-21)"
    để có đầy đủ yêu cầu gốc trước khi sửa.
 
+## 4.7. Báo cáo lô sản xuất (F11) + bắt buộc & xác nhận ở Dự đoán số lô (2026-09-26)
+
+- **Báo cáo lô sản xuất** (`NMCB-QT01-F11`, mẫu `cung_cap_dl/NMCB-QT01-F11Báo cáo lô sản xuất.pdf`)
+  dựng ở `src/app/dashboard/product/confirm/lot-report-pdf.ts` (`buildLotReportPdf`) từ CHÍNH
+  `ShiftReportData` của phiếu F09 — không query thêm. Là file RIÊNG, không gộp vào F09.
+  - Mục 1: chỉ các lô **HOÀN THÀNH trong ngày báo cáo** (`lots.ngay_ht = ngày`, loại "Dở dang")
+    — lấy qua `loadCompletedLotsForDay` → `ShiftReportData.completedLots`. Lô mở hôm trước nhưng
+    tròn lô hôm nay VẪN có; lô mở hôm nay còn dở dang thì KHÔNG. Mỗi lô 1 dòng theo `num`; tên lô
+    bỏ đuôi năm (`1636cs/26` → `1636cs`); pallet gom từ `lot_transactions` của lô (mọi ngày), nối
+    `/`; ghi chú = `lots.ghi_chu`. Cuối bảng có dòng **"Tổng: N lô"**.
+  - Mục 2: `data.byGroup` = thành phẩm SẢN XUẤT trong ngày (theo giao dịch, như phiếu F09) + dòng
+    Cộng — cố ý khác phạm vi mục 1 (đúng mẫu giấy: 13-14 lô nhưng tổng 1.941 bành).
+  - Ô trùng dòng liền trên in dấu `"` (`applyDitto`) — không áp cho Số bành/Số kg.
+- `ShiftReportPreviewBar` giờ bắt buộc `lotDoc`/`lotFileName`: 2 nút chia sẻ ảnh riêng
+  ("Thành phẩm" / "Báo cáo lô") + 1 icon tải **cả 2 PDF**. 3 call site (product/page.tsx,
+  confirm/page.tsx ×2) dựng `lotDoc` cùng lúc với `doc`.
+- **Dự đoán số lô** (`predict/page.tsx`): Thảm là dropdown cứng `Cũ`/`Mới` (mặc định `Cũ`); Loại
+  bọc và Hậu tố bắt buộc — hậu tố KHÔNG còn tự chọn sẵn `cs`, state `null` = chưa chọn, "Trống
+  (không hậu tố)" là 1 lựa chọn rõ ràng. Nút "Tạo dự đoán" chỉ mở modal xác nhận liệt kê mọi lựa
+  chọn; "Xác nhận & tạo" mới gọi `handleCreate()`.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

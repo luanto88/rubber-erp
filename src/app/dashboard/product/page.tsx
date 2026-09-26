@@ -10,6 +10,7 @@ import {
   openShiftReportPdfInNewTab,
 } from "@/app/dashboard/product/confirm/shift-report-pdf";
 import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
+import { buildLotReportFileName, buildLotReportPdf } from "@/app/dashboard/product/confirm/lot-report-pdf";
 import {
   getActiveFactoryId,
   hasPermission,
@@ -1382,7 +1383,7 @@ export default function ProductPage() {
   const [pdfReportDate, setPdfReportDate] = useState<string | null>(null);
   const [pdfReportLoading, setPdfReportLoading] = useState(false);
   const [pdfReportError, setPdfReportError] = useState<string | null>(null);
-  const [pdfReportPreview, setPdfReportPreview] = useState<{ doc: jsPDF; fileName: string } | null>(null);
+  const [pdfReportPreview, setPdfReportPreview] = useState<{ doc: jsPDF; fileName: string; lotDoc: jsPDF; lotFileName: string } | null>(null);
   const nganMetaById = useMemo(() => {
     const map = new Map<string, Ngan>();
     ngans.forEach((ngan) => {
@@ -3210,8 +3211,10 @@ export default function ProductPage() {
       }
       const doc = await buildShiftReportPdf(data);
       const fileName = buildShiftReportFileName(data);
+      const lotDoc = await buildLotReportPdf(data);
+      const lotFileName = buildLotReportFileName(data);
       openShiftReportPdfInNewTab(doc);
-      setPdfReportPreview({ doc, fileName });
+      setPdfReportPreview({ doc, fileName, lotDoc, lotFileName });
     } catch (err) {
       setPdfReportError(err instanceof Error ? err.message : "Lỗi không xác định");
     } finally {
@@ -5588,7 +5591,7 @@ export default function ProductPage() {
               {pdfReportError}
             </div>
           ) : pdfReportPreview ? (
-            <ShiftReportPreviewBar doc={pdfReportPreview.doc} fileName={pdfReportPreview.fileName} />
+            <ShiftReportPreviewBar doc={pdfReportPreview.doc} fileName={pdfReportPreview.fileName} lotDoc={pdfReportPreview.lotDoc} lotFileName={pdfReportPreview.lotFileName} />
           ) : null}
         </ModalShell>
       )}

@@ -1358,6 +1358,20 @@ export type ShiftReportCaSection = {
   tongKg: number;
 };
 
+// 1 lô HOÀN THÀNH trong ngày báo cáo (lots.ngay_ht = ngày) — nguồn của mục 1 "Tên lô sản xuất"
+// trong Báo cáo lô sản xuất (F11). Khác `sections` (giao dịch phát sinh trong ngày): lô bắt đầu
+// từ hôm trước nhưng tròn lô hôm nay VẪN có mặt; lô mới mở hôm nay còn dở dang thì KHÔNG.
+export type CompletedLotRow = {
+  maLo: string;
+  num: number;
+  loaiCsr: string;
+  loaiBanh: number;
+  boc: string;
+  // Tập pallet khác nhau của các kiện (gom từ lot_transactions của lô, mọi ngày) — nối "/".
+  pallet: string;
+  ghiChu: string;
+};
+
 export type ShiftReportData = {
   ngay: string;
   soChiThi: string;
@@ -1365,7 +1379,72 @@ export type ShiftReportData = {
   tongBanh: number;
   tongKg: number;
   byGroup: ShiftReportGroupRow[];
+  completedLots: CompletedLotRow[];
 };
+
+function joinUniqueSlash(values: (string | null | undefined)[]): string {
+  const out: string[] = [];
+  for (const v of values) {
+    const t = (v || "").trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out.join("/");
+}
+
+// Lô hoàn thành (tròn lô) đúng ngày `ngaySx` — dựa trên lots.ngay_ht (do sync_lot_master_snapshot
+// ghi khi lô đủ kiện). Pallet/bọc gom từ giao dịch thật của lô để thấy đúng lô có kiện dùng pallet
+// khác nhau (lots.pallet chỉ là snapshot giao dịch cuối).
+async function loadCompletedLotsForDay(factoryId: string, ngaySx: string): Promise<CompletedLotRow[]> {
+  const supabase = getSupabaseAdmin();
+  const { data: lots, error } = await supabase
+    .from("lots")
+    .select("id,ma_lo,num,loai_csr,loai_banh,boc,pallet,ghi_chu,trang_thai")
+    .eq("factory_id", factoryId)
+    .eq("ngay_ht", ngaySx)
+    .order("num", { ascending: true })
+    .range(0, 999);
+  if (error) throw new Error(error.message);
+  const done = (lots || []).filter((l) => normalizeLotStatus(l.trang_thai) !== "Dở dang");
+  if (done.length === 0) return [];
+
+  const ids = done.map((l) => l.id as string);
+  const txByLot = new Map<string, { boc: string | null; pallet: string[] | null }[]>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const { data: txs, error: txErr } = await supabase
+      .from("lot_transactions")
+      .select("lot_id,boc,pallet,created_at")
+      .in("lot_id", chunk)
+      .order("created_at", { ascending: true })
+      .range(0, 999);
+    if (txErr) throw new Error(txErr.message);
+    for (const t of txs || []) {
+      const list = txByLot.get(t.lot_id) || [];
+      list.push({ boc: t.boc, pallet: t.pallet });
+      txByLot.set(t.lot_id, list);
+    }
+  }
+
+  // Trùng ma_lo (dữ liệu lịch sử bẩn) → giữ 1 dòng.
+  const seen = new Set<string>();
+  const rows: CompletedLotRow[] = [];
+  for (const l of done) {
+    if (!l.ma_lo || seen.has(l.ma_lo)) continue;
+    seen.add(l.ma_lo);
+    const txs = txByLot.get(l.id) || [];
+    const txPallets = txs.flatMap((t) => t.pallet || []);
+    rows.push({
+      maLo: l.ma_lo,
+      num: Number(l.num) || 0,
+      loaiCsr: l.loai_csr || "",
+      loaiBanh: Number(l.loai_banh) || 0,
+      boc: l.boc || joinUniqueSlash(txs.map((t) => t.boc)),
+      pallet: joinUniqueSlash(txPallets.length > 0 ? txPallets : l.pallet || []),
+      ghiChu: (l.ghi_chu || "").trim(),
+    });
+  }
+  return rows;
+}
 
 // Fallback A→B→C — chỉ dùng làm tie-breaker khi 2 ca có cùng (hoặc thiếu) mốc created_at sớm nhất
 // (về lý thuyết gần như không xảy ra vì created_at có độ chính xác mili-giây), KHÔNG còn là nguồn
@@ -1414,9 +1493,10 @@ function resolveCaName(names: Record<string, string>, ca: string): string {
 // trong 1 ngày (Ca A buổi sáng, Ca B buổi chiều xuyên đêm), phiếu gộp cả 2 vào cùng 1 lần in —
 // mỗi ca 1 bảng chi tiết riêng (section), 1 bảng "Tổng hợp" chung cho cả ngày.
 export async function loadShiftReportData(factoryId: string, ngaySx: string): Promise<ShiftReportData> {
-  const [rows, shiftNames] = await Promise.all([
+  const [rows, shiftNames, completedLots] = await Promise.all([
     loadDayTransactions(factoryId, ngaySx),
     loadFactoryShiftNames(factoryId),
+    loadCompletedLotsForDay(factoryId, ngaySx),
   ]);
   const nameMap = await resolveProfileNames(rows.map((r) => r.created_by || ""));
 
@@ -1568,6 +1648,7 @@ export async function loadShiftReportData(factoryId: string, ngaySx: string): Pr
     tongBanh: allRows.reduce((s, r) => s + r.soBanh, 0),
     tongKg: Math.round(allRows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
     byGroup: [...byGroupMap.values()].map((g) => ({ ...g, soKg: Math.round(g.soKg * 100) / 100 })),
+    completedLots,
   };
 }
 
