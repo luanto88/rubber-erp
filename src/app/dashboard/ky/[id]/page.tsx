@@ -22,6 +22,7 @@ type YeuCauKy = {
   id: string
   factory_id: string
   ma_ho_so: string | null
+  ban_ghi_id: string | null
   modun: string
   loai_tai_lieu: string
   file_hien_tai: string | null
@@ -138,13 +139,12 @@ export default function SignScreenPage() {
   const [mySigUrl, setMySigUrl] = useState("")
 
   const loadData = useCallback(async (uid: string) => {
-    // Tải signed URL cho chữ ký của người ký hiện tại (để preview trong khung ký)
-    try {
-      const sigRes = await fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(uid)}`)
-      if (sigRes.ok && sigRes.url) {
-        setMySigUrl(sigRes.url)
-      }
-    } catch { /* Chưa có chữ ký hoặc lỗi mạng — fallback hiển thị nhãn */ }
+    // Tải signed URL chữ ký của người ký hiện tại (chỉ để preview trong khung ký) — chạy SONG
+    // SONG, không chặn phần còn lại. Trước đây await tuần tự ở đầu hàm, cộng thêm 1 round-trip
+    // vào thời gian mở màn ký (đặc biệt chậm khi mở từ link Telegram, bug báo 2026-09-26).
+    void fetchSecureUrl(`/api/account/signature-url?userId=${encodeURIComponent(uid)}`)
+      .then((sigRes) => { if (sigRes.ok && sigRes.url) setMySigUrl(sigRes.url) })
+      .catch(() => { /* Chưa có chữ ký hoặc lỗi mạng — fallback hiển thị nhãn */ })
 
     const { data: ycData, error: ycErr } = await supabase
       .from("yeu_cau_ky")
@@ -158,8 +158,9 @@ export default function SignScreenPage() {
     }
 
     // Nếu ma_ho_so đang là UUID (do bản ghi cũ hoặc lưu id kỹ thuật), tự động phân giải sang nhãn nghiệp vụ
-    let currentMaHoSo = ycData.ma_ho_so as string | null
-    if (currentMaHoSo && isUuid(currentMaHoSo)) {
+    const resolveMaHoSo = async (): Promise<string | null> => {
+      let currentMaHoSo = ycData.ma_ho_so as string | null
+      if (!currentMaHoSo || !isUuid(currentMaHoSo)) return currentMaHoSo
       const targetId = (ycData.ban_ghi_id as string | null) || currentMaHoSo
       if (ycData.modun === "maintenance" && targetId) {
         try {
@@ -191,37 +192,33 @@ export default function SignScreenPage() {
           }
         } catch { /* fallback */ }
       }
-      if (currentMaHoSo && isUuid(currentMaHoSo)) {
-        currentMaHoSo = null
-      }
-      ycData.ma_ho_so = currentMaHoSo
+      return currentMaHoSo && isUuid(currentMaHoSo) ? null : currentMaHoSo
     }
 
+    // Nhãn hồ sơ và danh sách người ký độc lập nhau → chạy song song.
+    const [resolvedMaHoSo, nkRes] = await Promise.all([
+      resolveMaHoSo(),
+      supabase
+        .from("nguoi_ky")
+        .select("*")
+        .eq("yeu_cau_id", yeuCauId)
+        .order("thu_tu", { ascending: true }),
+    ])
+    ycData.ma_ho_so = resolvedMaHoSo
     setYeuCau(ycData as YeuCauKy)
 
-    const { data: nkData } = await supabase
-      .from("nguoi_ky")
-      .select("*")
-      .eq("yeu_cau_id", yeuCauId)
-      .order("thu_tu", { ascending: true })
-    const signers = (nkData || []) as NguoiKy[]
+    const signers = (nkRes.data || []) as NguoiKy[]
     setNguoiKyList(signers)
 
     if (signers.length) {
-      const { data: tkData } = await supabase
-        .from("truong_ky")
-        .select("*")
-        .in("nguoi_ky_id", signers.map((s) => s.id))
-        .order("trang", { ascending: true })
-      setTruongKyList((tkData || []) as TruongKy[])
-
       // `profiles` RLS chỉ cho đọc đúng dòng của chính mình — không query trực tiếp
       // được tên của những người ký KHÁC, phải qua route service-role riêng (đã xác
       // thực người gọi thật sự liên quan tới đúng yeu_cau_id).
-      try {
-        const { data: sessionData } = await supabase.auth.getSession()
-        const accessToken = sessionData.session?.access_token
-        if (accessToken) {
+      const loadParticipants = async () => {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession()
+          const accessToken = sessionData.session?.access_token
+          if (!accessToken) return
           const res = await fetch(`/api/signing/participants?yeuCauId=${yeuCauId}`, {
             headers: { Authorization: `Bearer ${accessToken}` },
           })
@@ -237,8 +234,17 @@ export default function SignScreenPage() {
               setYeuCau((prev) => (prev ? { ...prev, ma_ho_so: json.maHoSo } : null))
             }
           }
-        }
-      } catch { /* tên hiển thị "—" nếu route lỗi — không chặn xem/ký */ }
+        } catch { /* tên hiển thị "—" nếu route lỗi — không chặn xem/ký */ }
+      }
+      const [tkRes] = await Promise.all([
+        supabase
+          .from("truong_ky")
+          .select("*")
+          .in("nguoi_ky_id", signers.map((s) => s.id))
+          .order("trang", { ascending: true }),
+        loadParticipants(),
+      ])
+      setTruongKyList((tkRes.data || []) as TruongKy[])
     }
     setLoading(false)
   }, [yeuCauId])
@@ -246,7 +252,17 @@ export default function SignScreenPage() {
   useEffect(() => {
     let cancelled = false
     const bootstrap = async () => {
-      const { user } = await hydrateActiveSession()
+      // Layout dashboard vừa hydrate xong phiên và ghi `erp_user` trước khi mount trang này
+      // (trang ký chỉ render khi layout đã có user) — đọc lại cache thay vì hydrate LẦN 2 (4-5
+      // truy vấn thừa nối tiếp, nguyên nhân chính làm mở link từ Telegram chậm). Chỉ fallback
+      // hydrate đầy đủ khi cache thiếu/hỏng.
+      let user: SessionUser | null = null
+      try {
+        const raw = window.localStorage.getItem("erp_user")
+        const parsed = raw ? (JSON.parse(raw) as SessionUser) : null
+        if (parsed?.id) user = parsed
+      } catch { /* cache hỏng → hydrate */ }
+      if (!user) user = (await hydrateActiveSession()).user
       if (cancelled) return
       if (!user) {
         setError("Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.")
@@ -259,6 +275,15 @@ export default function SignScreenPage() {
     void bootstrap()
     return () => { cancelled = true }
   }, [loadData])
+
+  // Mạng chậm/treo: sau 15s vẫn đang tải thì hiện nút "Tải lại" thay vì spinner vô hạn (trước
+  // đây người dùng phải tự thoát ra rồi bấm lại link Telegram).
+  const [slowLoad, setSlowLoad] = useState(false)
+  useEffect(() => {
+    if (!loading) return
+    const t = window.setTimeout(() => setSlowLoad(true), 15_000)
+    return () => window.clearTimeout(t)
+  }, [loading])
 
   const myNguoiKy = useMemo(
     () => (me ? nguoiKyList.find((n) => n.user_id === me.id) ?? null : null),
@@ -344,26 +369,33 @@ export default function SignScreenPage() {
         if (cancelled) return
         setNumPages(pdf.numPages)
 
-        const dims: Record<number, { w: number; h: number }> = {}
-        const images: Record<number, string> = {}
-        const renderScale = 2 // độ phân giải cao để chữ sắc nét khi ảnh bị co lại vừa khung hiển thị
+        // Render DẦN từng trang: ảnh trang nào xong hiện ngay trang đó (trước đây đợi render hết
+        // mọi trang ở scale 2 mới hiện 1 lần — PDF nhiều trang trên điện thoại rất lâu mới thấy
+        // gì). Scale bám theo mật độ điểm ảnh thật, trần 2; màn hẹp dùng 1.5 cho nhẹ bộ nhớ.
+        const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1
+        const narrow = typeof window !== "undefined" && window.innerWidth < 768
+        const renderScale = Math.max(1.25, Math.min(narrow ? 1.5 : 2, dpr * 1.25))
         for (let p = 1; p <= pdf.numPages; p++) {
+          if (cancelled) return
           const page = await pdf.getPage(p)
           const dimVp = page.getViewport({ scale: 1 })
-          dims[p] = { w: dimVp.width, h: dimVp.height }
+          const dim = { w: dimVp.width, h: dimVp.height }
+          setPageDims((prev) => ({ ...prev, [p]: dim }))
           const viewport = page.getViewport({ scale: renderScale })
           const canvas = document.createElement("canvas")
           canvas.width = Math.floor(viewport.width)
           canvas.height = Math.floor(viewport.height)
           const ctx = canvas.getContext("2d")
           if (!ctx) continue
+          // JPEG không có kênh alpha → phải tô nền trắng trước, nếu không vùng trong suốt thành đen.
+          ctx.fillStyle = "#ffffff"
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await page.render({ canvasContext: ctx, viewport } as any).promise
-          images[p] = canvas.toDataURL("image/png")
+          if (cancelled) return
+          const url = canvas.toDataURL("image/jpeg", 0.9)
+          setPageImages((prev) => ({ ...prev, [p]: url }))
         }
-        if (cancelled) return
-        setPageDims(dims)
-        setPageImages(images)
       } catch {
         if (!cancelled) setPdfLoadError("Không hiển thị được nội dung file — vẫn có thể ký bình thường.")
       }
@@ -611,8 +643,19 @@ export default function SignScreenPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-50 px-4 text-center">
         <Loader2 className="animate-spin text-emerald-600" size={32} />
+        {slowLoad && (
+          <>
+            <p className="text-sm text-slate-500">Tải hồ sơ đang lâu hơn bình thường (mạng chậm?).</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-bold text-white hover:bg-emerald-700"
+            >
+              Tải lại
+            </button>
+          </>
+        )}
       </div>
     )
   }
@@ -630,6 +673,31 @@ export default function SignScreenPage() {
     )
   }
 
+  // "Đóng": router.back() chỉ chạy được khi có trang trước CÙNG app (vào từ badge/chuông). Mở từ
+  // link Telegram/email/tab mới thì không có lịch sử → back() không làm gì (bug báo 2026-09-26).
+  // Khi đó điều hướng thẳng về màn nghiệp vụ của đúng module.
+  const handleClose = () => {
+    let sameOriginReferrer = false
+    try {
+      sameOriginReferrer =
+        !!document.referrer && new URL(document.referrer).origin === window.location.origin
+    } catch { /* referrer dị dạng */ }
+    if (sameOriginReferrer && window.history.length > 1) {
+      router.back()
+      return
+    }
+    const banGhiId = yeuCau.ban_ghi_id
+    const returnUrl =
+      yeuCau.modun === "maintenance"
+        ? (banGhiId ? `/dashboard/maintenance/records/${banGhiId}` : "/dashboard/maintenance/records")
+        : yeuCau.modun === "dispatch"
+          ? "/dashboard/dispatch"
+          : yeuCau.modun === "quality"
+            ? "/dashboard/quality"
+            : "/dashboard"
+    router.push(returnUrl)
+  }
+
   const statusBadge =
     yeuCau.trang_thai === "hoan_tat"
       ? "Đã hoàn tất"
@@ -642,7 +710,7 @@ export default function SignScreenPage() {
   return (
     <div className="flex h-screen flex-col bg-[#f2f8f5]">
       {/* Topbar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-br from-[#2f5d52] to-[#1c3a32] px-5 py-3.5 text-white">
+      <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-[#3f7f6f] via-[#4a917f] to-[#5fa593] px-5 py-3.5 text-white shadow-sm">
         <div className="flex min-w-[220px] flex-col gap-1">
           <div className="text-[11px] opacity-75">
             Hệ thống ký số dùng chung · {modunLabel(yeuCau.modun)}
@@ -660,7 +728,7 @@ export default function SignScreenPage() {
           </div>
         </div>
         <button
-          onClick={() => router.back()}
+          onClick={handleClose}
           className="rounded-xl border border-white/35 bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20"
         >
           Đóng

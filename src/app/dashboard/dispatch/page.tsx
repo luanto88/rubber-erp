@@ -11,6 +11,7 @@ import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTri
 import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { DispatchSignModal } from "@/app/dashboard/dispatch/_components/dispatch-sign-modal"
 import { DispatchSignStatusBadge, type DispatchSigningStatus } from "@/app/dashboard/dispatch/_components/dispatch-sign-status"
+import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
 import { EMPTY_NOTE_FILTER, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
@@ -23,7 +24,7 @@ import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-se
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye, Loader2 } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye, Loader2, AlertTriangle } from "lucide-react"
 
 // Types
 type DxRow = {
@@ -731,6 +732,10 @@ export default function DispatchPage() {
   // Cờ "đã tải xong trạng thái ký lần đầu" — tránh nút Sửa/Xóa hiện ra rồi mới ẩn khi phát hiện
   // phiếu đã "Đã ký duyệt" (race condition đã báo 2026-08-31, mirror đúng cách xử lý ở Kiểm nghiệm).
   const [signingStatusLoaded, setSigningStatusLoaded] = useState(false)
+  // Lỗi tải trạng thái ký: GIỮ map cũ + nút thử lại, KHÔNG coi như "chưa gửi ký" — trước đây lỗi
+  // bị nuốt, map rỗng → badge sai và nút PDF render bản CHƯA ký (bug báo 2026-09-26).
+  const [signingStatusError, setSigningStatusError] = useState(false)
+  const signingReqSeq = useRef(0)
   const [signModalEntry, setSignModalEntry] = useState<DispatchEntry | null>(null)
 
   // "Gắn bản ghi tại chỗ" — gợi ý gắn phiếu vừa lưu vào công việc KPI đang mở hôm nay
@@ -937,29 +942,35 @@ export default function DispatchPage() {
     void loadData(factoryId, deliveryPoints)
   }, [deliveryPoints, factoryId, loadData])
 
-  // Ký duyệt bảng phân xe — tải trạng thái yeu_cau_ky cho các phiếu đang hiển thị. Lỗi
-  // bị nuốt êm vì badge chỉ là tiện ích hiển thị thêm, không được chặn danh sách chính.
+  // Ký duyệt bảng phân xe — tải trạng thái yeu_cau_ky cho các phiếu đang hiển thị. Gửi id qua
+  // POST body (danh sách dài không vỡ URL); lỗi thì giữ dữ liệu cũ + báo "Thử lại"; bỏ qua
+  // response về muộn của lần gọi trước.
   const loadSigningStatus = useCallback(async (fid: string, entryIds: string[]) => {
-    if (!entryIds.length) { setSigningStatusByEntry(new Map()); setSigningStatusLoaded(true); return }
-    try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const accessToken = sessionData.session?.access_token
-      if (!accessToken) return
-      const res = await fetch(`/api/dispatch/signing-status?factoryId=${fid}&entryIds=${entryIds.join(",")}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
-      if (!res.ok) return
-      const rows = (await res.json()) as DispatchSigningStatus[]
-      setSigningStatusByEntry(new Map(rows.map((r) => [r.entryId, r])))
-    } catch {
-      // im lặng
-    } finally {
+    const seq = ++signingReqSeq.current
+    if (!entryIds.length) {
+      setSigningStatusByEntry(new Map())
+      setSigningStatusError(false)
       setSigningStatusLoaded(true)
+      return
+    }
+    try {
+      const rows = await fetchSigningStatusList<DispatchSigningStatus>(
+        "/api/dispatch/signing-status",
+        { factoryId: fid, entryIds },
+      )
+      if (seq !== signingReqSeq.current) return
+      setSigningStatusByEntry(new Map(rows.map((r) => [r.entryId, r])))
+      setSigningStatusError(false)
+    } catch {
+      if (seq !== signingReqSeq.current) return
+      setSigningStatusError(true)
+    } finally {
+      if (seq === signingReqSeq.current) setSigningStatusLoaded(true)
     }
   }, [])
 
   useEffect(() => {
-    if (!factoryId || !entries.length) return
+    if (!factoryId) return
     void loadSigningStatus(factoryId, entries.map((e) => e.id))
   }, [factoryId, entries, loadSigningStatus])
   const filterRowsByActiveFilters = useCallback((rows: DxRow[] = []) => {
@@ -1896,6 +1907,13 @@ export default function DispatchPage() {
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       {!signingStatusLoaded ? (
                         <Loader2 size={14} className="animate-spin text-slate-300"/>
+                      ) : signingStatusError && !signingStatusByEntry.get(entry.id) ? (
+                        <button
+                          onClick={() => { if (factoryId) void loadSigningStatus(factoryId, entries.map((e) => e.id)) }}
+                          title="Không tải được trạng thái ký — bấm để thử lại"
+                          className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-50">
+                          <AlertTriangle size={14}/> Thử lại
+                        </button>
                       ) : currentUser && (
                         <DispatchSignStatusBadge
                           status={signingStatusByEntry.get(entry.id)}
@@ -1927,6 +1945,10 @@ export default function DispatchPage() {
                               <Download size={14}/>
                             </a>
                           </>
+                        ) : signingStatusError ? (
+                          // Không biết phiếu đã ký hay chưa → KHÔNG render bản chưa ký (dễ nhầm với
+                          // file đã ký, đúng bug báo 2026-09-26).
+                          <span className="p-1.5 text-slate-300" title="Chưa tải được trạng thái ký"><FileText size={14}/></span>
                         ) : (
                           <button onClick={(e) => { e.stopPropagation(); exportEntryPdf(entry) }}
                             className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF (chưa ký)">
@@ -1937,13 +1959,13 @@ export default function DispatchPage() {
                           className="p-1.5 hover:bg-violet-50 text-violet-500 rounded-lg transition-colors" title="Nhân bản phiếu này">
                           <Copy size={14}/>
                         </button>
-                        {hasPermission(currentUser, "dispatch.edit") && canOwnerEditEntry && signingStatusLoaded && !isEntryLocked && (
+                        {hasPermission(currentUser, "dispatch.edit") && canOwnerEditEntry && signingStatusLoaded && !signingStatusError && !isEntryLocked && (
                           <button onClick={(e) => { e.stopPropagation(); openEdit(entry) }}
                             className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
                             <Edit2 size={14}/>
                           </button>
                         )}
-                        {hasPermission(currentUser, "dispatch.delete") && canOwnerEditEntry && signingStatusLoaded && !isEntryLocked && (
+                        {hasPermission(currentUser, "dispatch.delete") && canOwnerEditEntry && signingStatusLoaded && !signingStatusError && !isEntryLocked && (
                           <button onClick={(e) => { e.stopPropagation(); setDelConfirm(entry.id) }}
                             className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors" title="Xóa">
                             <Trash2 size={14}/>
@@ -2006,6 +2028,7 @@ export default function DispatchPage() {
     const canEditSelected = !!currentUser && hasPermission(currentUser, "dispatch.edit") &&
       (currentUser.role === "admin" || selected.created_by === currentUser.id) &&
       signingStatusLoaded &&
+      !signingStatusError &&
       !(currentUser.role !== "admin" && signingStatusByEntry.get(selected.id)?.trangThai === "hoan_tat")
     return (
     <div>

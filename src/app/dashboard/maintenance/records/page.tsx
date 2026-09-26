@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Calendar, ChevronDown, Download, Eye, FileText, Filter, Loader2, Plus, Printer, Search, Wrench, X } from "lucide-react"
+import { AlertTriangle, Calendar, ChevronDown, Download, Eye, FileText, Filter, Loader2, Plus, Printer, Search, Wrench, X } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { buildStorageDownloadUrl } from "@/lib/storage-download"
@@ -15,6 +15,7 @@ import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-sele
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "./_components/maintenance-sign-status"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
+import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
 
 type RecordRow = {
   id: string
@@ -59,6 +60,9 @@ export default function MaintenanceRecordsPage() {
   const [records, setRecords] = useState<RecordRow[]>([])
   const [signingStatusByRecord, setSigningStatusByRecord] = useState<Map<string, MaintenanceSigningStatus>>(new Map())
   const [signingStatusLoaded, setSigningStatusLoaded] = useState(false)
+  // Lỗi tải trạng thái ký: GIỮ map cũ + nút thử lại, không coi như "chưa gửi ký" (bug 2026-09-26).
+  const [signingStatusError, setSigningStatusError] = useState(false)
+  const signingReqSeq = useRef(0)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
   useEffect(() => {
@@ -201,28 +205,31 @@ export default function MaintenanceRecordsPage() {
   // signing-status?...&entryIds=...`). Chỉ gửi id của các biên bản CÓ bundle ký số (loại trừ
   // hạng mục khác Sửa chữa/Bảo dưỡng — không có luồng ký).
   const loadSigningStatuses = useCallback(async (fid: string, recs: RecordRow[]) => {
+    const seq = ++signingReqSeq.current
     const ids = recs.filter((r) => resolveSignBundle(r)).map((r) => r.id)
     if (ids.length === 0) {
       setSigningStatusByRecord(new Map())
+      setSigningStatusError(false)
       setSigningStatusLoaded(true)
       return
     }
     setSigningStatusLoaded(false)
     try {
-      const { data: sessionData } = await supabase.auth.getSession()
-      const accessToken = sessionData.session?.access_token
-      if (!accessToken) { setSigningStatusLoaded(true); return }
-      const res = await fetch(`/api/maintenance/signing-status?factoryId=${fid}&recordIds=${ids.join(",")}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
-      const json = (await res.json()) as MaintenanceSigningStatus[] | { error?: string }
+      // POST body — danh sách dài (bộ lọc ngày rộng) không còn vỡ giới hạn URL.
+      const list = await fetchSigningStatusList<MaintenanceSigningStatus>(
+        "/api/maintenance/signing-status",
+        { factoryId: fid, recordIds: ids },
+      )
+      if (seq !== signingReqSeq.current) return // response cũ về muộn — bỏ qua
       const map = new Map<string, MaintenanceSigningStatus>()
-      if (Array.isArray(json)) for (const s of json) map.set(s.recordId, s)
+      for (const s of list) map.set(s.recordId, s)
       setSigningStatusByRecord(map)
+      setSigningStatusError(false)
     } catch {
-      // Badge chỉ là thông tin phụ — lỗi tải không được chặn danh sách biên bản.
+      if (seq !== signingReqSeq.current) return
+      setSigningStatusError(true)
     } finally {
-      setSigningStatusLoaded(true)
+      if (seq === signingReqSeq.current) setSigningStatusLoaded(true)
     }
   }, [])
 
@@ -554,6 +561,17 @@ export default function MaintenanceRecordsPage() {
                       if (!bundle) return <span className="text-xs text-slate-300">—</span>
                       if (!signingStatusLoaded) return <Loader2 size={14} className="animate-spin text-slate-300" />
                       const status = signingStatusByRecord.get(r.id)
+                      if (!status && signingStatusError) {
+                        return (
+                          <button
+                            onClick={() => { if (factoryId) void loadSigningStatuses(factoryId, records) }}
+                            title="Không tải được trạng thái ký — bấm để thử lại"
+                            className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-50"
+                          >
+                            <AlertTriangle size={14} /> Thử lại
+                          </button>
+                        )
+                      }
                       return (
                         <div className="flex items-center gap-1.5">
                           {status?.fileHienTai ? (

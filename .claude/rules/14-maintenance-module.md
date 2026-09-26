@@ -1230,3 +1230,13 @@ Chỉ `order-files` dính (đúng các module cho `accept="image/*"` hoặc khô
 Sau khi chuyển đổi, `order-files` còn 6.021 JPEG + 59 PNG + 1 WebP + **40 tệp `%PDF`** — 40 tệp
 này là **nhãn lô in ra** (`product-predict/.../*-large.pdf`), không phải ảnh hỏng; script báo
 "không nhận ra" là đúng (chúng không phải ảnh) — **không cần xử lý gì**.
+
+## Cập nhật 2026-09-26 — Thông báo ký nêu đích danh + màn ký mở từ link ngoài
+
+- `src/lib/signing/notify.ts`: Telegram/email (kênh chung) tiêu đề "Đến lượt {tên} ký hồ sơ" /
+  "Hồ sơ chờ {tên} ký" (tra `profiles` của người nhận); chuông in-app (cá nhân) giữ chữ "bạn".
+- `dashboard/ky/[id]/page.tsx`: đọc `erp_user` từ cache thay vì hydrate lần 2; tải dữ liệu song
+  song; PDF render dần từng trang (JPEG, nền trắng); sau 15s hiện "Tải lại"; nút "Đóng" dùng
+  `router.back()` chỉ khi có trang trước cùng origin, ngược lại về màn nghiệp vụ của module (mở từ
+  Telegram trước đây bấm Đóng không phản hồi). Header đổi gradient xanh dịu `#3f7f6f→#5fa593`.
+- Cột "Ký duyệt" Bảo trì: cùng cơ chế chống lỗi như Điều xe (xem rule 19, mục 2026-09-26).

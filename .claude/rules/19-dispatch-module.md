@@ -225,3 +225,16 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - Kỹ thuật định vị dropdown: vì ô này nằm trong `<td>` của bảng có thể cuộn ngang/nhiều dòng, `RequiredNoteSelect` dùng `createPortal` + `position: fixed` (mirror đúng kỹ thuật của `SmartMultiSelect` đã có sẵn trong file này) để panel không bị cắt hình bởi bảng — không dùng `position: absolute` kiểu `FilterMultiSelect` (sẽ bị kẹt trong vùng nhìn thấy của dòng/bảng).
 - Filter "Ghi chú" (`filterGhiChu`, `<select>` Pattern A ở tab Danh sách/Thống kê) **không đổi** — vẫn build option từ `required_notes` như cũ, không liên quan tới thay đổi này.
 - `tripNoteOptions` trong module Kho nguyên liệu (`storage/page.tsx`, phần "Chuyến xe từ Điều xe" khi tạo/sửa ngăn) đổi nguồn thành hợp `required_notes ∪ giá trị lịch sử còn tồn tại trong dữ liệu điều xe` — xem `.claude/rules/storage.md` mục liên quan.
+
+## Cập nhật 2026-09-26 — Phiếu điều xe ngày gọn 1 trang + trạng thái ký ổn định
+
+- `buildDispatchEntryDoc` (`src/lib/dispatch-pdf.ts`): bảng thông tin 2 dòng × 8 cột; bảng chuyến
+  bỏ cột "Xử lý", Tài xế/Đội/Điểm GN/Phiên 1 dòng (`ellipsize`), Lô thu hoạch tối đa 2 dòng
+  (`clampLines`), Tươi/Khô tách theo loại nguyên liệu CÓ dữ liệu trong ngày (header 2 tầng) + dòng
+  TỔNG. Tự thử 3 mức mật độ (`ENTRY_DENSITY`) để khối ký nằm cùng trang; bảng dài hơn 1 trang thì
+  giữ mức thoáng nhất. Đã kiểm bằng code thật: 16 chuyến (mã lô 2 dòng) vẫn 1 trang.
+- Ký số: `maHoSo` = `entry.ma_dx` (trước là ngày → 2 phiếu cùng ngày đụng unique index
+  `uniq_yeu_cau_ky_active_business_key`).
+- Cột "Ký duyệt": route `signing-status` nhận POST body, chia lô 100 (`src/app/api/signing/_lib/
+  status-query.ts`), lỗi phiên trả 401. Client dùng `fetchSigningStatusList()` — lỗi thì GIỮ map cũ
+  + nút "Thử lại", không render bản PDF chưa ký, không mở Sửa/Xóa khi chưa biết trạng thái ký.

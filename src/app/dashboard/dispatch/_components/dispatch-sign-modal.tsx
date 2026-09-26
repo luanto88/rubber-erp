@@ -121,7 +121,11 @@ export function DispatchSignModal({
           factoryId,
           modun: "dispatch",
           loaiTaiLieu: "dispatch_bang_phan_xe",
-          maHoSo: formatDispatchDate(entry.ngay) || entry.id,
+          // Mã ĐX (vd DX-250926/1) — duy nhất theo phiếu. KHÔNG dùng ngày: 2 phiếu cùng ngày sẽ
+          // đụng unique index `uniq_yeu_cau_ky_active_business_key` (factory, modun, loại, ma_ho_so)
+          // → phiếu thứ 2 không gửi ký được. Bản ghi khóa theo `ban_ghi_id` nên không ảnh hưởng
+          // các yêu cầu cũ đã lưu ma_ho_so = ngày.
+          maHoSo: entry.ma_dx || formatDispatchDate(entry.ngay) || entry.id,
           banGhiId: entry.id,
           fileBase64: bytesToBase64(bytes),
           fileExt: "pdf",

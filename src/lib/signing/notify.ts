@@ -66,8 +66,23 @@ type NotifyContext = {
   actorName: string
   factoryName: string
   recipients: string[]
+  /** Tên người nhận (nối ", ") — dùng cho kênh NHÓM (Telegram/email) để biết tới lượt ai. */
+  recipientNames: string
   lyDo?: string | null
   buoc?: number | null
+}
+
+/**
+ * Tiêu đề cho kênh gửi CHUNG (Telegram nhóm, email nhiều người nhận): nêu đích danh người phải
+ * ký thay vì "bạn" — tin vào nhóm chung mà ghi "Đến lượt bạn" thì không ai biết tới lượt ai.
+ * Chuông in-app (cá nhân) vẫn dùng `EVENT_TITLE` với chữ "bạn".
+ */
+function groupTitle(ctx: NotifyContext): string {
+  const who = ctx.recipientNames
+  if (!who) return EVENT_TITLE[ctx.event]
+  if (ctx.event === "ky_buoc") return `Đến lượt ${who} ký hồ sơ`
+  if (ctx.event === "tao_yeu_cau") return `Hồ sơ chờ ${who} ký`
+  return EVENT_TITLE[ctx.event]
 }
 
 function errMsg(e: unknown): string {
@@ -130,11 +145,14 @@ async function sendTelegram(ctx: NotifyContext): Promise<void> {
   // BẮT BUỘC escape mọi giá trị đến từ DB: parse_mode="HTML" gặp ký tự & < > chưa escape sẽ trả
   // HTTP 400 "can't parse entities" và mất trắng cả tin nhắn, không chỉ hỏng định dạng.
   const lines = [
-    `🔔 <b>${escapeHtml(EVENT_TITLE[ctx.event])}</b>`,
+    `🔔 <b>${escapeHtml(groupTitle(ctx))}</b>`,
     ``,
     `🏭 ${escapeHtml(ctx.factoryName)}`,
     `📄 ${escapeHtml(ctx.docLabel)}`,
     `👤 ${escapeHtml(ctx.actorName)}`,
+    (ctx.event === "tra_ve" || ctx.event === "hoan_tat") && ctx.recipientNames
+      ? `📨 Người nhận: ${escapeHtml(ctx.recipientNames)}`
+      : null,
     ctx.event === "tra_ve" && ctx.lyDo ? `⚠️ Lý do: ${escapeHtml(ctx.lyDo)}` : null,
     ``,
     `<a href="${APP_URL}${signLink(ctx.yeuCauId)}">📎 Mở hồ sơ ký</a>`,
@@ -179,7 +197,7 @@ async function sendEmail(ctx: NotifyContext): Promise<void> {
     return
   }
 
-  const title = EVENT_TITLE[ctx.event]
+  const title = groupTitle(ctx)
   const color = EVENT_COLOR[ctx.event]
   const lyDoRow =
     ctx.event === "tra_ve" && ctx.lyDo
@@ -196,6 +214,7 @@ async function sendEmail(ctx: NotifyContext): Promise<void> {
     <table style="width:100%;border-collapse:collapse;font-size:14px">
       <tr><td style="padding:4px 0;color:#64748b;width:150px">Hồ sơ:</td><td style="padding:4px 8px;font-weight:600">${escapeHtml(ctx.docLabel)}</td></tr>
       <tr><td style="padding:4px 0;color:#64748b">Người thực hiện:</td><td style="padding:4px 8px">${escapeHtml(ctx.actorName)}</td></tr>
+      ${ctx.recipientNames ? `<tr><td style="padding:4px 0;color:#64748b">Người nhận:</td><td style="padding:4px 8px">${escapeHtml(ctx.recipientNames)}</td></tr>` : ""}
       ${lyDoRow}
     </table>
   </div>
@@ -282,11 +301,19 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
   )
   if (!recipients.length) return
 
-  const [actorRes, factoryRes] = await Promise.all([
+  const [actorRes, factoryRes, recipientRes] = await Promise.all([
     supabase.from("profiles").select("full_name, username").eq("id", plan.actorUserId).maybeSingle(),
     supabase.from("factories").select("name").eq("id", yeuCau.factory_id).maybeSingle(),
+    supabase.from("profiles").select("id, full_name, username").in("id", recipients),
   ])
   const actor = actorRes.data as { full_name?: string | null; username?: string | null } | null
+  const recipientNameById = new Map<string, string>()
+  for (const p of (recipientRes.data || []) as { id: string; full_name?: string | null; username?: string | null }[]) {
+    const name = (p.full_name || p.username || "").trim()
+    if (name) recipientNameById.set(p.id, name)
+  }
+  // Giữ đúng thứ tự người nhận (thứ tự ký) khi ghép tên.
+  const recipientNames = recipients.map((id) => recipientNameById.get(id)).filter(Boolean).join(", ")
 
   const ctx: NotifyContext = {
     event: plan.event,
@@ -303,6 +330,7 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
     actorName: actor?.full_name || actor?.username || "Người dùng",
     factoryName: ((factoryRes.data as { name?: string } | null)?.name as string) || "Nhà máy",
     recipients,
+    recipientNames,
     lyDo: plan.lyDo,
     buoc: plan.buoc,
   }

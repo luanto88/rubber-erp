@@ -283,21 +283,6 @@ function materialRows(trip: DispatchFlatTrip) {
   ]
 }
 
-function buildDispatchEntrySummaryRows(trips: DispatchFlatTrip[], entry: DispatchAnalyticsEntry) {
-  const vehicleCount = new Set(trips.map((trip) => trip.so_xe).filter(Boolean)).size
-  const driverCount = new Set(trips.map((trip) => trip.tai_xe).filter(Boolean)).size
-  const totalKm = trips.reduce((sum, trip) => sum + (trip.totalKm || 0), 0)
-  const totalTuoi = trips.reduce((sum, trip) => sum + (trip.totalTuoi || 0), 0)
-  const totalKho = trips.reduce((sum, trip) => sum + (trip.totalKho || 0), 0)
-
-  return [
-    ["Mã ĐX", entry.ma_dx || "-", "Số chuyến", String(trips.length)],
-    ["Số xe", String(vehicleCount), "Tài xế", String(driverCount)],
-    ["Tổng Km", formatKm(totalKm), "Tươi (kg)", formatKg(totalTuoi)],
-    ["Chứng nhận", entry.chung_nhan || "-", "Khô (kg)", formatKg(totalKho)],
-  ]
-}
-
 export async function downloadDispatchTripPdf(trip: DispatchFlatTrip, factoryName: string, makerName?: string) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
@@ -333,54 +318,196 @@ export async function downloadDispatchTripPdf(trip: DispatchFlatTrip, factoryNam
   doc.save(`phieu-dieu-xe-${safeName(trip.maDx || trip.ngay)}-${safeName(trip.so_xe || "xe")}-chuyen-${trip.chuyen || 1}.pdf`)
 }
 
+// Các loại nguyên liệu của phiếu điều xe ngày — chỉ loại CÓ dữ liệu trong ngày mới thành cột.
+const ENTRY_MATERIALS = [
+  { key: "mn", label: "Nước" },
+  { key: "ct", label: "Chén" },
+  { key: "dct", label: "Đông chén" },
+  { key: "dkt", label: "Đông khối" },
+  { key: "dt", label: "Dây" },
+] as const
+type EntryMaterialKey = (typeof ENTRY_MATERIALS)[number]["key"]
+type EntryMaterials = ReturnType<typeof getTripTotals>["materials"]
+
+function materialValue(materials: EntryMaterials, key: EntryMaterialKey, kind: "Tuoi" | "Kho"): number {
+  return Number((materials as unknown as Record<string, number>)[`${key}${kind}`] || 0)
+}
+
+/** Cắt chuỗi cho vừa tối đa `maxLines` dòng ở bề rộng `widthMm`, dòng cuối thêm "…" nếu bị cắt. */
+function clampLines(doc: jsPDF, text: string, widthMm: number, maxLines: number): string {
+  const lines = doc.splitTextToSize(text, widthMm) as string[]
+  if (lines.length <= maxLines) return lines.join("\n")
+  const kept = lines.slice(0, maxLines)
+  let last = kept[maxLines - 1]
+  while (last.length > 1 && doc.getTextWidth(`${last}…`) > widthMm) last = last.slice(0, -1)
+  kept[maxLines - 1] = `${last.trimEnd()}…`
+  return kept.join("\n")
+}
+
+// Khối ký (nhãn + khung 18mm + tên) cần ~26mm tính từ startY, và không được chạm dòng
+// "Trang i/N" ở chân trang (y = pageH - 8). Vượt ngưỡng này thì khối ký phải sang trang mới.
+const ENTRY_SIGNATURE_GAP_MM = 7
+const ENTRY_SIGNATURE_BOTTOM_RESERVE_MM = 37
+
+// 3 mức mật độ bảng chuyến: thử từ thoáng → dày, chọn mức đầu tiên để khối ký nằm cùng trang
+// với bảng (yêu cầu 2026-09-26: phiếu điều xe gọn trong 1 trang A4 ngang cả phần ký).
+const ENTRY_DENSITY = [
+  { fontSize: 7.5, padV: 1.1, padH: 1.3 },
+  { fontSize: 7.0, padV: 0.7, padH: 1.1 },
+  { fontSize: 6.4, padV: 0.45, padH: 0.9 },
+] as const
+
 async function buildDispatchEntryDoc(params: {
   entry: DispatchAnalyticsEntry
   trips: DispatchFlatTrip[]
   factoryName: string
 }): Promise<jsPDF> {
+  let doc: jsPDF | null = null
+  for (let level = 0; level < ENTRY_DENSITY.length; level++) {
+    doc = await buildDispatchEntryDocAtDensity(params, level)
+    const pdf = doc as PdfWithTable
+    const finalY = pdf.lastAutoTable?.finalY || 0
+    const pageH = doc.internal.pageSize.getHeight()
+    const fits = finalY + ENTRY_SIGNATURE_GAP_MM <= pageH - ENTRY_SIGNATURE_BOTTOM_RESERVE_MM
+    // Bảng đã dài quá 1 trang thì co chữ cũng vô ích — giữ mức thoáng nhất cho dễ đọc.
+    if (fits || doc.getNumberOfPages() > 1) {
+      if (!fits && level > 0) doc = await buildDispatchEntryDocAtDensity(params, 0)
+      return doc
+    }
+  }
+  return doc as jsPDF
+}
+
+async function buildDispatchEntryDocAtDensity(params: {
+  entry: DispatchAnalyticsEntry
+  trips: DispatchFlatTrip[]
+  factoryName: string
+}, level: number): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
   renderHeader(doc, `PHIẾU ĐIỀU XE NGÀY ${formatDateVi(params.entry.ngay)}`, `Mã ĐX: ${params.entry.ma_dx || "-"}; nhà máy: ${params.factoryName}; chứng nhận: ${params.entry.chung_nhan || "-"}`)
 
+  const margin = 10
+  const pageW = doc.internal.pageSize.getWidth()
+  const usableW = pageW - margin * 2
+  const trips = params.trips
+  const tripMaterials = trips.map((trip) => getTripTotals(trip).materials)
+
+  // Loại nguyên liệu có dữ liệu trong ngày (tươi hoặc khô > 0); loại nào cả ngày bằng 0 không hiện.
+  const activeMaterials = ENTRY_MATERIALS.filter((m) =>
+    tripMaterials.some((mat) => materialValue(mat, m.key, "Tuoi") > 0 || materialValue(mat, m.key, "Kho") > 0),
+  )
+  const sumOf = (key: EntryMaterialKey, kind: "Tuoi" | "Kho") =>
+    tripMaterials.reduce((acc, mat) => acc + materialValue(mat, key, kind), 0)
+
+  // ── Bảng thông tin: 2 dòng × 8 cột, trải hết bề ngang (trước đây 4 dòng × 4 cột chiếm chỗ).
+  // Tươi/Khô ở đây chỉ ghi tổng — tách theo loại nằm ở dòng TỔNG của bảng chuyến bên dưới. ──
+  const vehicleCount = new Set(trips.map((trip) => trip.so_xe).filter(Boolean)).size
+  const driverCount = new Set(trips.map((trip) => trip.tai_xe).filter(Boolean)).size
+  const totalKm = trips.reduce((sum, trip) => sum + (trip.totalKm || 0), 0)
+  const totalTuoi = trips.reduce((sum, trip) => sum + (trip.totalTuoi || 0), 0)
+  const totalKho = trips.reduce((sum, trip) => sum + (trip.totalKho || 0), 0)
+
+  const labelW = 22
+  const valueW = (usableW - labelW * 4) / 4
+  const labelStyle = { fontStyle: "bold" as const, cellWidth: labelW, fillColor: [241, 245, 249] as [number, number, number] }
   autoTable(doc, {
-    startY: 32,
+    startY: 28,
+    margin: { left: margin, right: margin },
     theme: "grid",
-    styles: { font: PDF_FONT_NAME, fontSize: 9, cellPadding: 2 },
-    headStyles: { fillColor: [15, 118, 80], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
-    body: buildDispatchEntrySummaryRows(params.trips, params.entry),
+    styles: { font: PDF_FONT_NAME, fontSize: 8.5, cellPadding: 1.4 },
+    body: [
+      ["Mã ĐX", params.entry.ma_dx || "-", "Số chuyến", String(trips.length), "Số xe", String(vehicleCount), "Tài xế", String(driverCount)],
+      ["Chứng nhận", params.entry.chung_nhan || "-", "Tổng Km", formatKm(totalKm), "Tươi (kg)", formatKg(totalTuoi), "Khô (kg)", formatKg(totalKho)],
+    ],
     columnStyles: {
-      0: { fontStyle: "bold", cellWidth: 24 },
-      1: { cellWidth: 48 },
-      2: { fontStyle: "bold", cellWidth: 24 },
-      3: { cellWidth: 48 },
+      0: labelStyle,
+      1: { cellWidth: valueW },
+      2: labelStyle,
+      3: { cellWidth: valueW },
+      4: labelStyle,
+      5: { cellWidth: valueW },
+      6: labelStyle,
+      7: { cellWidth: valueW },
     },
   })
 
+  // ── Bảng chuyến ──
+  const density = ENTRY_DENSITY[level]
+  const fontSize = density.fontSize
+  const cellPadding = { top: density.padV, bottom: density.padV, left: density.padH, right: density.padH }
+  const nMat = activeMaterials.length
+
+  // Tài xế / Đội / Điểm GN / Phiên đủ rộng để 1 dòng; Lô thu hoạch lấy phần còn lại, tối đa 2
+  // dòng. Cột "Xử lý" đã bỏ theo yêu cầu (2026-09-26).
+  const fixed = { xe: 12, chuyen: 14, taiXe: 32, doi: 22, diemGn: 30, phien: 26, km: 12 }
+  const fixedSum = Object.values(fixed).reduce((a, b) => a + b, 0)
+  const matW = nMat ? Math.max(12, Math.min(18, (usableW - fixedSum - 36) / (nMat * 2))) : 0
+  const loW = Math.max(20, usableW - fixedSum - matW * nMat * 2)
+
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(fontSize)
+  const loTextW = loW - density.padH * 2 - 0.5
+
+  const infoHead = ["Xe", "Chuyến", "Tài xế", "Đội", "Điểm GN", "Phiên", "Lô thu hoạch", "Km"]
+  const head = nMat
+    ? [
+        [
+          ...infoHead.map((content) => ({ content, rowSpan: 2, styles: { valign: "middle" as const } })),
+          { content: "Tươi (kg)", colSpan: nMat, styles: { halign: "center" as const } },
+          { content: "Khô (kg)", colSpan: nMat, styles: { halign: "center" as const } },
+        ],
+        [...activeMaterials.map((m) => m.label), ...activeMaterials.map((m) => m.label)],
+      ]
+    : [infoHead]
+
+  const body: string[][] = trips.map((trip, idx) => [
+    trip.so_xe || "-",
+    String(trip.chuyen || 1),
+    trip.tai_xe || "-",
+    trip.dois.length ? trip.dois.map((doi) => `Đội ${doi}`).join(", ") : "-",
+    (trip.diem_gn || []).join(", ") || "-",
+    (trip.phien || []).join(", ") || "-",
+    clampLines(doc, (trip.lo_thu_hoach || []).join(", ") || "-", loTextW, 2),
+    formatKm(trip.totalKm),
+    ...activeMaterials.map((m) => formatKg(materialValue(tripMaterials[idx], m.key, "Tuoi"))),
+    ...activeMaterials.map((m) => formatKg(materialValue(tripMaterials[idx], m.key, "Kho"))),
+  ])
+  const totalRow = [
+    "TỔNG", "", "", "", "", "", "",
+    formatKm(totalKm),
+    ...activeMaterials.map((m) => formatKg(sumOf(m.key, "Tuoi"))),
+    ...activeMaterials.map((m) => formatKg(sumOf(m.key, "Kho"))),
+  ]
+
+  const columnStyles: Record<number, Record<string, unknown>> = {
+    0: { cellWidth: fixed.xe, overflow: "ellipsize" },
+    1: { cellWidth: fixed.chuyen, halign: "center" },
+    2: { cellWidth: fixed.taiXe, overflow: "ellipsize" },
+    3: { cellWidth: fixed.doi, overflow: "ellipsize" },
+    4: { cellWidth: fixed.diemGn, overflow: "ellipsize" },
+    5: { cellWidth: fixed.phien, overflow: "ellipsize" },
+    6: { cellWidth: loW },
+    7: { cellWidth: fixed.km, halign: "right" },
+  }
+  for (let i = 0; i < nMat * 2; i++) columnStyles[8 + i] = { cellWidth: matW, halign: "right" }
+
   const pdf = doc as PdfWithTable
   autoTable(doc, {
-    startY: (pdf.lastAutoTable?.finalY || 32) + 8,
+    startY: (pdf.lastAutoTable?.finalY || 28) + 5,
+    margin: { left: margin, right: margin },
     theme: "grid",
-    styles: { font: PDF_FONT_NAME, fontSize: 7.5, cellPadding: 1.3 },
-    headStyles: { fillColor: [15, 118, 80], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold" },
-    head: [["Xe", "Chuyến", "Tài xế", "Đội", "Điểm GN", "Phiên", "Lô thu hoạch", "Xử lý", "Km", "Tươi (kg)", "Khô (kg)"]],
-    body: params.trips.map((trip) => [
-      trip.so_xe || "-",
-      String(trip.chuyen || 1),
-      trip.tai_xe || "-",
-      trip.dois.length ? trip.dois.map((doi) => `Đội ${doi}`).join(", ") : "-",
-      (trip.diem_gn || []).join(", ") || "-",
-      (trip.phien || []).join(", ") || "-",
-      (trip.lo_thu_hoach || []).join(", ") || "-",
-      trip.xu_ly || "-",
-      formatKm(trip.totalKm),
-      formatKg(trip.totalTuoi),
-      formatKg(trip.totalKho),
-    ]),
-    columnStyles: {
-      1: { halign: "center" },
-      8: { halign: "right" },
-      9: { halign: "right" },
-      10: { halign: "right" },
+    styles: { font: PDF_FONT_NAME, fontSize, cellPadding },
+    headStyles: { fillColor: [15, 118, 80], textColor: 255, font: PDF_FONT_NAME, fontStyle: "bold", halign: "center" },
+    head,
+    body: [...body, totalRow],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    columnStyles: columnStyles as any,
+    didParseCell: (data) => {
+      if (data.section === "body" && data.row.index === body.length) {
+        data.cell.styles.fontStyle = "bold"
+        data.cell.styles.fillColor = [236, 253, 245]
+      }
     },
   })
 
@@ -408,11 +535,14 @@ function renderEntrySignatures(doc: jsPDF, makerName?: string): DispatchEntrySig
   const pdf = doc as PdfWithTable
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
-  const desiredY = (pdf.lastAutoTable?.finalY || 0) + 16
-  if (desiredY > pageH - 42) {
+  // Khối ký cần ~30mm (nhãn + khung 18mm + tên + chân trang). Gọn hơn trước (16/42) để phần ký
+  // nằm cùng trang với bảng chuyến trên A4 ngang (yêu cầu 2026-09-26).
+  const desiredY = (pdf.lastAutoTable?.finalY || 0) + ENTRY_SIGNATURE_GAP_MM
+  const overflow = desiredY > pageH - ENTRY_SIGNATURE_BOTTOM_RESERVE_MM
+  if (overflow) {
     doc.addPage()
   }
-  const startY = desiredY > pageH - 42 ? 20 : desiredY
+  const startY = overflow ? 20 : desiredY
 
   doc.setFont(PDF_FONT_NAME, "bold")
   doc.setFontSize(10)
