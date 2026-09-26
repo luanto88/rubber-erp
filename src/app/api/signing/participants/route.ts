@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
+import { isUuid, buildMaintenanceDocLabel, formatMaHoSoDisplay } from "@/lib/signing/labels"
 
 export const dynamic = "force-dynamic"
 
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
 
     const { data: yeuCau } = await supabaseAdmin
       .from("yeu_cau_ky")
-      .select("id, nguoi_tao")
+      .select("id, nguoi_tao, factory_id, modun, loai_tai_lieu, ma_ho_so, ban_ghi_id")
       .eq("id", yeuCauId)
       .single()
     if (!yeuCau) return NextResponse.json({ error: "Không tìm thấy hồ sơ" }, { status: 404 })
@@ -42,7 +43,52 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Không có quyền xem hồ sơ này" }, { status: 403 })
     }
 
-    if (!signerIds.length) return NextResponse.json([])
+    // Tự động phân giải và sửa dữ liệu lịch sử nếu ma_ho_so đang là UUID
+    let resolvedMaHoSo: string | null = null
+    const currentMa = yeuCau.ma_ho_so as string | null
+    if (currentMa && isUuid(currentMa)) {
+      const targetId = (yeuCau.ban_ghi_id as string | null) || currentMa
+      if (yeuCau.modun === "maintenance" && targetId) {
+        const { data: rec } = await supabaseAdmin
+          .from("maintenance_records")
+          .select("id, ma_bb, ngay, bo_phan, maintenance_record_lines(ma_tb)")
+          .eq("id", targetId)
+          .maybeSingle()
+        if (rec) {
+          const lines = (rec.maintenance_record_lines || []) as { ma_tb?: string | null }[]
+          resolvedMaHoSo = buildMaintenanceDocLabel({
+            ma_bb: rec.ma_bb,
+            ngay: rec.ngay,
+            bo_phan: rec.bo_phan,
+            lines,
+          })
+        }
+      } else if (yeuCau.modun === "dispatch" && targetId) {
+        const { data: entry } = await supabaseAdmin
+          .from("dispatch_entries")
+          .select("id, ngay")
+          .eq("id", targetId)
+          .maybeSingle()
+        if (entry?.ngay) {
+          resolvedMaHoSo = formatMaHoSoDisplay(entry.ngay)
+        }
+      }
+
+      if (resolvedMaHoSo && resolvedMaHoSo !== currentMa) {
+        await supabaseAdmin
+          .from("yeu_cau_ky")
+          .update({
+            ma_ho_so: resolvedMaHoSo,
+            ban_ghi_id: targetId,
+          })
+          .eq("id", yeuCau.id)
+      }
+    }
+
+    if (!signerIds.length) {
+      return NextResponse.json({ profiles: [], maHoSo: resolvedMaHoSo || (isUuid(currentMa) ? null : currentMa) })
+    }
+
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
       .select("id, full_name, username")
@@ -52,8 +98,12 @@ export async function GET(req: NextRequest) {
       id: p.id,
       full_name: p.full_name || p.username || "",
     }))
-    return NextResponse.json(result)
+    return NextResponse.json({
+      profiles: result,
+      maHoSo: resolvedMaHoSo || (isUuid(currentMa) ? null : currentMa),
+    })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })
   }
 }
+

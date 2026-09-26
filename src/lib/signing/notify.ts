@@ -2,7 +2,7 @@ import nodemailer from "nodemailer"
 import { after } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { escapeHtml } from "@/lib/html-escape"
-import { signingDocLabel } from "./labels"
+import { signingDocLabel, isUuid, buildMaintenanceDocLabel, formatMaHoSoDisplay } from "./labels"
 
 // Thông báo 3 kênh cho hệ thống ký số dùng chung (Chất lượng / Điều xe / Bảo trì).
 //
@@ -226,10 +226,55 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
 
   const { data: yeuCau } = await supabase
     .from("yeu_cau_ky")
-    .select("id, factory_id, ma_ho_so, modun, loai_tai_lieu")
+    .select("id, factory_id, ma_ho_so, ban_ghi_id, modun, loai_tai_lieu")
     .eq("id", plan.yeuCauId)
     .maybeSingle()
   if (!yeuCau) return
+
+  let resolvedMaHoSo = (yeuCau.ma_ho_so as string | null) ?? null
+  if (resolvedMaHoSo && isUuid(resolvedMaHoSo)) {
+    const targetId = (yeuCau.ban_ghi_id as string | null) || resolvedMaHoSo
+    if (yeuCau.modun === "maintenance" && targetId) {
+      const { data: rec } = await supabase
+        .from("maintenance_records")
+        .select("id, ma_bb, ngay, bo_phan, maintenance_record_lines(ma_tb)")
+        .eq("id", targetId)
+        .maybeSingle()
+      if (rec) {
+        const lines = (rec.maintenance_record_lines || []) as { ma_tb?: string | null }[]
+        const label = buildMaintenanceDocLabel({
+          ma_bb: rec.ma_bb,
+          ngay: rec.ngay,
+          bo_phan: rec.bo_phan,
+          lines,
+        })
+        if (label) resolvedMaHoSo = label
+      }
+    } else if (yeuCau.modun === "dispatch" && targetId) {
+      const { data: entry } = await supabase
+        .from("dispatch_entries")
+        .select("id, ngay")
+        .eq("id", targetId)
+        .maybeSingle()
+      if (entry?.ngay) {
+        resolvedMaHoSo = formatMaHoSoDisplay(entry.ngay)
+      }
+    }
+
+    if (resolvedMaHoSo && resolvedMaHoSo !== yeuCau.ma_ho_so) {
+      await supabase
+        .from("yeu_cau_ky")
+        .update({
+          ma_ho_so: resolvedMaHoSo,
+          ban_ghi_id: targetId,
+        })
+        .eq("id", yeuCau.id)
+    }
+  }
+
+  if (resolvedMaHoSo && isUuid(resolvedMaHoSo)) {
+    resolvedMaHoSo = null
+  }
 
   // Không tự báo cho chính người vừa thao tác + khử trùng lặp.
   const recipients = [...new Set(plan.recipientUserIds)].filter(
@@ -249,11 +294,11 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
     factoryId: yeuCau.factory_id as string,
     modun: yeuCau.modun as string,
     loaiTaiLieu: yeuCau.loai_tai_lieu as string,
-    maHoSo: (yeuCau.ma_ho_so as string | null) ?? null,
+    maHoSo: resolvedMaHoSo,
     docLabel: signingDocLabel(
       yeuCau.modun as string,
       yeuCau.loai_tai_lieu as string,
-      yeuCau.ma_ho_so as string | null,
+      resolvedMaHoSo,
     ),
     actorName: actor?.full_name || actor?.username || "Người dùng",
     factoryName: ((factoryRes.data as { name?: string } | null)?.name as string) || "Nhà máy",

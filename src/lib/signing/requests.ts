@@ -512,19 +512,20 @@ export async function signField(params: {
   // này KHÔNG được chặn việc xác nhận đã ký xong — chữ ký là sự thật không thể đổi lại — chỉ
   // ghi lại lỗi để trả về cho client cảnh báo admin xử lý tay.
   let maintenanceIssueError: string | null = null
-  if (allDone && yeuCau.modun === "maintenance" && yeuCau.ban_ghi_id) {
+  const targetBanGhiId = (yeuCau.ban_ghi_id as string | null) || (yeuCau.ma_ho_so as string | null)
+  if (allDone && yeuCau.modun === "maintenance" && targetBanGhiId) {
     try {
       const { data: recordRow } = await supabase
         .from("maintenance_records")
         .select("ma_bb, ngay")
-        .eq("id", yeuCau.ban_ghi_id)
-        .single()
+        .eq("id", targetBanGhiId)
+        .maybeSingle()
       const { issueDocIds } = await issueMaintenanceStock({
-        recordId: yeuCau.ban_ghi_id as string,
+        recordId: targetBanGhiId,
         factoryId: yeuCau.factory_id as string,
         approverUserId: params.userId,
         approverName: signerName,
-        maBb: (recordRow?.ma_bb as string) || (yeuCau.ma_ho_so as string) || "",
+        maBb: (recordRow?.ma_bb as string) || "",
         ngay: (recordRow?.ngay as string) || todayLabel,
       })
       const { error: recordUpdateErr } = await supabase
@@ -536,7 +537,7 @@ export async function signField(params: {
           inventory_issue_doc_id: issueDocIds[0] || null,
           inventory_issue_doc_ids: issueDocIds.length > 0 ? issueDocIds : null,
         })
-        .eq("id", yeuCau.ban_ghi_id)
+        .eq("id", targetBanGhiId)
       if (recordUpdateErr) maintenanceIssueError = recordUpdateErr.message
     } catch (err) {
       maintenanceIssueError = err instanceof Error ? err.message : String(err)

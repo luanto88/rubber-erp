@@ -12,6 +12,7 @@ import {
   type MaintenanceSignBundle, type MaintenanceSignRoleId, type MaintenanceSigningResult,
 } from "@/lib/maintenance-pdf"
 import { jsPdfBoxToPt } from "@/lib/signing/coords"
+import { buildMaintenanceDocLabel } from "@/lib/signing/labels"
 
 type ResolvedSigner = {
   roleId: MaintenanceSignRoleId
@@ -57,23 +58,14 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-function formatMaintenanceDate(dateStr: string): string {
-  if (!dateStr) return ""
-  const parts = dateStr.slice(0, 10).split("-")
-  if (parts.length === 3) {
-    return `${parts[2]}/${parts[1]}/${parts[0]}`
-  }
-  return dateStr
-}
-
 function buildMaintenanceMaHoSo(record: RecordData): string {
-  const dateFormatted = formatMaintenanceDate(record.ngay)
-  const boPhan = (record.bo_phan || "").trim()
-  const maTbList = Array.from(new Set((record.lines || []).map((l) => l.ma_tb?.trim()).filter(Boolean)))
-  const maTbStr = maTbList.join(", ")
-
-  const parts = [dateFormatted, boPhan, maTbStr].filter(Boolean)
-  return parts.length > 0 ? parts.join(" - ") : record.id
+  const label = buildMaintenanceDocLabel({
+    ma_bb: record.ma_bb,
+    ngay: record.ngay,
+    bo_phan: record.bo_phan,
+    lines: record.lines,
+  })
+  return label || "Biên bản sự cố"
 }
 
 // Tải lại toàn bộ dữ liệu biên bản trực tiếp từ DB (không dùng state form đang sửa của trang

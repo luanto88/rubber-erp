@@ -5,8 +5,10 @@ import { useParams, useRouter } from "next/navigation"
 import { ChevronDown, ChevronUp, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { hydrateActiveSession, type SessionUser } from "@/lib/auth"
-import { modunLabel, loaiTaiLieuLabel, formatMaHoSoDisplay } from "@/lib/signing/labels"
+import { modunLabel, loaiTaiLieuLabel, formatMaHoSoDisplay, isUuid, buildMaintenanceDocLabel } from "@/lib/signing/labels"
 import { fetchSecureUrl } from "@/app/dashboard/_components/secure-file-open"
+
+
 
 // Màn hình ký dùng chung cho MỌI module (Giai đoạn 3 — Hệ thống ký số dùng chung).
 // Bám sát mockup đã duyệt cung_cap_dl/thiet_ke_man_hinh_ky.html, thu gọn 1 điểm so
@@ -154,6 +156,47 @@ export default function SignScreenPage() {
       setLoading(false)
       return
     }
+
+    // Nếu ma_ho_so đang là UUID (do bản ghi cũ hoặc lưu id kỹ thuật), tự động phân giải sang nhãn nghiệp vụ
+    let currentMaHoSo = ycData.ma_ho_so as string | null
+    if (currentMaHoSo && isUuid(currentMaHoSo)) {
+      const targetId = (ycData.ban_ghi_id as string | null) || currentMaHoSo
+      if (ycData.modun === "maintenance" && targetId) {
+        try {
+          const { data: rec } = await supabase
+            .from("maintenance_records")
+            .select("id, ma_bb, ngay, bo_phan, maintenance_record_lines(ma_tb)")
+            .eq("id", targetId)
+            .maybeSingle()
+          if (rec) {
+            const lines = (rec.maintenance_record_lines || []) as { ma_tb?: string | null }[]
+            const label = buildMaintenanceDocLabel({
+              ma_bb: rec.ma_bb,
+              ngay: rec.ngay,
+              bo_phan: rec.bo_phan,
+              lines,
+            })
+            if (label) currentMaHoSo = label
+          }
+        } catch { /* fallback */ }
+      } else if (ycData.modun === "dispatch" && targetId) {
+        try {
+          const { data: entry } = await supabase
+            .from("dispatch_entries")
+            .select("id, ngay")
+            .eq("id", targetId)
+            .maybeSingle()
+          if (entry?.ngay) {
+            currentMaHoSo = formatMaHoSoDisplay(entry.ngay)
+          }
+        } catch { /* fallback */ }
+      }
+      if (currentMaHoSo && isUuid(currentMaHoSo)) {
+        currentMaHoSo = null
+      }
+      ycData.ma_ho_so = currentMaHoSo
+    }
+
     setYeuCau(ycData as YeuCauKy)
 
     const { data: nkData } = await supabase
@@ -182,11 +225,17 @@ export default function SignScreenPage() {
           const res = await fetch(`/api/signing/participants?yeuCauId=${yeuCauId}`, {
             headers: { Authorization: `Bearer ${accessToken}` },
           })
-          const list = (await res.json()) as ProfileLite[]
-          if (res.ok && Array.isArray(list)) {
-            const map: Record<string, ProfileLite> = {}
-            for (const p of list) map[p.id] = p
-            setProfiles(map)
+          const json = await res.json()
+          if (res.ok) {
+            const list = (Array.isArray(json) ? json : json.profiles) as ProfileLite[]
+            if (Array.isArray(list)) {
+              const map: Record<string, ProfileLite> = {}
+              for (const p of list) map[p.id] = p
+              setProfiles(map)
+            }
+            if (!Array.isArray(json) && json?.maHoSo) {
+              setYeuCau((prev) => (prev ? { ...prev, ma_ho_so: json.maHoSo } : null))
+            }
           }
         }
       } catch { /* tên hiển thị "—" nếu route lỗi — không chặn xem/ký */ }
@@ -600,7 +649,7 @@ export default function SignScreenPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2 text-base font-bold">
             {loaiTaiLieuLabel(yeuCau.loai_tai_lieu)}
-            {yeuCau.ma_ho_so && (
+            {formatMaHoSoDisplay(yeuCau.ma_ho_so) && (
               <span className="rounded-md bg-white/15 px-2 py-0.5 font-mono text-xs font-semibold">
                 {formatMaHoSoDisplay(yeuCau.ma_ho_so)}
               </span>

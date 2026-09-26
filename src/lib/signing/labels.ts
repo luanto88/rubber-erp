@@ -34,12 +34,21 @@ export function loaiTaiLieuLabel(loaiTaiLieu: string): string {
   return LOAI_TAI_LIEU_LABEL[loaiTaiLieu] || loaiTaiLieu
 }
 
+/** Kiểm tra chuỗi có phải UUID không */
+export function isUuid(val?: string | null): boolean {
+  if (!val) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim())
+}
+
 /**
- * Format mã hồ sơ hiển thị: nếu là ngày YYYY-MM-DD thuần túy thì chuyển sang DD/MM/YYYY.
+ * Format mã hồ sơ hiển thị:
+ * - Nếu rỗng hoặc là raw UUID thì trả về rỗng (tránh in ID kỹ thuật ra giao diện người dùng).
+ * - Nếu là ngày YYYY-MM-DD thuần túy thì chuyển sang DD/MM/YYYY.
  */
 export function formatMaHoSoDisplay(maHoSo?: string | null): string {
   if (!maHoSo) return ""
   const trimmed = maHoSo.trim()
+  if (isUuid(trimmed)) return ""
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
     const [y, m, d] = trimmed.split("-")
     return `${d}/${m}/${y}`
@@ -47,8 +56,35 @@ export function formatMaHoSoDisplay(maHoSo?: string | null): string {
   return trimmed
 }
 
+/**
+ * Tạo nhãn nghiệp vụ tiêu chuẩn cho biên bản bảo trì:
+ * - Ưu tiên ma_bb nếu có: "[ma_bb] ([Bộ phận] - [Mã TB])" hoặc "[ma_bb]"
+ * - Hoặc: "DD/MM/YYYY - [Bộ phận] - [Mã TB]"
+ */
+export function buildMaintenanceDocLabel(rec: {
+  ma_bb?: string | null
+  ngay?: string | null
+  bo_phan?: string | null
+  lines?: { ma_tb?: string | null }[]
+}): string {
+  const dateFormatted = formatMaHoSoDisplay(rec.ngay)
+  const boPhan = (rec.bo_phan || "").trim()
+  const lines = rec.lines || []
+  const maTbList = Array.from(new Set(lines.map((l) => l.ma_tb?.trim()).filter(Boolean)))
+  const maTbStr = maTbList.join(", ")
+
+  if (rec.ma_bb?.trim()) {
+    const sub = [boPhan, maTbStr].filter(Boolean).join(" - ")
+    return sub ? `${rec.ma_bb.trim()} (${sub})` : rec.ma_bb.trim()
+  }
+
+  const parts = [dateFormatted, boPhan, maTbStr].filter(Boolean)
+  return parts.length > 0 ? parts.join(" - ") : ""
+}
+
 /** Nhãn 1 dòng mô tả hồ sơ, vd: "Bảng phân xe 25/09/2026 · Điều xe" hoặc "Biên bản sự cố 25/09/2026 - Mủ tạp - MC1 · Bảo trì" */
 export function signingDocLabel(modun: string, loaiTaiLieu: string, maHoSo?: string | null): string {
   const displayMaHoSo = formatMaHoSoDisplay(maHoSo)
   return `${loaiTaiLieuLabel(loaiTaiLieu)}${displayMaHoSo ? ` ${displayMaHoSo}` : ""} · ${modunLabel(modun)}`
 }
+

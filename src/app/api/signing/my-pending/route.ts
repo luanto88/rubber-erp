@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
+import { isUuid } from "@/lib/signing/labels"
 
 export const dynamic = "force-dynamic"
 
@@ -100,7 +101,7 @@ export async function GET(req: NextRequest) {
         const toiLuot = !rows.some((r) => r.thu_tu < myThuTu && r.trang_thai !== "da_ky")
         return {
           yeuCauId: y.id,
-          maHoSo: y.ma_ho_so,
+          maHoSo: isUuid(y.ma_ho_so) ? null : y.ma_ho_so,
           modun: y.modun,
           loaiTaiLieu: y.loai_tai_lieu,
           thuTu: myThuTu,
