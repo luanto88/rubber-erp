@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import type jsPDF from "jspdf";
 import {
   AlertTriangle,
   Boxes,
@@ -44,7 +43,6 @@ import {
   loadFactoryShiftNames,
   loadShiftHistory,
   loadShiftLockStatus,
-  loadShiftReportData,
   loadUserChucVu,
   loadUserShiftAssignment,
   resolveKienForConfirm,
@@ -59,13 +57,10 @@ import {
   type ShiftHistoryEntry,
   type ShiftLockStatus,
 } from "@/app/dashboard/product/confirm/actions";
-import {
-  buildShiftReportFileName,
-  buildShiftReportPdf,
-  openShiftReportPdfInNewTab,
-} from "@/app/dashboard/product/confirm/shift-report-pdf";
 import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
-import { buildLotReportFileName, buildLotReportPdf } from "@/app/dashboard/product/confirm/lot-report-pdf";
+import { buildReportBundle, loadReportDraft, type ReportBundle, type ReportDraft } from "@/app/dashboard/product/confirm/report-bundle";
+import { DailyReportInputForm } from "@/app/dashboard/product/confirm/daily-report-input-form";
+import type { DailyReportInputs } from "@/app/dashboard/product/confirm/daily-report-pdf";
 import { loadStoredLang, storeLang, t, palletLabel, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select";
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt";
@@ -197,12 +192,14 @@ export default function ConfirmKienProductionPage() {
   const [endShiftConfirmOpen, setEndShiftConfirmOpen] = useState(false);
   // Mục 3: "confirm" (xác nhận ban đầu) -> "warning" (nếu phát hiện lô dở dang thiếu kiện, chờ
   // xác nhận rõ ràng) -> "preview" (PDF đã dựng xong, chờ người dùng Chia sẻ/Tải/Hoàn tất).
-  const [endShiftPhase, setEndShiftPhase] = useState<"confirm" | "pendingDrafts" | "warning" | "preview">(
+  // "dailyInput" (2026-09-27): nhập dầu DO cho Báo cáo sản xuất hằng ngày (F12) trước khi dựng PDF.
+  const [endShiftPhase, setEndShiftPhase] = useState<"confirm" | "pendingDrafts" | "warning" | "dailyInput" | "preview">(
     "confirm",
   );
   const [endShiftIncomplete, setEndShiftIncomplete] = useState<LotCompletenessWarning[]>([]);
-  const [endShiftReportPreview, setEndShiftReportPreview] = useState<{ doc: jsPDF; fileName: string; lotDoc: jsPDF; lotFileName: string } | null>(null);
+  const [endShiftReportPreview, setEndShiftReportPreview] = useState<ReportBundle | null>(null);
   const [endShiftGenerating, setEndShiftGenerating] = useState(false);
+  const [endShiftDraft, setEndShiftDraft] = useState<ReportDraft | null>(null);
   const [endShiftError, setEndShiftError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; variant: "success" | "error" } | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -267,7 +264,8 @@ export default function ConfirmKienProductionPage() {
   const [reportGenerating, setReportGenerating] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   // Mục 7: PDF đã dựng sẵn từ "Xem/Tạo lại phiếu" trong Hub — Chia sẻ/Tải dùng lại đúng doc này.
-  const [reportPreview, setReportPreview] = useState<{ doc: jsPDF; fileName: string; lotDoc: jsPDF; lotFileName: string } | null>(null);
+  const [reportPreview, setReportPreview] = useState<ReportBundle | null>(null);
+  const [reportDraft, setReportDraft] = useState<ReportDraft | null>(null);
 
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -709,18 +707,28 @@ export default function ConfirmKienProductionPage() {
     setReportGenerating(true);
     setReportError(null);
     setReportPreview(null);
+    setReportDraft(null);
     try {
-      const data = await loadShiftReportData(factoryId, historyNgay);
-      if (data.sections.length === 0) {
+      const draft = await loadReportDraft(factoryId, historyNgay);
+      if (draft.shift.sections.length === 0) {
         setReportError(tt("endShiftNoData"));
         return;
       }
-      const doc = await buildShiftReportPdf(data);
-      const fileName = buildShiftReportFileName(data);
-      const lotDoc = await buildLotReportPdf(data);
-      const lotFileName = buildLotReportFileName(data);
-      openShiftReportPdfInNewTab(doc);
-      setReportPreview({ doc, fileName, lotDoc, lotFileName });
+      setReportDraft(draft);
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : tt("endShiftReportError"));
+    } finally {
+      setReportGenerating(false);
+    }
+  };
+
+  const handleReportInputsSubmit = async (inputs: DailyReportInputs) => {
+    if (!reportDraft) return;
+    setReportGenerating(true);
+    setReportError(null);
+    try {
+      setReportPreview(await buildReportBundle(reportDraft, inputs));
+      setReportDraft(null);
     } catch (err) {
       setReportError(err instanceof Error ? err.message : tt("endShiftReportError"));
     } finally {
@@ -735,6 +743,7 @@ export default function ConfirmKienProductionPage() {
     setEndShiftPhase("confirm");
     setEndShiftIncomplete([]);
     setEndShiftReportPreview(null);
+    setEndShiftDraft(null);
     setEndShiftError(null);
     setEndShiftConfirmOpen(true);
   };
@@ -744,22 +753,31 @@ export default function ConfirmKienProductionPage() {
     setEndShiftGenerating(true);
     setEndShiftError(null);
     try {
-      const data = await loadShiftReportData(factoryId, historyNgay);
-      if (data.sections.length === 0) {
+      const draft = await loadReportDraft(factoryId, historyNgay);
+      if (draft.shift.sections.length === 0) {
         setEndShiftError(tt("endShiftNoData"));
         setEndShiftPhase("confirm");
         return;
       }
-      const doc = await buildShiftReportPdf(data);
-      const fileName = buildShiftReportFileName(data);
-      const lotDoc = await buildLotReportPdf(data);
-      const lotFileName = buildLotReportFileName(data);
-      openShiftReportPdfInNewTab(doc);
-      setEndShiftReportPreview({ doc, fileName, lotDoc, lotFileName });
-      setEndShiftPhase("preview");
+      setEndShiftDraft(draft);
+      setEndShiftPhase("dailyInput");
     } catch (err) {
       setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
       setEndShiftPhase("confirm");
+    } finally {
+      setEndShiftGenerating(false);
+    }
+  };
+
+  const handleEndShiftInputsSubmit = async (inputs: DailyReportInputs) => {
+    if (!endShiftDraft) return;
+    setEndShiftGenerating(true);
+    setEndShiftError(null);
+    try {
+      setEndShiftReportPreview(await buildReportBundle(endShiftDraft, inputs));
+      setEndShiftPhase("preview");
+    } catch (err) {
+      setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
     } finally {
       setEndShiftGenerating(false);
     }
@@ -968,6 +986,8 @@ export default function ConfirmKienProductionPage() {
                 reportGenerating={reportGenerating}
                 reportError={reportError}
                 reportPreview={reportPreview}
+                reportDraft={reportDraft}
+                onReportInputsSubmit={(inputs) => void handleReportInputsSubmit(inputs)}
                 onGenerateReport={handleGenerateReportNow}
                 onScan={() => {
                   setScanError(null);
@@ -1330,6 +1350,8 @@ export default function ConfirmKienProductionPage() {
           incomplete={endShiftIncomplete}
           pendingDrafts={pendingDrafts}
           reportPreview={endShiftReportPreview}
+          draft={endShiftDraft}
+          onInputsSubmit={(inputs) => void handleEndShiftInputsSubmit(inputs)}
           onCancel={() => {
             if (endShiftGenerating) return;
             setEndShiftConfirmOpen(false);
@@ -1507,6 +1529,8 @@ function HubView({
   reportGenerating,
   reportError,
   reportPreview,
+  reportDraft,
+  onReportInputsSubmit,
   onGenerateReport,
   onScan,
   onEndShift,
@@ -1541,7 +1565,9 @@ function HubView({
   onEdit: (entry: ShiftHistoryEntry) => void;
   reportGenerating: boolean;
   reportError: string | null;
-  reportPreview: { doc: jsPDF; fileName: string; lotDoc: jsPDF; lotFileName: string } | null;
+  reportPreview: ReportBundle | null;
+  reportDraft: ReportDraft | null;
+  onReportInputsSubmit: (inputs: DailyReportInputs) => void;
   onGenerateReport: () => void;
   onScan: () => void;
   onEndShift: () => void;
@@ -1780,9 +1806,14 @@ function HubView({
         </button>
         <p className="mt-1.5 text-center text-[11px] text-slate-400">{tt("reportCoversWholeDayHint")}</p>
         {reportError && <p className="mt-2 text-center text-xs font-semibold text-red-500">{reportError}</p>}
+        {reportDraft && !reportPreview && (
+          <div className="mt-2">
+            <DailyReportInputForm data={reportDraft.daily} submitting={reportGenerating} onSubmit={onReportInputsSubmit} />
+          </div>
+        )}
         {reportPreview && (
           <div className="mt-2">
-            <ShiftReportPreviewBar doc={reportPreview.doc} fileName={reportPreview.fileName} lotDoc={reportPreview.lotDoc} lotFileName={reportPreview.lotFileName} />
+            <ShiftReportPreviewBar {...reportPreview} />
           </div>
         )}
       </div>
@@ -1811,6 +1842,8 @@ function EndShiftConfirmModal({
   incomplete,
   pendingDrafts,
   reportPreview,
+  draft,
+  onInputsSubmit,
   onCancel,
   onConfirm,
   onSendDraftsAndContinue,
@@ -1819,12 +1852,14 @@ function EndShiftConfirmModal({
   onFinish,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
-  phase: "confirm" | "pendingDrafts" | "warning" | "preview";
+  phase: "confirm" | "pendingDrafts" | "warning" | "dailyInput" | "preview";
   generating: boolean;
   error: string | null;
   incomplete: LotCompletenessWarning[];
   pendingDrafts: ConfirmDraftRow[];
-  reportPreview: { doc: jsPDF; fileName: string; lotDoc: jsPDF; lotFileName: string } | null;
+  reportPreview: ReportBundle | null;
+  draft: ReportDraft | null;
+  onInputsSubmit: (inputs: DailyReportInputs) => void;
   onCancel: () => void;
   onConfirm: () => void;
   onSendDraftsAndContinue: () => void;
@@ -1834,7 +1869,7 @@ function EndShiftConfirmModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-6">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+      <div className={`w-full ${phase === "dailyInput" ? "max-w-lg" : "max-w-sm"} rounded-2xl bg-white p-6 shadow-xl`}>
         {phase === "confirm" && (
           <>
             <h3 className="text-base font-extrabold text-slate-800">{tt("confirmEndShiftTitle")}</h3>
@@ -1962,6 +1997,17 @@ function EndShiftConfirmModal({
           </>
         )}
 
+        {phase === "dailyInput" && draft && (
+          <>
+            {error && (
+              <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+                {error}
+              </div>
+            )}
+            <DailyReportInputForm data={draft.daily} submitting={generating} onSubmit={onInputsSubmit} onCancel={onCancel} />
+          </>
+        )}
+
         {phase === "preview" && reportPreview && (
           <>
             <div className="flex items-start gap-2">
@@ -1969,7 +2015,7 @@ function EndShiftConfirmModal({
               <h3 className="text-base font-extrabold text-slate-800">{tt("endShiftReportReady")}</h3>
             </div>
             <div className="mt-3">
-              <ShiftReportPreviewBar doc={reportPreview.doc} fileName={reportPreview.fileName} lotDoc={reportPreview.lotDoc} lotFileName={reportPreview.lotFileName} />
+              <ShiftReportPreviewBar {...reportPreview} />
             </div>
             <div className="mt-5 flex gap-3">
               <button

@@ -6,6 +6,8 @@
 import type { ReactNode } from "react"
 import type { LucideIcon } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { buildMonthlyQualityReport, SAN_PHAM_GROUP, TIEU_CHUAN_OPTIONS } from "@/lib/quality-stats"
+import { cachedQuery } from "./dashboard-cache"
 import type { SessionUser } from "@/lib/auth"
 
 export type WidgetProps = { factoryId: string | null; user: SessionUser | null }
@@ -112,8 +114,33 @@ export function WidgetCard({
   )
 }
 
+/** Khung chờ có hình dạng (vài ô số + vùng biểu đồ) thay cho chữ "Đang tải...". */
 export function WidgetLoading() {
-  return <div className="flex items-center justify-center py-10 text-slate-400 text-sm">Đang tải...</div>
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label="Đang tải">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="rounded-xl bg-slate-50 p-3 space-y-2">
+            <div className="skeleton h-3 w-2/3 rounded" />
+            <div className="skeleton h-5 w-1/2 rounded" />
+          </div>
+        ))}
+      </div>
+      <div className="skeleton h-48 w-full rounded-xl" />
+    </div>
+  )
+}
+
+/** Khung chờ nguyên 1 card — dùng cho khối chưa cuộn tới (LazySection). */
+export function WidgetSkeleton({ height = 320 }: { height?: number }) {
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden" style={{ minHeight: height }}>
+      <div className="skeleton h-16 w-full" />
+      <div className="p-5">
+        <WidgetLoading />
+      </div>
+    </div>
+  )
 }
 
 export function WidgetEmpty({ label = "Chưa có dữ liệu" }: { label?: string }) {
@@ -156,4 +183,54 @@ export async function fetchAllPaged<T>(table: string, selectCols: string, applyF
     from += PAGE_SIZE
   }
   return all
+}
+
+// ── Dữ liệu dùng chung nhiều widget (cache Promise, xem dashboard-cache.ts) ──────────
+
+/** Tổng KL khô nguyên liệu còn trong các ngăn chưa sản xuất xong. */
+export function getRawStockKho(factoryId: string): Promise<number> {
+  return cachedQuery(`ton-nl:${factoryId}`, async () => {
+    const rows = await fetchAllPaged<{ tong_kho: number | null }>("ngans", "tong_kho", (q) =>
+      q.eq("factory_id", factoryId).neq("trang_thai", "Đã sản xuất"),
+    )
+    return rows.reduce((s, r) => s + Number(r.tong_kho || 0), 0)
+  })
+}
+
+export type ProdKhoRow = {
+  ngay: string
+  mn_kho: number | null
+  ct_kho: number | null
+  dct_kho: number | null
+  dkt_kho: number | null
+  dt_kho: number | null
+}
+
+export function prodRowKho(r: ProdKhoRow) {
+  return Number(r.mn_kho || 0) + Number(r.ct_kho || 0) + Number(r.dct_kho || 0) + Number(r.dkt_kho || 0) + Number(r.dt_kho || 0)
+}
+
+/** Sản lượng từ đầu năm tới hôm nay (widget tự lọc phần tháng nếu cần). */
+export function getYearProductionRows(factoryId: string): Promise<ProdKhoRow[]> {
+  const { yearStart, today } = getCurrentRanges()
+  return cachedQuery(`sl-nam:${factoryId}:${yearStart}:${today}`, () =>
+    fetchAllPaged<ProdKhoRow>("production_records", "ngay,mn_kho,ct_kho,dct_kho,dkt_kho,dt_kho", (q) =>
+      q.eq("factory_id", factoryId).gte("ngay", yearStart).lte("ngay", today),
+    ),
+  )
+}
+
+/** Báo cáo chất lượng tháng hiện tại, tiêu chuẩn mặc định, mọi sản phẩm. */
+export function getCurrentMonthQualityReport(factoryId: string) {
+  const { nam, thang } = getCurrentRanges()
+  return cachedQuery(`cl-thang:${factoryId}:${nam}-${thang}`, () =>
+    buildMonthlyQualityReport({
+      factoryId,
+      nam,
+      thang,
+      sanPhamList: Object.keys(SAN_PHAM_GROUP),
+      tieuChuan: TIEU_CHUAN_OPTIONS[0],
+      chiTieuList: [],
+    }),
+  )
 }

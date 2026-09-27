@@ -467,6 +467,25 @@ bộ đó đã **code xong và qua ≥1 vòng test tay** tính đến 2026-07-22
   (không hậu tố)" là 1 lựa chọn rõ ràng. Nút "Tạo dự đoán" chỉ mở modal xác nhận liệt kê mọi lựa
   chọn; "Xác nhận & tạo" mới gọi `handleCreate()`.
 
+## 4.8. Báo cáo sản xuất hằng ngày (F12) — xuất kèm F11 (2026-09-27)
+
+- Mẫu `cung_cap_dl/NMCB-QT01-F12 Báo cáo sản xuất hàng ngày.pdf`, khổ NGANG, luôn đúng 1 trang
+  (tự giảm mật độ chữ qua `DENSITY`, `confirm/daily-report-pdf.ts`), mã tài liệu góc trái dưới.
+- Dữ liệu: `confirm/daily-report-actions.ts` (`loadDailyProductionReportData`, phân trang `.range()`).
+  - Mục 1: gom theo Loại CSR + Nguồn gốc (`lots.suffix` → `suffixes.nguon`: NT=Công ty, M/TM=Thu
+    mua, GC*=Gia công, TL=Thanh lý) + Bọc + Loại bành. Liệt kê mọi tổ hợp có nhập/xuất trong năm
+    hoặc còn tồn (đã xuất hết vẫn hiện, tồn 0). Nhập = `lot_transactions`; Xuất = đơn xuất ĐÃ DUYỆT
+    (`trang_thai` NULL/`da_phe_duyet`) theo `export_orders.ngay`, kg = bành gán × `lots.loai_banh`;
+    Tồn = nhập mọi thời điểm − xuất mọi thời điểm (tới hết ngày).
+  - Mục 2: sản lượng từng ca tách CSR + loại bành (KHÔNG tách bọc), lũy kế theo mã ca + CSR + bành;
+    thứ tự Ca 1/2/3 theo `created_at` sớm nhất (mirror F09). Dòng dầu Diesel = số người dùng nhập.
+- Dầu DO: KHÔNG lưu DB. Trước khi dựng PDF, 3 luồng (Hub, Kết thúc ca, "Xem phiếu PDF") đều hiện
+  `DailyReportInputForm`: gợi ý = xuất kho `DO750K` (`movement_type='export'`) trong ngày, sửa được;
+  lũy kế = xuất kho DO750K các ngày trước + số vừa nhập; ghi chú chỉ vào dòng dầu.
+- `confirm/report-bundle.ts` dựng cả F09/F11/F12 1 lần. Chia sẻ "Báo cáo lô" = 2 ảnh tách rời
+  (F11 + F12, `shareReportImages`); tải PDF = F09 + 1 file gộp F11 (dọc) + trang F12 (ngang).
+- Form nhập dầu chỉ có tiếng Việt (chưa qua `i18n` của trang quét QR).
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

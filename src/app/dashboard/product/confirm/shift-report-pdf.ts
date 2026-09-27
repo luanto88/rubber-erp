@@ -376,9 +376,10 @@ export function downloadShiftReportPdfDoc(doc: jsPDF, fileName: string): void {
 // worker PHẢI trỏ asset local qua import.meta.url, KHÔNG dùng CDN, để ổn định trên Vercel
 // production). Nút "Tải phiếu PDF" không đổi, vẫn dùng downloadShiftReportPdfDoc ở trên.
 export async function shareShiftReportImage(doc: jsPDF, fileName: string): Promise<void> {
-  if (typeof window === "undefined") return;
-  const imageFileName = fileName.replace(/\.pdf$/i, ".png");
+  await shareReportImages([{ doc, fileName }]);
+}
 
+async function loadPdfjs() {
   const pdfjsLib = await import("pdfjs-dist");
   if ((globalThis as Record<string, unknown>).pdfjsWorker) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "";
@@ -388,7 +389,15 @@ export async function shareShiftReportImage(doc: jsPDF, fileName: string): Promi
       import.meta.url,
     ).toString();
   }
+  return pdfjsLib;
+}
 
+// Rasterize MỌI trang của 1 doc rồi ghép dọc thành 1 PNG. null nếu không rasterize được.
+async function rasterizeDocToPng(
+  pdfjsLib: Awaited<ReturnType<typeof loadPdfjs>>,
+  doc: jsPDF,
+  imageFileName: string,
+): Promise<File | null> {
   const blob = doc.output("blob") as Blob;
   const pdfBytes = await blob.arrayBuffer();
   const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
@@ -407,7 +416,7 @@ export async function shareShiftReportImage(doc: jsPDF, fileName: string): Promi
     pageCanvases.push(canvas);
   }
 
-  const imageFile = await new Promise<File | null>((resolve) => {
+  return new Promise<File | null>((resolve) => {
     if (pageCanvases.length === 0) {
       resolve(null);
       return;
@@ -435,16 +444,36 @@ export async function shareShiftReportImage(doc: jsPDF, fileName: string): Promi
       resolve(pngBlob ? new File([pngBlob], imageFileName, { type: "image/png" }) : null);
     }, "image/png");
   });
+}
 
-  if (!imageFile) {
-    // Không rasterize được — fallback tải PDF gốc thay vì để im lặng không làm gì.
-    downloadShiftReportPdfDoc(doc, fileName);
-    return;
+function downloadFile(file: File) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Chia sẻ nhiều mẫu cùng lúc, MỖI doc = 1 ảnh riêng (vd Báo cáo lô F11 + Báo cáo sản xuất hằng
+// ngày F12 → 2 ảnh tách rời trong cùng 1 lần share). Doc nào không rasterize được thì tải PDF gốc.
+export async function shareReportImages(items: Array<{ doc: jsPDF; fileName: string }>): Promise<void> {
+  if (typeof window === "undefined" || items.length === 0) return;
+  const pdfjsLib = await loadPdfjs();
+
+  const files: File[] = [];
+  for (const { doc, fileName } of items) {
+    const file = await rasterizeDocToPng(pdfjsLib, doc, fileName.replace(/\.pdf$/i, ".png"));
+    if (file) files.push(file);
+    else downloadShiftReportPdfDoc(doc, fileName);
   }
+  if (files.length === 0) return;
 
-  if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files: [imageFile] })) {
+  if (typeof navigator !== "undefined" && navigator.share && navigator.canShare?.({ files })) {
     try {
-      await navigator.share({ files: [imageFile], title: imageFileName });
+      await navigator.share({ files, title: files[0].name });
       return;
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
@@ -452,12 +481,8 @@ export async function shareShiftReportImage(doc: jsPDF, fileName: string): Promi
     }
   }
 
-  const url = URL.createObjectURL(imageFile);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = imageFileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  files.forEach((file, i) => {
+    // Một số trình duyệt bỏ qua lượt tải thứ 2 nếu bắn cùng 1 tick.
+    window.setTimeout(() => downloadFile(file), i * 400);
+  });
 }

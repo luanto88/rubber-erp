@@ -101,6 +101,14 @@ const headStyles = {
 export async function buildLotReportPdf(data: ShiftReportData): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   await ensurePdfFont(doc);
+  renderLotReport(doc, data);
+  return doc;
+}
+
+// Vẽ F11 lên doc đã nạp font (trang hiện tại = trang 1). Tách riêng để file gộp F11 + F12
+// (daily-report-pdf.ts) vẽ lại đúng nội dung này rồi mới thêm trang ngang của F12. Footer được vẽ
+// ngay tại đây — PHẢI trước khi thêm trang F12, vì renderFooter lặp qua mọi trang đang có.
+export function renderLotReport(doc: jsPDF, data: ShiftReportData): void {
   const pageW = doc.internal.pageSize.getWidth();
 
   doc.setTextColor(15, 23, 42);
@@ -225,7 +233,6 @@ export async function buildLotReportPdf(data: ShiftReportData): Promise<jsPDF> {
   });
 
   renderFooter(doc);
-  return doc;
 }
 
 export function buildLotReportFileName(data: ShiftReportData): string {

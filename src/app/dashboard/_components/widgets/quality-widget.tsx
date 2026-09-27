@@ -6,18 +6,17 @@ import { FlaskConical } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts"
 import { hasPermission } from "@/lib/auth"
 import {
-  buildMonthlyQualityReport,
   fetchAllQcResults,
   resolveEffectiveQcResults,
   SAN_PHAM_GROUP,
-  TIEU_CHUAN_OPTIONS,
   CHI_TIEU_META,
   toNums,
   mean,
   type ChiTieuKey,
 } from "@/lib/quality-stats"
 import { CHART_PALETTE, ChartTooltip, formatPercent } from "@/lib/chart-theme"
-import { WidgetCard, WidgetLoading, WidgetEmpty, getCurrentRanges, type WidgetProps } from "./widget-shared"
+import { WidgetCard, WidgetLoading, WidgetEmpty, getCurrentRanges, getCurrentMonthQualityReport, type WidgetProps } from "./widget-shared"
+import { AnimatedNumber, GrowBar } from "./animated-number"
 
 type ProductAchievement = { sanPham: string; tyLe: number; tyLeMucTieu: number | null; kl: number }
 type TrendSeriesMeta = { key: string; label: string }
@@ -38,17 +37,10 @@ export function QualityWidget({ factoryId, user }: WidgetProps) {
     let alive = true
     ;(async () => {
       try {
-        const { nam, thang, monthStart, today } = getCurrentRanges()
+        const { monthStart, today } = getCurrentRanges()
 
         const [report, rawQcRows] = await Promise.all([
-          buildMonthlyQualityReport({
-            factoryId,
-            nam,
-            thang,
-            sanPhamList: Object.keys(SAN_PHAM_GROUP),
-            tieuChuan: TIEU_CHUAN_OPTIONS[0],
-            chiTieuList: [],
-          }),
+          getCurrentMonthQualityReport(factoryId),
           fetchAllQcResults(factoryId, monthStart, today),
         ])
         if (!alive) return
@@ -129,7 +121,8 @@ export function QualityWidget({ factoryId, user }: WidgetProps) {
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-bold text-slate-600">Tỷ lệ đạt hạng theo mục tiêu (tháng này)</h3>
               <span className="text-sm font-extrabold text-rose-600">
-                Toàn nhà máy: {tyLeToanNhaMay == null ? "—" : formatPercent(tyLeToanNhaMay)}
+                Toàn nhà máy:{" "}
+                {tyLeToanNhaMay == null ? "—" : <AnimatedNumber value={tyLeToanNhaMay} format={formatPercent} />}
               </span>
             </div>
             {achievements.length === 0 ? (
@@ -143,15 +136,12 @@ export function QualityWidget({ factoryId, user }: WidgetProps) {
                       <div className="flex items-center justify-between text-xs mb-1">
                         <span className="font-semibold text-slate-600">CSR{a.sanPham}</span>
                         <span className="font-bold text-slate-700">
-                          {formatPercent(a.tyLe)}
+                          <AnimatedNumber value={a.tyLe} format={formatPercent} />
                           {a.tyLeMucTieu != null && <span className="text-slate-400 font-normal"> / mục tiêu {formatPercent(a.tyLeMucTieu)}</span>}
                         </span>
                       </div>
                       <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${dat ? "bg-emerald-500" : "bg-amber-500"}`}
-                          style={{ width: `${Math.min(100, a.tyLe)}%` }}
-                        />
+                        <GrowBar percent={a.tyLe} className={dat ? "bg-emerald-500" : "bg-amber-500"} />
                       </div>
                     </div>
                   )
@@ -181,6 +171,8 @@ export function QualityWidget({ factoryId, user }: WidgetProps) {
                         strokeWidth={2}
                         dot={{ r: 2 }}
                         connectNulls
+                        animationDuration={900}
+                        animationEasing="ease-out"
                       />
                     ))}
                   </LineChart>

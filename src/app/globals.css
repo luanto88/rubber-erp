@@ -55,6 +55,20 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
   transform: translateY(0);
 }
 
+/* ─── Skeleton shimmer (Dashboard) ───────────────────────────────────────── */
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #eef2f6 25%, #f8fafc 50%, #eef2f6 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
 /* ─── Hover: Lift ────────────────────────────────────────────────────────── */
 .hover-lift {
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;

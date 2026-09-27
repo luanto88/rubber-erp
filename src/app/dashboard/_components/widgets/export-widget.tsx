@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase"
 import { hasPermission } from "@/lib/auth"
 import { CHART_PALETTE, ChartTooltip, formatCompact } from "@/lib/chart-theme"
 import { WidgetCard, WidgetLoading, WidgetEmpty, getCurrentRanges, fetchAllPaged, type WidgetProps } from "./widget-shared"
+import { AnimatedNumber } from "./animated-number"
 
 type OrderRow = { customer_id: string | null; ngay: string | null; tong_banh: number | null }
 type CustomerRow = { id: string; ma_kh: string | null; ten_kh_en: string | null }
@@ -140,6 +141,8 @@ export function ExportWidget({ factoryId, user }: WidgetProps) {
                     strokeWidth={2.5}
                     fill="url(#gradExportOrders)"
                     dot={{ r: 3, fill: CHART_PALETTE[3], stroke: "white", strokeWidth: 2 }}
+                    animationDuration={900}
+                    animationEasing="ease-out"
                   />
                   <Area
                     yAxisId="right"
@@ -150,6 +153,8 @@ export function ExportWidget({ factoryId, user }: WidgetProps) {
                     strokeWidth={2.5}
                     fill="url(#gradExportBanh)"
                     dot={{ r: 3, fill: CHART_PALETTE[4], stroke: "white", strokeWidth: 2 }}
+                    animationDuration={900}
+                    animationEasing="ease-out"
                   />
                 </AreaChart>
               </ResponsiveContainer>
@@ -166,7 +171,7 @@ export function ExportWidget({ factoryId, user }: WidgetProps) {
                   {topThang.map((c) => (
                     <div key={c.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50 text-sm">
                       <span className="font-semibold text-slate-700 truncate">{c.name}</span>
-                      <span className="font-bold text-slate-800">{formatCompact(c.banh)} bành</span>
+                      <AnimatedNumber className="font-bold text-slate-800" value={c.banh} format={(v) => `${formatCompact(v)} bành`} />
                     </div>
                   ))}
                 </div>
@@ -181,7 +186,7 @@ export function ExportWidget({ factoryId, user }: WidgetProps) {
                   {topNam.map((c) => (
                     <div key={c.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-50 text-sm">
                       <span className="font-semibold text-slate-700 truncate">{c.name}</span>
-                      <span className="font-bold text-slate-800">{formatCompact(c.banh)} bành</span>
+                      <AnimatedNumber className="font-bold text-slate-800" value={c.banh} format={(v) => `${formatCompact(v)} bành`} />
                     </div>
                   ))}
                 </div>

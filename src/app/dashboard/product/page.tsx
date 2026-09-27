@@ -1,16 +1,11 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import type jsPDF from "jspdf";
 import { supabase } from "@/lib/supabase";
-import { loadShiftReportData } from "@/app/dashboard/product/confirm/actions";
-import {
-  buildShiftReportFileName,
-  buildShiftReportPdf,
-  openShiftReportPdfInNewTab,
-} from "@/app/dashboard/product/confirm/shift-report-pdf";
 import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
-import { buildLotReportFileName, buildLotReportPdf } from "@/app/dashboard/product/confirm/lot-report-pdf";
+import { buildReportBundle, loadReportDraft, type ReportBundle, type ReportDraft } from "@/app/dashboard/product/confirm/report-bundle";
+import { DailyReportInputForm } from "@/app/dashboard/product/confirm/daily-report-input-form";
+import type { DailyReportInputs } from "@/app/dashboard/product/confirm/daily-report-pdf";
 import {
   getActiveFactoryId,
   hasPermission,
@@ -1383,7 +1378,10 @@ export default function ProductPage() {
   const [pdfReportDate, setPdfReportDate] = useState<string | null>(null);
   const [pdfReportLoading, setPdfReportLoading] = useState(false);
   const [pdfReportError, setPdfReportError] = useState<string | null>(null);
-  const [pdfReportPreview, setPdfReportPreview] = useState<{ doc: jsPDF; fileName: string; lotDoc: jsPDF; lotFileName: string } | null>(null);
+  const [pdfReportPreview, setPdfReportPreview] = useState<ReportBundle | null>(null);
+  // Bước nhập dầu DO cho F12 (Báo cáo sản xuất hằng ngày) — giữa lúc nạp dữ liệu và dựng PDF.
+  const [pdfReportDraft, setPdfReportDraft] = useState<ReportDraft | null>(null);
+  const [pdfReportBuilding, setPdfReportBuilding] = useState(false);
   const nganMetaById = useMemo(() => {
     const map = new Map<string, Ngan>();
     ngans.forEach((ngan) => {
@@ -3203,22 +3201,32 @@ export default function ProductPage() {
     setPdfReportLoading(true);
     setPdfReportError(null);
     setPdfReportPreview(null);
+    setPdfReportDraft(null);
     try {
-      const data = await loadShiftReportData(factoryId, date);
-      if (data.sections.length === 0) {
+      const draft = await loadReportDraft(factoryId, date);
+      if (draft.shift.sections.length === 0) {
         setPdfReportError("Ngày này chưa có dữ liệu để lập phiếu báo thành phẩm.");
         return;
       }
-      const doc = await buildShiftReportPdf(data);
-      const fileName = buildShiftReportFileName(data);
-      const lotDoc = await buildLotReportPdf(data);
-      const lotFileName = buildLotReportFileName(data);
-      openShiftReportPdfInNewTab(doc);
-      setPdfReportPreview({ doc, fileName, lotDoc, lotFileName });
+      setPdfReportDraft(draft);
     } catch (err) {
       setPdfReportError(err instanceof Error ? err.message : "Lỗi không xác định");
     } finally {
       setPdfReportLoading(false);
+    }
+  };
+
+  const handlePdfReportInputsSubmit = async (inputs: DailyReportInputs) => {
+    if (!pdfReportDraft) return;
+    setPdfReportBuilding(true);
+    setPdfReportError(null);
+    try {
+      setPdfReportPreview(await buildReportBundle(pdfReportDraft, inputs));
+      setPdfReportDraft(null);
+    } catch (err) {
+      setPdfReportError(err instanceof Error ? err.message : "Lỗi không xác định");
+    } finally {
+      setPdfReportBuilding(false);
     }
   };
 
@@ -5578,6 +5586,7 @@ export default function ProductPage() {
           onClose={() => {
             setPdfReportDate(null);
             setPdfReportPreview(null);
+            setPdfReportDraft(null);
             setPdfReportError(null);
           }}
           maxWidth="sm"
@@ -5591,7 +5600,13 @@ export default function ProductPage() {
               {pdfReportError}
             </div>
           ) : pdfReportPreview ? (
-            <ShiftReportPreviewBar doc={pdfReportPreview.doc} fileName={pdfReportPreview.fileName} lotDoc={pdfReportPreview.lotDoc} lotFileName={pdfReportPreview.lotFileName} />
+            <ShiftReportPreviewBar {...pdfReportPreview} />
+          ) : pdfReportDraft ? (
+            <DailyReportInputForm
+              data={pdfReportDraft.daily}
+              submitting={pdfReportBuilding}
+              onSubmit={(inputs) => void handlePdfReportInputsSubmit(inputs)}
+            />
           ) : null}
         </ModalShell>
       )}

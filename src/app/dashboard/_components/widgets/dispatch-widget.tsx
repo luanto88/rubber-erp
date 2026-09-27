@@ -10,6 +10,7 @@ import { buildDispatchAnalytics, type DispatchAnalyticsEntry } from "@/lib/dispa
 import type { DiemGN } from "@/lib/dispatch-master"
 import { formatCompact } from "@/lib/chart-theme"
 import { WidgetCard, WidgetLoading, WidgetEmpty, getCurrentRanges, fetchAllPaged, TILE_PATTERN_OCEAN, type WidgetProps } from "./widget-shared"
+import { AnimatedNumber } from "./animated-number"
 
 type Stat = { chuyen1: number; chuyenTiep: number; km: number; quyKhoTb: number; trips: number }
 
@@ -96,19 +97,19 @@ export function DispatchWidget({ factoryId, user }: WidgetProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <div className="text-[11px] text-slate-400">Chuyến 1</div>
-                  <div className="text-lg font-extrabold text-slate-800">{formatCompact(stat.chuyen1)}</div>
+                  <div className="text-lg font-extrabold text-slate-800"><AnimatedNumber value={stat.chuyen1} format={formatCompact} /></div>
                 </div>
                 <div>
                   <div className="text-[11px] text-slate-400">Chuyến 2+</div>
-                  <div className="text-lg font-extrabold text-slate-800">{formatCompact(stat.chuyenTiep)}</div>
+                  <div className="text-lg font-extrabold text-slate-800"><AnimatedNumber value={stat.chuyenTiep} format={formatCompact} /></div>
                 </div>
                 <div>
                   <div className="text-[11px] text-slate-400">Số km</div>
-                  <div className="text-lg font-extrabold text-slate-800">{formatCompact(stat.km)} km</div>
+                  <div className="text-lg font-extrabold text-slate-800"><AnimatedNumber value={stat.km} format={(v) => `${formatCompact(v)} km`} /></div>
                 </div>
                 <div>
                   <div className="text-[11px] text-slate-400">Quy khô TB/chuyến</div>
-                  <div className="text-lg font-extrabold text-slate-800">{formatCompact(Math.round(stat.quyKhoTb))} kg</div>
+                  <div className="text-lg font-extrabold text-slate-800"><AnimatedNumber value={stat.quyKhoTb} format={(v) => `${formatCompact(Math.round(v))} kg`} /></div>
                 </div>
               </div>
             </div>
