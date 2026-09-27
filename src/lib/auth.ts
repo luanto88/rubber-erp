@@ -454,6 +454,10 @@ export const DEFAULT_PERMISSION_CODES = [
   "product.predict_manage",
   "product.confirm_scan",
   "product.approve_shift",
+  // Báo cáo lô F11 + Báo cáo sản xuất hằng ngày F12 (migration 20260927). Cố ý KHÔNG có trong
+  // ROLE_DEFAULTS.manager/user — chỉ admin, cấp tay cho nhân viên văn phòng qua Cài đặt → Phân quyền.
+  // (Phiếu báo thành phẩm F09 KHÔNG cần quyền riêng: ai có product.create/confirm_scan là in được.)
+  "product.report_daily",
   "quality.view",
   "quality.create",
   "quality.edit",

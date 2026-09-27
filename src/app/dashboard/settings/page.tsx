@@ -658,6 +658,7 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "product.predict_manage": "quản lý dự đoán số lô",
   "product.confirm_scan": "quét QR xác nhận",
   "product.approve_shift": "duyệt ca sản xuất",
+  "product.report_daily": "báo cáo ngày (Báo cáo lô F11 + Báo cáo sản xuất F12)",
   "export.delete_order": "xóa đơn xuất hàng",
   "export.quick_add_customer": "thêm nhanh khách hàng",
   "export.view_own": "xem đơn được cấp",

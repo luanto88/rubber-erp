@@ -90,8 +90,11 @@ const DICT: Record<Lang, Record<string, string>> = {
     shareReport: "Chia sẻ phiếu",
     downloadReport: "Tải phiếu PDF",
     deleteEntry: "Xóa dòng này",
-    viewOrRegenerateReport: "Xem / Tạo lại phiếu PDF",
+    viewOrRegenerateReport: "Phiếu thành phẩm (PDF)",
     reportCoversWholeDayHint: "Phiếu gồm tất cả ca đã có dữ liệu trong ngày đã chọn, không chỉ ca đang lọc.",
+    // Chỉ tiếng Việt: Báo cáo ngày là việc của văn phòng (bản khmer tự rơi về tiếng Việt).
+    dailyReportButton: "Báo cáo ngày (lô + sản xuất)",
+    dailyReportError: "Không tạo được báo cáo ngày",
     kienBocPalletMismatchTitle: "Bọc/Pallet không khớp lần nhập trước của kiện này",
     kienBocPalletMismatchBody:
       "Kiện {kien} được phép khác Ca SX/Số chỉ thị/Ngày SX giữa các lần nhập, nhưng bắt buộc CÙNG Bọc và Loại pallet. Giá trị đã ghi nhận trước đó: {boc} · {pallet}.",

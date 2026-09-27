@@ -2,8 +2,19 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
-import { buildReportBundle, loadReportDraft, type ReportBundle, type ReportDraft } from "@/app/dashboard/product/confirm/report-bundle";
+import {
+  DailyReportPreviewBar,
+  ShiftReportPreviewBar,
+} from "@/app/dashboard/product/confirm/shift-report-preview-bar";
+import {
+  buildDailyReport,
+  buildShiftReport,
+  loadDailyReportDraft,
+  loadShiftReport,
+  type DailyReportBundle,
+  type DailyReportDraft,
+  type ShiftReportBundle,
+} from "@/app/dashboard/product/confirm/report-bundle";
 import { DailyReportInputForm } from "@/app/dashboard/product/confirm/daily-report-input-form";
 import type { DailyReportInputs } from "@/app/dashboard/product/confirm/daily-report-pdf";
 import {
@@ -25,6 +36,7 @@ import {
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
 import { loadRequiredNotes } from "@/lib/required-notes";
+import { getFactoryTodayISO } from "@/lib/date-utils";
 import { EMPTY_NOTE_FILTER, matchesNoteFilterMulti } from "@/lib/note-filter";
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select";
 import { FilterBar } from "@/app/dashboard/_components/filter-bar";
@@ -65,6 +77,7 @@ import {
   Minus,
   Wand2,
   FileDown,
+  ClipboardList,
   Loader2,
   ScanLine,
   ShieldCheck,
@@ -624,6 +637,13 @@ function getLoaiCSRByDayChuyen(dc: string, prefix: "CSR" | "SVR"): string[] {
       "Ngo\u1ea1i l\u1ec7",
     ];
   return [`${prefix}10`, `${prefix}20`, "Ngo\u1ea1i l\u1ec7"];
+}
+
+// Mặc định bộ lọc ngày của danh sách: đầu tháng → hôm nay, theo MÚI GIỜ NHÀ MÁY (không dùng
+// getTodayISODate — lệch 1 ngày trong khung 00:00–06:59 sáng giờ VN).
+function getDefaultListDateRange(): { from: string; to: string } {
+  const today = getFactoryTodayISO();
+  return { from: `${today.slice(0, 7)}-01`, to: today };
 }
 
 function getBocsForLoaiCSR(dc: string, loai_csr: string): string[] {
@@ -1336,15 +1356,27 @@ export default function ProductPage() {
     return factory.name?.toLowerCase().includes("cuaparis") ? "SVR" : "CSR";
   }, [factory]);
 
+  // Quyền 2 nút báo cáo cuối ngày — mirror đúng REPORT_*_PERMISSIONS (confirm/report-access.ts),
+  // server action kiểm lại lần nữa.
+  const canReportShift =
+    hasPermission(currentUser, "product.create") || hasPermission(currentUser, "product.confirm_scan");
+  const canReportDaily = hasPermission(currentUser, "product.report_daily");
+
   // List filters
   const [search, setSearch] = useState("");
   const [filterLoai, setFilterLoai] = useState("");
   const [filterTT, setFilterTT] = useState("");
   const [filterCa, setFilterCa] = useState("");
   const [filterDC, setFilterDC] = useState("");
+  const [filterBoc, setFilterBoc] = useState("");
   const [filterGhiChu, setFilterGhiChu] = useState<string[]>([]);
-  const [filterFrom, setFilterFrom] = useState("");
-  const [filterTo, setFilterTo] = useState("");
+  // Mặc định = đầu tháng → hôm nay (chốt 1 lần lúc mở trang). "Xóa lọc" đưa về lại đúng mốc này,
+  // và 2 ngày mặc định KHÔNG tính là "đang lọc" trong activeCount của FilterBar.
+  const [defaultDateRange] = useState(getDefaultListDateRange);
+  const [filterFrom, setFilterFrom] = useState(defaultDateRange.from);
+  const [filterTo, setFilterTo] = useState(defaultDateRange.to);
+  const isDateFilterCustom =
+    filterFrom !== defaultDateRange.from || filterTo !== defaultDateRange.to;
   const [expandedDates, setExpandedDates] = useState<string[]>([]);
   const [requiredNotes, setRequiredNotes] = useState<string[]>([]);
 
@@ -1373,14 +1405,16 @@ export default function ProductPage() {
   const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(
     new Set(),
   );
-  // Mục 7: "Xem phiếu PDF" ở header nhóm ngày — tái dùng loadShiftReportData (confirm/actions.ts)
-  // + luồng xem-trước-rồi-mới-chia-sẻ/tải (mirror confirm/page.tsx).
+  // Mục 7: 2 nút báo cáo ở header nhóm ngày — "Phiếu thành phẩm" (F09) và "Báo cáo ngày" (F11+F12),
+  // tách độc lập 2026-09-27 (xem confirm/report-bundle.ts). Xem-trước-rồi-mới-chia-sẻ/tải.
   const [pdfReportDate, setPdfReportDate] = useState<string | null>(null);
+  const [pdfReportKind, setPdfReportKind] = useState<"shift" | "daily">("shift");
   const [pdfReportLoading, setPdfReportLoading] = useState(false);
   const [pdfReportError, setPdfReportError] = useState<string | null>(null);
-  const [pdfReportPreview, setPdfReportPreview] = useState<ReportBundle | null>(null);
-  // Bước nhập dầu DO cho F12 (Báo cáo sản xuất hằng ngày) — giữa lúc nạp dữ liệu và dựng PDF.
-  const [pdfReportDraft, setPdfReportDraft] = useState<ReportDraft | null>(null);
+  const [pdfShiftPreview, setPdfShiftPreview] = useState<ShiftReportBundle | null>(null);
+  const [pdfDailyPreview, setPdfDailyPreview] = useState<DailyReportBundle | null>(null);
+  // Bước nhập dầu DO cho F12 (chỉ "Báo cáo ngày") — giữa lúc nạp dữ liệu và dựng PDF.
+  const [pdfReportDraft, setPdfReportDraft] = useState<DailyReportDraft | null>(null);
   const [pdfReportBuilding, setPdfReportBuilding] = useState(false);
   const nganMetaById = useMemo(() => {
     const map = new Map<string, Ngan>();
@@ -1629,6 +1663,7 @@ export default function ProductPage() {
         return false;
       }
       if (filterLoai && c.loai_csr !== filterLoai) return false;
+      if (filterBoc && (c.boc || "").trim() !== filterBoc) return false;
       if (filterTT && normalizeLotStatus(c.trang_thai) !== normalizeLotStatus(filterTT)) {
         return false;
       }
@@ -1643,12 +1678,58 @@ export default function ProductPage() {
     filterCa,
     filterDC,
     filterLoai,
+    filterBoc,
     filterTT,
     filterGhiChu,
     filterFrom,
     filterTo,
     nganMetaById,
   ]);
+
+  // Option "Loại CSR" theo Dây chuyền (matrix cấu hình, không hard-code) — chưa chọn dây chuyền thì
+  // hợp cả 2. Cộng thêm các giá trị loai_csr THỰC TẾ có trong dữ liệu (cùng dây chuyền) để vẫn lọc
+  // được lô cũ lệch cấu hình (vd "CSR5").
+  const filterLoaiOptions = useMemo(() => {
+    const dcs = filterDC ? [filterDC] : [DAY_CHUYEN_TAP, DAY_CHUYEN_NUOC];
+    const configured = dcs.flatMap((dc) => getLoaiCSRByDayChuyen(dc, factoryPrefix));
+    const actual = contributions
+      .filter(
+        (c) => !filterDC || normalizeDayChuyen(c.day_chuyen) === normalizeDayChuyen(filterDC),
+      )
+      .map((c) => (c.loai_csr || "").trim())
+      .filter(Boolean);
+    return [...new Set([...configured, ...actual])];
+  }, [contributions, factoryPrefix, filterDC]);
+
+  // Option "Loại bọc": theo Dây chuyền + Loại CSR (chưa chọn CSR thì hợp các CSR của dây chuyền),
+  // cộng giá trị `boc` thực tế có trong dữ liệu khớp cùng điều kiện (dữ liệu cũ có thể lệch cấu hình).
+  const filterBocOptions = useMemo(() => {
+    const dcs = filterDC ? [filterDC] : [DAY_CHUYEN_TAP, DAY_CHUYEN_NUOC];
+    const configured = dcs.flatMap((dc) => {
+      const csrs = filterLoai
+        ? [filterLoai]
+        : getLoaiCSRByDayChuyen(dc, factoryPrefix).filter((l) => l !== "Ngoại lệ");
+      return csrs.flatMap((csr) => getBocsForLoaiCSR(dc, csr));
+    });
+    const actual = contributions
+      .filter(
+        (c) =>
+          (!filterDC || normalizeDayChuyen(c.day_chuyen) === normalizeDayChuyen(filterDC)) &&
+          (!filterLoai || c.loai_csr === filterLoai),
+      )
+      .map((c) => (c.boc || "").trim())
+      .filter(Boolean);
+    return [...new Set([...configured, ...actual])];
+  }, [contributions, factoryPrefix, filterDC, filterLoai]);
+
+  // Đổi Dây chuyền/CSR mà giá trị con đang chọn không còn hợp lệ → reset (điều chỉnh state trong
+  // render theo đúng mẫu "adjusting state when a prop changes" của React, không dùng effect).
+  if (filterLoai && !filterLoaiOptions.includes(filterLoai)) {
+    setFilterLoai("");
+    setFilterBoc("");
+  } else if (filterBoc && !filterBocOptions.includes(filterBoc)) {
+    setFilterBoc("");
+  }
 
   const groupedByDateAndCa = useMemo(() => {
     const groups: Record<string, Record<string, LotContribution[]>> = {};
@@ -3195,17 +3276,28 @@ export default function ProductPage() {
   // Mục 7: "Xem phiếu PDF" — dựng phiếu báo thành phẩm của đúng ngày này (gồm tất cả ca có phát
   // sinh trong ngày, giống hệt "Xem/Tạo lại phiếu" ở Hub quét QR), mở xem trước ở tab mới trước
   // khi cho Chia sẻ/Tải xuống — không điều hướng sang route confirm.
-  const openReportPdfModal = async (date: string) => {
+  const openReportPdfModal = async (date: string, kind: "shift" | "daily") => {
     if (!factoryId || date === "Chưa có ngày") return;
     setPdfReportDate(date);
+    setPdfReportKind(kind);
     setPdfReportLoading(true);
     setPdfReportError(null);
-    setPdfReportPreview(null);
+    setPdfShiftPreview(null);
+    setPdfDailyPreview(null);
     setPdfReportDraft(null);
     try {
-      const draft = await loadReportDraft(factoryId, date);
+      if (kind === "shift") {
+        const shift = await loadShiftReport(factoryId, date);
+        if (shift.sections.length === 0) {
+          setPdfReportError("Ngày này chưa có dữ liệu để lập phiếu báo thành phẩm.");
+          return;
+        }
+        setPdfShiftPreview(await buildShiftReport(shift));
+        return;
+      }
+      const draft = await loadDailyReportDraft(factoryId, date);
       if (draft.shift.sections.length === 0) {
-        setPdfReportError("Ngày này chưa có dữ liệu để lập phiếu báo thành phẩm.");
+        setPdfReportError("Ngày này chưa có dữ liệu để lập báo cáo sản xuất.");
         return;
       }
       setPdfReportDraft(draft);
@@ -3221,7 +3313,7 @@ export default function ProductPage() {
     setPdfReportBuilding(true);
     setPdfReportError(null);
     try {
-      setPdfReportPreview(await buildReportBundle(pdfReportDraft, inputs));
+      setPdfDailyPreview(await buildDailyReport(pdfReportDraft, inputs));
       setPdfReportDraft(null);
     } catch (err) {
       setPdfReportError(err instanceof Error ? err.message : "Lỗi không xác định");
@@ -5088,8 +5180,9 @@ export default function ProductPage() {
 
       <FilterBar
         activeCount={
-          [search, filterDC, filterLoai, filterTT, filterCa, filterFrom, filterTo].filter(Boolean).length +
-          (filterGhiChu.length > 0 ? 1 : 0)
+          [search, filterDC, filterLoai, filterBoc, filterTT, filterCa].filter(Boolean).length +
+          (filterGhiChu.length > 0 ? 1 : 0) +
+          (isDateFilterCustom ? 1 : 0)
         }
       >
         <div className="flex items-center gap-2 flex-1 min-w-48">
@@ -5103,6 +5196,25 @@ export default function ProductPage() {
             className="flex-1 text-sm outline-none"
           />
         </div>
+        <input
+          type="date"
+          value={filterFrom}
+          onChange={(e) => {
+            setFilterFrom(e.target.value);
+          }}
+          title="Từ ngày"
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+        />
+        <span className="text-slate-400 text-sm">→</span>
+        <input
+          type="date"
+          value={filterTo}
+          onChange={(e) => {
+            setFilterTo(e.target.value);
+          }}
+          title="Đến ngày"
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+        />
         <select
           value={filterDC}
           onChange={(e) => {
@@ -5121,24 +5233,25 @@ export default function ProductPage() {
           }}
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
         >
-          <option value="">Tất cả loại</option>
-          {[
-            "CSR10",
-            "CSR20",
-            "CSR3L",
-            "CSRL",
-            "CSRCV50",
-            "CSRCV60",
-            "SVR10",
-            "SVR20",
-            "SVR3L",
-            "SVRL",
-            "SVRCV50",
-            "SVRCV60",
-            "CSR5",
-            "Ngoại lệ",
-          ].map((l) => (
-            <option key={l}>{l}</option>
+          <option value="">Tất cả loại CSR</option>
+          {filterLoaiOptions.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filterBoc}
+          onChange={(e) => {
+            setFilterBoc(e.target.value);
+          }}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+        >
+          <option value="">Tất cả loại bọc</option>
+          {filterBocOptions.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
           ))}
         </select>
         <select
@@ -5176,39 +5289,23 @@ export default function ProductPage() {
           searchPlaceholder="Tìm ghi chú..."
           className="min-w-64"
         />
-        <input
-          type="date"
-          value={filterFrom}
-          onChange={(e) => {
-            setFilterFrom(e.target.value);
-          }}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
-        />
-        <span className="text-slate-400 text-sm">→</span>
-        <input
-          type="date"
-          value={filterTo}
-          onChange={(e) => {
-            setFilterTo(e.target.value);
-          }}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
-        />
         {(filterLoai ||
+          filterBoc ||
           filterTT ||
           filterCa ||
           filterGhiChu.length > 0 ||
-          filterFrom ||
-          filterTo ||
+          isDateFilterCustom ||
           search ||
           filterDC) && (
           <button
             onClick={() => {
               setFilterLoai("");
+              setFilterBoc("");
               setFilterTT("");
               setFilterCa("");
               setFilterGhiChu([]);
-              setFilterFrom("");
-              setFilterTo("");
+              setFilterFrom(defaultDateRange.from);
+              setFilterTo(defaultDateRange.to);
               setSearch("");
               setFilterDC("");
             }}
@@ -5278,16 +5375,28 @@ export default function ProductPage() {
                       <span className="text-slate-300">|</span>
                       <span className="text-emerald-700">{fmtKg(dayKg)}</span>
                     </div>
-                    {date !== "Chưa có ngày" && (
+                    {date !== "Chưa có ngày" && canReportShift && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          void openReportPdfModal(date);
+                          void openReportPdfModal(date, "shift");
                         }}
                         className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 shrink-0"
-                        title="Xem phiếu báo thành phẩm PDF của ngày này"
+                        title="Phiếu báo thành phẩm (PDF) của ngày này"
                       >
                         <FileDown size={16} />
+                      </button>
+                    )}
+                    {date !== "Chưa có ngày" && canReportDaily && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void openReportPdfModal(date, "daily");
+                        }}
+                        className="rounded-lg p-1.5 text-indigo-600 hover:bg-indigo-50 shrink-0"
+                        title="Báo cáo ngày: Báo cáo lô + Báo cáo sản xuất hằng ngày (PDF)"
+                      >
+                        <ClipboardList size={16} />
                       </button>
                     )}
                     {date !== "Chưa có ngày" && (dateHasAnyLockedCa || canApproveShift) && (
@@ -5582,10 +5691,11 @@ export default function ProductPage() {
 
       {pdfReportDate && (
         <ModalShell
-          title={`Phiếu báo thành phẩm — ${new Date(pdfReportDate).toLocaleDateString("vi-VN")}`}
+          title={`${pdfReportKind === "shift" ? "Phiếu báo thành phẩm" : "Báo cáo ngày (lô + sản xuất)"} — ${new Date(pdfReportDate).toLocaleDateString("vi-VN")}`}
           onClose={() => {
             setPdfReportDate(null);
-            setPdfReportPreview(null);
+            setPdfShiftPreview(null);
+            setPdfDailyPreview(null);
             setPdfReportDraft(null);
             setPdfReportError(null);
           }}
@@ -5599,8 +5709,10 @@ export default function ProductPage() {
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">
               {pdfReportError}
             </div>
-          ) : pdfReportPreview ? (
-            <ShiftReportPreviewBar {...pdfReportPreview} />
+          ) : pdfShiftPreview ? (
+            <ShiftReportPreviewBar {...pdfShiftPreview} />
+          ) : pdfDailyPreview ? (
+            <DailyReportPreviewBar {...pdfDailyPreview} />
           ) : pdfReportDraft ? (
             <DailyReportInputForm
               data={pdfReportDraft.daily}

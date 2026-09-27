@@ -12,6 +12,10 @@
 //   - Lũy kế dòng ca theo mã ca (A/B/C) + CSR + loại bành.
 //   - Dầu DO không lưu DB: loader chỉ trả gợi ý hôm nay + lũy kế các NGÀY TRƯỚC; UI cộng số nhập.
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import {
+  assertReportAccess,
+  REPORT_DAILY_PERMISSIONS,
+} from "@/app/dashboard/product/confirm/report-access";
 
 export type DailyStockRow = {
   loaiCsr: string;
@@ -121,8 +125,13 @@ function compareCaCode(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-export async function loadDailyProductionReportData(factoryId: string, ngay: string): Promise<DailyReportData> {
+export async function loadDailyProductionReportData(
+  factoryId: string,
+  ngay: string,
+  accessToken: string | null,
+): Promise<DailyReportData> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(ngay)) throw new Error("Ngày báo cáo không hợp lệ.");
+  await assertReportAccess(accessToken, factoryId, REPORT_DAILY_PERMISSIONS, "báo cáo sản xuất hằng ngày");
   const supabase = getSupabaseAdmin();
   const yearStart = `${ngay.slice(0, 4)}-01-01`;
   const monthStart = `${ngay.slice(0, 7)}-01`;

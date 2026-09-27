@@ -486,6 +486,43 @@ bộ đó đã **code xong và qua ≥1 vòng test tay** tính đến 2026-07-22
   (F11 + F12, `shareReportImages`); tải PDF = F09 + 1 file gộp F11 (dọc) + trang F12 (ngang).
 - Form nhập dầu chỉ có tiếng Việt (chưa qua `i18n` của trang quét QR).
 
+## 4.9. Tách "Phiếu thành phẩm" và "Báo cáo ngày" + quyền `product.report_daily` (2026-09-27)
+
+- 2 hành động ĐỘC LẬP (`confirm/report-bundle.ts`):
+  - **Phiếu thành phẩm (F09)** — `loadShiftReport()` → `buildShiftReport()`. Không nhập dầu, không
+    dựng F11/F12. Quyền = **quyền tạo thành phẩm có sẵn** (`product.create` HOẶC
+    `product.confirm_scan`), KHÔNG có mã quyền riêng (đã chốt với người dùng).
+  - **Báo cáo ngày (F11 + F12)** — `loadDailyReportDraft()` → `DailyReportInputForm` (dầu DO) →
+    `buildDailyReport()`. Quyền mới **`product.report_daily`** (nhân viên văn phòng).
+- Thanh xem trước tách 2: `ShiftReportPreviewBar` (1 ảnh + 1 PDF) và `DailyReportPreviewBar`
+  (2 ảnh F11/F12 + 1 PDF gộp).
+- 3 call site: header nhóm ngày `product/page.tsx` (2 icon `FileDown` / `ClipboardList`), Hub quét
+  QR (2 nút cạnh nhau), modal **"Kết thúc ca" CHỈ còn Phiếu thành phẩm** (bỏ bước nhập dầu).
+- **Guard server**: `loadShiftReportData(fid, ngay, accessToken, purpose)` và
+  `loadDailyProductionReportData(fid, ngay, accessToken)` tự xác thực token qua
+  `confirm/report-access.ts` (`assertReportAccess`: đúng nhà máy, active, quyền hiệu lực mirror
+  `fetchPermissionCodesForUser`, admin luôn qua). F11 dựng từ dữ liệu F09 nên `purpose: "daily"`
+  nhận `product.report_daily`.
+- Migration `20260927_product_report_daily_permission.sql` (**chạy tay**): seed `permissions` +
+  `role_permissions` CHỈ cho admin. Mọi tài khoản đang có `user_permissions` tường minh ⇒ admin phải
+  **tick tay** quyền này cho từng nhân viên văn phòng ở Cài đặt → Phân quyền (nhãn "báo cáo ngày (Báo
+  cáo lô F11 + Báo cáo sản xuất F12)"). Cố ý không có trong `ROLE_DEFAULTS.manager/user`.
+
+## 4.10. Bộ lọc danh sách thành phẩm (2026-09-27)
+
+- Thứ tự: Tìm nhanh → Từ ngày → Đến ngày → Dây chuyền → Loại CSR → Loại bọc → Trạng thái → Ca →
+  Ghi chú → Xóa lọc.
+- Ngày mặc định = đầu tháng → hôm nay theo **múi giờ nhà máy** (`getDefaultListDateRange()` dùng
+  `getFactoryTodayISO()`). "Xóa lọc" đưa về lại mặc định này; 2 ngày mặc định không tính vào
+  `activeCount`. Cảnh báo lô dở dang, `dorDangCountByNganId`, KPI "Tổng/Hoàn thành/Dở dang" tính trên
+  `lots` nên KHÔNG bị bộ lọc ngày ảnh hưởng (chỉ Tổng bành/kg theo danh sách đang lọc).
+- Loại CSR: `getLoaiCSRByDayChuyen(dc, factoryPrefix)` (chưa chọn dây chuyền → hợp 2 dây chuyền) ∪
+  `loai_csr` thực tế trong dữ liệu (giữ lọc được lô cũ kiểu "CSR5").
+- Loại bọc (`filterBoc`, so khớp chính xác sau trim trên `c.boc`): `getBocsForLoaiCSR` theo DC+CSR ∪
+  `boc` thực tế khớp cùng điều kiện.
+- Đổi dây chuyền/CSR mà giá trị con không còn trong option → tự reset (CSR reset kéo theo Bọc).
+- Trạng thái / Ca / Ghi chú độc lập, không lọc chéo.
+
 ## 5. Kiểm nghiệm và Xuất hàng
 
 - Luồng chính phải giữ:

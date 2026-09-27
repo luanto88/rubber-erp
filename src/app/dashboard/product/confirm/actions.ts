@@ -5,6 +5,11 @@ import type { KienLetter } from "@/lib/product-label";
 import { getExistingRealKg, markLotPredictionRealized } from "@/app/dashboard/product/predict/actions";
 import { deleteLotTransaction, saveLotTransaction } from "@/app/dashboard/product/actions";
 import { assertShiftNotLocked } from "@/app/dashboard/product/shift-lock";
+import {
+  assertReportAccess,
+  REPORT_DAILY_PERMISSIONS,
+  REPORT_SHIFT_PERMISSIONS,
+} from "@/app/dashboard/product/confirm/report-access";
 import { normalizeLotStatus } from "@/app/dashboard/product/shared";
 import { getLoaiBanhConfig } from "@/lib/product-lot-config";
 import { getTodayISODate } from "@/lib/date-utils";
@@ -1492,7 +1497,21 @@ function resolveCaName(names: Record<string, string>, ca: string): string {
 // phiếu cũ" vì luôn truy vấn lại DB, không phụ thuộc phiên làm việc nào. Trường hợp 2 ca cùng làm
 // trong 1 ngày (Ca A buổi sáng, Ca B buổi chiều xuyên đêm), phiếu gộp cả 2 vào cùng 1 lần in —
 // mỗi ca 1 bảng chi tiết riêng (section), 1 bảng "Tổng hợp" chung cho cả ngày.
-export async function loadShiftReportData(factoryId: string, ngaySx: string): Promise<ShiftReportData> {
+//
+// `purpose` quyết định quyền cần kiểm: "shift" = Phiếu báo thành phẩm F09 (quyền tạo thành phẩm);
+// "daily" = Báo cáo lô F11 (dựng từ CHÍNH dữ liệu này, nên nhận quyền product.report_daily).
+export async function loadShiftReportData(
+  factoryId: string,
+  ngaySx: string,
+  accessToken: string | null,
+  purpose: "shift" | "daily",
+): Promise<ShiftReportData> {
+  await assertReportAccess(
+    accessToken,
+    factoryId,
+    purpose === "shift" ? REPORT_SHIFT_PERMISSIONS : REPORT_DAILY_PERMISSIONS,
+    purpose === "shift" ? "phiếu báo thành phẩm" : "báo cáo sản xuất hằng ngày",
+  );
   const [rows, shiftNames, completedLots] = await Promise.all([
     loadDayTransactions(factoryId, ngaySx),
     loadFactoryShiftNames(factoryId),

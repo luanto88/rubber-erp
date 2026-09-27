@@ -9,6 +9,7 @@ import {
   Calendar,
   CheckCircle2,
   ChevronLeft,
+  ClipboardList,
   Clock,
   FileDown,
   Hash,
@@ -57,8 +58,19 @@ import {
   type ShiftHistoryEntry,
   type ShiftLockStatus,
 } from "@/app/dashboard/product/confirm/actions";
-import { ShiftReportPreviewBar } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
-import { buildReportBundle, loadReportDraft, type ReportBundle, type ReportDraft } from "@/app/dashboard/product/confirm/report-bundle";
+import {
+  DailyReportPreviewBar,
+  ShiftReportPreviewBar,
+} from "@/app/dashboard/product/confirm/shift-report-preview-bar";
+import {
+  buildDailyReport,
+  buildShiftReport,
+  loadDailyReportDraft,
+  loadShiftReport,
+  type DailyReportBundle,
+  type DailyReportDraft,
+  type ShiftReportBundle,
+} from "@/app/dashboard/product/confirm/report-bundle";
 import { DailyReportInputForm } from "@/app/dashboard/product/confirm/daily-report-input-form";
 import type { DailyReportInputs } from "@/app/dashboard/product/confirm/daily-report-pdf";
 import { loadStoredLang, storeLang, t, palletLabel, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n";
@@ -192,14 +204,14 @@ export default function ConfirmKienProductionPage() {
   const [endShiftConfirmOpen, setEndShiftConfirmOpen] = useState(false);
   // Mục 3: "confirm" (xác nhận ban đầu) -> "warning" (nếu phát hiện lô dở dang thiếu kiện, chờ
   // xác nhận rõ ràng) -> "preview" (PDF đã dựng xong, chờ người dùng Chia sẻ/Tải/Hoàn tất).
-  // "dailyInput" (2026-09-27): nhập dầu DO cho Báo cáo sản xuất hằng ngày (F12) trước khi dựng PDF.
-  const [endShiftPhase, setEndShiftPhase] = useState<"confirm" | "pendingDrafts" | "warning" | "dailyInput" | "preview">(
+  // Kết thúc ca CHỈ xuất Phiếu báo thành phẩm (F09) — Báo cáo ngày F11+F12 là việc của văn phòng,
+  // làm ở nút riêng trong Hub / module Thành phẩm (tách 2026-09-27).
+  const [endShiftPhase, setEndShiftPhase] = useState<"confirm" | "pendingDrafts" | "warning" | "preview">(
     "confirm",
   );
   const [endShiftIncomplete, setEndShiftIncomplete] = useState<LotCompletenessWarning[]>([]);
-  const [endShiftReportPreview, setEndShiftReportPreview] = useState<ReportBundle | null>(null);
+  const [endShiftReportPreview, setEndShiftReportPreview] = useState<ShiftReportBundle | null>(null);
   const [endShiftGenerating, setEndShiftGenerating] = useState(false);
-  const [endShiftDraft, setEndShiftDraft] = useState<ReportDraft | null>(null);
   const [endShiftError, setEndShiftError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; variant: "success" | "error" } | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -261,11 +273,13 @@ export default function ConfirmKienProductionPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
-  const [reportGenerating, setReportGenerating] = useState(false);
+  // Mục 7: 2 hành động báo cáo độc lập trong Hub (tách 2026-09-27) — PDF dựng sẵn, Chia sẻ/Tải dùng
+  // lại đúng doc. "shift" = Phiếu thành phẩm F09; "daily" = Báo cáo lô F11 + sản xuất hằng ngày F12.
+  const [reportGenerating, setReportGenerating] = useState<"shift" | "daily" | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
-  // Mục 7: PDF đã dựng sẵn từ "Xem/Tạo lại phiếu" trong Hub — Chia sẻ/Tải dùng lại đúng doc này.
-  const [reportPreview, setReportPreview] = useState<ReportBundle | null>(null);
-  const [reportDraft, setReportDraft] = useState<ReportDraft | null>(null);
+  const [reportPreview, setReportPreview] = useState<ShiftReportBundle | null>(null);
+  const [dailyPreview, setDailyPreview] = useState<DailyReportBundle | null>(null);
+  const [reportDraft, setReportDraft] = useState<DailyReportDraft | null>(null);
 
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -702,37 +716,60 @@ export default function ConfirmKienProductionPage() {
     }
   };
 
-  const handleGenerateReportNow = async () => {
-    if (!factoryId) return;
-    setReportGenerating(true);
+  const resetReportState = () => {
     setReportError(null);
     setReportPreview(null);
+    setDailyPreview(null);
     setReportDraft(null);
+  };
+
+  const handleGenerateReportNow = async () => {
+    if (!factoryId) return;
+    resetReportState();
+    setReportGenerating("shift");
     try {
-      const draft = await loadReportDraft(factoryId, historyNgay);
+      const shift = await loadShiftReport(factoryId, historyNgay);
+      if (shift.sections.length === 0) {
+        setReportError(tt("endShiftNoData"));
+        return;
+      }
+      setReportPreview(await buildShiftReport(shift));
+    } catch (err) {
+      setReportError(err instanceof Error ? err.message : tt("endShiftReportError"));
+    } finally {
+      setReportGenerating(null);
+    }
+  };
+
+  const handleGenerateDailyReport = async () => {
+    if (!factoryId) return;
+    resetReportState();
+    setReportGenerating("daily");
+    try {
+      const draft = await loadDailyReportDraft(factoryId, historyNgay);
       if (draft.shift.sections.length === 0) {
         setReportError(tt("endShiftNoData"));
         return;
       }
       setReportDraft(draft);
     } catch (err) {
-      setReportError(err instanceof Error ? err.message : tt("endShiftReportError"));
+      setReportError(err instanceof Error ? err.message : tt("dailyReportError"));
     } finally {
-      setReportGenerating(false);
+      setReportGenerating(null);
     }
   };
 
   const handleReportInputsSubmit = async (inputs: DailyReportInputs) => {
     if (!reportDraft) return;
-    setReportGenerating(true);
+    setReportGenerating("daily");
     setReportError(null);
     try {
-      setReportPreview(await buildReportBundle(reportDraft, inputs));
+      setDailyPreview(await buildDailyReport(reportDraft, inputs));
       setReportDraft(null);
     } catch (err) {
-      setReportError(err instanceof Error ? err.message : tt("endShiftReportError"));
+      setReportError(err instanceof Error ? err.message : tt("dailyReportError"));
     } finally {
-      setReportGenerating(false);
+      setReportGenerating(null);
     }
   };
 
@@ -743,7 +780,6 @@ export default function ConfirmKienProductionPage() {
     setEndShiftPhase("confirm");
     setEndShiftIncomplete([]);
     setEndShiftReportPreview(null);
-    setEndShiftDraft(null);
     setEndShiftError(null);
     setEndShiftConfirmOpen(true);
   };
@@ -753,31 +789,17 @@ export default function ConfirmKienProductionPage() {
     setEndShiftGenerating(true);
     setEndShiftError(null);
     try {
-      const draft = await loadReportDraft(factoryId, historyNgay);
-      if (draft.shift.sections.length === 0) {
+      const shift = await loadShiftReport(factoryId, historyNgay);
+      if (shift.sections.length === 0) {
         setEndShiftError(tt("endShiftNoData"));
         setEndShiftPhase("confirm");
         return;
       }
-      setEndShiftDraft(draft);
-      setEndShiftPhase("dailyInput");
-    } catch (err) {
-      setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
-      setEndShiftPhase("confirm");
-    } finally {
-      setEndShiftGenerating(false);
-    }
-  };
-
-  const handleEndShiftInputsSubmit = async (inputs: DailyReportInputs) => {
-    if (!endShiftDraft) return;
-    setEndShiftGenerating(true);
-    setEndShiftError(null);
-    try {
-      setEndShiftReportPreview(await buildReportBundle(endShiftDraft, inputs));
+      setEndShiftReportPreview(await buildShiftReport(shift));
       setEndShiftPhase("preview");
     } catch (err) {
       setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
+      setEndShiftPhase("confirm");
     } finally {
       setEndShiftGenerating(false);
     }
@@ -986,9 +1008,12 @@ export default function ConfirmKienProductionPage() {
                 reportGenerating={reportGenerating}
                 reportError={reportError}
                 reportPreview={reportPreview}
+                dailyPreview={dailyPreview}
                 reportDraft={reportDraft}
+                canReportDaily={hasPermission(currentUser, "product.report_daily")}
                 onReportInputsSubmit={(inputs) => void handleReportInputsSubmit(inputs)}
                 onGenerateReport={handleGenerateReportNow}
+                onGenerateDailyReport={handleGenerateDailyReport}
                 onScan={() => {
                   setScanError(null);
                   setView("scanning");
@@ -1350,8 +1375,6 @@ export default function ConfirmKienProductionPage() {
           incomplete={endShiftIncomplete}
           pendingDrafts={pendingDrafts}
           reportPreview={endShiftReportPreview}
-          draft={endShiftDraft}
-          onInputsSubmit={(inputs) => void handleEndShiftInputsSubmit(inputs)}
           onCancel={() => {
             if (endShiftGenerating) return;
             setEndShiftConfirmOpen(false);
@@ -1529,9 +1552,12 @@ function HubView({
   reportGenerating,
   reportError,
   reportPreview,
+  dailyPreview,
   reportDraft,
+  canReportDaily,
   onReportInputsSubmit,
   onGenerateReport,
+  onGenerateDailyReport,
   onScan,
   onEndShift,
   pendingDrafts,
@@ -1563,12 +1589,15 @@ function HubView({
   onCancelDelete: () => void;
   onConfirmDelete: (entry: ShiftHistoryEntry) => void;
   onEdit: (entry: ShiftHistoryEntry) => void;
-  reportGenerating: boolean;
+  reportGenerating: "shift" | "daily" | null;
   reportError: string | null;
-  reportPreview: ReportBundle | null;
-  reportDraft: ReportDraft | null;
+  reportPreview: ShiftReportBundle | null;
+  dailyPreview: DailyReportBundle | null;
+  reportDraft: DailyReportDraft | null;
+  canReportDaily: boolean;
   onReportInputsSubmit: (inputs: DailyReportInputs) => void;
   onGenerateReport: () => void;
+  onGenerateDailyReport: () => void;
   onScan: () => void;
   onEndShift: () => void;
   pendingDrafts: ConfirmDraftRow[];
@@ -1795,25 +1824,51 @@ function HubView({
           </div>
         )}
 
-        <button
-          type="button"
-          disabled={reportGenerating}
-          onClick={onGenerateReport}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {reportGenerating ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
-          {tt("viewOrRegenerateReport")}
-        </button>
+        <div className={`mt-3 grid gap-2 ${canReportDaily ? "grid-cols-2" : "grid-cols-1"}`}>
+          <button
+            type="button"
+            disabled={reportGenerating !== null}
+            onClick={onGenerateReport}
+            className="flex items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-2 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {reportGenerating === "shift" ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
+            {tt("viewOrRegenerateReport")}
+          </button>
+          {canReportDaily && (
+            <button
+              type="button"
+              disabled={reportGenerating !== null}
+              onClick={onGenerateDailyReport}
+              className="flex items-center justify-center gap-2 rounded-xl border border-indigo-300 bg-indigo-50 px-2 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {reportGenerating === "daily" && !reportDraft ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <ClipboardList size={16} />
+              )}
+              {tt("dailyReportButton")}
+            </button>
+          )}
+        </div>
         <p className="mt-1.5 text-center text-[11px] text-slate-400">{tt("reportCoversWholeDayHint")}</p>
         {reportError && <p className="mt-2 text-center text-xs font-semibold text-red-500">{reportError}</p>}
-        {reportDraft && !reportPreview && (
+        {reportDraft && !dailyPreview && (
           <div className="mt-2">
-            <DailyReportInputForm data={reportDraft.daily} submitting={reportGenerating} onSubmit={onReportInputsSubmit} />
+            <DailyReportInputForm
+              data={reportDraft.daily}
+              submitting={reportGenerating === "daily"}
+              onSubmit={onReportInputsSubmit}
+            />
           </div>
         )}
         {reportPreview && (
           <div className="mt-2">
             <ShiftReportPreviewBar {...reportPreview} />
+          </div>
+        )}
+        {dailyPreview && (
+          <div className="mt-2">
+            <DailyReportPreviewBar {...dailyPreview} />
           </div>
         )}
       </div>
@@ -1842,8 +1897,6 @@ function EndShiftConfirmModal({
   incomplete,
   pendingDrafts,
   reportPreview,
-  draft,
-  onInputsSubmit,
   onCancel,
   onConfirm,
   onSendDraftsAndContinue,
@@ -1852,14 +1905,12 @@ function EndShiftConfirmModal({
   onFinish,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
-  phase: "confirm" | "pendingDrafts" | "warning" | "dailyInput" | "preview";
+  phase: "confirm" | "pendingDrafts" | "warning" | "preview";
   generating: boolean;
   error: string | null;
   incomplete: LotCompletenessWarning[];
   pendingDrafts: ConfirmDraftRow[];
-  reportPreview: ReportBundle | null;
-  draft: ReportDraft | null;
-  onInputsSubmit: (inputs: DailyReportInputs) => void;
+  reportPreview: ShiftReportBundle | null;
   onCancel: () => void;
   onConfirm: () => void;
   onSendDraftsAndContinue: () => void;
@@ -1869,7 +1920,7 @@ function EndShiftConfirmModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-6">
-      <div className={`w-full ${phase === "dailyInput" ? "max-w-lg" : "max-w-sm"} rounded-2xl bg-white p-6 shadow-xl`}>
+      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
         {phase === "confirm" && (
           <>
             <h3 className="text-base font-extrabold text-slate-800">{tt("confirmEndShiftTitle")}</h3>
@@ -1994,17 +2045,6 @@ function EndShiftConfirmModal({
                 {generating ? tt("endShiftGenerating") : tt("endShiftProceedAnyway")}
               </button>
             </div>
-          </>
-        )}
-
-        {phase === "dailyInput" && draft && (
-          <>
-            {error && (
-              <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
-                {error}
-              </div>
-            )}
-            <DailyReportInputForm data={draft.daily} submitting={generating} onSubmit={onInputsSubmit} onCancel={onCancel} />
           </>
         )}
 

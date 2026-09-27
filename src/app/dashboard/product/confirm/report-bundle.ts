@@ -1,10 +1,15 @@
-// Gói 3 mẫu in cuối ngày dùng chung cho 3 luồng (Hub "Xem/Tạo lại phiếu", modal "Kết thúc ca",
-// nút "Xem phiếu PDF" ở module Thành phẩm): F09 Phiếu báo thành phẩm, F11 Báo cáo lô sản xuất,
-// F12 Báo cáo sản xuất hằng ngày. Luồng chuẩn:
-//   1. loadReportDraft() — nạp dữ liệu F09/F11 + F12 song song.
-//   2. Người dùng xác nhận số lít dầu DO + ghi chú (DailyReportInputForm) — F12 cần trước khi dựng.
-//   3. buildReportBundle() — dựng cả 3 PDF 1 lần, mở F09 ở tab mới, trả bundle cho preview bar.
+// 2 hành động báo cáo cuối ngày ĐỘC LẬP (tách 2026-09-27), dùng chung cho 3 luồng: Hub "Xem/Tạo lại
+// phiếu", modal "Kết thúc ca" (chỉ Phiếu thành phẩm) và nút ở header nhóm ngày trong module Thành phẩm.
+//
+//   A. Phiếu thành phẩm (F09) — quyền TẠO thành phẩm (product.create | product.confirm_scan).
+//      loadShiftReport() → buildShiftReport(). KHÔNG cần nhập dầu, KHÔNG dựng F11/F12.
+//   B. Báo cáo ngày (F11 + F12) — quyền product.report_daily.
+//      loadDailyReportDraft() → người dùng xác nhận dầu DO (DailyReportInputForm) → buildDailyReport().
+//
+// Server action tự kiểm quyền bằng access token của người gọi (report-access.ts) — ẩn nút ở UI chỉ
+// là lớp thứ nhất.
 import type jsPDF from "jspdf";
+import { getFreshAuthSession } from "@/lib/auth";
 import { loadShiftReportData, type ShiftReportData } from "@/app/dashboard/product/confirm/actions";
 import {
   loadDailyProductionReportData,
@@ -24,11 +29,11 @@ import {
   openShiftReportPdfInNewTab,
 } from "@/app/dashboard/product/confirm/shift-report-pdf";
 
-export type ReportDraft = { shift: ShiftReportData; daily: DailyReportData };
+export type ShiftReportBundle = { doc: jsPDF; fileName: string };
 
-export type ReportBundle = {
-  doc: jsPDF;
-  fileName: string;
+export type DailyReportDraft = { shift: ShiftReportData; daily: DailyReportData };
+
+export type DailyReportBundle = {
   lotDoc: jsPDF;
   lotFileName: string;
   dailyDoc: jsPDF;
@@ -37,23 +42,39 @@ export type ReportBundle = {
   lotBundleFileName: string;
 };
 
-export async function loadReportDraft(factoryId: string, ngay: string): Promise<ReportDraft> {
+async function getAccessToken(): Promise<string | null> {
+  const session = await getFreshAuthSession();
+  return session?.access_token ?? null;
+}
+
+export async function loadShiftReport(factoryId: string, ngay: string): Promise<ShiftReportData> {
+  return loadShiftReportData(factoryId, ngay, await getAccessToken(), "shift");
+}
+
+export async function buildShiftReport(shift: ShiftReportData): Promise<ShiftReportBundle> {
+  const doc = await buildShiftReportPdf(shift);
+  openShiftReportPdfInNewTab(doc);
+  return { doc, fileName: buildShiftReportFileName(shift) };
+}
+
+export async function loadDailyReportDraft(factoryId: string, ngay: string): Promise<DailyReportDraft> {
+  const token = await getAccessToken();
   const [shift, daily] = await Promise.all([
-    loadShiftReportData(factoryId, ngay),
-    loadDailyProductionReportData(factoryId, ngay),
+    loadShiftReportData(factoryId, ngay, token, "daily"),
+    loadDailyProductionReportData(factoryId, ngay, token),
   ]);
   return { shift, daily };
 }
 
-export async function buildReportBundle(draft: ReportDraft, inputs: DailyReportInputs): Promise<ReportBundle> {
-  const doc = await buildShiftReportPdf(draft.shift);
+export async function buildDailyReport(
+  draft: DailyReportDraft,
+  inputs: DailyReportInputs,
+): Promise<DailyReportBundle> {
   const lotDoc = await buildLotReportPdf(draft.shift);
   const dailyDoc = await buildDailyReportPdf(draft.daily, inputs);
   const lotBundleDoc = await buildLotAndDailyReportPdf(draft.shift, draft.daily, inputs);
-  openShiftReportPdfInNewTab(doc);
+  openShiftReportPdfInNewTab(lotBundleDoc);
   return {
-    doc,
-    fileName: buildShiftReportFileName(draft.shift),
     lotDoc,
     lotFileName: buildLotReportFileName(draft.shift),
     dailyDoc,
