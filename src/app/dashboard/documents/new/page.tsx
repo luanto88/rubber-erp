@@ -7,8 +7,6 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/auth"
 import { DocumentsShell } from "../_components/documents-shell"
 import {
-  CHE_DO_XEM_DESC,
-  CHE_DO_XEM_LABEL,
   LOAI_VAN_BAN_KY_HIEU,
   LOAI_VAN_BAN_LABEL,
   LOAI_VAN_BAN_OPTIONS,
@@ -20,6 +18,7 @@ import {
   type VanBanDocumentType,
   type ThuTuKyStep,
 } from "../_components/documents-types"
+import { DocumentScopeFields } from "../_components/scope-toggle-group"
 import {
   Plus,
   Trash2,
@@ -27,7 +26,6 @@ import {
   X,
   FileText,
   GripVertical,
-  Globe,
   Lock,
   Sparkles,
   FileSignature,
@@ -648,90 +646,25 @@ export default function NewDocumentPage() {
                 )}
               </div>
 
-              {/* Phạm vi lưu hành — quyết định luồng ký, đặt sớm để các section bên dưới hiện đúng nhánh */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi lưu hành</label>
-                <div className="flex rounded-xl overflow-hidden border border-slate-200">
-                  {[
-                    { val: "Cong_ty", label: "Nội bộ công ty" },
-                    { val: "Don_vi", label: "Nội bộ đơn vị" },
-                  ].map(({ val, label }) => (
-                    <button
-                      key={val}
-                      type="button"
-                      className={`flex-1 py-2 text-sm font-bold transition-all ${
-                        form.pham_vi === val
-                          ? "bg-blue-600 text-white"
-                          : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                      }`}
-                      onClick={() => {
-                        setForm((f) => ({
-                          ...f,
-                          pham_vi: val,
-                          ...(val === "Don_vi" ? { che_do_xem: "cong_khai" } : {}),
-                          phe_duyet_user_id: "",
-                        }))
-                        setSelectedUnitUserIds([])
-                        if (val === "Don_vi" && factoryId && form.phong_ban) {
-                          void loadUnitUsers(factoryId, form.phong_ban)
-                          // loadDeptLeaderCandidates được effect [factoryId, phong_ban, pham_vi] tự gọi
-                        }
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {form.pham_vi === "Don_vi" && (
-                  <p className="text-xs text-blue-600 mt-1">
-                    Văn bản chỉ lưu hành trong đơn vị. Người trong phòng ban ký xác nhận tuần tự.
-                  </p>
-                )}
-              </div>
-
-              {/* Phạm vi hiển thị — chỉ áp dụng Nội bộ công ty (thay "Phân loại Thường/Mật" cũ) */}
-              {form.pham_vi !== "Don_vi" && (
-                <div className="p-4 rounded-xl border-2 border-slate-200 bg-slate-50">
-                  <label className="text-xs font-bold text-slate-600 block mb-2.5">
-                    Phạm vi hiển thị <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex gap-3 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => setForm((f) => ({ ...f, che_do_xem: "cong_khai" }))}
-                      className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
-                        !isGioiHan
-                          ? "bg-slate-700 text-white border-slate-700 shadow-md"
-                          : "bg-white text-slate-500 border-slate-300 hover:bg-slate-50"
-                      }`}
-                    >
-                      <Globe size={17} />
-                      {CHE_DO_XEM_LABEL.cong_khai}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setForm((f) => ({ ...f, che_do_xem: "gioi_han" }))}
-                      className={`flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border-2 transition-all ${
-                        isGioiHan
-                          ? "bg-amber-600 text-white border-amber-600 shadow-md"
-                          : "bg-white text-amber-700 border-amber-300 hover:bg-amber-50"
-                      }`}
-                    >
-                      <Lock size={17} />
-                      {CHE_DO_XEM_LABEL.gioi_han}
-                    </button>
-                  </div>
-                  <p className={`text-xs mt-2 ${isGioiHan ? "text-amber-700 font-medium" : "text-slate-400"}`}>
-                    {isGioiHan ? CHE_DO_XEM_DESC.gioi_han : CHE_DO_XEM_DESC.cong_khai}
-                  </p>
-                  {isGioiHan && (
-                    <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-                      Lưu ý: giới hạn áp dụng cho danh sách, trang chi tiết và tìm kiếm. Người đang
-                      giữ sẵn đường dẫn tệp PDF vẫn tải được tệp đó.
-                    </p>
-                  )}
-                </div>
-              )}
+              {/* Phạm vi lưu hành | Phạm vi hiển thị — 2 cột cân đối, dùng chung Soạn thảo/Upload/Sửa */}
+              <DocumentScopeFields
+                phamVi={form.pham_vi === "Don_vi" ? "Don_vi" : "Cong_ty"}
+                onPhamViChange={(val) => {
+                  setForm((f) => ({
+                    ...f,
+                    pham_vi: val,
+                    ...(val === "Don_vi" ? { che_do_xem: "cong_khai" } : {}),
+                    phe_duyet_user_id: "",
+                  }))
+                  setSelectedUnitUserIds([])
+                  if (val === "Don_vi" && factoryId && form.phong_ban) {
+                    void loadUnitUsers(factoryId, form.phong_ban)
+                    // loadDeptLeaderCandidates được effect [factoryId, phong_ban, pham_vi] tự gọi
+                  }
+                }}
+                cheDoXem={isGioiHan ? "gioi_han" : "cong_khai"}
+                onCheDoXemChange={(val) => setForm((f) => ({ ...f, che_do_xem: val }))}
+              />
 
               <div className="grid grid-cols-2 gap-4">
                 <div>

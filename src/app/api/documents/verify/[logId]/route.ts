@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
-import { verifyPadesSignature, findUniqueByteRanges } from "@/lib/signing/verify-pades"
-import { computeIntegrityHash } from "@/lib/signing/hash"
+import { verifyPadesSignature, findUniqueByteRanges, findMatchingRevision } from "@/lib/signing/verify-pades"
 import { parseStorageObjectPath } from "@/lib/secure-file-url"
 
 export const dynamic = "force-dynamic"
@@ -37,6 +36,18 @@ type LogRow = {
 }
 
 const SUPPORTED_DOC_TYPES = new Set(["van_ban", "iso", "iso_form"])
+
+/**
+ * Dòng log ISO của bản TRUNG GIAN (trước khi niêm phong): ISO dựng lại file từ file gốc mỗi lượt
+ * ký nên bản này bị thay thế hoàn toàn — không có chỉ số PAdES và mã băm không bao giờ khớp file
+ * cuối. Không phải dấu hiệu can thiệp.
+ */
+function isSupersededIsoDraft(row: LogRow): boolean {
+  return (row.doc_type === "iso" || row.doc_type === "iso_form")
+    && (row.pades_sig_index === null || row.pades_sig_index === undefined)
+}
+
+const SIGN_STEP_ACTIONS = new Set(["soan_thao", "xem_xet", "phe_duyet", "ky_buoc"])
 
 /** "Người lập" / "Thực hiện" / "Phê duyệt" — nhãn hiển thị cho người xem, lấy động từ cấu hình bước nếu có. */
 function getBuocLabel(
@@ -169,7 +180,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     let trangThai: string | null = null
     let maTaiLieu: string | null = null
     let tenTaiLieu: string | null = null
-    let fileSignedPdfUrl: string | null = null
     let thuTuKy: Array<{ ten?: string; user_id?: string }> | null = null
     let nguoiKyMap: Record<string, { ten?: string; ky_at?: string; user_id?: string }> | null = null
     let soBuocTong: number | null = null
@@ -237,7 +247,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     // Tải thông tin người ký hiện tại và lịch sử các bước ký của tài liệu này
     const siblingLogsRes = await supabase
       .from("doc_approval_log")
-      .select("id, user_id, action, buoc_ky, created_at, pades_sig_index")
+      .select("id, doc_type, user_id, action, buoc_ky, content_hash, created_at, pades_sig_index")
       .eq("doc_id", log.doc_id)
       .order("created_at", { ascending: true })
 
@@ -259,7 +269,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
 
     const effectiveTotalSteps = soBuocTong || (thuTuKy?.length ?? siblingLogs.length)
 
-    const signingHistory = siblingLogs.map((l) => ({
+    // Chỉ giữ dòng thực sự gắn với một con dấu đã đóng lên file: bỏ dòng chuyển trạng thái ghi từ
+    // client (không có mã băm) và — với ISO đã có nhật ký theo từng bước — bỏ các dòng
+    // "generate_pdf" của bản trung gian đã bị thay thế (bấm vào chỉ ra cảnh báo, gây hiểu nhầm
+    // "không xác minh được"). Dòng đang xem luôn được giữ.
+    const hasStepLogs = siblingLogs.some((l) => !!l.content_hash && SIGN_STEP_ACTIONS.has(l.action || ""))
+    const visibleLogs = siblingLogs.filter((l) => {
+      if (l.id === log?.id) return true
+      if (!l.content_hash) return false
+      if (hasStepLogs && l.action === "generate_pdf" && isSupersededIsoDraft(l)) return false
+      return true
+    })
+    const signingHistory = visibleLogs.map((l) => ({
       id: l.id,
       signerName: resolveSignerName(l, profileMap, nguoiKyMap, docRow),
       buoc: getBuocLabel(l, thuTuKy, effectiveTotalSteps, docRow),
@@ -303,9 +324,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
     // Vá bảo mật 2026-09-20: bucket iso-documents sẽ chuyển private — `fetch()` thẳng URL public
     // sẽ 403 dù route này chạy phía server. Tải object bằng service role (bypass cờ public/RLS)
     // thay vì gọi HTTP thô ra URL đã lưu trong DB.
-    // Duyệt qua candidateUrls để tìm file có mã băm SHA-256 khớp với log.content_hash
+    //
+    // Toàn vẹn nội dung kiểm THEO REVISION (sửa 2026-09-27): `content_hash` của bước N là hash file
+    // NGAY SAU bước N, còn file hiện tại đã được các bước sau NỐI THÊM (incremental update). So hash
+    // toàn file như trước làm mọi bước trừ bước cuối luôn báo "đã bị chỉnh sửa" dù chữ ký hợp lệ
+    // tuyệt đối (lỗi thật ở 01/VB-NMCB, 22/BC-NMCB). Nay so với tiền tố file tới hết revision của
+    // chữ ký đó — xem `findMatchingRevision`.
     let pdfBytes: Buffer | null = null
-    let isIntegrityValid = false
+    let revisionMatch: { index: number; revisionEnd: number } | null = null
+    let anyDownloaded = false
 
     for (const url of candidateUrls) {
       const objectPath = parseStorageObjectPath(url, BUCKET)
@@ -313,20 +340,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       const download = await getSupabaseAdmin().storage.from(BUCKET).download(objectPath)
       if (download?.error || !download?.data) continue
       const bytes = Buffer.from(await download.data.arrayBuffer())
-      const currentHash = computeIntegrityHash(bytes)
+      anyDownloaded = true
 
-      if (!log.content_hash || log.content_hash === currentHash) {
+      if (!log.content_hash) {
         pdfBytes = bytes
-        isIntegrityValid = true
         break
       }
-
-      if (!pdfBytes) {
+      const match = findMatchingRevision(bytes, log.content_hash, log.pades_sig_index)
+      if (match) {
         pdfBytes = bytes
+        revisionMatch = match
+        break
       }
     }
 
-    if (!pdfBytes) {
+    if (!anyDownloaded) {
       return NextResponse.json({
         ...base,
         valid: false,
@@ -335,8 +363,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
       })
     }
 
-    // 1. Kiểm tra tính toàn vẹn của file (SHA-256) so với mã băm lưu trong doc_approval_log
-    if (!isIntegrityValid) {
+    // 1. Không revision nào khớp mã băm đã lưu lúc ký.
+    if (!pdfBytes) {
+      // ISO dựng lại file từ file gốc mỗi lượt ký ⇒ bản trung gian (trước khi niêm phong) bị THAY
+      // THẾ hoàn toàn, không bao giờ nằm trong file cuối. Đây là quy trình bình thường, không phải
+      // file bị can thiệp — trả cảnh báo trung tính thay vì báo đỏ.
+      if (isSupersededIsoDraft(log)) {
+        return NextResponse.json({
+          ...base,
+          valid: false,
+          severity: "warn",
+          supersededDraft: true,
+          reason:
+            "Đây là bản trung gian trước khi ban hành — đã được thay thế bởi bản cuối có niêm phong chữ ký số. Hãy xác thực bằng con dấu trên bản đang lưu hành.",
+        })
+      }
       return NextResponse.json({
         ...base,
         valid: false,
@@ -344,6 +385,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
         reason: "Nội dung tài liệu đã bị chỉnh sửa sau khi ký (sai lệch mã băm toàn vẹn SHA-256)",
       })
     }
+
+    // Khớp một revision ở giữa file ⇒ các bước ký sau chỉ nối thêm, phần đã ký còn nguyên vẹn.
+    const revisionVerified = !!revisionMatch && revisionMatch.revisionEnd < pdfBytes.length
+    const revisionNote = revisionVerified
+      ? "Nội dung tại thời điểm ký còn nguyên vẹn — các bước ký sau chỉ được nối thêm vào cuối file, không đụng phần đã ký."
+      : undefined
 
     // 2. Kiểm tra chữ ký số PAdES nếu có trong file
     const padesRanges = findUniqueByteRanges(pdfBytes)
@@ -373,6 +420,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ log
         signerName: finalSignerName,
         padesSignerName: padesSealSignerName,
         isInheritedSeal,
+        revisionVerified,
+        revisionNote: result.valid ? revisionNote : undefined,
         inheritedNote: isInheritedSeal && result.valid
           ? "Chữ ký điện tử nội bộ hợp lệ — Đã được niêm phong bảo chứng PAdES theo quy trình ban hành tài liệu"
           : undefined,

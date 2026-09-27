@@ -1,6 +1,7 @@
 import forge from "node-forge"
 import crypto from "node:crypto"
 import { normalizePem } from "./pades"
+import { computeIntegrityHash } from "./hash"
 
 // Verify lại 1 chữ ký PAdES/CMS đã nhúng trong file PDF — "mirror ngược" đúng những gì
 // `applyPadesSignature()`/`ForgeCmsSigner.sign()` (`./pades.ts`) đã làm lúc ký, dùng cùng thư
@@ -209,6 +210,44 @@ export function findUniqueByteRanges(pdf: Buffer): ByteRange[] {
     }
   }
   return result
+}
+
+/**
+ * Byte kết thúc revision của 1 chữ ký = `s2 + l2` của ByteRange. Chữ ký PAdES phủ trọn file TẠI
+ * THỜI ĐIỂM KÝ, nên file ngay sau lượt ký đó chính là `bytes.subarray(0, revisionEndOf(range))` —
+ * các lượt ký sau chỉ NỐI THÊM (incremental update) phía sau, không đụng phần này.
+ */
+export function revisionEndOf([, , s2, l2]: ByteRange): number {
+  return s2 + l2
+}
+
+/**
+ * Tìm revision của file có SHA-256 khớp `contentHash` (hash lưu trong `doc_approval_log` ngay
+ * sau lượt ký). Trước 2026-09-27 trang xác thực chỉ so hash TOÀN FILE hiện tại → mọi bước ký trừ
+ * bước cuối luôn báo "đã bị chỉnh sửa", dù chữ ký hoàn toàn hợp lệ (file chỉ bị nối thêm).
+ *
+ * Trả `{ index: -1 }` khi khớp toàn file nhưng không trùng revision nào (file không có PAdES),
+ * `null` khi không khớp gì cả.
+ */
+export function findMatchingRevision(
+  pdf: Buffer,
+  contentHash: string,
+  preferIndex?: number | null,
+): { index: number; revisionEnd: number } | null {
+  const target = contentHash.toLowerCase()
+  const ranges = findUniqueByteRanges(pdf)
+  const order = ranges.map((_, i) => i)
+  if (preferIndex != null && preferIndex >= 0 && preferIndex < ranges.length) {
+    order.splice(order.indexOf(preferIndex), 1)
+    order.unshift(preferIndex)
+  }
+  for (const i of order) {
+    const end = revisionEndOf(ranges[i])
+    if (end > pdf.length) continue
+    if (computeIntegrityHash(pdf.subarray(0, end)) === target) return { index: i, revisionEnd: end }
+  }
+  if (computeIntegrityHash(pdf) === target) return { index: -1, revisionEnd: pdf.length }
+  return null
 }
 
 /**

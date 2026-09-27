@@ -5,19 +5,16 @@ import { supabase } from "@/lib/supabase"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
 import {
-  CHE_DO_XEM_DESC,
-  CHE_DO_XEM_LABEL,
   PHONG_BAN_VAN_BAN_OPTIONS,
   sanitizeStorageFileName,
   fmtDate,
   type VanBanDocument,
   type ThuTuKyStep,
 } from "./documents-types"
+import { DocumentScopeFields } from "./scope-toggle-group"
 import {
   AlertTriangle,
   FileText,
-  Globe,
-  Lock,
   Plus,
   Trash2,
   Upload,
@@ -427,36 +424,14 @@ export function EditDocModal({
           )}
         </div>
 
-        {!isDonVi && (
-          <div>
-            <label className="text-xs font-bold text-slate-600 block mb-1.5">Phạm vi hiển thị</label>
-            <div className="flex rounded-xl overflow-hidden border border-slate-200">
-              {([
-                { val: "cong_khai", Icon: Globe },
-                { val: "gioi_han", Icon: Lock },
-              ] as const).map(({ val, Icon }) => (
-                <button
-                  key={val}
-                  type="button"
-                  onClick={() => setCheDoXem(val)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm font-bold transition-all ${
-                    cheDoXem === val
-                      ? val === "gioi_han"
-                        ? "bg-amber-600 text-white"
-                        : "bg-slate-700 text-white"
-                      : "bg-slate-50 text-slate-500 hover:bg-slate-100"
-                  }`}
-                >
-                  <Icon size={14} />
-                  {CHE_DO_XEM_LABEL[val]}
-                </button>
-              ))}
-            </div>
-            <p className={`text-xs mt-1.5 ${isGioiHan ? "text-amber-700 font-medium" : "text-slate-400"}`}>
-              {isGioiHan ? CHE_DO_XEM_DESC.gioi_han : CHE_DO_XEM_DESC.cong_khai}
-            </p>
-          </div>
-        )}
+        {/* Phạm vi lưu hành chỉ đọc (luồng ký đã cố định khi tạo) — hiện để cân 2 cột với Phạm vi hiển thị */}
+        <DocumentScopeFields
+          phamVi={isDonVi ? "Don_vi" : "Cong_ty"}
+          phamViLocked
+          cheDoXem={isGioiHan ? "gioi_han" : "cong_khai"}
+          onCheDoXemChange={setCheDoXem}
+        />
+
 
         <div>
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>

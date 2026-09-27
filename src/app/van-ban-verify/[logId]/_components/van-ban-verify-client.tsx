@@ -47,6 +47,11 @@ type VerifyResponse = {
   padesSignerName?: string
   isInheritedSeal?: boolean
   inheritedNote?: string
+  /** Chữ ký nằm ở giữa file: các bước sau được nối thêm, phần đã ký kiểm theo đúng revision. */
+  revisionVerified?: boolean
+  revisionNote?: string
+  /** Dòng nhật ký của bản ISO trung gian đã bị thay thế bởi bản ban hành (không phải lỗi). */
+  supersededDraft?: boolean
   signingHistory?: SigningStep[]
 }
 
@@ -144,13 +149,16 @@ export function VanBanVerifyClient({ logId }: { logId: string }) {
     severity === "ok"
       ? "Chữ ký hợp lệ"
       : severity === "warn"
-        ? "Tài liệu đã hết hiệu lực"
+        ? data.supersededDraft
+          ? "Bản trung gian đã được thay thế"
+          : "Tài liệu đã hết hiệu lực"
         : "Không xác minh được"
 
-  // Nhánh "warn" chỉ phát sinh với ISO hết hiệu lực: bản ban hành đã bị đóng dấu lại nên chữ ký số
-  // không còn nguyên vẹn — là quy trình bình thường, KHÔNG phải dấu hiệu file bị sửa trái phép.
+  // Nhánh "warn" phát sinh ở 2 trường hợp đều là quy trình bình thường, KHÔNG phải dấu hiệu file
+  // bị sửa trái phép: (1) ISO hết hiệu lực — bản ban hành bị đóng dấu lại; (2) dòng nhật ký của
+  // bản ISO trung gian — đã bị bản ban hành thay thế (server gửi sẵn lý do trong `reason`).
   const message =
-    severity === "warn"
+    severity === "warn" && !data.supersededDraft
       ? "Tài liệu này đã hết hiệu lực và được đóng dấu lại, nên chữ ký số của bản ban hành không còn nguyên vẹn — đây là điều bình thường, không phải dấu hiệu file bị can thiệp."
       : data.reason
 
@@ -234,6 +242,11 @@ export function VanBanVerifyClient({ logId }: { logId: string }) {
       {data.valid && (
         <div className="border-t border-slate-100 p-6 space-y-2 text-xs bg-slate-50/60">
           <p className="font-bold text-slate-500 mb-1">Thông tin kỹ thuật chữ ký số</p>
+          {data.revisionNote && (
+            <div className="p-2.5 rounded-xl bg-emerald-50/80 border border-emerald-200/70 text-emerald-800 text-xs mb-3 font-medium leading-relaxed">
+              {data.revisionNote}
+            </div>
+          )}
           {data.inheritedNote && (
             <div className="p-2.5 rounded-xl bg-violet-50/80 border border-violet-200/70 text-violet-800 text-xs mb-3 font-medium leading-relaxed">
               {data.inheritedNote}
