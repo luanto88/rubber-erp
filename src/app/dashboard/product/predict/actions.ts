@@ -15,6 +15,16 @@ export type PredictAvailableNgan = {
 export async function loadPredictAvailableNgans(
   factoryId: string,
 ): Promise<PredictAvailableNgan[]> {
+  const rows = await loadPredictNgansWithCapacity(factoryId);
+  return rows.filter((x) => x.availableKg > 0.5).map((x) => x.ngan);
+}
+
+// Cùng danh sách ngăn như loadPredictAvailableNgans (Chờ/Đang SX, còn nguyên liệu, chưa "đóng dự
+// kiến") nhưng KHÔNG lọc theo dung lượng và trả kèm availableKg — dùng chung cho màn "Đổi ngăn"
+// khi quét QR (confirm/actions.ts) để 2 màn tính sức chứa y hệt nhau.
+export async function loadPredictNgansWithCapacity(
+  factoryId: string,
+): Promise<Array<{ ngan: PredictAvailableNgan; availableKg: number; usedKg: number }>> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ngans")
@@ -38,10 +48,17 @@ export async function loadPredictAvailableNgans(
   const closedNganIds = new Set((closedRows || []).map((r) => r.ngan_id));
   ngans = ngans.filter((n) => !closedNganIds.has(n.id));
 
-  // Loại ngăn đã "hết dung lượng dự đoán" — real kg + predicted kg + KL "có chủ" của kiện dở
-  // dang một phần (xem getReservedKgForPartialKien) đã chạm 110% tong_kho, không còn chỗ
-  // trống dù chỉ 1 kiện. Tính thuần theo kg (không phụ thuộc CSR/bành cụ thể, vì bước chọn
-  // ngăn diễn ra TRƯỚC khi chọn CSR/bành).
+  return computeNganCapacities(factoryId, ngans);
+}
+
+// Sức chứa đã dùng / còn lại của từng ngăn — real kg + predicted kg + KL "có chủ" của kiện dở
+// dang (xem getReservedKgForPartialKien), trần 110% tong_kho. Tính thuần theo kg (không phụ thuộc
+// CSR/bành cụ thể, vì bước chọn ngăn diễn ra TRƯỚC khi chọn CSR/bành). Dùng chung cho màn Dự đoán
+// và màn "Đổi ngăn" để 2 nơi không bao giờ lệch nhau.
+async function computeNganCapacities(
+  factoryId: string,
+  ngans: PredictAvailableNgan[],
+): Promise<Array<{ ngan: PredictAvailableNgan; availableKg: number; usedKg: number }>> {
   const reservedMap = await getReservedKgForPartialKien(factoryId);
   const withCapacity = await Promise.all(
     ngans.map(async (n) => {
@@ -51,11 +68,64 @@ export async function loadPredictAvailableNgans(
       ]);
       const reservedKg = reservedMap[n.id] || 0;
       const capKg = Number(n.tong_kho || 0) * 1.1;
-      const availableKg = capKg - realKg - predictedKg - reservedKg;
-      return { ngan: n, availableKg };
+      const usedKg = realKg + predictedKg + reservedKg;
+      const availableKg = capKg - usedKg;
+      return { ngan: n, availableKg, usedKg };
     }),
   );
-  return withCapacity.filter((x) => x.availableKg > 0.5).map((x) => x.ngan);
+  return withCapacity;
+}
+
+// Danh sách ngăn cho "Đổi ngăn" (màn tra cứu nhãn kiện): Chờ/Đang SX, còn nguyên liệu, và ĐÃ CÓ
+// LỊCH SỬ DỰ ĐOÁN (từng là ngăn của 1 đợt dự đoán, hoặc đang được gán cho ít nhất 1 kiện của 1 lô
+// dự đoán còn hiệu lực). Khác loadPredictNgansWithCapacity: KHÔNG loại ngăn đã tick "đã dự kiến
+// xong" (closes_ngan) — trần 110% vẫn là chốt chặn cứng (lọc ở confirm/actions.ts).
+export async function loadSwapCandidateNgans(
+  factoryId: string,
+): Promise<Array<{ ngan: PredictAvailableNgan; availableKg: number; usedKg: number }>> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("ngans")
+    .select("id,ma_ngan,ten_ngan,loai_nl,tong_kho,trang_thai")
+    .eq("factory_id", factoryId)
+    .in("trang_thai", ["Chờ sản xuất", "Đang sản xuất"])
+    .gt("tong_kho", 0)
+    .order("ten_ngan", { ascending: true });
+  if (error) throw new Error(error.message);
+  const ngans = (data || []) as PredictAvailableNgan[];
+  if (ngans.length === 0) return [];
+
+  const historyIds = new Set<string>();
+  const { data: batchRows, error: batchErr } = await supabase
+    .from("lot_prediction_batches")
+    .select("ngan_id")
+    .eq("factory_id", factoryId);
+  if (batchErr) throw new Error(batchErr.message);
+  for (const r of batchRows || []) if (r.ngan_id) historyIds.add(r.ngan_id);
+
+  // Phân trang — lot_prediction_lots có thể vượt 1000 dòng (xem rule 04-code-patterns.md).
+  const PAGE_SIZE = 1000;
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data: rows, error: rowErr } = await supabase
+      .from("lot_prediction_lots")
+      .select("id,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id")
+      .eq("factory_id", factoryId)
+      .neq("trang_thai", "Hủy")
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (rowErr) throw new Error(rowErr.message);
+    for (const r of rows || []) {
+      for (const id of [r.kien_a_ngan_id, r.kien_b_ngan_id, r.kien_c_ngan_id, r.kien_d_ngan_id]) {
+        if (id) historyIds.add(id);
+      }
+    }
+    if (!rows || rows.length < PAGE_SIZE) break;
+  }
+
+  return computeNganCapacities(
+    factoryId,
+    ngans.filter((n) => historyIds.has(n.id)),
+  );
 }
 
 // Lấy thông tin ngăn theo id, KHÔNG lọc theo trạng thái/dung lượng/đóng dự kiến — dùng khi
@@ -165,6 +235,38 @@ async function getReservedKgForPartialKien(factoryId: string): Promise<Record<st
     .eq("factory_id", factoryId)
     .eq("trang_thai", "Dở dang");
   const reservedByNgan: Record<string, number> = {};
+
+  // Dòng dự đoán của các lô ĐÃ thành lô thật (real_lot_id có giá trị) không còn được
+  // getExistingPredictedKg/RPC create_lot_prediction_batch đếm (chúng chỉ đếm real_lot_id IS NULL)
+  // — trước đây kiện CHƯA SẢN XUẤT (B, C, D) của lô đã quét kiện A bị mất chỗ giữ ở ngăn dự kiến.
+  // Bù lại ở đây: kiện có kien_X_ngan_id, chưa có bành thật nào, không thuộc unassignable_kien →
+  // giữ trọn kien_weight_kg ở ngăn dự kiến. Không trùng với phần kiện dở dang một phần bên dưới
+  // (phần đó chỉ áp dụng khi sum > 0).
+  const dodangIds = (dodangLots || []).map((l) => l.id);
+  const predByLotId = new Map<
+    string,
+    {
+      kien_weight_kg: number;
+      unassignable_kien: string[] | null;
+      kien_a_ngan_id: string | null;
+      kien_b_ngan_id: string | null;
+      kien_c_ngan_id: string | null;
+      kien_d_ngan_id: string | null;
+    }
+  >();
+  for (let i = 0; i < dodangIds.length; i += 200) {
+    const chunk = dodangIds.slice(i, i + 200);
+    const { data: predRows } = await supabase
+      .from("lot_prediction_lots")
+      .select("real_lot_id,kien_weight_kg,unassignable_kien,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id")
+      .eq("factory_id", factoryId)
+      .neq("trang_thai", "Hủy")
+      .in("real_lot_id", chunk);
+    for (const r of predRows || []) {
+      if (r.real_lot_id) predByLotId.set(r.real_lot_id, r);
+    }
+  }
+
   for (const lot of dodangLots || []) {
     const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh);
     const { data: txs } = await supabase
@@ -186,6 +288,14 @@ async function getReservedKgForPartialKien(factoryId: string): Promise<Record<st
       if (sum > 0 && sum < cfg.max_per_kien && originNganId) {
         const missingBanh = cfg.max_per_kien - sum;
         reservedByNgan[originNganId] = (reservedByNgan[originNganId] || 0) + missingBanh * Number(lot.loai_banh);
+      }
+      if (sum === 0) {
+        const pred = predByLotId.get(lot.id);
+        const plannedNgan = pred ? (pred[`kien_${letter}_ngan_id`] as string | null) : null;
+        const unassignable = (pred?.unassignable_kien || []).map((x) => x.toLowerCase());
+        if (pred && plannedNgan && !unassignable.includes(letter)) {
+          reservedByNgan[plannedNgan] = (reservedByNgan[plannedNgan] || 0) + Number(pred.kien_weight_kg || 0);
+        }
       }
     });
   }

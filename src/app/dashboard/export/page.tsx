@@ -11,6 +11,7 @@ import {
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
 import { fetchAllPaginated } from "@/lib/supabase-helpers";
+import { buildLotKienBocMap, KIEN_KEYS, kienBocOf, type KienBoc, type KienTxRow } from "@/lib/lot-kien-boc";
 import {
   FileOutput,
   Plus,
@@ -295,6 +296,21 @@ function normalizeText(value?: string | null) {
     .toLowerCase();
 }
 
+// Đơn nhập CSV cũ ghi "CSR 10" trong khi lô là "CSR10" → so khớp phải bỏ khoảng trắng, nếu không ô chọn
+// lô trống (bug XH-NBS-14-060326/1, 2026-09-29). Dữ liệu cũ đã chuẩn hoá bằng scripts/repair-export-orders.mjs.
+function normalizeCsrCode(value?: string | null) {
+  return (value || "").replace(/\s+/g, "").toUpperCase();
+}
+
+// Bí danh bọc của đơn cũ → tên chuẩn đang dùng ở lô.
+function normalizeBocAlias(value: string | null | undefined, csr: string): string | null {
+  const n = normalizeText(value).replace(/\s+/g, " ");
+  if (!n) return null;
+  if (/khong nhan|tron/.test(n)) return "Bọc trơn 0,04";
+  if (/^boc (nhan )?0,04 vrg/.test(n)) return `Bọc nhãn 0,04 VRG ${csr}`;
+  return value || null;
+}
+
 function getExportOrderStatus(order?: Pick<ExportOrder, "trang_thai"> | null) {
   return order?.trang_thai || EXPORT_ORDER_STATUS_APPROVED;
 }
@@ -338,6 +354,13 @@ export default function ExportPage() {
   const searchParams = useSearchParams();
   const [orders, setOrders] = useState<ExportOrder[]>([]);
   const [lotsRaw, setLotsRaw] = useState<LotRaw[]>([]);
+  // Toàn bộ dòng gán của MỌI đơn trong nhà máy (không theo bộ lọc danh sách, có phân trang) — nguồn
+  // để tính phần còn lại của lô. `orders` chỉ là danh sách đang hiển thị nên không dùng được.
+  const [allOrderAssignments, setAllOrderAssignments] = useState<
+    { id: string; assignments: Assignment[] | null }[]
+  >([]);
+  // Bọc theo từng kiện (lots.boc chỉ là bản chụp giao dịch cuối).
+  const [kienBocMap, setKienBocMap] = useState<Map<string, KienBoc>>(() => new Map());
   const [qcResults, setQcResults] = useState<QcResult[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -475,7 +498,29 @@ export default function ExportPage() {
       const status = normalizeLotStatus(lot.trang_thai);
       return status === "Hoàn thành" || status === "Xuất hàng";
     });
+    const [assignRows, txRows] = await Promise.all([
+      fetchAllPaginated<{ id: string; assignments: Assignment[] | null }>((from, to) =>
+        supabase
+          .from("export_orders")
+          .select("id,assignments")
+          .eq("factory_id", fid)
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+      fetchAllPaginated<KienTxRow & { id: string }>((from, to) =>
+        supabase
+          .from("lot_transactions")
+          .select("id,lot_id,boc,kien_a,kien_b,kien_c,kien_d,lots!inner(factory_id)")
+          .eq("lots.factory_id", fid)
+          .not("boc", "is", null)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
+    ]);
     setLotsRaw(filteredLots);
+    setAllOrderAssignments(assignRows);
+    setKienBocMap(buildLotKienBocMap(txRows));
   }, []);
 
   const loadQcResults = useCallback(async (fid: string) => {
@@ -690,8 +735,26 @@ export default function ExportPage() {
     [canonicalLotByCode, lotById],
   );
 
+  // Kiện (lot_id|kien) đơn đang sửa đã gán sẵn — vẫn cho giữ dù bọc kiện khác bọc đơn (dữ liệu cũ).
+  const editOriginalKien = useMemo(() => {
+    const set = new Set<string>();
+    const original = allOrderAssignments.find((o) => o.id === editId);
+    for (const a of original?.assignments || []) {
+      const lot = resolveAssignmentLot(a);
+      if (!lot) continue;
+      for (const k of KIEN_KEYS) if ((Number(a[`kien_${k}`]) || 0) > 0) set.add(`${lot.id}|${k}`);
+    }
+    return set;
+  }, [allOrderAssignments, editId, resolveAssignmentLot]);
+
   const lotsExt = useMemo<LotExt[]>(() => {
-    const pastAssignments = orders
+    const formBoc = normalizeText(form.loai_boc);
+    // Sau Thay bọc tròn kiện, 1 lô có kiện khác bọc: kiện không đúng bọc của đơn coi như còn 0.
+    const kienOk = (lot: LotRaw, k: (typeof KIEN_KEYS)[number]) =>
+      !formBoc ||
+      normalizeText(kienBocOf(kienBocMap, lot.id, k, lot.boc)) === formBoc ||
+      editOriginalKien.has(`${lot.id}|${k}`);
+    const pastAssignments = allOrderAssignments
       .filter((o) => o.id !== editId)
       .flatMap((o) =>
         (o.assignments || []).map((assignment) => {
@@ -715,14 +778,14 @@ export default function ExportPage() {
           .reduce((s, a) => s + (a.kien_d || 0), 0);
         return {
           ...lot,
-          rem_a: lot.kien_a - expA,
-          rem_b: lot.kien_b - expB,
-          rem_c: lot.kien_c - expC,
-          rem_d: lot.kien_d - expD,
+          rem_a: kienOk(lot, "a") ? lot.kien_a - expA : 0,
+          rem_b: kienOk(lot, "b") ? lot.kien_b - expB : 0,
+          rem_c: kienOk(lot, "c") ? lot.kien_c - expC : 0,
+          rem_d: kienOk(lot, "d") ? lot.kien_d - expD : 0,
         };
       })
       .filter((l) => l.rem_a + l.rem_b + l.rem_c + l.rem_d > 0);
-  }, [lotsRaw, orders, editId, resolveAssignmentLot]);
+  }, [lotsRaw, allOrderAssignments, editId, resolveAssignmentLot, form.loai_boc, kienBocMap, editOriginalKien]);
 
   const latestQcByLotId = useMemo(() => {
     const byId = new Map<string, QcResult>();
@@ -769,9 +832,9 @@ export default function ExportPage() {
   // -- Filter lots for picker -----------------------------------------------
   const availLots = useMemo(() => {
     let base = lotsExt.filter((l) => {
-      if (l.loai_csr !== form.chung_loai) return false;
+      if (normalizeCsrCode(l.loai_csr) !== normalizeCsrCode(form.chung_loai)) return false;
       if (Number(l.loai_banh) !== Number(form.loai_banh)) return false;
-      if (normalizeText(l.boc) !== normalizeText(form.loai_boc)) return false;
+      // Bọc đã lọc theo TỪNG KIỆN trong lotsExt (lots.boc chỉ là bản chụp).
       return latestQcByLotId.has(l.id);
     });
     if (lotSearch)
@@ -803,7 +866,6 @@ export default function ExportPage() {
     lotsExt,
     form.chung_loai,
     form.loai_banh,
-    form.loai_boc,
     form.yeu_cau_chi_tieu,
     lotSearch,
     latestQcByLotId,
@@ -885,6 +947,35 @@ export default function ExportPage() {
       showToast("Bạn không có quyền sửa đơn này.", "error");
       return;
     }
+    const editAssignments = order.assignments?.length
+      ? order.assignments.map((assignment) => {
+          const resolvedLot = resolveAssignmentLot(assignment);
+          return resolvedLot
+            ? { ...assignment, lot_id: resolvedLot.id, ma_lo: resolvedLot.ma_lo }
+            : { ...assignment };
+        })
+      : [];
+    // CSR khớp đúng chuỗi của lô (đơn cũ có thể ghi "CSR 10").
+    const rawCsr = order.chung_loai || (isNMCP ? "SVR10" : "CSR10");
+    const editCsr =
+      lotsRaw.find((l) => normalizeCsrCode(l.loai_csr) === normalizeCsrCode(rawCsr))?.loai_csr || rawCsr;
+    // Bọc: ưu tiên bọc thật của lô trong đơn (nếu chỉ 1 loại), sau đó bí danh của đơn, cuối cùng mặc định.
+    // Bọc: ƯU TIÊN bọc đã ghi trên đơn (đơn đã duyệt không được tự đổi bọc khi mở sửa). Chỉ khi đơn
+    // trống bọc mới suy từ bọc của các KIỆN đã gán (1 loại duy nhất), cuối cùng là mặc định.
+    const kienBocs = [
+      ...new Set(
+        editAssignments.flatMap((a) => {
+          const lot = lotsRaw.find((l) => l.id === a.lot_id);
+          return KIEN_KEYS.filter((k) => (Number(a[`kien_${k}`]) || 0) > 0).map((k) =>
+            kienBocOf(kienBocMap, a.lot_id, k, lot?.boc),
+          );
+        }),
+      ),
+    ].filter(Boolean);
+    const editBoc =
+      normalizeBocAlias(order.loai_boc, editCsr) ||
+      (kienBocs.length === 1 ? kienBocs[0] : null) ||
+      `Bọc nhãn 0,04 VRG ${editCsr}`;
     setForm({
       ma_don: order.ma_don || "",
       ngay: order.ngay?.slice(0, 10) || new Date().toISOString().slice(0, 10),
@@ -892,26 +983,17 @@ export default function ExportPage() {
       so_hoa_don: order.so_hoa_don || "",
       so_hop_dong: order.so_hop_dong || "",
       customer_id: order.customer_id || "",
-      chung_loai: order.chung_loai || (isNMCP ? "SVR10" : "CSR10"),
+      chung_loai: editCsr,
       loai_pallet: order.loai_pallet || "Rời",
       loai_banh: order.loai_banh || 35,
-      loai_boc:
-        order.loai_boc ||
-        `Bọc nhãn 0,04 VRG ${order.chung_loai || (isNMCP ? "SVR10" : "CSR10")}`,
+      loai_boc: editBoc,
       vehicles: order.vehicles?.length
         ? order.vehicles.map((v) => ({
             ...v,
             image_urls: v.image_urls ?? [v.image_url_1, v.image_url_2, v.image_url_3].filter(Boolean) as string[],
           }))
         : [emptyVehicle()],
-      assignments: order.assignments?.length
-        ? order.assignments.map((assignment) => {
-            const resolvedLot = resolveAssignmentLot(assignment);
-            return resolvedLot
-              ? { ...assignment, lot_id: resolvedLot.id, ma_lo: resolvedLot.ma_lo }
-              : { ...assignment };
-          })
-        : [],
+      assignments: editAssignments,
       yeu_cau_chi_tieu: order.yeu_cau_chi_tieu || [],
     });
     // Nếu loai_pallet của đơn cũ không có trong base list thì thêm vào palletExtra

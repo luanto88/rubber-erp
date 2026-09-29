@@ -188,11 +188,40 @@ function renderDailyReportPage(
         hook.cell.styles.fontStyle = "bold";
         hook.cell.styles.fillColor = [241, 245, 249];
       }
+      // Tồn âm = dữ liệu lệch (xuất nhiều hơn nhập/tồn chốt) → tô đỏ để lộ ra, không che bằng 0.
+      if (hook.section === "body" && hook.column.index === 12) {
+        const value =
+          hook.row.index === stockTotalIndex
+            ? sum((r) => r.tonKg)
+            : stock[hook.row.index]?.tonKg;
+        if (typeof value === "number" && value < 0) hook.cell.styles.textColor = [220, 38, 38];
+      }
     },
   });
 
+  // Ghi chú nguồn số tồn + đơn xuất trỏ lô không còn tồn tại.
+  let noteY = ((doc as PdfWithTable).lastAutoTable?.finalY ?? 60) + 3.2;
+  const notes: string[] = [
+    data.ngayChotTon
+      ? `Tồn kho tính từ số chốt kiểm kê ngày ${formatDay(data.ngayChotTon)} + nhập − xuất sau ngày chốt.`
+      : "Chưa chốt tồn đầu kỳ — tồn kho tự tính từ toàn bộ dữ liệu nhập/xuất trong hệ thống.",
+  ];
+  if (data.unmatchedExport.bales > 0) {
+    notes.push(
+      `Có ${numFmt(data.unmatchedExport.bales)} bành trong ${data.unmatchedExport.orderCount} đơn xuất trỏ tới lô không còn tồn tại — chưa trừ vào tồn kho.`,
+    );
+  }
+  doc.setFont(PDF_FONT_NAME, "normal");
+  doc.setFontSize(7.5);
+  for (const note of notes) {
+    doc.setTextColor(...(note.startsWith("Có ") ? ([220, 38, 38] as [number, number, number]) : INK));
+    doc.text(note, PAGE_MARGIN, noteY);
+    noteY += 3.4;
+  }
+  doc.setTextColor(...INK);
+
   // ── 2. Chi tiết sản xuất, sử dụng nhiên liệu ──
-  let y = ((doc as PdfWithTable).lastAutoTable?.finalY ?? 60) + d.gap;
+  let y = noteY - 3.4 + d.gap;
   doc.setFont(PDF_FONT_NAME, "bold");
   doc.setFontSize(10);
   doc.setTextColor(...INK);
@@ -201,7 +230,7 @@ function renderDailyReportPage(
 
   const detailRows: string[][] = data.shiftRows.map((r) => [
     "",
-    `Khối lượng sản xuất ${r.caLabel} – ${r.loaiCsr}`,
+    `Khối lượng sản xuất Ca ${r.ca}${r.caName ? ` (${r.caName})` : ""} – ${r.loaiCsr}`,
     "kg",
     numFmt(r.soBanh),
     banhLabel(r.loaiBanh),

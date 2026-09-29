@@ -8,24 +8,33 @@ import {
 } from "@/app/dashboard/product/confirm/shift-report-preview-bar";
 import {
   buildDailyReport,
-  buildShiftReport,
-  loadDailyReportDraft,
-  loadShiftReport,
+  loadReportLockState,
+  openReportSnapshot,
+  openShiftReport,
+  prepareDailyReport,
   type DailyReportBundle,
   type DailyReportDraft,
   type ShiftReportBundle,
 } from "@/app/dashboard/product/confirm/report-bundle";
+import { ReasonConfirmBanner } from "@/app/dashboard/product/_components/reason-confirm-banner";
 import { DailyReportInputForm } from "@/app/dashboard/product/confirm/daily-report-input-form";
 import type { DailyReportInputs } from "@/app/dashboard/product/confirm/daily-report-pdf";
 import {
   getActiveFactoryId,
+  getFreshAuthSession,
   hasPermission,
   hydrateActiveSession,
   type SessionUser,
 } from "@/lib/auth";
 import {
+  adminUpdateLotTransaction,
   deleteLotTransaction,
+  loadSkKienAvailability,
+  performSangKienThayBoc,
+  saveDateHeaderEdits,
   saveLotTransaction,
+  type SkKienAvailability,
+  type SkKienKey,
 } from "@/app/dashboard/product/actions";
 import {
   loadActiveShiftLocks,
@@ -134,6 +143,10 @@ type LotTransaction = {
   kien_d: number;
   so_banh: number;
   so_kg: number;
+  // Bọc/pallet/chỉ thị theo giao dịch — sau Thay bọc/Sang kiện tròn kiện có thể khác bản chụp của lô.
+  boc?: string | null;
+  pallet?: string[] | null;
+  chi_thi?: string | null;
   created_at?: string;
 };
 
@@ -451,13 +464,20 @@ type LotSeries = {
   year: string;
 };
 
+// Sang kiện / Thay bọc "tròn kiện": kien_x = số bành của kiện nếu được chọn đổi, 0 nếu không.
+// avail = null khi đang tải; kiện chỉ chọn được nếu đã có bành và CHƯA gán đơn xuất bành nào.
 type SkPendingLot = {
   lot: Lot;
   kien_a: number;
   kien_b: number;
   kien_c: number;
   kien_d: number;
+  avail: SkKienAvailability | null;
 };
+
+const SK_KIEN_KEYS: SkKienKey[] = ["a", "b", "c", "d"];
+const skKienSelectable = (p: SkPendingLot, k: SkKienKey) =>
+  !!p.avail && p.avail[k].produced > 0 && p.avail[k].assigned === 0;
 
 type SkLotBreakdown = {
   a: number;
@@ -1359,7 +1379,9 @@ export default function ProductPage() {
   // Quyền 2 nút báo cáo cuối ngày — mirror đúng REPORT_*_PERMISSIONS (confirm/report-access.ts),
   // server action kiểm lại lần nữa.
   const canReportShift =
-    hasPermission(currentUser, "product.create") || hasPermission(currentUser, "product.confirm_scan");
+    hasPermission(currentUser, "product.create") ||
+    hasPermission(currentUser, "product.confirm_scan") ||
+    hasPermission(currentUser, "product.approve_shift");
   const canReportDaily = hasPermission(currentUser, "product.report_daily");
 
   // List filters
@@ -1384,6 +1406,11 @@ export default function ProductPage() {
 
   const [editModal, setEditModal] = useState(false);
   const [editForm, setEditForm] = useState<EditForm>(emptyEditForm());
+  // GĐ4: lý do bắt buộc khi admin sửa giao dịch đã gửi / sửa theo ngày (ghi vào lot_admin_edits).
+  const [editLyDo, setEditLyDo] = useState("");
+  const [dateEditLyDo, setDateEditLyDo] = useState("");
+  const [editReasonOpen, setEditReasonOpen] = useState(false);
+  const [dateReasonOpen, setDateReasonOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editTransactionId, setEditTransactionId] = useState<string | null>(null);
   const [editContext, setEditContext] = useState<EditTransactionContext | null>(null);
@@ -1462,7 +1489,7 @@ export default function ProductPage() {
           const { data, error } = await supabase
             .from("lots")
             .select(
-              "*, ngans(ten_ngan, ma_ngan, loai_nl), lot_transactions(id, lot_id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, created_at)",
+              "*, ngans(ten_ngan, ma_ngan, loai_nl), lot_transactions(id, lot_id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, boc, pallet, chi_thi, created_at)",
             )
             .eq("factory_id", fid)
             .order("ngay_sx", { ascending: false })
@@ -2759,35 +2786,49 @@ export default function ProductPage() {
     setSkOpen(false);
     setSkConfirm(false); setSkError(null);
   };
-  const skAddLot = (lot: Lot) => {
-    setSkPending((prev) => [
-      ...prev,
-      { lot, kien_a: lot.kien_a, kien_b: lot.kien_b, kien_c: lot.kien_c, kien_d: lot.kien_d },
-    ]);
+  // Tròn kiện: thêm lô thì tải số bành đã sản xuất / đã gán đơn xuất theo kiện (server), mặc định
+  // chọn mọi kiện đổi được. Kiện đã gán đơn xuất (dù 1 bành) không chọn được.
+  const skAddLot = async (lot: Lot) => {
+    if (!factoryId || skPending.some((p) => p.lot.id === lot.id)) return;
+    setSkPending((prev) => [...prev, { lot, kien_a: 0, kien_b: 0, kien_c: 0, kien_d: 0, avail: null }]);
+    try {
+      const token = (await getFreshAuthSession())?.access_token ?? null;
+      const map = await loadSkKienAvailability(factoryId, token, [lot.id]);
+      const avail = map[lot.id];
+      if (!avail) throw new Error(`Không tải được số liệu kiện của lô ${lot.ma_lo}.`);
+      setSkPending((prev) =>
+        prev.map((p) => {
+          if (p.lot.id !== lot.id) return p;
+          const next: SkPendingLot = { ...p, avail };
+          for (const k of SK_KIEN_KEYS) next[`kien_${k}`] = skKienSelectable(next, k) ? avail[k].produced : 0;
+          return next;
+        }),
+      );
+    } catch (e) {
+      setSkPending((prev) => prev.filter((p) => p.lot.id !== lot.id));
+      setSkError(getErrorMessage(e));
+    }
   };
   const skRemoveLot = (lotId: string) => {
     setSkPending((prev) => prev.filter((p) => p.lot.id !== lotId));
   };
-  const skUpdateKien = (
-    lotId: string,
-    field: "kien_a" | "kien_b" | "kien_c" | "kien_d",
-    value: number,
-  ) => {
+  const skToggleKien = (lotId: string, k: SkKienKey) => {
     setSkPending((prev) =>
       prev.map((p) => {
-        if (p.lot.id !== lotId) return p;
-        const max = p.lot[field];
-        return { ...p, [field]: Math.min(Math.max(0, value), max) };
+        if (p.lot.id !== lotId || !p.avail || !skKienSelectable(p, k)) return p;
+        const field = `kien_${k}` as const;
+        return { ...p, [field]: p[field] > 0 ? 0 : p.avail[k].produced };
       }),
     );
   };
   const skSetAll = (lotId: string) => {
     setSkPending((prev) =>
-      prev.map((p) =>
-        p.lot.id !== lotId
-          ? p
-          : { ...p, kien_a: p.lot.kien_a, kien_b: p.lot.kien_b, kien_c: p.lot.kien_c, kien_d: p.lot.kien_d },
-      ),
+      prev.map((p) => {
+        if (p.lot.id !== lotId || !p.avail) return p;
+        const next = { ...p };
+        for (const k of SK_KIEN_KEYS) next[`kien_${k}`] = skKienSelectable(p, k) ? p.avail[k].produced : 0;
+        return next;
+      }),
     );
   };
 
@@ -2802,13 +2843,13 @@ export default function ProductPage() {
       const actorUsername = currentUser?.username || null;
       const convertedIds: string[] = [];
       const historyLots: SkHistoryLotDetail[] = [];
-      const lotsPayload: Record<string, unknown>[] = [];
+      const lotsPayload: { lotId: string; kiens: SkKienKey[] }[] = [];
 
       for (const p of skPending) {
+        if (!p.avail) { setSkError(`Lô ${p.lot.ma_lo} đang tải số liệu kiện, vui lòng đợi.`); return; }
         const { lot, kien_a, kien_b, kien_c, kien_d } = p;
-        const isFullConvert =
-          kien_a === lot.kien_a && kien_b === lot.kien_b &&
-          kien_c === lot.kien_c && kien_d === lot.kien_d;
+        const kiens = SK_KIEN_KEYS.filter((k) => p[`kien_${k}`] > 0);
+        if (kiens.length === 0) { setSkError(`Lô ${lot.ma_lo} chưa chọn kiện nào.`); return; }
 
         const movedBreakdown = createSkBreakdown(kien_a, kien_b, kien_c, kien_d, lot.loai_banh);
         const newBoc = skTab === "thay_boc" ? skToBoc : lot.boc;
@@ -2823,50 +2864,19 @@ export default function ProductPage() {
         );
         const movedSnapshot = createSkSnapshot(lot.id, lot.ma_lo, newBoc, newPallet, movedBreakdown, lot.trang_thai);
 
-        const lotEntry: Record<string, unknown> = {
-          lot_id: lot.id,
-          new_kien_a: kien_a, new_kien_b: kien_b,
-          new_kien_c: kien_c, new_kien_d: kien_d,
-          new_tong_banh: movedBreakdown.tong_banh,
-          new_tong_kg: movedBreakdown.tong_kg,
-          new_boc: skTab === "thay_boc" ? skToBoc : null,
-          new_pallet: skTab === "sang_kien" ? skToPallet : null,
-          has_residual: !isFullConvert,
-        };
-
-        let residualSnapshot: SkLotSnapshot | null = null;
-        let residualBreakdown: SkLotBreakdown | null = null;
-
-        if (!isFullConvert) {
-          const rem_a = lot.kien_a - kien_a;
-          const rem_b = lot.kien_b - kien_b;
-          const rem_c = lot.kien_c - kien_c;
-          const rem_d = lot.kien_d - kien_d;
-          residualBreakdown = createSkBreakdown(rem_a, rem_b, rem_c, rem_d, lot.loai_banh);
-          const residualSuffix = lot.suffix + "r";
-          const residualMaLo = buildMaLo(lot.num, residualSuffix, lot.year);
-
-          lotEntry.residual_ma_lo = residualMaLo;
-          lotEntry.res_kien_a = rem_a; lotEntry.res_kien_b = rem_b;
-          lotEntry.res_kien_c = rem_c; lotEntry.res_kien_d = rem_d;
-          lotEntry.res_tong_banh = residualBreakdown.tong_banh;
-          lotEntry.res_tong_kg = residualBreakdown.tong_kg;
-
-          residualSnapshot = createSkSnapshot(null, residualMaLo, lot.boc, lot.pallet, residualBreakdown, "Hoàn thành");
-        }
-
-        lotsPayload.push(lotEntry);
+        // Tròn kiện: không còn tách lô tồn dư — kiện không chọn giữ nguyên bọc/pallet cũ trong CÙNG lô.
+        lotsPayload.push({ lotId: lot.id, kiens });
         convertedIds.push(lot.id);
         historyLots.push({
           id: lot.id,
           ma_lo: lot.ma_lo,
           source_snapshot: sourceSnapshot,
           moved_snapshot: movedSnapshot,
-          residual_snapshot: residualSnapshot,
+          residual_snapshot: null,
           moved_breakdown: movedBreakdown,
-          residual_breakdown: residualBreakdown,
-          split: !isFullConvert,
-          residual_action: !isFullConvert ? "created" : "none",
+          residual_breakdown: null,
+          split: false,
+          residual_action: "none",
           actor_id: currentUser?.id ?? null,
           actor_name: actorName,
           actor_username: actorUsername,
@@ -2883,13 +2893,16 @@ export default function ProductPage() {
         lots: historyLots,
       };
 
-      const { error } = await supabase.rpc("perform_sang_kien_thay_boc", {
-        p_factory_id: factoryId,
-        p_loai: skTab === "sang_kien" ? "Sang kiện" : "Thay bọc",
-        p_lots: lotsPayload,
-        p_history_payload: historyPayload,
+      const result = await performSangKienThayBoc({
+        factoryId,
+        accessToken: (await getFreshAuthSession())?.access_token ?? null,
+        loai: skTab === "sang_kien" ? "Sang kiện" : "Thay bọc",
+        lots: lotsPayload,
+        newBoc: skTab === "thay_boc" ? skToBoc : null,
+        newPallet: skTab === "sang_kien" ? skToPallet : null,
+        history: historyPayload,
       });
-      if (error) { setSkError(error.message); return; }
+      if (!result.success) { setSkError(result.error); return; }
 
       setSkDone((prev) => new Set([...prev, ...convertedIds]));
       setSkPending([]);
@@ -3118,7 +3131,7 @@ export default function ProductPage() {
                 pallet: block.pallet,
                 chi_thi: session.chi_thi,
               },
-              actorUserId: currentUser?.id ?? null,
+              accessToken: (await getFreshAuthSession())?.access_token ?? null,
             });
             if (!saveResult.success) {
               setSaveError(`Không lưu được lô ${ma_lo}: ${saveResult.error}`);
@@ -3183,6 +3196,12 @@ export default function ProductPage() {
     }
   };
   const openEdit = (lot: Lot, transactionId?: string) => {
+    if (currentUser?.role !== "admin") {
+      setSaveError("Chỉ admin được sửa giao dịch thành phẩm đã gửi.");
+      return;
+    }
+    setEditLyDo("");
+    setEditReasonOpen(false);
     if (normalizeLotStatus(lot.trang_thai) === "Xuất hàng") {
       setSaveError("Lô đã xuất hàng, không thể sửa.");
       return;
@@ -3219,10 +3238,12 @@ export default function ProductPage() {
       day_chuyen: normalizeDayChuyen(lot.day_chuyen) || DAY_CHUYEN_TAP,
       loai_csr: lot.loai_csr,
       loai_banh: lot.loai_banh || 35,
-      boc: lot.boc,
+      // Lấy theo CHÍNH giao dịch đang sửa: lots.boc/pallet chỉ là bản chụp giao dịch cuối — điền sẵn
+      // bản chụp rồi lưu sẽ ghi đè bọc/pallet riêng của kiện (bug 2026-09-29).
+      boc: targetTx?.boc || lot.boc,
       tham: lot.tham,
-      pallet: lot.pallet || [],
-      chi_thi: lot.chi_thi,
+      pallet: (targetTx?.pallet && targetTx.pallet.length ? targetTx.pallet : lot.pallet) || [],
+      chi_thi: targetTx?.chi_thi || lot.chi_thi,
       kien_a: targetTx ? targetTx.kien_a : lot.kien_a,
       kien_b: targetTx ? targetTx.kien_b : lot.kien_b,
       kien_c: targetTx ? targetTx.kien_c : lot.kien_c,
@@ -3286,21 +3307,26 @@ export default function ProductPage() {
     setPdfDailyPreview(null);
     setPdfReportDraft(null);
     try {
+      // GĐ7b: ngày đã khóa đủ ca → bản cứng (mở lại hoặc tạo ở lần render đầu), xem report-bundle.ts.
       if (kind === "shift") {
-        const shift = await loadShiftReport(factoryId, date);
-        if (shift.sections.length === 0) {
+        const bundle = await openShiftReport(factoryId, date);
+        if (!bundle) {
           setPdfReportError("Ngày này chưa có dữ liệu để lập phiếu báo thành phẩm.");
           return;
         }
-        setPdfShiftPreview(await buildShiftReport(shift));
+        setPdfShiftPreview(bundle);
         return;
       }
-      const draft = await loadDailyReportDraft(factoryId, date);
-      if (draft.shift.sections.length === 0) {
+      const prep = await prepareDailyReport(factoryId, date);
+      if (prep.kind === "empty") {
         setPdfReportError("Ngày này chưa có dữ liệu để lập báo cáo sản xuất.");
         return;
       }
-      setPdfReportDraft(draft);
+      if (prep.kind === "snapshot") {
+        setPdfDailyPreview(prep.bundle);
+        return;
+      }
+      setPdfReportDraft(prep.draft);
     } catch (err) {
       setPdfReportError(err instanceof Error ? err.message : "Lỗi không xác định");
     } finally {
@@ -3322,8 +3348,19 @@ export default function ProductPage() {
     }
   };
 
+  // GĐ4: "Sửa theo ngày" chỉ admin, chạy ở server (saveDateHeaderEdits) + đồng bộ snapshot lô và
+  // trạng thái ngăn. KHÔNG còn đổi hậu tố/năm (= đổi mã lô): mã lô là khóa QR của nhãn đã in, đổi ở
+  // đây không lan sang lot_prediction_lots → quét nhãn cũ sinh lô trùng.
   const handleDateHeaderSave = async () => {
     if (!factoryId || !editDateModal || !dateEditHeader) return;
+    if (currentUser?.role !== "admin") {
+      setSaveError("Chỉ admin được sửa phiếu thành phẩm theo ngày.");
+      return;
+    }
+    if (!dateEditLyDo.trim()) {
+      setSaveError("Vui lòng nhập lý do sửa.");
+      return;
+    }
     const previousDate = editDateModal;
     const nextDate = dateEditHeader.ngay_sx;
     const editableLots = lots.filter(
@@ -3332,120 +3369,38 @@ export default function ProductPage() {
         normalizeLotStatus(lot.trang_thai) !== "Xuất hàng",
     );
     if (editableLots.length === 0) {
-      setSaveError("Vui lòng chọn ngăn sản xuất cho phiếu này.");
+      setSaveError("Ngày này không còn lô nào sửa được (các lô đã Xuất hàng).");
       return;
-    }
-
-    const nextYear = normalizeLotYear(yearFromDate(dateEditHeader.ngay_sx));
-    const duplicateMaLos = editableLots
-      .map((lot) => buildMaLo(lot.num, dateEditHeader.suffix, nextYear))
-      .filter((maLo, idx, arr) => arr.indexOf(maLo) !== idx);
-    if (duplicateMaLos.length > 0) {
-      setSaveError(`Trùng mã lô sau khi đổi header: ${duplicateMaLos.join(", ")}`);
-      return;
-    }
-
-    // Pre-check UX cho khóa ca sản xuất (xem .claude/rules/06-module-production.md mục
-    // "Khóa ca sản xuất") — chặn sớm trước khi query DB, RLS lot_transactions_update/
-    // lots_update là lớp phòng thủ thật sự cho request thô ngoài UI.
-    if (currentUser?.role !== "admin") {
-      const affectedCas = Array.from(
-        new Set(
-          editableLots
-            .flatMap((lot) =>
-              (lot.lot_transactions || [])
-                .filter((tx) => tx.ngay_nhap === editDateModal)
-                .map((tx) => tx.ca),
-            )
-            .filter(Boolean) as string[],
-        ),
-      );
-      if (affectedCas.length > 0) {
-        const { data: lockRows } = await supabase
-          .from("product_shift_locks")
-          .select("ca")
-          .eq("factory_id", factoryId)
-          .eq("ngay_sx", editDateModal)
-          .eq("is_active", true)
-          .in("ca", affectedCas);
-        if (lockRows && lockRows.length > 0) {
-          setSaveError(
-            `Ca ${lockRows.map((r) => r.ca).join(", ")} ngày ${editDateModal} đã được duyệt & khóa. Liên hệ quản trị viên để mở khóa trước khi sửa.`,
-          );
-          return;
-        }
-      }
     }
 
     setSaving(true);
     setSaveError(null);
     try {
-      for (const lot of editableLots) {
-        const nextMaLo = buildMaLo(lot.num, dateEditHeader.suffix, nextYear);
-        const updatedTransactions = (lot.lot_transactions || [])
-          .map((tx) =>
-            tx.ngay_nhap === editDateModal
-              ? {
-                  ...tx,
-                  ngay_nhap: dateEditHeader.ngay_sx,
-                }
-              : tx,
-          )
-          .sort((a, b) => {
-            const cmp = (a.ngay_nhap || "").localeCompare(b.ngay_nhap || "");
-            if (cmp !== 0) return cmp;
-            return (a.created_at || "").localeCompare(b.created_at || "");
-          });
-        const latestTxAfterHeaderEdit = updatedTransactions[updatedTransactions.length - 1];
-        const duplicatedOutsideDate = lots.find(
-          (item) =>
-            item.id !== lot.id &&
-            item.ma_lo === nextMaLo &&
-            item.ngay_sx !== editDateModal,
-        );
-        if (duplicatedOutsideDate) {
-          throw new Error(`Mã lô ${nextMaLo} đã tồn tại ở phiếu khác.`);
-        }
-
-        if ((lot.lot_transactions?.length || 0) > 0) {
-          const { error: txError } = await supabase
-            .from("lot_transactions")
-            .update({
-              ngay_nhap: dateEditHeader.ngay_sx,
-            })
-            .eq("lot_id", lot.id)
-            .eq("ngay_nhap", editDateModal);
-          if (txError) throw new Error(txError.message);
-        }
-
-        const { error } = await supabase
-          .from("lots")
-          .update({
-            ma_lo: nextMaLo,
-            suffix: dateEditHeader.suffix,
-            year: nextYear,
-            ngay_sx: dateEditHeader.ngay_sx,
-            ngan_id: latestTxAfterHeaderEdit?.ngan_id || lot.ngan_id,
-            chi_thi: dateEditHeader.chi_thi,
-            ghi_chu: dateEditHeader.ghi_chu,
-            image_url_1: dateEditHeader.image_url_1 || null,
-            image_url_2: dateEditHeader.image_url_2 || null,
-            image_code_1: dateEditHeader.image_code_1 || null,
-            image_code_2: dateEditHeader.image_code_2 || null,
-          })
-          .eq("id", lot.id);
-        if (error) throw new Error(error.message);
+      const result = await saveDateHeaderEdits({
+        accessToken: (await getFreshAuthSession())?.access_token ?? null,
+        factoryId,
+        oldDate: previousDate,
+        lotIds: editableLots.map((lot) => lot.id),
+        patch: {
+          ngay_sx: dateEditHeader.ngay_sx,
+          chi_thi: dateEditHeader.chi_thi || null,
+          ghi_chu: dateEditHeader.ghi_chu || null,
+          image_url_1: dateEditHeader.image_url_1 || null,
+          image_url_2: dateEditHeader.image_url_2 || null,
+          image_code_1: dateEditHeader.image_code_1 || null,
+          image_code_2: dateEditHeader.image_code_2 || null,
+        },
+        lyDo: dateEditLyDo,
+      });
+      if (!result.success) {
+        setSaveError(result.error);
+        return;
       }
-
-      const affectedNganIds = Array.from(
-        new Set(
-          editableLots
-            .map((lot) => lot.ngan_id)
-            .filter(Boolean) as string[],
-        ),
-      );
-      for (const nganId of affectedNganIds) {
-        await syncNganStatusAfterLotEdit(nganId);
+      if (result.skipped.length > 0) {
+        setSaveError(
+          `Đã sửa ${result.updated.length} lô. Bỏ qua ${result.skipped.length} lô: ` +
+            result.skipped.map((item) => `${item.maLo} (${item.reason})`).join("; "),
+        );
       }
 
       setExpandedDates((prev) => {
@@ -3455,6 +3410,8 @@ export default function ProductPage() {
       await loadData(factoryId);
       setEditDateModal(null);
       setDateEditHeader(null);
+      setDateEditLyDo("");
+      setDateReasonOpen(false);
     } catch (err) {
       setSaveError(getErrorMessage(err));
     } finally {
@@ -3599,28 +3556,33 @@ export default function ProductPage() {
     [factoryId, ngans],
   );
 
+  // GĐ4: sửa giao dịch ĐÃ GỬI — chỉ admin, gọi 1 RPC atomic (adminUpdateLotTransaction) thay chuỗi
+  // 3 bước rời trước đây (saveLotTransaction + update lots từ trình duyệt + lan bọc lần 2). Không đổi
+  // mã lô / CSR / loại bành. RPC tự đồng bộ lots, dự đoán, nháp, trạng thái 2 ngăn + ghi nhật ký.
   const handleEditSave = async () => {
     if (!factoryId || !editId) return;
-    const lotYear = normalizeLotYear(editForm.year, editForm.ngay_sx);
-    if (lotYear.length !== 2) {
-      setSaveError("N\u0103m l\u00f4 ph\u1ea3i c\u00f3 \u0111\u00fang 2 ch\u1eef s\u1ed1.");
+    if (currentUser?.role !== "admin") {
+      setSaveError("Chỉ admin được sửa giao dịch thành phẩm đã gửi.");
+      return;
+    }
+    if (!editLyDo.trim()) {
+      setSaveError("Vui lòng nhập lý do sửa.");
       return;
     }
     setSaving(true);
     try {
       const dbLot = lots.find((l) => l.id === editId);
       if (!dbLot) {
-        setSaveError("Kh\u00f4ng t\u00ecm th\u1ea5y l\u00f4 c\u1ea7n s\u1eeda.");
+        setSaveError("Không tìm thấy lô cần sửa.");
         return;
       }
 
       const transactions = dbLot.lot_transactions || [];
       const fallbackTx = transactions[transactions.length - 1];
       const targetTxId = editTransactionId || fallbackTx?.id;
-      const targetTxIndex = transactions.findIndex((tx) => tx.id === targetTxId);
-      const targetTx = targetTxIndex >= 0 ? transactions[targetTxIndex] : fallbackTx;
+      const targetTx = transactions.find((tx) => tx.id === targetTxId) || fallbackTx;
       if (!targetTx) {
-        setSaveError("L\u00f4 n\u00e0y ch\u01b0a c\u00f3 giao d\u1ecbch \u0111\u1ec3 s\u1eeda.");
+        setSaveError("Lô này chưa có giao dịch để sửa.");
         return;
       }
 
@@ -3629,155 +3591,54 @@ export default function ProductPage() {
       const otherB = otherTransactions.reduce((sum, tx) => sum + (tx.kien_b || 0), 0);
       const otherC = otherTransactions.reduce((sum, tx) => sum + (tx.kien_c || 0), 0);
       const otherD = otherTransactions.reduce((sum, tx) => sum + (tx.kien_d || 0), 0);
-      const otherBanh = otherTransactions.reduce((sum, tx) => sum + (tx.so_banh || 0), 0);
       const cfg = getLoaiBanhConfig(editForm.loai_csr, editForm.loai_banh);
-      const maxA = Math.max(0, cfg.max_per_kien - otherA);
-      const maxB = Math.max(0, cfg.max_per_kien - otherB);
-      const maxC = Math.max(0, cfg.max_per_kien - otherC);
-      const maxD = Math.max(0, cfg.max_per_kien - otherD);
-      const maxLotBanh = Math.max(0, cfg.lo_tron - otherBanh);
-
       if (
-        editForm.kien_a > maxA ||
-        editForm.kien_b > maxB ||
-        editForm.kien_c > maxC ||
-        editForm.kien_d > maxD
+        editForm.kien_a > Math.max(0, cfg.max_per_kien - otherA) ||
+        editForm.kien_b > Math.max(0, cfg.max_per_kien - otherB) ||
+        editForm.kien_c > Math.max(0, cfg.max_per_kien - otherC) ||
+        editForm.kien_d > Math.max(0, cfg.max_per_kien - otherD)
       ) {
-        setSaveError(
-          "Số kiện của ca đang sửa vượt phần còn lại của lô. Vui lòng giảm về đúng sản lượng ca này.",
-        );
+        setSaveError("Số kiện của ca đang sửa vượt phần còn lại của lô. Vui lòng giảm về đúng sản lượng ca này.");
+        return;
+      }
+      if (editForm.tong_banh <= 0) {
+        setSaveError("Số bành phải lớn hơn 0.");
         return;
       }
 
-      if (editForm.tong_banh > maxLotBanh) {
-        setSaveError(
-          `Phần dở dang này vượt giới hạn toàn lô. Lô chỉ cần ${maxLotBanh} bành trống sau khi trừ các phần khác.`, 
-        );
-        return;
-      }
-
-      const nextLotBanh = otherBanh + editForm.tong_banh;
-      const nextTransactionKg = Math.round(editForm.tong_banh * editForm.loai_banh * 100) / 100;
-
-      const targetNganId = editForm.ngan_id || "";
-      if (targetNganId) {
-        const ngan = ngans.find((item) => item.id === targetNganId);
-        if (ngan?.tong_kho) {
-          const totalKg = lots.reduce((sum, lot) => {
-            const lotTransactions = lot.lot_transactions || [];
-            return (
-              sum +
-              lotTransactions.reduce((inner, tx) => {
-                if (tx.id === targetTx.id) return inner;
-                return inner + (tx.ngan_id === targetNganId ? Number(tx.so_kg || 0) : 0);
-              }, 0)
-            );
-          }, 0);
-          const projectedPct = ((totalKg + nextTransactionKg) / ngan.tong_kho) * 100;
-          if (isProjectedPctBlocked(projectedPct)) {
-            setSaveError(
-              `Kh\u00f4ng th\u1ec3 chuy\u1ec3n sang ng\u0103n n\u00e0y v\u00ec t\u1ef7 l\u1ec7 l\u1ea5p \u0111\u1ea7y s\u1ebd l\u00e0 ${projectedPct.toFixed(1)}%, v\u01b0\u1ee3t 110%.`,
-            );
-            return;
-          }
-        }
-      }
-
-      const saveResult = await saveLotTransaction({
-        lot: {
-          factory_id: factoryId,
-          ma_lo: buildMaLo(editForm.num, editForm.suffix, lotYear),
-          num: editForm.num,
-          suffix: editForm.suffix,
-          year: lotYear,
-          ngay_sx: editForm.ngay_sx,
-          ca: editForm.ca,
-          ngan_id: editForm.ngan_id || null,
-          day_chuyen: editForm.day_chuyen,
-          loai_csr: editForm.loai_csr,
-          loai_banh: editForm.loai_banh,
-          boc: editForm.boc,
-          tham: editForm.tham,
-          chi_thi: editForm.chi_thi,
-          pallet: editForm.pallet,
-          ghi_chu: editForm.ghi_chu,
-          trang_thai: autoTrangThai(nextLotBanh, cfg.lo_tron, dbLot.trang_thai),
-        },
-        transaction: {
-          id: targetTx.id,
-          ngan_id: editForm.ngan_id || targetTx.ngan_id,
-          ca: editForm.ca,
-          ngay_nhap: editForm.ngay_sx,
-          kien_a: editForm.kien_a,
-          kien_b: editForm.kien_b,
-          kien_c: editForm.kien_c,
-          kien_d: editForm.kien_d,
-          so_banh: editForm.tong_banh,
-          so_kg: nextTransactionKg,
-          boc: editForm.boc,
-          pallet: editForm.pallet,
-          chi_thi: editForm.chi_thi,
-        },
-        actorUserId: currentUser?.id ?? null,
+      const result = await adminUpdateLotTransaction({
+        accessToken: (await getFreshAuthSession())?.access_token ?? null,
+        factoryId,
+        transactionId: targetTx.id,
+        kien: { a: editForm.kien_a, b: editForm.kien_b, c: editForm.kien_c, d: editForm.kien_d },
+        nganId: editForm.ngan_id || targetTx.ngan_id,
+        ca: editForm.ca,
+        ngayNhap: editForm.ngay_sx,
+        boc: editForm.boc || null,
+        pallet: editForm.pallet || null,
+        chiThi: editForm.chi_thi || null,
+        lyDo: editLyDo,
       });
-
-      if (!saveResult.success) {
-        setSaveError(`Lỗi cập nhật ngăn lưu: ${saveResult.error}`);
+      if (!result.success) {
+        setSaveError(`Không sửa được giao dịch: ${result.error}`);
         return;
       }
 
-      const syncedSnapshot = saveResult.snapshot;
-
-      const { error: updateError } = await supabase
-        .from("lots")
-        .update({
-          ...editForm,
-          year: lotYear,
-          ma_lo: buildMaLo(editForm.num, editForm.suffix, lotYear),
-          factory_id: factoryId,
-          kien_a: syncedSnapshot.kien_a,
-          kien_b: syncedSnapshot.kien_b,
-          kien_c: syncedSnapshot.kien_c,
-          kien_d: syncedSnapshot.kien_d,
-          tong_banh: syncedSnapshot.tong_banh,
-          tong_kg: syncedSnapshot.tong_kg,
-          trang_thai: syncedSnapshot.trang_thai,
-          ca: syncedSnapshot.ca || editForm.ca,
-          ngan_id: syncedSnapshot.ngan_id || null,
-          ngay_ht: syncedSnapshot.ngay_ht,
-          is_manual_edit: true,
-        })
-        .eq("id", editId);
-      if (updateError) {
-        setSaveError(`L\u1ed7i c\u1eadp nh\u1eadt l\u00f4: ${updateError.message}`);
-        return;
-      }
-
-      // Đồng bộ bọc cho tất cả transactions của lô này
-      if (editForm.boc) {
-        await supabase
-          .from("lot_transactions")
-          .update({ boc: editForm.boc })
-          .eq("lot_id", editId);
-      }
       const affectedNganIds = Array.from(
-        new Set([dbLot.ngan_id, targetTx.ngan_id, editForm.ngan_id].filter(Boolean) as string[]),
+        new Set([result.oldNganId, result.newNganId].filter(Boolean) as string[]),
       );
-      for (const nganId of affectedNganIds) {
-        await syncNganStatusAfterLotEdit(nganId);
-      }
       const readyCandidates = await buildPostSaveReadyNgans(affectedNganIds);
       setPostSaveReadyNgans(readyCandidates);
       setSelectedReadyNganIds(new Set(readyCandidates.map((item) => item.id)));
       setEditModal(false);
       setEditTransactionId(null);
       setEditContext(null);
-      loadData(factoryId);
+      setEditLyDo("");
+      setEditReasonOpen(false);
+      void loadData(factoryId);
       setSaveError(null);
     } catch (err) {
-      setSaveError(
-        `L\u1ed7i c\u1eadp nh\u1eadt ng\u0103n l\u01b0u: ${getErrorMessage(err)}`,
-      );
+      setSaveError(`Lỗi sửa giao dịch: ${getErrorMessage(err)}`);
     } finally {
       setSaving(false);
     }
@@ -3814,19 +3675,15 @@ export default function ProductPage() {
       try {
         const result = await deleteLotTransaction({
           transactionId,
-          actorUserId: currentUser?.id ?? null,
+          factoryId,
+          accessToken: (await getFreshAuthSession())?.access_token ?? null,
         });
         if (!result.success) {
           setSaveError(result.error);
           setDelConfirm(null);
           return { success: false, maLo, error: result.error };
         }
-        const affectedNganIds = Array.from(
-          new Set([result.affectedNganId, lot.ngan_id].filter(Boolean) as string[]),
-        );
-        for (const nganId of affectedNganIds) {
-          await syncNganStatusAfterLotEdit(nganId);
-        }
+        // Trạng thái ngăn đã được server đồng bộ (sync_ngan_production_status) trong deleteLotTransaction.
       } catch (err) {
         const msg = getErrorMessage(err);
         setSaveError(msg);
@@ -3855,9 +3712,7 @@ export default function ProductPage() {
           setDelConfirm(null);
           return { success: false, maLo, error: msg };
         }
-        if (lot.ngan_id) {
-          await syncNganStatusAfterLotEdit(lot.ngan_id);
-        }
+        // Lô mồ côi không có giao dịch → không đổi khối lượng ngăn, không cần đồng bộ trạng thái ngăn.
       } catch (err) {
         const msg = getErrorMessage(err);
         setSaveError(msg);
@@ -4977,12 +4832,14 @@ export default function ProductPage() {
                 <ScanLine size={15} /> Quét QR xác nhận SX
               </Link>
             )}
-            <button
-              onClick={openSk}
-              className="flex items-center gap-1.5 px-3 py-2 border border-white/40 bg-white/15 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/25"
-            >
-              <ArrowLeftRight size={15} /> Sang kiện/Thay bọc
-            </button>
+            {hasPermission(currentUser, "product.edit") && (
+              <button
+                onClick={openSk}
+                className="flex items-center gap-1.5 px-3 py-2 border border-white/40 bg-white/15 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/25"
+              >
+                <ArrowLeftRight size={15} /> Sang kiện/Thay bọc
+              </button>
+            )}
             <button
               onClick={() => openCreate()}
               className="flex items-center gap-1.5 px-3 py-2 bg-white text-brand text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/90"
@@ -5465,6 +5322,9 @@ export default function ProductPage() {
                         >
                           <Plus size={16} />
                         </button>
+                        {/* GĐ4: giao dịch đã gửi chỉ admin sửa/xóa. */}
+                        {currentUser?.role === "admin" && (
+                        <>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -5496,6 +5356,8 @@ export default function ProductPage() {
                         >
                           <Trash2 size={16} />
                         </button>
+                        </>
+                        )}
                       </>
                     )}
                   </div>
@@ -5717,6 +5579,7 @@ export default function ProductPage() {
             <DailyReportInputForm
               data={pdfReportDraft.daily}
               submitting={pdfReportBuilding}
+              notice={pdfReportDraft.notice}
               onSubmit={(inputs) => void handlePdfReportInputsSubmit(inputs)}
             />
           ) : null}
@@ -5740,29 +5603,43 @@ export default function ProductPage() {
             setEditModal(false);
             setEditTransactionId(null);
             setEditContext(null);
+            setEditLyDo("");
+            setEditReasonOpen(false);
           }}
           maxWidth="6xl"
           zIndexClassName="z-[60]"
           footer={
-            <>
-              <button
-                onClick={() => {
-                  setEditModal(false);
-                  setEditTransactionId(null);
-                  setEditContext(null);
-                }}
-                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={handleEditSave}
-                disabled={saving}
-                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
-              >
-                {saving ? "Đang lưu..." : "Lưu thay đổi"}
-              </button>
-            </>
+            editReasonOpen ? (
+              <ReasonConfirmBanner
+                value={editLyDo}
+                onChange={setEditLyDo}
+                onConfirm={() => void handleEditSave()}
+                onBack={() => setEditReasonOpen(false)}
+                saving={saving}
+              />
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    setEditModal(false);
+                    setEditTransactionId(null);
+                    setEditContext(null);
+                    setEditLyDo("");
+                    setEditReasonOpen(false);
+                  }}
+                  className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+                >
+                  Hủy
+                </button>
+                <button
+                  onClick={() => setEditReasonOpen(true)}
+                  disabled={saving}
+                  className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+                >
+                  Lưu thay đổi
+                </button>
+              </>
+            )
           }
         >
             <div className="space-y-6">
@@ -5772,9 +5649,9 @@ export default function ProductPage() {
                   className="text-amber-600 mt-0.5 shrink-0"
                 />
                 <p className="text-xs text-amber-700">
-                  <strong>Lưu ý:</strong> Header chung như ngày SX, hậu tố, ngăn
-                  và ghi chú được sửa ở modal theo ngày. Màn này chỉ sửa chi tiết
-                  riêng của transaction đang chọn.
+                  <strong>Lưu ý:</strong> Chỉ admin sửa được giao dịch đã gửi. Không đổi mã lô,
+                  loại CSR, loại bành, thảm. Đổi ngăn/bọc sẽ tự đồng bộ kế hoạch dự đoán, nháp và
+                  trạng thái ngăn; mọi lần sửa được ghi nhật ký kèm lý do.
                 </p>
               </div>
               {saveError && (
@@ -5804,30 +5681,15 @@ export default function ProductPage() {
                       </div>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-3">
+                    <div className="grid gap-3 md:grid-cols-2">
                       <div>
                         <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                          Số lô *
+                          Ngày nhập *
                         </label>
                         <input
-                          type="number"
-                          value={editForm.num}
-                          onChange={(e) => updateEditForm({ num: +e.target.value })}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                          Năm lô
-                        </label>
-                        <input
-                          value={editForm.year}
-                          onChange={(e) =>
-                            updateEditForm({
-                              year: e.target.value.replace(/\D/g, "").slice(0, 2),
-                            })
-                          }
-                          placeholder="25"
+                          type="date"
+                          value={editForm.ngay_sx}
+                          onChange={(e) => updateEditForm({ ngay_sx: e.target.value })}
                           className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white"
                         />
                       </div>
@@ -5852,23 +5714,9 @@ export default function ProductPage() {
                     <div className="space-y-4">
                       <div>
                         <label className="text-xs font-bold text-slate-600 block mb-2">
-                          Dây chuyền *
+                          Dây chuyền
                         </label>
-                        <div className="flex flex-wrap gap-2">
-                          {["Mủ tạp", "Mủ nước"].map((dc) => (
-                            <button
-                              key={dc}
-                              onClick={() => updateEditForm({ day_chuyen: dc })}
-                              className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all ${
-                                editForm.day_chuyen === dc
-                                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm"
-                                  : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-white"
-                              }`}
-                            >
-                              {dc}
-                            </button>
-                          ))}
-                        </div>
+                        <input readOnly value={editForm.day_chuyen} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-100 text-slate-500" />
                       </div>
 
                       <div>
@@ -5895,34 +5743,15 @@ export default function ProductPage() {
                       <div className="grid gap-3 md:grid-cols-2">
                         <div>
                           <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                            Loại CSR *
+                            Loại CSR
                           </label>
-                          <select
-                            value={editForm.loai_csr}
-                            onChange={(e) => updateEditForm({ loai_csr: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white"
-                          >
-                            {getLoaiCSRByDayChuyen(
-                              editForm.day_chuyen,
-                              factoryPrefix,
-                            ).map((l) => (
-                              <option key={l}>{l}</option>
-                            ))}
-                          </select>
+                          <input readOnly value={editForm.loai_csr} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-100 text-slate-500" />
                         </div>
                         <div>
                           <label className="text-xs font-bold text-slate-600 block mb-1.5">
                             Thảm
                           </label>
-                          <select
-                            value={editForm.tham}
-                            onChange={(e) => updateEditForm({ tham: e.target.value })}
-                            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white"
-                          >
-                            {THAM_OPTS.map((t) => (
-                              <option key={t}>{t}</option>
-                            ))}
-                          </select>
+                          <input readOnly value={editForm.tham} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm bg-slate-100 text-slate-500" />
                         </div>
                       </div>
                     </div>
@@ -6243,6 +6072,8 @@ export default function ProductPage() {
               onClose={() => {
                 setEditDateModal(null);
                 setDateEditHeader(null);
+                setDateEditLyDo("");
+                setDateReasonOpen(false);
               }}
               maxWidth="2xl"
               bodyClassName="p-0"
@@ -6276,34 +6107,25 @@ export default function ProductPage() {
                           </div>
                         </div>
                         <button
-                          onClick={() => void handleDateHeaderSave()}
-                          disabled={saving}
+                          onClick={() => setDateReasonOpen(true)}
+                          disabled={saving || dateReasonOpen}
                           className="shrink-0 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl disabled:opacity-50"
                         >
-                          {saving ? "Đang lưu..." : "Lưu thay đổi"}
+                          Lưu thay đổi
                         </button>
                       </div>
+                      {dateReasonOpen && (
+                        <ReasonConfirmBanner
+                          value={dateEditLyDo}
+                          onChange={setDateEditLyDo}
+                          onConfirm={() => void handleDateHeaderSave()}
+                          onBack={() => setDateReasonOpen(false)}
+                          saving={saving}
+                        />
+                      )}
                       <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                            Hậu tố
-                          </label>
-                          <select
-                            value={dateEditHeader.suffix}
-                            onChange={(e) =>
-                              setDateEditHeader((prev) =>
-                                prev ? { ...prev, suffix: e.target.value } : prev,
-                              )
-                            }
-                            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                          >
-                            <option value="">Trống</option>
-                            {suffixList.map((s) => (
-                              <option key={s.code} value={s.code}>
-                                {s.code} - {s.name}
-                              </option>
-                            ))}
-                          </select>
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-500">
+                          Hậu tố / năm (mã lô) không sửa ở đây — mã lô là khóa QR của nhãn đã in.
                         </div>
                         <div>
                           <label className="text-xs font-bold text-slate-600 block mb-1.5">
@@ -6552,16 +6374,14 @@ export default function ProductPage() {
           (s, p) => s + p.kien_a + p.kien_b + p.kien_c + p.kien_d,
           0,
         );
+        // Lô chỉ đổi một số kiện → sau khi đổi, lô có kiện khác bọc/pallet (được phép sau sản xuất).
         const hasPartial = skPending.some(
-          (p) =>
-            p.kien_a !== p.lot.kien_a ||
-            p.kien_b !== p.lot.kien_b ||
-            p.kien_c !== p.lot.kien_c ||
-            p.kien_d !== p.lot.kien_d,
+          (p) => !!p.avail && SK_KIEN_KEYS.some((k) => p.avail![k].produced > 0 && p[`kien_${k}`] === 0),
         );
 
         const canConfirm =
           skPending.length > 0 &&
+          skPending.every((p) => !!p.avail && SK_KIEN_KEYS.some((k) => p[`kien_${k}`] > 0)) &&
           (skTab === "thay_boc" ? !!skToBoc : skToPallet.length > 0);
 
         return (
@@ -6654,7 +6474,7 @@ export default function ProductPage() {
                         return (
                           <button
                             key={lot.id}
-                            onClick={() => skAddLot(lot)}
+                            onClick={() => void skAddLot(lot)}
                             className={`w-full text-left p-3 rounded-xl border transition-all ${
                               isDone
                                 ? "border-violet-200 bg-violet-50 cursor-default"
@@ -6770,11 +6590,9 @@ export default function ProductPage() {
                       </div>
                     ) : (
                       skPending.map((p) => {
-                        const rem_a = p.lot.kien_a - p.kien_a;
-                        const rem_b = p.lot.kien_b - p.kien_b;
-                        const rem_c = p.lot.kien_c - p.kien_c;
-                        const rem_d = p.lot.kien_d - p.kien_d;
-                        const isPartial = rem_a > 0 || rem_b > 0 || rem_c > 0 || rem_d > 0;
+                        const keptKiens = p.avail
+                          ? SK_KIEN_KEYS.filter((k) => p.avail![k].produced > 0 && p[`kien_${k}`] === 0)
+                          : [];
                         const convertBanh = p.kien_a + p.kien_b + p.kien_c + p.kien_d;
                         return (
                           <div
@@ -6795,7 +6613,7 @@ export default function ProductPage() {
                                   onClick={() => skSetAll(p.lot.id)}
                                   className="px-2 py-0.5 text-[10px] font-bold bg-violet-50 hover:bg-violet-100 text-violet-600 rounded border border-violet-200 transition-colors"
                                 >
-                                  Sang hết
+                                  Chọn hết
                                 </button>
                                 <button
                                   onClick={() => skRemoveLot(p.lot.id)}
@@ -6806,36 +6624,50 @@ export default function ProductPage() {
                               </div>
                             </div>
 
-                            {/* Kien inputs */}
-                            <div className="grid grid-cols-2 gap-1.5 mb-2">
-                              {(["kien_a","kien_b","kien_c","kien_d"] as const).map((k) => {
-                                const label = k.replace("kien_","").toUpperCase();
-                                const max = p.lot[k];
-                                const val = p[k];
-                                return (
-                                  <div key={k} className="flex items-center gap-1.5 bg-slate-50 rounded-lg px-2 py-1.5">
-                                    <span className="text-xs font-extrabold text-violet-600 w-4 shrink-0">{label}</span>
-                                    <input
-                                      type="number"
-                                      value={val}
-                                      min={0}
-                                      max={max}
-                                      onChange={(e) => skUpdateKien(p.lot.id, k, +e.target.value)}
-                                      className="w-full text-sm font-bold text-center outline-none bg-transparent text-slate-700"
-                                    />
-                                    <span className="text-[10px] text-slate-400 shrink-0">/{max}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                            {/* Chọn kiện — tròn kiện: đổi nguyên kiện, không nhập số bành */}
+                            {!p.avail ? (
+                              <div className="mb-2 rounded-lg bg-slate-50 px-2 py-2 text-center text-xs text-slate-400">
+                                Đang tải số liệu kiện...
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-4 gap-1.5 mb-2">
+                                {SK_KIEN_KEYS.map((k) => {
+                                  const a = p.avail![k];
+                                  const selectable = skKienSelectable(p, k);
+                                  const selected = p[`kien_${k}`] > 0;
+                                  const note = a.produced <= 0 ? "Trống" : a.assigned > 0 ? `Đã xuất ${a.assigned}` : `${a.produced} bành`;
+                                  return (
+                                    <button
+                                      key={k}
+                                      type="button"
+                                      disabled={!selectable}
+                                      onClick={() => skToggleKien(p.lot.id, k)}
+                                      title={!selectable && a.assigned > 0 ? "Kiện đã gán đơn xuất — không đổi được" : undefined}
+                                      className={`rounded-lg border px-1.5 py-1.5 text-center transition-all ${
+                                        !selectable
+                                          ? "border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed"
+                                          : selected
+                                            ? "border-violet-500 bg-violet-50 text-violet-700"
+                                            : "border-slate-200 bg-white text-slate-500 hover:border-violet-300"
+                                      }`}
+                                    >
+                                      <span className="block text-sm font-extrabold">
+                                        {selected ? "✓ " : ""}{k.toUpperCase()}
+                                      </span>
+                                      <span className="block text-[10px]">{note}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
 
                             <div className="flex items-center justify-between text-[11px]">
                               <span className="text-violet-600 font-bold">
-                                Chuyển: {convertBanh} bành
+                                Đổi: {convertBanh} bành
                               </span>
-                              {isPartial && (
+                              {keptKiens.length > 0 && (
                                 <span className="text-amber-600 font-bold">
-                                  Còn lại: A={rem_a} B={rem_b} C={rem_c} D={rem_d}
+                                  Giữ nguyên: kiện {keptKiens.map((k) => k.toUpperCase()).join(", ")}
                                 </span>
                               )}
                             </div>
@@ -7031,7 +6863,7 @@ export default function ProductPage() {
                       <div className="flex items-start gap-2 mb-4 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
                         <AlertTriangle size={13} className="text-amber-600 mt-0.5 shrink-0" />
                         <p className="text-xs text-amber-700 font-bold">
-                          Một số lô sang một phần — sẽ tách thành 2 lô riêng (phần đã chuyển + phần tồn dư).
+                          Một số lô chỉ đổi vài kiện — sau khi đổi, các kiện trong cùng lô sẽ khác bọc/pallet (không tách lô).
                         </p>
                       </div>
                     )}
@@ -7100,6 +6932,31 @@ function ShiftLockModal({
   const [error, setError] = useState<string | null>(null);
   const [unlockCa, setUnlockCa] = useState<string | null>(null);
   const [unlockReason, setUnlockReason] = useState("");
+  // GĐ7b: trạng thái bản cứng của ngày (đọc lại mỗi khi bộ khóa đổi). Khóa ca KHÔNG sinh PDF —
+  // bản cứng chỉ tạo ở lần render đầu tiên sau khi khóa đủ mọi ca (report-bundle.ts).
+  const [dayState, setDayState] = useState<Awaited<ReturnType<typeof loadReportLockState>>>(null);
+  const [openingSnapshot, setOpeningSnapshot] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void loadReportLockState(factoryId, date).then((state) => {
+      if (alive) setDayState(state);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [factoryId, date, lockedShiftKeys]);
+
+  const handleOpenSnapshot = async (snapshotId: string) => {
+    setOpeningSnapshot(snapshotId);
+    setError(null);
+    try {
+      await openReportSnapshot(factoryId, snapshotId);
+    } catch (err) {
+      setError(getErrorMessage(err, "Không mở được bản cứng."));
+    } finally {
+      setOpeningSnapshot(null);
+    }
+  };
 
   const handleLock = async (ca: string) => {
     setBusyCa(ca);
@@ -7231,6 +7088,47 @@ function ShiftLockModal({
             </div>
           );
         })}
+        {dayState?.fullyLocked && (
+          <div className="p-3 border border-emerald-200 bg-emerald-50 rounded-xl space-y-2">
+            <p className="text-xs font-bold text-emerald-800">
+              Ngày đã khóa đủ tất cả các ca — bản cứng PDF
+            </p>
+            {dayState.unavailable ? (
+              <p className="text-xs text-amber-700 font-semibold">
+                Chưa bật lưu bản cứng (migration 20261003 chưa chạy).
+              </p>
+            ) : (
+              ([
+                ["F09", "Phiếu thành phẩm (F09)"],
+                ["F11_F12", "Báo cáo lô + Báo cáo ngày (F11 + F12)"],
+              ] as const).map(([kind, label]) => {
+                const snap = dayState.current[kind];
+                return (
+                  <div key={kind} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-slate-700">
+                      <span className="font-bold">{label}:</span>{" "}
+                      {snap
+                        ? `tạo ${new Date(snap.createdAt).toLocaleString("vi-VN")} – ${snap.createdByName}`
+                        : "chưa tạo (tạo ở lần mở phiếu đầu tiên)"}
+                    </span>
+                    {snap && (
+                      <button
+                        onClick={() => void handleOpenSnapshot(snap.id)}
+                        disabled={openingSnapshot === snap.id}
+                        className="px-2.5 py-1 bg-white border border-emerald-300 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg shrink-0 disabled:opacity-50"
+                      >
+                        {openingSnapshot === snap.id ? "Đang mở..." : "Xem"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+            <p className="text-[11px] text-slate-500">
+              Muốn sửa: admin mở khóa ca, sửa dữ liệu rồi khóa lại — lần mở phiếu kế tiếp sẽ tạo bản cứng mới.
+            </p>
+          </div>
+        )}
       </div>
     </ModalShell>
   );

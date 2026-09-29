@@ -7506,3 +7506,366 @@ Chỉ dùng npx tsc --noEmit + npx eslint — không chạy npm run build.
 
 
 
+
+## Cập nhật (2026-09-28) — Thành phẩm/Ngăn lưu: GĐ1-3 đã code, GĐ4-7 để phiên sau
+
+Kế hoạch đầy đủ 7 giai đoạn (đã duyệt): `C:\Users\Software\.claude\plans\pasted-content-id-83a4-xem-l-i-typed-lighthouse.md`.
+Chi tiết kỹ thuật GĐ1-3: `.claude/rules/06-module-production.md` mục **4.11**.
+
+### Đã làm phiên này (tsc + eslint sạch, CHƯA test tay, CHƯA commit)
+
+| GĐ | Nội dung | File |
+|---|---|---|
+| 1 | Hotfix ngăn kẹt "Chờ sản xuất": khôi phục `sync_ngan_production_status` trong `submit_confirm_draft_batch` (mất từ migration 20260828) + backfill | `supabase/migrations/20260928_submit_draft_batch_restore_ngan_sync.sql` |
+| 2 | F09 in kiện theo A,B,C,D (lô liền nhau, xếp theo mốc quét sớm nhất); fix `created_at` null làm ca xếp đầu | `confirm/actions.ts` (`loadShiftReportData`), `confirm/daily-report-actions.ts` |
+| 3 | Nút "Đổi ngăn" ở màn quét QR (kiện chưa có bành), RPC `swap_predicted_kien_ngan` + nhật ký `lot_prediction_ngan_changes`; sửa nháp đổi ngăn đi qua swap; vá lỗ giữ chỗ kiện chưa SX của lô đã thành lô thật | `supabase/migrations/20260928_swap_predicted_kien_ngan.sql`, `confirm/actions.ts`, `confirm/page.tsx`, `confirm/i18n.ts`, `predict/actions.ts` |
+
+Đã kiểm DB thật (chỉ đọc, 28/09): trạng thái ngăn đều chuẩn NFC, hiện 0 ngăn kẹt (admin đã bấm tay),
+**0 lô mồ côi**, 0 lô tồn dư `…r`, `sk_history` chỉ 2 lần Thay bọc không tách lô.
+
+### BẮT BUỘC trước khi test
+
+1. Chạy trên Supabase SQL Editor theo thứ tự: `20260928_submit_draft_batch_restore_ngan_sync.sql` →
+   `20260928_swap_predicted_kien_ngan.sql`.
+2. Test tay:
+   - Quét 1 kiện vào ngăn "Chờ sản xuất" → Lưu tạm → Gửi tất cả → ngăn tự thành "Đang sản xuất".
+   - Ngày có lô quét CD trước AB (khác ngăn/pallet) → phiếu F09 in AB rồi CD liền nhau.
+   - Quét kiện của lô có dự đoán, chưa có bành → thấy nút "Đổi ngăn"; danh sách chỉ gồm ngăn cùng dây
+     chuyền, % sau đổi; ngăn vượt 110% bị khóa; đổi xong ngăn nguồn hiện ngăn mới, nhắc in lại nhãn;
+     Lưu tạm + Gửi → `lot_transactions.ngan_id` là ngăn mới; `lot_prediction_lots.kien_X_ngan_id` đổi;
+     có dòng trong `lot_prediction_ngan_changes`.
+   - Kiện đã có nháp/bành (kể cả của người khác) → không thấy nút "Đổi ngăn".
+   - Sửa nháp đổi sang ngăn khác → ngăn hợp lệ thì kế hoạch đổi theo; ngăn không hợp lệ → báo lý do.
+   - Màn Tạo dự đoán: ngăn có kiện chưa SX của lô đã quét dở giờ hiện ít chỗ trống hơn trước (đúng).
+
+### Việc còn lại (phiên sau) — theo thứ tự đã chốt trong file kế hoạch
+
+- **GĐ4** — Quyền & đồng bộ khi sửa: sau "Gửi tất cả" người quét KHÔNG sửa/xóa được nữa (chỉ admin; nháp
+  vẫn tự sửa kể cả lô tròn). Admin sửa ngăn/bọc/số bành/pallet/ca-ngày qua 1 RPC atomic
+  `admin_update_lot_transaction` đồng bộ `lot_transactions`, `lots`, `lot_prediction_lots`
+  (`kien_X_ngan_id`, `boc`), nháp, trạng thái 2 ngăn, audit `lot_admin_edits`; bỏ ô sửa Số lô/Năm ở modal
+  (nguyên nhân tạo lô mồ côi rồi báo lỗi); kiểm khóa ca cả nguồn lẫn đích.
+- **GĐ7a** — Bịt lỗ khóa ca: `delete_orphan_lot` (không kiểm khóa/nhà máy), lan truyền `boc` sang ca
+  đã khóa, `sync_lot_master_snapshot` hạ "Xuất hàng".
+- **GĐ6** — F11 cột pallet theo kiện ("Sắt mỏng A, C / Sắt đế gỗ B, D"); F12 tồn: bảng
+  `product_opening_stock` (tồn chốt kiểm kê theo nhóm CSR+nguồn+bọc+bành, có ngày chốt) ở Cài đặt →
+  Cấu hình nhà máy; bỏ ép âm về 0; dòng "Không xác định lô"; script `scripts/reconcile-f12-stock.mjs`.
+  Sang kiện/Thay bọc (`perform_sang_kien_thay_boc`) đồng bộ `lot_transactions.boc/pallet`,
+  `lot_prediction_lots.boc`, tách lô tạo giao dịch cho lô tồn dư (không sinh lô mồ côi), kiểm quyền +
+  khóa ca.
+- **GĐ5** — Ca 1/Ca 2 = Ca Ngày/Ca Đêm (F09); Ca A/B/C theo ca trưởng, bảng `production_shift_names`
+  có `hieu_luc_tu`; F12 đổi thành "Khối lượng Ca A / Ca B" gom theo chữ cái ca.
+- **GĐ7b** — Lưu bản cứng PDF F09/F11/F12 khi khóa ca (bucket private + sha256, bảng
+  `product_shift_report_snapshots`).
+
+### Prompt gợi ý mở đầu phiên sau
+
+```
+Đọc mục "Cập nhật (2026-09-28) — Thành phẩm/Ngăn lưu" ở cuối CLAUDE.md, mục 4.11 trong
+.claude/rules/06-module-production.md và file kế hoạch
+C:\Users\Software\.claude\plans\pasted-content-id-83a4-xem-l-i-typed-lighthouse.md (GĐ4-7).
+GĐ1-3 đã code xong. Hỏi tôi đã chạy 2 migration 20260928_* và test tay GĐ1-3 chưa; nếu có lỗi thì
+sửa trước.
+
+Sau đó làm GĐ4 (quyền sửa sau khi Gửi + RPC admin_update_lot_transaction đồng bộ lots /
+lot_transactions / lot_prediction_lots / nháp / trạng thái ngăn / audit lot_admin_edits), rồi GĐ7a
+(bịt lỗ khóa ca). Dừng lại cho tôi test trước khi sang GĐ6 (F11 pallet theo kiện, tồn đầu kỳ F12,
+Sang kiện đồng bộ), GĐ5 (bảng ca trưởng có ngày hiệu lực, đổi nhãn F12) và GĐ7b (bản cứng khi khóa ca).
+
+Không đổi mã lô/CSR/loại bành ở GĐ4 (đã chốt: chỉ sửa ngăn, bọc, số bành, pallet, ca/ngày).
+Mọi CREATE OR REPLACE submit_confirm_draft_batch phải chép từ migration mới nhất
+(20260928_submit_draft_batch_restore_ngan_sync.sql) và giữ vòng v_touched_ngans.
+Chỉ dùng npx tsc --noEmit + npx eslint — không chạy npm run build.
+```
+
+## Cập nhật (2026-09-28, tiếp) — Đổi ngăn chuyển sang màn tra cứu nhãn + dịch Khmer
+
+Chi tiết: `.claude/rules/06-module-production.md` mục 4.11 "Đổi ngăn nguồn của kiện (cập nhật
+2026-09-28, lần 2)" + mục "Thay bọc — hiện trạng & lỗi đã biết". Tóm tắt:
+
+- Đổi ngăn CHỈ ở `/product-label` (icon góc phải dòng "Xem chi tiết ngăn nguồn gốc"), bỏ khỏi form
+  xác nhận. Server action tự xác thực token (`assertProductAccess`) vì trang công khai.
+- Danh sách ngăn: đã có lịch sử dự đoán + Chờ/Đang SX, kể cả ngăn "đã dự kiến xong", trần 110%.
+- Fix: quét QR kiện chưa có bành giờ hiện ngăn kế hoạch (= ngăn đã đổi), không còn rơi về `lots.ngan_id`.
+- Dịch Khmer các chữ `doiNgan*` (cần người bản ngữ duyệt).
+- Không migration mới; vẫn cần chạy 2 migration `20260928_*`. tsc + eslint sạch, CHƯA test tay.
+
+
+## Cập nhật (2026-09-28, tiếp 2) — Hotfix "lot_id is ambiguous" + GĐ4 + GĐ7a đã code, CHƯA test tay
+
+Chi tiết: `.claude/rules/06-module-production.md` mục 4.11 (dòng 🐛) và mục **4.12**. Tóm tắt:
+
+- 🐛 **Bug production**: "Gửi tất cả" báo `column reference "lot_id" is ambiguous` — dòng lan bọc trong
+  `submit_confirm_draft_batch` không alias, trùng biến OUT của `RETURNS TABLE`. Có từ `20260918`, lộ ra
+  sau khi chạy `20260928_*`. Fix: `20260928b_fix_submit_draft_batch_ambiguous_lot_id.sql` (đổi đúng 1 dòng).
+- **GĐ4**: giao dịch đã gửi chỉ admin sửa/xóa (cả màn quét lẫn trang Thành phẩm); mọi action nhận access
+  token, không tin `isAdmin`/`actorUserId` từ client; sửa qua 1 RPC atomic `admin_update_lot_transaction`
+  (đồng bộ lots / dự đoán / nháp / 2 ngăn, lý do bắt buộc, nhật ký `lot_admin_edits` bất biến);
+  `saveLotTransaction` chỉ còn tạo mới; "Sửa theo ngày" chạy server, bỏ đổi hậu tố/năm.
+- **GĐ7a**: `sync_lot_master_snapshot` không hạ "Xuất hàng"; `delete_orphan_lot` chỉ admin (trước đây
+  ai đăng nhập cũng xóa được lô bất kỳ); RLS DELETE theo khóa ca; lan bọc không vượt ca đã khóa.
+- `product-draft/page.tsx` (trang mồ côi) chỉ sửa đủ để biên dịch — mọi thao tác ghi ở đó giờ bị server
+  từ chối (không có token). → Đã xóa hẳn ở phiên "tiếp 3" (xem dưới).
+- `tsc` sạch, `eslint` 0 lỗi. KHÔNG chạy `npm run build`.
+
+### Thứ tự chạy migration (Supabase SQL Editor)
+1. `20260928b_fix_submit_draft_batch_ambiguous_lot_id.sql` — **chạy NGAY**, không phụ thuộc deploy; thử
+   "Gửi tất cả" trên production phải hết lỗi.
+2. `20260929_shift_lock_gaps.sql` — an toàn chạy trước deploy (giữ chữ ký hàm cũ).
+3. `20260929_lot_admin_edits.sql` → rồi **deploy code** (code mới gọi RPC này).
+
+### Checklist test tay
+1. User thường: Lịch sử ca không còn nút Sửa/Xóa; nháp vẫn sửa được. Trang Thành phẩm: không thấy
+   Sửa/Xóa/"Sửa theo ngày".
+2. Admin sửa kiện C sang ngăn khác → `lot_prediction_lots.kien_c_ngan_id` đổi, 2 ngăn đúng trạng thái;
+   ngăn mới >110% bị chặn.
+3. Admin đổi bọc → `lot_transactions`, `lots`, `lot_prediction_lots`, nháp cùng lô đều bọc mới.
+4. Giảm số bành dưới số đã gán đơn xuất → bị chặn. Sửa lô "Xuất hàng" chưa có KN → vẫn "Xuất hàng".
+5. `SELECT * FROM lot_admin_edits` có dòng kèm lý do; `UPDATE lot_admin_edits SET ly_do='x'` bị chặn.
+6. "Sửa theo ngày" không còn ô Hậu tố; đổi ngày + chỉ thị → lô đúng ngày mới, chỉ thị không bị đổi lại.
+7. Tài khoản thường gọi `select delete_orphan_lot('<id>')` → "Chỉ admin được xóa lô."
+
+### Ghi chú
+- Trong lúc làm phát hiện `product-label-client.tsx`, `src/lib/product-label.ts` và mục 4.11 "lần 2" đã
+  bị sửa bởi 1 phiên khác (đổi ngăn chuyển sang `/product-label`) — không đụng tới.
+
+### Prompt gợi ý mở đầu phiên sau
+
+```
+Đọc mục "Cập nhật (2026-09-28, tiếp 2)" ở cuối CLAUDE.md và mục 4.12 trong
+.claude/rules/06-module-production.md. Hỏi tôi đã chạy 3 migration (20260928b, 20260929_shift_lock_gaps,
+20260929_lot_admin_edits), đã deploy và test tay checklist chưa; có lỗi thì sửa trước.
+
+Sau đó làm GĐ6 theo file kế hoạch
+C:\Users\Software\.claude\plans\pasted-content-id-83a4-xem-l-i-typed-lighthouse.md: F11 pallet theo
+kiện; F12 tồn đầu kỳ (bảng product_opening_stock + tab Cài đặt); bỏ ép âm về 0; dòng "Không xác định
+lô"; script scripts/reconcile-f12-stock.mjs; Sang kiện/Thay bọc (perform_sang_kien_thay_boc) đồng bộ
+lot_transactions/lot_prediction_lots, tách lô tạo giao dịch cho lô tồn dư, kiểm quyền + khóa ca bằng
+token. Dừng cho tôi test trước GĐ5 và GĐ7b.
+
+Trong hàm PL/pgSQL có RETURNS TABLE, mọi cột phải có alias bảng. Mọi CREATE OR REPLACE
+submit_confirm_draft_batch chép từ 20260928b_fix_submit_draft_batch_ambiguous_lot_id.sql.
+Chỉ dùng npx tsc --noEmit + npx eslint — không chạy npm run build.
+```
+
+## Cập nhật (2026-09-28, tiếp 3) — Sau test tay GĐ4: banner lý do + khôi phục lô lệch
+
+Test tay (người dùng): 3 migration đã chạy, "Gửi tất cả" hết lỗi; mục 1, 2, 6, 7 PASS; mục 4, 5 test sau.
+
+- Ô "Lý do sửa" chuyển thành **banner cảnh báo** hiện khi bấm Lưu (`ReasonConfirmBanner`), nhập lý do
+  ngay trong banner mới lưu được — 3 modal (Sửa giao dịch, Sửa theo ngày, Lịch sử ca màn quét).
+- Mục 3 (371cs/26 không tìm được kiện D 24 ở Xuất hàng): KHÔNG do Thay bọc — `lots` đã bị ghi còn 24 từ
+  trước trong khi giao dịch 144, đã gán 120 ⇒ còn lại âm. 1159cs/26 lệch tương tự. Script
+  `scripts/repair-lot-snapshot-from-transactions.mjs` đã chạy CHẾ ĐỘ XEM, **CHƯA `--apply`** (chờ người
+  dùng duyệt). Sau khi apply: 371cs/26 = 144, còn xuất D 24, bọc "Bọc nhãn 0,04 VRG CSR10"; 1159cs/26 còn 96.
+- Script liệt kê thêm **24 lô đơn xuất gán > tổng lô** (phần lớn 288/144, 1593cs/25 gán 144/29) — nghi
+  đơn xuất trùng, chưa đụng.
+- Trang `product-draft`: người dùng **đã quyết định XÓA** (2026-09-28) — **đã xóa** thư mục
+  `src/app/dashboard/product-draft/` + dòng `revalidatePath` trong `product/actions.ts`; grep `src/` = 0.
+- `tsc` + `eslint` sạch; không `npm run build`.
+- **Xác nhận sau đó**: đã chạy script `--apply`, 371cs/26 đúng (kiện D 24 bành bọc mới); test tay GĐ4
+  mục 4, 5 và banner lý do đều ĐẠT ⇒ GĐ4 + GĐ7a hoàn tất.
+
+### Prompt gợi ý mở đầu phiên sau
+
+```
+Đọc mục "Cập nhật (2026-09-28, tiếp 2)" và "(tiếp 3)" ở cuối CLAUDE.md, mục 4.12 trong
+.claude/rules/06-module-production.md. Hỏi tôi: (1) đã chạy
+`node --env-file=.env.local scripts/repair-lot-snapshot-from-transactions.mjs --apply` chưa và tạo đơn
+xuất đã thấy 371cs/26 kiện D 24 bành bọc mới chưa; (2) test tay GĐ4 mục 4, 5 và banner lý do;
+(3) Có lỗi thì sửa trước.
+
+Việc đầu tiên (đã quyết định 2026-09-28, không cần hỏi lại): XÓA trang mồ côi product-draft —
+xóa cả thư mục src/app/dashboard/product-draft/ và dòng revalidatePath("/dashboard/product-draft")
+trong revalidateLotScreens() (src/app/dashboard/product/actions.ts). grep lại "product-draft" toàn
+src/ phải ra 0 kết quả; cập nhật mục 4.4c trong .claude/rules/06-module-production.md thành "đã xóa".
+
+Sau đó làm GĐ6 theo file kế hoạch
+C:\Users\Software\.claude\plans\pasted-content-id-83a4-xem-l-i-typed-lighthouse.md, bổ sung:
+- Sang kiện / Thay bọc (perform_sang_kien_thay_boc): chỉ cho chọn phần CHƯA xuất (lots.kien − đã gán
+  đơn xuất theo từng kiện), lan bọc/pallet xuống lot_transactions + lot_prediction_lots + nháp, tách lô
+  tạo giao dịch âm/dương thay vì sửa tay lots, không bao giờ ghi lots.kien = phần còn lại; xác thực
+  token + khóa ca.
+- Đối soát 24 lô "đơn xuất gán > tổng lô" (vd 288/144): tìm đơn xuất trùng, báo cáo cho tôi trước khi sửa.
+- F11 pallet theo kiện; F12 tồn đầu kỳ (bảng product_opening_stock + tab Cài đặt); bỏ ép âm về 0; dòng
+  "Không xác định lô"; script scripts/reconcile-f12-stock.mjs.
+Dừng cho tôi test trước GĐ5 và GĐ7b.
+
+Trong hàm PL/pgSQL có RETURNS TABLE, mọi cột phải có alias bảng. Mọi CREATE OR REPLACE
+submit_confirm_draft_batch chép từ 20260928b_fix_submit_draft_batch_ambiguous_lot_id.sql.
+Chỉ dùng npx tsc --noEmit + npx eslint — không chạy npm run build.
+```
+
+## Cập nhật (2026-09-28, tiếp 4) — GĐ6 đã code: F11 pallet theo kiện, F12 tồn đầu kỳ, Sang kiện "tròn kiện"
+
+Chi tiết: `.claude/rules/06-module-production.md` mục **4.5** (viết lại) và **4.13** (mới). Tóm tắt:
+
+- Trang mồ côi `product-draft` đã XÓA (mục 4.4c).
+- **F11**: pallet (và bọc) in theo kiện khi lô có ≥2 loại (`"Sắt mỏng A, C / Sắt đế gỗ B, D"`); phân trang.
+- **F12**: tồn theo mốc chốt kiểm kê (bảng mới `product_opening_stock` + tab Cài đặt → Cấu hình nhà máy →
+  "Tồn đầu kỳ thành phẩm", có nút "Gợi ý từ hệ thống"); bỏ ép âm về 0 (tô đỏ); đơn xuất lạc lô khớp theo
+  mã lô, không khớp thì báo dòng đỏ; lô không giao dịch vẫn tính nhập; bọc theo giao dịch/kiện.
+- **Sang kiện / Thay bọc** — người dùng chốt: sau sản xuất được đổi nhưng **tròn kiện**. RPC mới (chỉ
+  service role) qua server action `performSangKienThayBoc` (token + quyền `product.edit`): chỉ kiện chưa
+  gán đơn xuất, sửa `lot_transactions` (tách dòng nếu 1 dòng chứa nhiều kiện), không tạo lô `…r`, khóa ca
+  (admin bỏ qua). UI chọn kiện bằng nút bật/tắt.
+- Script `scripts/reconcile-f12-stock.mjs` (chỉ đọc) — đã chạy, kết quả ở mục 4.13.
+- `tsc` sạch (chỉ còn lỗi cache `.next` trỏ `product-draft`, tự hết khi dev chạy lại); `eslint` sạch các file
+  đã sửa (lỗi còn lại ở `settings/page.tsx` là có từ trước). Không `npm run build`.
+
+### Migration cần chạy (Supabase SQL Editor)
+1. `20260930_product_opening_stock.sql` — trước deploy (code tự coi "chưa chốt" nếu bảng chưa có).
+2. `20260930b_sang_kien_thay_boc_tron_kien.sql` — chạy **cùng lúc deploy** (DROP bản RPC cũ; code cũ
+   gọi RPC cũ sẽ lỗi trong khoảng giữa).
+
+### Chờ người dùng quyết (chưa sửa dữ liệu)
+- **29 lô gán đơn xuất vượt số sản xuất** — phần lớn do 2 đơn cùng ngày 12/02/2026
+  (`XH-NBS-13-120226/1` và `XH-HK RUBBER-12-120226/1`) cùng gán nguyên các lô 154–177cs/26; 1593cs/25 sản
+  xuất 29 bành nhưng đơn `XH-PHR-22-210426/1` gán 144.
+- **23 dòng gán mất hẳn lô** (1428–1450cs/25, đơn `XH-PHR-1-080126/1`) + **74 dòng lot_id cũ** (lô bị tạo
+  lại id mới, cùng mã): F12 đã khớp theo mã; nhưng Xuất hàng (`lotsExt`) tính còn lại theo `lot_id` nên
+  các lô này có thể hiện "còn hàng" sai — cân nhắc script sửa `lot_id` trong `assignments`.
+- Tồn tự tính hiện ~1,23 triệu kg (thiếu đơn xuất lịch sử) ⇒ cần nhập tồn chốt kiểm kê.
+
+### Checklist test tay
+1. F11 ngày có lô 2 loại pallet (hoặc sau Thay bọc 2 kiện) → cột pallet/bọc ghi kèm kiện.
+2. Cài đặt → Tồn đầu kỳ: chọn ngày → Gợi ý → sửa số → Lưu → F12 ngày sau đó ghi "Tồn kho tính từ số chốt
+   kiểm kê ngày …", tồn = chốt + nhập − xuất sau ngày chốt; tài khoản không có `settings.manage_config`
+   không lưu được.
+3. F12 có nhóm âm → số đỏ; có đơn lạc lô → dòng đỏ dưới bảng.
+4. Thay bọc: kiện đã gán đơn xuất bị khóa ("Đã xuất N"); đổi 2/4 kiện → lô "Hoàn thành" giữ nguyên số bành,
+   2 kiện bọc mới, không sinh lô `…r`; F09 ngày SX của lô hiện đúng bọc theo kiện; lô nhập tay 1 dòng A+B
+   đổi riêng A → giao dịch tách 2 dòng, tổng kg không đổi; user thường trên ca đã khóa bị chặn.
+5. Sang kiện tương tự với pallet; tài khoản không có `product.edit` không thấy nút.
+
+### Việc tiếp theo
+GĐ5 (bảng ca trưởng có ngày hiệu lực, đổi nhãn F09/F12) và GĐ7b (bản cứng PDF khi khóa ca) — theo file kế
+hoạch `C:\Users\Software\.claude\plans\pasted-content-id-83a4-xem-l-i-typed-lighthouse.md`.
+
+## Cập nhật (2026-09-29) — Sửa đơn xuất lệch dữ liệu + dropdown tồn đầu kỳ
+
+Kết quả test GĐ6 (người dùng, localhost, đã chạy 2 migration `20260930_*`): mục 1 PASS; mục 2 yêu cầu
+dropdown dữ liệu thật lọc theo nhau (đã làm); mục 3, 4, 5 **chưa báo kết quả**. 29 lô gán vượt người dùng đã
+tự xử lý.
+
+- **Bug "đơn XH-NBS-14-060326/1 không tìm thấy lô"**: đơn nhập CSV ghi "CSR 10"/"Bọc 0,04 VRG CSR 10" khác
+  chuỗi của lô → ô chọn lô trống. Đã sửa dữ liệu 65/65 đơn + relink 74 dòng `lot_id` bằng
+  `scripts/repair-export-orders.mjs --apply` (sao lưu:
+  `C:\Users\Software\rubber-erp-backups\export-orders-backup-2026-09-28T23-56-35-605Z.json`); code
+  `export/page.tsx` chuẩn hoá CSR/bọc khi mở sửa và khi lọc lô. Chi tiết: rule 08 mục cuối.
+- 23 dòng lô 2025 (1428–1450cs/25) giữ nguyên theo quyết định người dùng.
+- Còn 6 lô ở mục [5] đối soát: 4 lô lệch theo kiện (137, 143, 189, 593cs/26) và 2 lô vượt thật (1593cs/25,
+  934cs/26) — xem rule 06 mục 4.13.
+- Tab "Tồn đầu kỳ thành phẩm": 4 cột thành dropdown lọc xếp tầng (`loadOpeningStockOptions`).
+- `tsc` sạch (chỉ còn lỗi cache `.next` trỏ `product-draft`), `eslint` sạch các file sửa. Không `npm run build`.
+
+### Prompt gợi ý mở đầu phiên sau
+
+```
+Đọc các mục "Cập nhật (2026-09-28, tiếp 4)" và "Cập nhật (2026-09-29)" ở cuối CLAUDE.md, rule 06 mục 4.5 +
+4.13 và rule 08 mục "Chuẩn hoá chung_loai / loai_boc + relink lot_id". Không cần khảo sát lại.
+
+Hỏi tôi trước:
+1. Kết quả test GĐ6 mục 3 (F12 tồn âm tô đỏ + dòng đỏ đơn lạc lô), 4 (Thay bọc tròn kiện: kiện đã xuất bị
+   khóa, đổi 2/4 kiện, tách dòng A+B, khóa ca), 5 (Sang kiện + ẩn nút khi thiếu product.edit).
+2. Test mới: mở sửa đơn XH-NBS-14-060326/1 thấy CSR10 + bọc nhãn và ô chọn lô có lô; tab Tồn đầu kỳ dropdown
+   lọc xếp tầng lưu/mở lại đúng.
+3. 6 lô ở mục [5] của scripts/reconcile-f12-stock.mjs (4 lô lệch theo kiện 137/143/189/593cs/26, 2 lô vượt
+   thật 1593cs/25 và 934cs/26) — tôi muốn xử lý thế nào (không tự sửa).
+Có lỗi thì sửa trước.
+
+Sau đó làm GĐ5 theo C:\Users\Software\.claude\plans\pasted-content-id-83a4-xem-l-i-typed-lighthouse.md:
+bảng production_shift_names (ca A/B/C, ten_ca, ca_truong, hieu_luc_tu, seed từ factories.ca_a_ten/...),
+helper resolveShiftName(fid, ca, ngay), UI Cài đặt → Thông tin công ty dạng bảng lịch sử (thêm dòng = đổi
+ca trưởng từ ngày X, không sửa đè), F09 nhãn "Ca 1 (Ca ngày)"/"Ca 2 (Ca đêm)" + dòng phụ tên ca, F12 cột
+"Khối lượng Ca A/Ca B" gom theo chữ cái ca. Dừng cho tôi test trước GĐ7b (bản cứng PDF khi khóa ca).
+
+Nhớ: trong PL/pgSQL có RETURNS TABLE mọi cột phải có alias bảng; mọi CREATE OR REPLACE
+submit_confirm_draft_batch chép từ 20260928b_fix_submit_draft_batch_ambiguous_lot_id.sql; bọc/pallet lấy
+theo giao dịch/kiện (lots.boc chỉ là snapshot). Chỉ dùng npx tsc --noEmit + npx eslint — không npm run build.
+```
+## Cập nhật (2026-09-29, tiếp) — Dọn đơn xuất 2025, bọc theo kiện, sửa 10 lỗi đọc code
+
+Chi tiết: rule 08 mục "Gỡ lô 2025 mồ côi + bọc theo kiện", rule 06 mục 4.12.
+
+### Dữ liệu (ĐÃ GHI THẬT, sao lưu `C:\Users\Software\rubber-erp-backups\export-2025-boc-backup-2026-09-29T01-10-55-556Z.json`)
+- Đã xóa đơn `XH-PHR-1-080126/1` (chỉ gồm 23 dòng lô 1428–1450cs/25 không có trong Thành phẩm).
+- 3 đơn người dùng xác nhận giao 100% bọc nhãn (`XH-PHR-26-010626/1`, `XH-KUMHO-20-250426/1`,
+  `XH-NBS-21-210426/1`): đơn = "Bọc nhãn 0,04 VRG CSR10"; 58 giao dịch / 49 lô "trơn" → nhãn.
+- `reconcile-f12-stock.mjs` sau khi ghi: mục [1]–[5] đều = 0 (6 lô mục [5] cũ cũng đã hết).
+
+### Code (tsc + eslint sạch, CHƯA test tay)
+| # | Lỗi | Sửa |
+|---|---|---|
+| 1,8 | Sửa giao dịch ghi đè bọc/pallet cả lô | Form điền từ giao dịch; migration `20261001_admin_update_lot_transaction_fixes.sql` chỉ lan bọc khi lô đồng nhất |
+| 2 | Chọn lô xuất lọc theo `lots.boc` | Lọc theo bọc từng kiện (`src/lib/lot-kien-boc.ts`) |
+| 3 | Mở sửa đơn tự đổi bọc | Ưu tiên bọc ghi trên đơn |
+| 4 | Còn lại tính thiếu đơn (bị bộ lọc/1000 dòng) | `allOrderAssignments` nạp mọi đơn, phân trang |
+| 5,6,7 | RPC sửa giao dịch: không khớp `ma_lo`, không guard jsonb, thiếu search_path | Cùng migration trên |
+| 9 | Lịch sử ca xoá kiện khác của dòng nhiều kiện | Giữ số bành từng kiện, dòng nhiều kiện chỉ sửa trường khác |
+| 10 | `updateDraftKien` tin `userId` client | Xác thực token + quyền đổi ngăn |
+| 11 | F12 cộng thừa lô có giao dịch sau ngày | Tính cả giao dịch sau ngày khi xét "lô mồ côi" |
+| 12 | `.range(0,4999)` | Phân trang thật |
+
+### Việc cần làm
+1. Chạy `supabase/migrations/20261001_admin_update_lot_transaction_fixes.sql` (chữ ký hàm không đổi).
+2. Test tay: sửa số bành kiện A của lô 2 bọc → C,D giữ bọc; Xuất hàng đơn "Bọc nhãn" chỉ gán được kiện
+   nhãn; lọc danh sách đơn theo ngày rồi tạo đơn → phần còn lại không tăng; mở sửa đơn cũ → bọc không tự
+   đổi; Lịch sử ca sửa dòng A+B; sửa nháp đổi ngăn bằng tài khoản thiếu `product.confirm_scan` → bị chặn.
+3. Test GĐ6 mục 3-5 (còn treo) rồi làm GĐ5 (bảng ca trưởng + nhãn F09/F12) và GĐ7b.
+
+## Cập nhật (2026-09-29, GĐ5) — Tên ca theo ca trưởng có ngày hiệu lực + nhãn F09/F12
+
+Người dùng xác nhận GĐ6 mục 3-5 test tay **đạt**; migration `20260930_*`, `20261001_*` đã chạy.
+Chi tiết GĐ5: `.claude/rules/06-module-production.md` mục **4.14**. Tóm tắt:
+
+- Migration mới `20261002_production_shift_names.sql` — **CHƯA CHẠY** (code tự fallback về
+  `factories.ca_*_ten` nên deploy trước migration không gãy, nhưng tab Cài đặt báo "chưa có bảng").
+- `confirm/shift-names.ts` (server-only): `resolveShiftNamesAt(fid, ngay)`, `pickShiftNamesAt`, `formatCaName`.
+- Cài đặt → Danh mục → Thông tin công ty: thay 3 ô "Tên Ca A/B/C" bằng `shift-names-tab.tsx` (lịch sử mốc,
+  nút "Đổi ca trưởng" = thêm mốc "từ ngày X").
+- F09: "Ca 1 (Ca ngày)" / "Ca 2 (Ca đêm)" + "— Ca A – tên". F12 Mục 2: "Ca A (tên) – CSR10", sắp A→B→C.
+- Kiểm chứng: `tsc` sạch, `eslint` 0 lỗi mới; 6/6 assertion `pickShiftNamesAt`/`formatCaName`; chạy
+  `resolveShiftNamesAt` trên DB thật (phuochoa_kt) ra đúng `Sok Khum | Binh Ban | ''` qua nhánh dự phòng.
+
+### Test tay (sau khi chạy migration)
+1. Cài đặt → Thông tin công ty: thấy mốc seed 01/01/2020 (Ca A Sok Khum, Ca B Binh Ban, Ca C trống).
+2. "Đổi ca trưởng" Ca A từ 01/10/2026 tên mới → F12 ngày 30/09 in tên cũ; ngày 01/10 in tên mới; F09 ngày đó
+   hiện "Ca 1 (Ca ngày) — Ca A – <tên>".
+3. F12 Mục 2: dòng Ca A trước Ca B, lũy kế tháng/năm khớp đúng từng ca.
+4. Màn quét QR: đổi "Ngày sản xuất" sang 01/10 → dropdown ca hiện tên mới.
+5. Thêm trùng ngày cùng ca → báo lỗi tiếng Việt; tài khoản không có `settings.manage_config` không thấy nút.
+
+### Việc tiếp theo
+GĐ7b — lưu bản cứng PDF F09/F11/F12 khi khóa ca (bucket private + sha256, bảng
+`product_shift_report_snapshots`) theo `C:\Users\Software\.claude\plans\pasted-content-id-83a4-xem-l-i-typed-lighthouse.md`.
+Toàn bộ thay đổi GĐ4→GĐ5 vẫn **chưa commit**.
+
+## Cập nhật (2026-09-29, GĐ7b) — Bản cứng PDF khi ngày đã khóa đủ ca
+
+Chi tiết: `.claude/rules/06-module-production.md` mục **4.15**. Tóm tắt:
+
+- Bản cứng chỉ sinh khi **mọi ca của ngày đã khóa** VÀ **có người render lần đầu** (khóa ca không tự sinh PDF).
+  F09 ở lần mở Phiếu thành phẩm đầu tiên; F11+F12 ở lần đầu nhập dầu DO. Sau đó ai mở (kể cả admin) cũng nhận
+  đúng bản cứng; muốn sửa → admin mở khóa rồi khóa lại → lần render kế tiếp tạo bản mới (bản cũ giữ lịch sử).
+- Migration mới `20261003_product_shift_report_snapshots.sql` — **CHƯA CHẠY** (code tự tắt tính năng khi chưa có
+  bảng). Bucket private, sha256 tính ở server, bảng bất biến.
+- File mới `confirm/report-snapshots.ts`; `report-bundle.ts` thêm `openShiftReport`, `prepareDailyReport`,
+  `loadReportLockState`, `openReportSnapshot`; PDF helpers nhận `jsPDF | Blob`.
+- `tsc` sạch (chỉ lỗi cache `.next` trỏ `product-draft` đã xóa), `eslint` sạch. Không `npm run build`.
+
+### Checklist test tay (sau khi chạy migration)
+1. Ngày có Ca A, B: khóa A → Phiếu thành phẩm vẫn render sống; khóa B → mở phiếu lần đầu thấy "Đã lưu bản cứng",
+   `SELECT * FROM product_shift_report_snapshots` có 1 dòng F09; mở lại (kể cả admin) hint "Bản cứng…".
+2. Báo cáo ngày trên ngày đã khóa: form có khung vàng nhắc bản cứng → nhập dầu → 3 dòng F11/F12/F11_F12; mở lại
+   không hỏi dầu, ra đúng số cũ (kể cả admin).
+3. Admin mở khóa B → phiếu render sống, Báo cáo ngày không lưu; khóa lại → lần mở kế tiếp tạo bản mới.
+4. Modal khóa ca hiện khung bản cứng + nút Xem mở đúng PDF.
+5. `UPDATE product_shift_report_snapshots SET file_name='x'` bị chặn.
+
+### Migration cần chạy trên Supabase (theo thứ tự, file nào đã chạy thì bỏ qua)
+`20260928_submit_draft_batch_restore_ngan_sync` → `20260928_swap_predicted_kien_ngan` →
+`20260928b_fix_submit_draft_batch_ambiguous_lot_id` → `20260929_shift_lock_gaps` → `20260929_lot_admin_edits` →
+`20260930_product_opening_stock` → `20260930b_sang_kien_thay_boc_tron_kien` →
+`20261001_admin_update_lot_transaction_fixes` → `20261002_production_shift_names` →
+`20261003_product_shift_report_snapshots`.

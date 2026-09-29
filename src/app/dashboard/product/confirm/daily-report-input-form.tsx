@@ -22,11 +22,14 @@ export function DailyReportInputForm({
   submitting,
   onSubmit,
   onCancel,
+  notice,
 }: {
   data: DailyReportData;
   submitting: boolean;
   onSubmit: (inputs: DailyReportInputs) => void;
   onCancel?: () => void;
+  /** GĐ7b: nhắc khi lần nhập này sẽ tạo bản cứng (ngày đã khóa đủ ca). */
+  notice?: string | null;
 }) {
   const [doText, setDoText] = useState(String(data.doSuggestToday || 0));
   const [ghiChu, setGhiChu] = useState("");
@@ -40,6 +43,11 @@ export function DailyReportInputForm({
       <div>
         <p className="text-sm font-bold text-slate-800">Báo cáo sản xuất hằng ngày — {formatDay(data.ngay)}</p>
         <p className="text-xs text-slate-500">Xác nhận dầu Diesel sử dụng trước khi tạo phiếu.</p>
+        {notice && (
+          <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700">
+            {notice}
+          </p>
+        )}
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">

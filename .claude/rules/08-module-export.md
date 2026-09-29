@@ -264,3 +264,45 @@ EUDR đã được triển khai, không còn là ý tưởng tương lai.
 
 - Migration `20260708_customer_portal_export_grants.sql` đã áp dụng một phần trên DB thật (bảng + permission `export.view_own` đã có); code + bug fix trên đã qua `tsc`/`eslint`/`npm run build`.
 - **Chưa test tay trên trình duyệt thật**: cần admin thử lại modal "Cấp quyền KH" (giờ phải tải được danh sách và lưu thành công), rồi đăng nhập bằng tài khoản customer để xác nhận xem được đúng đơn đã cấp + chuỗi trace EUDR + tải DDS PDF/GeoJSON.
+
+## Chuẩn hoá chung_loai / loai_boc + relink lot_id (2026-09-29)
+
+**Bug**: mở sửa đơn `XH-NBS-14-060326/1` thì ô chọn lô trống. `availLots` so khớp chính xác CSR/bọc của đơn
+với lô, nhưng 26 đơn nhập CSV ngày 03/09/2026 ghi `chung_loai = "CSR 10"` và `loai_boc = "Bọc 0,04 VRG CSR
+10"`/`"Bọc 0,04 không nhãn"` (lô: `"CSR10"`, `"Bọc nhãn 0,04 VRG CSR10"`, `"Bọc trơn 0,04"`); các đơn khác
+để `loai_boc` rỗng/null. Đồng thời 74 dòng gán có `lot_id` cũ (lô bị tạo lại id mới, cùng mã lô).
+
+**Đã sửa dữ liệu** bằng `scripts/repair-export-orders.mjs` (mặc định chỉ xem, `--apply` ghi; tự sao lưu
+bản gốc ra `../rubber-erp-backups/export-orders-backup-*.json` trước khi ghi):
+- Relink `lot_id` theo `factory_id + ma_lo` (chỉ khi khớp đúng 1 lô) — 74 dòng / 69 lô, 0 lô phải đổi
+  trạng thái, 0 lô gán vượt sau relink.
+- `chung_loai` bỏ khoảng trắng; `loai_boc` = bọc thật của lô trong đơn nếu chỉ 1 loại, ngược lại chuẩn
+  hoá bí danh. Đã áp 65/65 đơn ngày 2026-09-29 (bản sao lưu:
+  `C:\Users\Software\rubber-erp-backups\export-orders-backup-2026-09-28T23-56-35-605Z.json`).
+- 23 dòng lô 2025 (1428–1450cs/25, đơn `XH-PHR-1-080126/1`) **giữ nguyên** (người dùng chốt) — lô chưa
+  từng có trong hệ thống; F12 báo dòng đỏ, tồn chốt kiểm kê sẽ bù.
+- 3 đơn có lô 2 loại bọc (`XH-PHR-26-010626/1`, `XH-KUMHO-20-250426/1`, `XH-NBS-21-210426/1`) — loai_boc
+  chỉ chuẩn hoá chuỗi; mở sửa sẽ chỉ thấy lô cùng loại bọc đang chọn trên đơn.
+- 2 đơn ghi bọc khác bọc thật của lô (`XH-PHR-1-080126/1` ghi "không nhãn" nhưng lô bọc nhãn;
+  `XH-HG-6-030226/1` ghi nhãn nhưng lô bọc trơn) → đã theo bọc của lô.
+
+**Chống tái phát** (`export/page.tsx`): `normalizeCsrCode()` (bỏ khoảng trắng) dùng trong `availLots`;
+`openEdit` lấy CSR đúng chuỗi của lô, bọc ưu tiên bọc thật của lô trong đơn → bí danh
+(`normalizeBocAlias`) → mặc định. Import/tạo đơn mới phải ghi CSR/bọc đúng chuỗi của lô.
+
+Đối soát lại bằng `scripts/reconcile-f12-stock.mjs` mục [4]/[5].
+## Gỡ lô 2025 mồ côi + bọc theo kiện (2026-09-29, tiếp)
+
+- Script `scripts/repair-export-2025-and-boc.mjs` (mặc định chỉ xem, `--apply` ghi, sao lưu ra
+  `../rubber-erp-backups/export-2025-boc-backup-*.json`):
+  - Gỡ dòng gán trỏ lô `…/25` không có trong Thành phẩm; đơn còn 0 dòng thì **xóa đơn** —
+    `XH-PHR-1-080126/1` (chỉ gồm 23 dòng 1428–1450cs/25) bị xóa theo quyết định người dùng.
+  - Bọc đơn theo **bọc của kiện được gán** (lô là chuẩn). Riêng 3 đơn người dùng xác nhận thực tế giao
+    100% bọc nhãn (`XH-PHR-26-010626/1`, `XH-KUMHO-20-250426/1`, `XH-NBS-21-210426/1`): đơn ghi
+    "Bọc nhãn 0,04 VRG CSR10" VÀ sửa bọc 58 giao dịch / 49 lô (kiện "trơn" đã gán) sang nhãn.
+- Màn Xuất hàng (`export/page.tsx`):
+  - Bọc lọc **theo từng kiện** (`src/lib/lot-kien-boc.ts`, nạp `lot_transactions.boc`): kiện khác bọc
+    đơn coi như còn 0 — trừ kiện đơn đang sửa đã gán sẵn. Không còn lọc theo `lots.boc` (bản chụp).
+  - Phần còn lại của lô tính từ `allOrderAssignments` = MỌI đơn của nhà máy (phân trang, không theo
+    bộ lọc danh sách). Trước đây dùng `orders` đang hiển thị ⇒ lọc ngày là xuất trùng được.
+  - `openEdit` ưu tiên bọc ghi trên đơn; chỉ khi đơn trống bọc mới suy từ bọc kiện đã gán.

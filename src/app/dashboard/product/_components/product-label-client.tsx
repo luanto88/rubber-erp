@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ClipboardCheck, ExternalLink, Package, RotateCcw, ShieldCheck, Warehouse } from "lucide-react"
+import { AlertTriangle, ArrowLeftRight, ClipboardCheck, ExternalLink, Package, RotateCcw, ShieldCheck, Warehouse } from "lucide-react"
 import { buildNganLookupPath, fetchProductLabelLookupPublic, type KienLetter, type ProductLabelLookupResult } from "@/lib/product-label"
 import { formatStorageDate } from "@/lib/storage-detail"
 import { ProductLabelSkeletonCard } from "@/app/dashboard/product/_components/product-label-skeleton"
 import { loadStoredLang, storeLang, t, palletLabel, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n"
+import { KienSwapNganModal } from "@/app/dashboard/product/_components/kien-swap-ngan-modal"
+import { getFreshAuthSession, hasPermission, hydrateActiveSession } from "@/lib/auth"
 
 type ProductLabelClientProps = {
   factoryId: string
@@ -90,6 +92,36 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
   const [data, setData] = useState<ProductLabelLookupResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Tải lại lookup sau khi đổi ngăn để dòng "ngăn nguồn gốc" phản ánh ngay ngăn mới.
+  const [reloadKey, setReloadKey] = useState(0)
+  // Icon "Đổi ngăn" chỉ hiện với người ĐÃ đăng nhập, đúng nhà máy, có quyền quét xác nhận. Đây chỉ
+  // là giao diện — server (loadKienSwapContext/swapKienNgan) tự xác thực lại bằng access token.
+  const [canSwapNgan, setCanSwapNgan] = useState(false)
+  const [swapOpen, setSwapOpen] = useState(false)
+  const [swapNotice, setSwapNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    const run = async () => {
+      try {
+        const session = await getFreshAuthSession()
+        if (!session?.user) return
+        const { user } = await hydrateActiveSession()
+        if (!alive || !user) return
+        setCanSwapNgan(
+          user.status === "active" &&
+            user.factory_id === factoryId &&
+            hasPermission(user, "product.confirm_scan"),
+        )
+      } catch {
+        // Khách chưa đăng nhập / lỗi mạng — giữ nguyên trang công khai, không hiện icon.
+      }
+    }
+    void run()
+    return () => {
+      alive = false
+    }
+  }, [factoryId])
 
   useEffect(() => {
     let alive = true
@@ -109,7 +141,7 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
     return () => {
       alive = false
     }
-  }, [factoryId, maLo, kien])
+  }, [factoryId, maLo, kien, reloadKey])
 
   const statusLabelKey: Record<ProductLabelLookupResult["status"], string> = {
     predicted: "plStatusPredicted",
@@ -276,13 +308,48 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
           )}
 
           {data.nganId && (
-            <a
-              href={buildNganLookupPath(data.nganId, data.nganMa)}
-              className="mt-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-emerald-700 hover:bg-emerald-50"
-            >
-              <Warehouse size={16} />
-              {tt("plXemChiTietNgan", { nganTen: data.nganTen || data.nganMa || "—" })}
-            </a>
+            <div className="mt-3 flex items-stretch gap-2">
+              <a
+                href={buildNganLookupPath(data.nganId, data.nganMa)}
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-emerald-700 hover:bg-emerald-50"
+              >
+                <Warehouse size={16} className="shrink-0" />
+                <span className="min-w-0">{tt("plXemChiTietNgan", { nganTen: data.nganTen || data.nganMa || "—" })}</span>
+              </a>
+              {canSwapNgan && (data.status === "predicted" || data.status === "partial") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSwapNotice(null)
+                    setSwapOpen(true)
+                  }}
+                  title={tt("doiNgan")}
+                  aria-label={tt("doiNgan")}
+                  className="flex shrink-0 items-center justify-center rounded-xl border border-emerald-300 bg-white px-3 text-emerald-700 hover:bg-emerald-50"
+                >
+                  <ArrowLeftRight size={16} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {swapNotice && (
+            <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{swapNotice}</div>
+          )}
+
+          {swapOpen && (
+            <KienSwapNganModal
+              lang={lang}
+              factoryId={factoryId}
+              maLo={maLo}
+              kien={kien}
+              onClose={() => setSwapOpen(false)}
+              onSwapped={(message) => {
+                setSwapOpen(false)
+                setSwapNotice(message)
+                setReloadKey((k) => k + 1)
+              }}
+            />
           )}
         </div>
       )}

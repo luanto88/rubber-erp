@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
+  ArrowLeftRight,
   Boxes,
   Calendar,
   CheckCircle2,
@@ -29,10 +30,17 @@ import {
   User,
   Warehouse,
 } from "lucide-react";
-import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth";
+import { ReasonConfirmBanner } from "@/app/dashboard/product/_components/reason-confirm-banner";
+import {
+  getActiveFactoryId,
+  getFreshAuthSession,
+  hasPermission,
+  hydrateActiveSession,
+  type SessionUser,
+} from "@/lib/auth";
 import { getTodayISODate } from "@/lib/date-utils";
 import { getBocsForLoaiCSR, getLoaiBanhConfig } from "@/lib/product-lot-config";
-import { KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
+import { buildProductLabelLookupPath, KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
   checkIncompleteLotsForDay,
   checkOtherIncompleteLotsForCategory,
@@ -65,8 +73,9 @@ import {
 import {
   buildDailyReport,
   buildShiftReport,
-  loadDailyReportDraft,
   loadShiftReport,
+  openShiftReport,
+  prepareDailyReport,
   type DailyReportBundle,
   type DailyReportDraft,
   type ShiftReportBundle,
@@ -232,6 +241,17 @@ export default function ConfirmKienProductionPage() {
   const [boc, setBoc] = useState("");
   const [pallet, setPallet] = useState<string[]>([]);
   const [chiThi, setChiThi] = useState("");
+
+  // Tên ca trưởng có ngày hiệu lực (bảng production_shift_names) — nạp lại theo đúng ngày sản xuất
+  // đang chọn trên form quét, để nhãn dropdown khớp ca trưởng của ngày đó.
+  useEffect(() => {
+    if (!factoryId) return;
+    let alive = true;
+    loadFactoryShiftNames(factoryId, ngaySx)
+      .then((names) => { if (alive) setShiftNames(names); })
+      .catch(() => { if (alive) setShiftNames({}); });
+    return () => { alive = false; };
+  }, [factoryId, ngaySx]);
   const [ghiChu, setGhiChu] = useState("");
   const [manualNganId, setManualNganId] = useState("");
   const [activeNgans, setActiveNgans] = useState<ActiveNganOption[]>([]);
@@ -315,7 +335,6 @@ export default function ConfirmKienProductionPage() {
       setFactoryId(fid);
       setCurrentUser(user);
       loadUserChucVu(fid, user.id).then(setChucVu).catch(() => setChucVu(null));
-      loadFactoryShiftNames(fid).then(setShiftNames).catch(() => setShiftNames({}));
       loadUserShiftAssignment(fid, user.id).then(setAssignedCa).catch(() => setAssignedCa(null));
 
       const paramLo = (searchParams.get("lo") || "").trim();
@@ -435,6 +454,7 @@ export default function ConfirmKienProductionPage() {
   }, [lookup?.dayChuyen, lookup?.loaiCsr]);
 
   const effectiveNganId = lookup?.nganId || manualNganId || "";
+
   const maxPerKien = lookup?.maxPerKien || 36;
   const stepperMax = lookup?.status === "partial_kien" ? Math.max(1, lookup.remainingBanh ?? maxPerKien) : maxPerKien;
 
@@ -589,10 +609,11 @@ export default function ConfirmKienProductionPage() {
     setDraftEditSaving(true);
     setDraftEditError(null);
     try {
+      const session = await getFreshAuthSession();
       const result = await updateDraftKien({
         draftId: editingDraft.id,
         factoryId,
-        userId: currentUser.id,
+        accessToken: session?.access_token ?? null,
         nganId: input.nganId,
         soBanh: input.soBanh,
         ngaySx: input.ngaySx,
@@ -652,7 +673,9 @@ export default function ConfirmKienProductionPage() {
   const handleDeleteEntry = async (entry: ShiftHistoryEntry) => {
     setDeletingId(entry.transactionId);
     try {
-      const result = await deleteShiftHistoryEntry(entry.transactionId, currentUser?.id ?? null);
+      if (!factoryId) return;
+      const session = await getFreshAuthSession();
+      const result = await deleteShiftHistoryEntry(entry.transactionId, factoryId, session?.access_token ?? null);
       if (!result.success) {
         setHistoryError(result.error);
         setToast({ message: result.error, variant: "error" });
@@ -684,15 +707,17 @@ export default function ConfirmKienProductionPage() {
     boc: string;
     pallet: string[];
     chiThi: string;
+    lyDo: string;
   }) => {
     if (!factoryId || !editingEntry) return;
     setEditSaving(true);
     setEditError(null);
     try {
+      const session = await getFreshAuthSession();
       const result = await editShiftHistoryEntry({
         transactionId: editingEntry.transactionId,
         factoryId,
-        isAdmin,
+        accessToken: session?.access_token ?? null,
         nganId: input.nganId,
         ca: input.ca,
         ngaySx: input.ngaySx,
@@ -700,7 +725,7 @@ export default function ConfirmKienProductionPage() {
         boc: input.boc || null,
         pallet: input.pallet,
         chiThi: input.chiThi || null,
-        actorUserId: currentUser?.id ?? null,
+        lyDo: input.lyDo,
       });
       if (!result.success) {
         setEditError(result.error);
@@ -728,12 +753,13 @@ export default function ConfirmKienProductionPage() {
     resetReportState();
     setReportGenerating("shift");
     try {
-      const shift = await loadShiftReport(factoryId, historyNgay);
-      if (shift.sections.length === 0) {
+      // GĐ7b: ngày đã khóa đủ ca → bản cứng (report-bundle.ts).
+      const bundle = await openShiftReport(factoryId, historyNgay);
+      if (!bundle) {
         setReportError(tt("endShiftNoData"));
         return;
       }
-      setReportPreview(await buildShiftReport(shift));
+      setReportPreview(bundle);
     } catch (err) {
       setReportError(err instanceof Error ? err.message : tt("endShiftReportError"));
     } finally {
@@ -746,12 +772,16 @@ export default function ConfirmKienProductionPage() {
     resetReportState();
     setReportGenerating("daily");
     try {
-      const draft = await loadDailyReportDraft(factoryId, historyNgay);
-      if (draft.shift.sections.length === 0) {
+      const prep = await prepareDailyReport(factoryId, historyNgay);
+      if (prep.kind === "empty") {
         setReportError(tt("endShiftNoData"));
         return;
       }
-      setReportDraft(draft);
+      if (prep.kind === "snapshot") {
+        setDailyPreview(prep.bundle);
+        return;
+      }
+      setReportDraft(prep.draft);
     } catch (err) {
       setReportError(err instanceof Error ? err.message : tt("dailyReportError"));
     } finally {
@@ -1277,12 +1307,23 @@ export default function ConfirmKienProductionPage() {
                   </Field>
                 )}
                 {lookup.nganId && (
-                  <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/50 px-3.5 py-3">
-                    <Warehouse size={16} className="shrink-0 text-emerald-500" />
-                    <span className="text-[15.4px] font-bold text-slate-500">{tt("nganNguon")}: </span>
-                    <span className="text-[15.4px] font-extrabold text-slate-800">
-                      {lookup.nganMa || "—"} {lookup.nganTen ? `— ${lookup.nganTen}` : ""}
-                    </span>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/50 px-3.5 py-3">
+                      <Warehouse size={16} className="shrink-0 text-emerald-500" />
+                      <span className="text-[15.4px] font-bold text-slate-500">{tt("nganNguon")}: </span>
+                      <span className="min-w-0 flex-1 truncate text-[15.4px] font-extrabold text-slate-800">
+                        {lookup.nganMa || "—"} {lookup.nganTen ? `— ${lookup.nganTen}` : ""}
+                      </span>
+                    </div>
+                    {/* Đổi ngăn chỉ làm ở màn tra cứu nhãn (dòng "Xem chi tiết ngăn nguồn gốc") — 1 lối vào duy nhất. */}
+                    {factoryId && (lookup.status === "predicted" || lookup.status === "partial") && (
+                      <a
+                        href={buildProductLabelLookupPath(factoryId, lookup.maLo, lookup.kien)}
+                        className="flex items-center gap-1.5 px-1 text-xs font-semibold text-emerald-700 hover:underline"
+                      >
+                        <ArrowLeftRight size={12} /> {tt("doiNganHuongDan")}
+                      </a>
+                    )}
                   </div>
                 )}
 
@@ -1857,6 +1898,7 @@ function HubView({
             <DailyReportInputForm
               data={reportDraft.daily}
               submitting={reportGenerating === "daily"}
+              notice={reportDraft.notice}
               onSubmit={onReportInputsSubmit}
             />
           </div>
@@ -2107,6 +2149,7 @@ function EditEntryModal({
     boc: string;
     pallet: string[];
     chiThi: string;
+    lyDo: string;
   }) => void;
 }) {
   const [nganId, setNganId] = useState(entry.nganId || "");
@@ -2116,6 +2159,8 @@ function EditEntryModal({
   const [boc, setBoc] = useState(entry.boc || "");
   const [pallet, setPallet] = useState<string[]>(entry.pallet || []);
   const [chiThi, setChiThi] = useState(entry.chiThi || "");
+  const [lyDo, setLyDo] = useState("");
+  const [reasonOpen, setReasonOpen] = useState(false);
   // Danh sách ngăn đang hoạt động để đổi ngăn nguồn — ngăn hiện tại của giao dịch (entry.nganId)
   // luôn được thêm vào đầu danh sách kể cả khi nó không còn "Chờ sản xuất/Đang sản xuất" (đã
   // chuyển "Đã sản xuất"), để không mất lựa chọn hiện tại khi mở modal.
@@ -2268,25 +2313,43 @@ function EditEntryModal({
           </div>
         )}
 
-        <div className="mt-5 flex gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={saving}
-            className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {tt("cancel")}
-          </button>
-          <button
-            type="button"
-            disabled={!canSave || saving}
-            onClick={() => onSave({ nganId, ca, ngaySx, soBanh, boc, pallet, chiThi })}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-          >
-            {saving && <Loader2 size={16} className="animate-spin" />}
-            {saving ? tt("editSaving") : tt("editSave")}
-          </button>
-        </div>
+        {reasonOpen ? (
+          <div className="mt-5">
+            <ReasonConfirmBanner
+              value={lyDo}
+              onChange={setLyDo}
+              onConfirm={() => onSave({ nganId, ca, ngaySx, soBanh, boc, pallet, chiThi, lyDo })}
+              onBack={() => setReasonOpen(false)}
+              saving={saving}
+              labels={{
+                message: tt("editReasonBanner"),
+                placeholder: tt("editReasonPlaceholder"),
+                confirm: tt("editReasonConfirm"),
+                back: tt("editReasonBack"),
+                saving: tt("editSaving"),
+              }}
+            />
+          </div>
+        ) : (
+          <div className="mt-5 flex gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="flex-1 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {tt("cancel")}
+            </button>
+            <button
+              type="button"
+              disabled={!canSave || saving}
+              onClick={() => setReasonOpen(true)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {tt("editSave")}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

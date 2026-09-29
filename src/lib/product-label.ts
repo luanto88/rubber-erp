@@ -129,7 +129,7 @@ export async function resolveProductLabelLookupTarget(
     .maybeSingle()
 
   if (lot) {
-    const [{ data: txRows }, { data: exportOrders }] = await Promise.all([
+    const [{ data: txRows }, { data: exportOrders }, { data: plannedRow }] = await Promise.all([
       client
         .from("lot_transactions")
         .select("id,ngan_id,ngay_nhap,ca,kien_a,kien_b,kien_c,kien_d,boc,pallet,created_at")
@@ -142,7 +142,19 @@ export async function resolveProductLabelLookupTarget(
         .eq("factory_id", normalizedFactoryId)
         .order("created_at", { ascending: false })
         .limit(100),
+      // Ngăn KẾ HOẠCH của đúng kiện này — kiện chưa có bành thật phải hiện ngăn kế hoạch (kể cả
+      // ngăn vừa được "Đổi ngăn"), không phải lots.ngan_id (= ngăn của kiện khác gửi gần nhất).
+      client
+        .from("lot_prediction_lots")
+        .select("kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id")
+        .eq("factory_id", normalizedFactoryId)
+        .eq("ma_lo", normalizedMaLo)
+        .neq("trang_thai", "Hủy")
+        .maybeSingle(),
     ])
+    const plannedNganId = plannedRow
+      ? (((plannedRow as Record<string, unknown>)[`kien_${kienKey}_ngan_id`] as string | null) ?? null)
+      : null
 
     const kienField = `kien_${kienKey}`
     const rows = (txRows || []) as Array<{
@@ -187,7 +199,8 @@ export async function resolveProductLabelLookupTarget(
 
     const isLotExported = normalizeLotStatus(lot.trang_thai) === "Xuất hàng" || Boolean(matchedOrder)
 
-    const finalNganId = lastKienTx?.ngan_id || lot.ngan_id || null
+    // Kiện đã có bành thật → ngăn thật (1 kiện chỉ 1 ngăn); chưa có → ngăn kế hoạch → ngăn lô.
+    const finalNganId = lastKienTx?.ngan_id || plannedNganId || lot.ngan_id || null
     let nganMa: string | null = null
     let nganTen: string | null = null
     if (finalNganId) {
@@ -304,6 +317,7 @@ export async function resolveProductLabelLookupTarget(
     .select("ma_lo,loai_csr,loai_banh,boc,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id")
     .eq("factory_id", normalizedFactoryId)
     .eq("ma_lo", normalizedMaLo)
+    .neq("trang_thai", "Hủy")
     .maybeSingle()
 
   if (predicted) {

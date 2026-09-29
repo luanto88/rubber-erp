@@ -2,17 +2,29 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { KienLetter } from "@/lib/product-label";
-import { getExistingRealKg, markLotPredictionRealized } from "@/app/dashboard/product/predict/actions";
-import { deleteLotTransaction, saveLotTransaction } from "@/app/dashboard/product/actions";
-import { assertShiftNotLocked } from "@/app/dashboard/product/shift-lock";
 import {
+  getExistingRealKg,
+  loadSwapCandidateNgans,
+  markLotPredictionRealized,
+} from "@/app/dashboard/product/predict/actions";
+import {
+  adminUpdateLotTransaction,
+  deleteLotTransaction,
+  saveLotTransaction,
+} from "@/app/dashboard/product/actions";
+import {
+  assertProductAccess,
   assertReportAccess,
+  PRODUCT_CREATE_PERMISSIONS,
+  PRODUCT_SWAP_NGAN_PERMISSIONS,
   REPORT_DAILY_PERMISSIONS,
   REPORT_SHIFT_PERMISSIONS,
 } from "@/app/dashboard/product/confirm/report-access";
 import { normalizeLotStatus } from "@/app/dashboard/product/shared";
 import { getLoaiBanhConfig } from "@/lib/product-lot-config";
-import { getTodayISODate } from "@/lib/date-utils";
+import { getFactoryTodayISO, getTodayISODate } from "@/lib/date-utils";
+import { resolveShiftNamesAt, SHIFT_CODES } from "@/app/dashboard/product/confirm/shift-names";
+import { fetchAllPaginated } from "@/lib/supabase-helpers";
 
 const KIEN_LOWER: Record<KienLetter, "a" | "b" | "c" | "d"> = {
   A: "a",
@@ -68,6 +80,9 @@ export type ConfirmKienLookup = {
   existingLotCsr: string | null;
   existingLotBanh: number | null;
   existingLotBoc: string | null;
+  // Ngăn KẾ HOẠCH của đúng kiện này (lot_prediction_lots.kien_X_ngan_id) — chỉ có khi lô có dự đoán.
+  // UI chỉ cho "Đổi ngăn" khi kiện chưa có bành (thật lẫn nháp) và ngăn đang dùng chính là ngăn kế hoạch.
+  predictionNganId?: string | null;
 };
 
 function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
@@ -379,6 +394,7 @@ export async function resolveKienForConfirm(
       existingLotCsr,
       existingLotBanh,
       existingLotBoc,
+      predictionNganId: predictedNganId,
     };
   }
 
@@ -453,6 +469,7 @@ export async function resolveKienForConfirm(
       existingLotCsr,
       existingLotBanh,
       existingLotBoc,
+      predictionNganId: predictedNganId,
     };
   }
 
@@ -473,6 +490,210 @@ export async function loadActiveNgansForFactory(factoryId: string): Promise<Acti
     .order("ten_ngan", { ascending: true });
   if (error) throw new Error(error.message);
   return (data || []) as ActiveNganOption[];
+}
+
+// ─── Đổi ngăn nguồn của 1 kiện theo kế hoạch dự đoán (trước khi "Gửi tất cả") ───────────────
+// Chỉ làm ở MÀN TRA CỨU NHÃN (/product-label, dòng "Xem chi tiết ngăn nguồn gốc") — trang đó công
+// khai nên MỌI server action ở đây tự xác thực access token (assertProductAccess), không tin userId
+// client gửi lên. Danh sách ngăn = ngăn ĐÃ CÓ LỊCH SỬ DỰ ĐOÁN, Chờ/Đang SX, cùng dây chuyền với lô
+// (loadSwapCandidateNgans). Sức chứa tính như màn Dự đoán (thật + dự kiến + giữ chỗ) cộng thêm đúng
+// 1 kiện đang đổi, trần 110% chặn cứng. Ngăn cũ tự được giải phóng vì kế hoạch của kiện chuyển hẳn
+// sang ngăn mới (RPC swap_predicted_kien_ngan).
+
+export type SwappableNganOption = {
+  id: string;
+  ma_ngan: string;
+  ten_ngan: string;
+  pctAfter: number;
+  fits: boolean;
+};
+
+/** Lý do không cho đổi ngăn — client dịch theo mã, `reason` là câu tiếng Việt dự phòng. */
+export type SwapBlockCode = "not_predicted" | "has_real_banh" | "has_draft" | "ngan_mismatch" | "not_found";
+
+export type KienSwapContext =
+  | {
+      canSwap: true;
+      maLo: string;
+      kien: KienLetter;
+      currentNganId: string;
+      currentNganMa: string | null;
+      options: SwappableNganOption[];
+    }
+  | { canSwap: false; code: SwapBlockCode; reason: string };
+
+function dayChuyenFromLoaiNl(loaiNl: string | null | undefined): string {
+  const s = (loaiNl || "").toLowerCase();
+  return s.includes("nước") || s.includes("nuoc") ? "Mủ nước" : "Mủ tạp";
+}
+
+async function loadPredictionKienWeight(factoryId: string, maLo: string): Promise<number | null> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("lot_prediction_lots")
+    .select("kien_weight_kg")
+    .eq("factory_id", factoryId)
+    .eq("ma_lo", maLo)
+    .neq("trang_thai", "Hủy")
+    .maybeSingle();
+  return data ? Number(data.kien_weight_kg || 0) : null;
+}
+
+async function computeSwappableNgans(
+  factoryId: string,
+  maLo: string,
+  currentNganId: string | null,
+  dayChuyen: string | null,
+): Promise<SwappableNganOption[]> {
+  const kienWeight = await loadPredictionKienWeight(factoryId, maLo);
+  if (!kienWeight) return [];
+  const rows = await loadSwapCandidateNgans(factoryId);
+  return rows
+    .filter((r) => r.ngan.id !== currentNganId)
+    .filter((r) => !dayChuyen || dayChuyenFromLoaiNl(r.ngan.loai_nl) === dayChuyen)
+    .map((r) => {
+      const tongKho = Number(r.ngan.tong_kho || 0);
+      const pctAfter = tongKho > 0 ? ((r.usedKg + kienWeight) / tongKho) * 100 : 0;
+      return {
+        id: r.ngan.id,
+        ma_ngan: r.ngan.ma_ngan,
+        ten_ngan: r.ngan.ten_ngan,
+        pctAfter: Math.round(pctAfter * 10) / 10,
+        fits: r.availableKg - kienWeight >= -0.5,
+      };
+    })
+    .sort((a, b) => Number(b.fits) - Number(a.fits));
+}
+
+// Điều kiện đổi ngăn — nguồn sự thật DUY NHẤT (client không tự quyết): kiện theo dự đoán, chưa có
+// bành thật lẫn nháp của BẤT KỲ ai, và ngăn đang dùng chính là ngăn kế hoạch (1 kiện 1 ngăn).
+function evaluateSwapEligibility(lookup: ConfirmKienLookup):
+  | { ok: true; nganId: string }
+  | { ok: false; code: SwapBlockCode; reason: string } {
+  if (lookup.status === "not_found") {
+    return { ok: false, code: "not_found", reason: "Không tìm thấy lô/kiện." };
+  }
+  if (lookup.existingBanh > 0 || lookup.status === "produced") {
+    return {
+      ok: false,
+      code: "has_real_banh",
+      reason: `Kiện ${lookup.kien} đã có ${lookup.existingBanh} bành ở ngăn hiện tại — một kiện không được lấy từ 2 ngăn.`,
+    };
+  }
+  if (lookup.pendingDraftBanh > 0 || lookup.status === "drafted_full" || lookup.status === "partial_kien") {
+    const by = lookup.pendingDraftBy.join(", ") || "—";
+    return {
+      ok: false,
+      code: "has_draft",
+      reason: `Kiện ${lookup.kien} đang có ${lookup.pendingDraftBanh} bành nháp chưa gửi (của ${by}) — gửi hoặc xóa nháp trước.`,
+    };
+  }
+  if (!lookup.predictionNganId) {
+    return { ok: false, code: "not_predicted", reason: "Kiện này không thuộc lô dự đoán nên không đổi ngăn được." };
+  }
+  if (!lookup.nganId || lookup.nganId !== lookup.predictionNganId) {
+    return { ok: false, code: "ngan_mismatch", reason: "Ngăn hiện tại của kiện khác ngăn kế hoạch — không đổi ngăn được." };
+  }
+  return { ok: true, nganId: lookup.nganId };
+}
+
+export async function loadKienSwapContext(
+  accessToken: string | null,
+  factoryId: string,
+  maLoRaw: string,
+  kien: KienLetter,
+): Promise<KienSwapContext> {
+  await assertProductAccess(accessToken, factoryId, PRODUCT_SWAP_NGAN_PERMISSIONS, "đổi ngăn nguồn");
+  const maLo = maLoRaw.trim();
+  const lookup = await resolveKienForConfirm(factoryId, maLo, kien);
+  const eligible = evaluateSwapEligibility(lookup);
+  if (!eligible.ok) return { canSwap: false, code: eligible.code, reason: eligible.reason };
+  const options = await computeSwappableNgans(factoryId, maLo, eligible.nganId, lookup.dayChuyen);
+  return {
+    canSwap: true,
+    maLo,
+    kien,
+    currentNganId: eligible.nganId,
+    currentNganMa: lookup.nganMa,
+    options,
+  };
+}
+
+type SwapResult =
+  | { success: true; nganMa: string | null; nganTen: string | null }
+  | { success: false; error: string };
+
+// Nội bộ (không export → không phải server action). Gọi từ swapKienNgan (đã xác thực) và từ
+// updateDraftKien khi sửa nháp đổi sang ngăn khác.
+async function swapKienNganInternal(input: {
+  factoryId: string;
+  maLo: string;
+  kien: KienLetter;
+  oldNganId: string;
+  newNganId: string;
+  dayChuyen: string | null;
+  userId: string | null;
+  draftId?: string | null;
+}): Promise<SwapResult> {
+  try {
+    if (!input.factoryId || !input.maLo || !input.newNganId) {
+      return { success: false, error: "Thiếu thông tin đổi ngăn." };
+    }
+    // Kiểm sức chứa lại ở server ngay trước khi ghi (danh sách phía client có thể đã cũ).
+    const options = await computeSwappableNgans(input.factoryId, input.maLo.trim(), input.oldNganId, input.dayChuyen);
+    const target = options.find((o) => o.id === input.newNganId);
+    if (!target) {
+      return {
+        success: false,
+        error: "Ngăn này không nằm trong danh sách ngăn được đổi (chưa từng có dự đoán, khác dây chuyền, hết nguyên liệu hoặc không ở trạng thái Chờ/Đang sản xuất).",
+      };
+    }
+    if (!target.fits) {
+      return { success: false, error: `Ngăn ${target.ma_ngan} sẽ vượt 110% (${target.pctAfter}%) nếu nhận thêm kiện này.` };
+    }
+    const supabase = getSupabaseAdmin();
+    const { error } = await supabase.rpc("swap_predicted_kien_ngan", {
+      p_factory_id: input.factoryId,
+      p_ma_lo: input.maLo.trim(),
+      p_kien: input.kien,
+      p_old_ngan_id: input.oldNganId,
+      p_new_ngan_id: input.newNganId,
+      p_actor_id: input.userId,
+      p_draft_id: input.draftId ?? null,
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true, nganMa: target.ma_ngan, nganTen: target.ten_ngan };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "Lỗi không xác định khi đổi ngăn." };
+  }
+}
+
+export async function swapKienNgan(input: {
+  accessToken: string | null;
+  factoryId: string;
+  maLo: string;
+  kien: KienLetter;
+  newNganId: string;
+}): Promise<SwapResult> {
+  let userId: string;
+  try {
+    userId = await assertProductAccess(input.accessToken, input.factoryId, PRODUCT_SWAP_NGAN_PERMISSIONS, "đổi ngăn nguồn");
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Không có quyền đổi ngăn." };
+  }
+  // Ngăn cũ + dây chuyền tính lại ở server — không tin giá trị client gửi.
+  const lookup = await resolveKienForConfirm(input.factoryId, input.maLo.trim(), input.kien);
+  const eligible = evaluateSwapEligibility(lookup);
+  if (!eligible.ok) return { success: false, error: eligible.reason };
+  return swapKienNganInternal({
+    factoryId: input.factoryId,
+    maLo: input.maLo,
+    kien: input.kien,
+    oldNganId: eligible.nganId,
+    newNganId: input.newNganId,
+    dayChuyen: lookup.dayChuyen,
+    userId,
+  });
 }
 
 export type ConfirmKienInput = {
@@ -608,7 +829,9 @@ export async function confirmKienProduction(input: ConfirmKienInput): Promise<Co
           pallet: input.pallet ?? null,
           chi_thi: input.chiThi ?? null,
         },
-        actorUserId: input.userId ?? null,
+        // Hàm này không còn call site (thay bằng Lưu tạm + Gửi tất cả) và không có token người
+        // gọi — saveLotTransaction sẽ từ chối. Giữ chữ ký để không phá build.
+        accessToken: null,
       }),
       supabase.from("lot_prediction_lots").select("id").eq("factory_id", input.factoryId).eq("ma_lo", maLo).maybeSingle(),
     ]);
@@ -784,16 +1007,25 @@ async function loadShiftTransactions(factoryId: string, ngaySx: string, ca: stri
 // mỗi ca 1 bảng chi tiết riêng + 1 bảng "Tổng hợp" chung cho cả ngày (đã chốt với người dùng).
 async function loadDayTransactions(factoryId: string, ngaySx: string): Promise<ShiftTxRow[]> {
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("lot_transactions")
-    .select(
-      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,boc,pallet,chi_thi,factory_id)",
-    )
-    .eq("lots.factory_id", factoryId)
-    .eq("ngay_nhap", ngaySx)
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data || []) as unknown as ShiftTxRow[];
+  // Phân trang: PostgREST cắt âm thầm ở 1000 dòng (rule 04-code-patterns). Thêm order theo id để
+  // các trang không chồng/lọt dòng khi nhiều giao dịch cùng created_at.
+  try {
+    const rows = await fetchAllPaginated((from, to) =>
+      supabase
+        .from("lot_transactions")
+        .select(
+          "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,boc,pallet,chi_thi,factory_id)",
+        )
+        .eq("lots.factory_id", factoryId)
+        .eq("ngay_nhap", ngaySx)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    return rows as unknown as ShiftTxRow[];
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : (err as { message?: string })?.message || String(err));
+  }
 }
 
 export type LotCompletenessWarning = { maLo: string; missingKien: KienLetter[] };
@@ -1010,11 +1242,12 @@ export async function loadShiftHistory(
         return Number(row[key] || 0) > 0;
       }).join("");
       const lotStatus = normalizeLotStatus(lotInfo?.trang_thai);
-      const canDelete = lotStatus === "Dở dang" && !isShiftLocked;
+      // GĐ4: giao dịch ĐÃ GỬI chỉ admin sửa/xóa (người quét chỉ tự sửa nháp trước "Gửi tất cả").
+      // Cờ này chỉ để hiện nút — server (editShiftHistoryEntry/deleteShiftHistoryEntry) tự xác
+      // thực token và kiểm lại.
+      const canDelete = isAdmin && !isShiftLocked && lotStatus === "Dở dang";
       const canEdit =
-        !isShiftLocked &&
-        (lotStatus === "Dở dang" ||
-          (isAdmin && !(lotStatus === "Xuất hàng" && lotIdsWithQc.has(row.lot_id))));
+        isAdmin && !isShiftLocked && !(lotStatus === "Xuất hàng" && lotIdsWithQc.has(row.lot_id));
       const maLo = lotInfo?.ma_lo || "";
       const num = Number(maLo.match(/^(\d+)/)?.[1] || 0);
       return {
@@ -1087,12 +1320,13 @@ export async function loadShiftLockStatus(
 
 export type DeleteShiftHistoryResult = { success: true } | { success: false; error: string };
 
-// Cho phép sửa lỗi nhập sai: xóa 1 giao dịch đã gửi trong Hub — chỉ khi lô liên quan vẫn đang
-// "Dở dang" (chưa đi qua Kiểm nghiệm/Xuất hàng), re-check ở server chứ không tin canDelete phía
-// client. Dùng lại deleteLotTransaction() (product/actions.ts) — đã tự đồng bộ lại lots.
+// Xóa 1 giao dịch đã gửi trong Hub — GĐ4: chỉ admin (xác thực token ở server, không tin cờ
+// client), và lô vẫn phải "Dở dang". Dùng lại deleteLotTransaction() (product/actions.ts) — đã tự
+// đồng bộ lots + trạng thái ngăn.
 export async function deleteShiftHistoryEntry(
   transactionId: string,
-  actorUserId: string | null,
+  factoryId: string,
+  accessToken: string | null,
 ): Promise<DeleteShiftHistoryResult> {
   try {
     const supabase = getSupabaseAdmin();
@@ -1108,20 +1342,8 @@ export async function deleteShiftHistoryEntry(
       return { success: false, error: "Lô đã qua bước tiếp theo (Hoàn thành/Xuất hàng...), không thể xóa từ đây." };
     }
 
-    // Guard "Khóa ca sản xuất" thực sự nằm trong RPC delete_lot_transaction (đã bảo vệ), truyền
-    // actorUserId xuống để RPC xác định đúng admin có được bypass hay không.
-    const result = await deleteLotTransaction({ transactionId, actorUserId });
+    const result = await deleteLotTransaction({ transactionId, factoryId, accessToken });
     if (!result.success) return { success: false, error: result.error };
-
-    // Đồng bộ lại trạng thái ngăn (best-effort — không chặn kết quả xóa nếu lỗi, ngăn có thể
-    // đã trống hoàn toàn sau khi xóa dòng cuối cùng, cần trả về "Chờ sản xuất").
-    if (tx.ngan_id) {
-      const { error: syncError } = await supabase.rpc("sync_ngan_production_status", {
-        p_ngan_id: tx.ngan_id,
-      });
-      if (syncError) console.error("sync_ngan_production_status:", syncError);
-    }
-
     return { success: true };
   } catch (error) {
     return {
@@ -1134,7 +1356,7 @@ export async function deleteShiftHistoryEntry(
 export type EditShiftHistoryInput = {
   transactionId: string;
   factoryId: string;
-  isAdmin: boolean;
+  accessToken: string | null;
   nganId: string;
   ca: string;
   ngaySx: string;
@@ -1142,177 +1364,59 @@ export type EditShiftHistoryInput = {
   boc: string | null;
   pallet: string[] | null;
   chiThi: string | null;
-  // Dùng riêng cho check "Khóa ca sản xuất" (assertShiftNotLocked) — KHÔNG dùng chung với
-  // isAdmin ở trên (isAdmin phục vụ đúng mục đích cũ: bypass qc_results/Xuất hàng).
-  actorUserId: string | null;
+  lyDo: string;
 };
 
 export type EditShiftHistoryResult = { success: true } | { success: false; error: string };
 
-// Sửa 1 dòng giao dịch đã gửi trong Hub (đổi bọc/pallet/số bành/ngăn/ca/số chỉ thị) — dùng khi
-// trực ca nhập sai nhưng lô đã đi quá xa để chỉ xóa-quét-lại (vd đã xuất hàng). Quy tắc quyền:
-// - User thường: chỉ sửa được khi lô vẫn "Dở dang" (mirror đúng canDelete).
-// - Admin: sửa được ở MỌI trạng thái, TRỪ KHI lô đồng thời đã "Xuất hàng" VÀ đã có qc_results
-//   gắn vào (cả 2 điều kiện phải CÙNG đúng mới chặn) — đối chiếu cả lot_id lẫn ma_lo vì lô có
-//   thể có nhiều bản ghi lots cùng ma_lo do dữ liệu cũ (xem pickCanonicalLot ở shared.ts).
-// Toàn bộ điều kiện được RE-CHECK ở đây, không tin canEdit đã tính sẵn phía client/list.
+// Sửa 1 dòng giao dịch đã gửi trong Hub (đổi bọc/pallet/số bành/ngăn/ca/ngày/số chỉ thị).
+// GĐ4: chỉ admin; dùng CHUNG adminUpdateLotTransaction với trang Thành phẩm để 2 đường sửa không
+// lệch nhau (RPC atomic: kiểm khóa ca nguồn+đích, đồng bộ dự đoán/nháp/ngăn, ghi lot_admin_edits).
 export async function editShiftHistoryEntry(input: EditShiftHistoryInput): Promise<EditShiftHistoryResult> {
   try {
     const supabase = getSupabaseAdmin();
-
     const { data: tx, error: txError } = await supabase
       .from("lot_transactions")
-      .select(
-        "id, lot_id, ngan_id, so_kg, ngay_nhap, ca, kien_a, kien_b, kien_c, kien_d, lots!inner(id, ma_lo, loai_csr, loai_banh, trang_thai, factory_id)",
-      )
+      .select("id, kien_a, kien_b, kien_c, kien_d")
       .eq("id", input.transactionId)
       .maybeSingle();
     if (txError || !tx) return { success: false, error: "Không tìm thấy giao dịch cần sửa." };
 
-    const lotInfo = Array.isArray(tx.lots) ? tx.lots[0] : tx.lots;
-    if (!lotInfo || lotInfo.factory_id !== input.factoryId) {
-      return { success: false, error: "Giao dịch không thuộc nhà máy hiện tại." };
+    // Dòng quét QR thuộc đúng 1 kiện — số bành mới đặt vào đúng kiện đó. Nhưng dòng nhập tay có thể
+    // chứa nhiều kiện (vd A+B): KHÔNG được xoá các kiện còn lại về 0. Màn này chỉ có 1 ô số bành nên
+    // với dòng nhiều kiện chỉ cho sửa các trường khác (giữ nguyên số bành từng kiện).
+    const cur = {
+      a: Number(tx.kien_a) || 0,
+      b: Number(tx.kien_b) || 0,
+      c: Number(tx.kien_c) || 0,
+      d: Number(tx.kien_d) || 0,
+    };
+    const withBales = (["a", "b", "c", "d"] as const).filter((k) => cur[k] > 0);
+    if (withBales.length === 0) return { success: false, error: "Không xác định được kiện của giao dịch này." };
+    let kien = { ...cur };
+    if (withBales.length === 1) {
+      kien = { ...cur, [withBales[0]]: input.soBanh };
+    } else if (input.soBanh !== cur.a + cur.b + cur.c + cur.d) {
+      return {
+        success: false,
+        error: `Giao dịch này gồm nhiều kiện (${withBales.map((k) => k.toUpperCase()).join(", ")}) — hãy sửa số bành từng kiện ở trang Thành phẩm.`,
+      };
     }
 
-    // Guard "Khóa ca sản xuất" — check cả (ngày, ca) HIỆN TẠI của giao dịch lẫn (ngày, ca) ĐÍCH
-    // (input.ngaySx/input.ca có thể khác nếu người dùng đổi ca/ngày) — chặn cả cách "lách khóa"
-    // bằng cách chuyển giao dịch vào 1 ca đã khóa.
-    await assertShiftNotLocked({
+    const result = await adminUpdateLotTransaction({
+      accessToken: input.accessToken,
       factoryId: input.factoryId,
-      ngaySx: tx.ngay_nhap,
-      ca: tx.ca,
-      actorUserId: input.actorUserId,
-    });
-    await assertShiftNotLocked({
-      factoryId: input.factoryId,
-      ngaySx: input.ngaySx,
+      transactionId: input.transactionId,
+      kien,
+      nganId: input.nganId,
       ca: input.ca,
-      actorUserId: input.actorUserId,
+      ngayNhap: input.ngaySx,
+      boc: input.boc,
+      pallet: input.pallet,
+      chiThi: input.chiThi,
+      lyDo: input.lyDo,
     });
-
-    const lotStatus = normalizeLotStatus(lotInfo.trang_thai);
-    if (!input.isAdmin) {
-      if (lotStatus !== "Dở dang") {
-        return { success: false, error: "Lô đã qua bước tiếp theo (Hoàn thành/Xuất hàng...), không thể sửa từ đây." };
-      }
-    } else if (lotStatus === "Xuất hàng") {
-      const [{ count: countByLotId }, { count: countByMaLo }] = await Promise.all([
-        supabase.from("qc_results").select("id", { count: "exact", head: true }).eq("lot_id", lotInfo.id),
-        supabase.from("qc_results").select("id", { count: "exact", head: true }).eq("ma_lo", lotInfo.ma_lo),
-      ]);
-      if ((countByLotId || 0) > 0 || (countByMaLo || 0) > 0) {
-        return {
-          success: false,
-          error: "Lô đã Xuất hàng và đã có phiếu kiểm nghiệm gắn vào, không thể sửa từ đây.",
-        };
-      }
-    }
-
-    if (!input.soBanh || input.soBanh <= 0) {
-      return { success: false, error: "Số bành phải lớn hơn 0." };
-    }
-    if (!input.nganId) {
-      return { success: false, error: "Chưa xác định ngăn nguồn cho kiện này." };
-    }
-
-    // Xác định đúng kiện của giao dịch đang sửa — mỗi dòng lot_transactions chỉ thuộc 1 kiện duy
-    // nhất (kien_a-d không bao giờ có quá 1 giá trị > 0 trên cùng 1 dòng, xem confirmKienProduction).
-    const kienKeyEntries: Array<["a" | "b" | "c" | "d", number]> = [
-      ["a", Number(tx.kien_a || 0)],
-      ["b", Number(tx.kien_b || 0)],
-      ["c", Number(tx.kien_c || 0)],
-      ["d", Number(tx.kien_d || 0)],
-    ];
-    const kienKey = kienKeyEntries.find(([, v]) => v > 0)?.[0];
-    if (!kienKey) return { success: false, error: "Không xác định được kiện của giao dịch này." };
-
-    const config = getLoaiBanhConfig(lotInfo.loai_csr, Number(lotInfo.loai_banh) || undefined);
-    const maxPerKien = config.max_per_kien;
-
-    // Re-check tổng số bành của ĐÚNG kiện, TRỪ đi phần đóng góp của chính giao dịch đang sửa —
-    // giống cấu trúc chống-race trong confirmKienProduction nhưng loại trừ dòng này.
-    const { data: siblingRows } = await supabase
-      .from("lot_transactions")
-      .select("kien_a, kien_b, kien_c, kien_d")
-      .eq("lot_id", lotInfo.id)
-      .neq("id", input.transactionId);
-    const otherBanh = (siblingRows || []).reduce(
-      (sum, row) => sum + Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0),
-      0,
-    );
-    if (otherBanh + input.soBanh > maxPerKien) {
-      return {
-        success: false,
-        error: `Kiện ${kienKey.toUpperCase()} của lô ${lotInfo.ma_lo} sẽ vượt quá ${maxPerKien} bành (các giao dịch khác của kiện này đã có ${otherBanh} bành).`,
-      };
-    }
-
-    const soKg = Math.round(input.soBanh * Number(lotInfo.loai_banh) * 100) / 100;
-
-    const { data: ngan, error: nganError } = await supabase
-      .from("ngans")
-      .select("tong_kho")
-      .eq("id", input.nganId)
-      .eq("factory_id", input.factoryId)
-      .maybeSingle();
-    if (nganError || !ngan) return { success: false, error: "Không tìm thấy ngăn nguồn được chọn." };
-
-    // Re-check 110% capacity của ngăn ĐÍCH — trừ đi so_kg cũ của chính giao dịch này nếu vẫn ở
-    // cùng 1 ngăn (tránh đếm 2 lần), cộng thêm so_kg mới rồi mới so với trần.
-    const existingRealKgOfTargetNgan = await getExistingRealKg(input.factoryId, input.nganId);
-    const ownContributionInTargetNgan = tx.ngan_id === input.nganId ? Number(tx.so_kg || 0) : 0;
-    const capKg = Number(ngan.tong_kho || 0) * 1.1;
-    if (existingRealKgOfTargetNgan - ownContributionInTargetNgan + soKg > capKg + 0.01) {
-      return {
-        success: false,
-        error: "Ngăn đích sẽ vượt quá 110% sau khi sửa, không thể lưu. Vui lòng kiểm tra lại số bành hoặc chọn ngăn khác.",
-      };
-    }
-
-    const kienPayload: Record<string, number> = { kien_a: 0, kien_b: 0, kien_c: 0, kien_d: 0 };
-    kienPayload[`kien_${kienKey}`] = input.soBanh;
-
-    const { error: updateError } = await supabase
-      .from("lot_transactions")
-      .update({
-        ngan_id: input.nganId,
-        ca: input.ca,
-        ngay_nhap: input.ngaySx,
-        kien_a: kienPayload.kien_a,
-        kien_b: kienPayload.kien_b,
-        kien_c: kienPayload.kien_c,
-        kien_d: kienPayload.kien_d,
-        so_banh: input.soBanh,
-        so_kg: soKg,
-        boc: input.boc,
-        pallet: input.pallet,
-        chi_thi: input.chiThi,
-      })
-      .eq("id", input.transactionId);
-    if (updateError) return { success: false, error: updateError.message };
-
-    if (input.boc) {
-      // Khi sửa bọc của 1 giao dịch, cập nhật đồng bộ toàn bộ các giao dịch của lô và bảng lots
-      // để đảm bảo tính đồng nhất 100% cho cả lô.
-      await Promise.all([
-        supabase.from("lots").update({ boc: input.boc }).eq("id", lotInfo.id),
-        supabase.from("lot_transactions").update({ boc: input.boc }).eq("lot_id", lotInfo.id),
-      ]);
-    }
-
-    const { error: rpcError } = await supabase.rpc("sync_lot_master_snapshot", { p_lot_id: lotInfo.id });
-    if (rpcError) return { success: false, error: `Không đồng bộ được lô sau khi sửa: ${rpcError.message}` };
-
-    // Đồng bộ lại trạng thái của cả ngăn cũ (tx.ngan_id) lẫn ngăn mới (input.nganId) nếu người
-    // dùng đổi ngăn nguồn — best-effort, không chặn kết quả sửa nếu lỗi.
-    const nganIdsToSync = new Set([tx.ngan_id, input.nganId].filter(Boolean) as string[]);
-    await Promise.all(
-      [...nganIdsToSync].map(async (id) => {
-        const { error: syncError } = await supabase.rpc("sync_ngan_production_status", { p_ngan_id: id });
-        if (syncError) console.error("sync_ngan_production_status:", syncError);
-      }),
-    );
-
+    if (!result.success) return { success: false, error: result.error };
     return { success: true };
   } catch (error) {
     return {
@@ -1396,6 +1500,36 @@ function joinUniqueSlash(values: (string | null | undefined)[]): string {
   return out.join("/");
 }
 
+// Pallet theo kiện cho F11: "Sắt mỏng A, C / Sắt đế gỗ B, D". Chỉ 1 loại pallet cho cả lô → in
+// đúng tên pallet như cũ (không kèm kiện). Giao dịch không mang pallet → dùng pallet của lô.
+// Chỉ ghi nhận kiện có số bành > 0 (giao dịch âm/0 không làm kiện "thuộc" pallet đó).
+const KIEN_KEYS = ["a", "b", "c", "d"] as const;
+function formatPalletByKien(
+  txs: { pallet: string[] | null; kien_a: number | null; kien_b: number | null; kien_c: number | null; kien_d: number | null }[],
+  lotPallet: string[],
+): string {
+  const kienByPallet = new Map<string, Set<string>>();
+  for (const t of txs) {
+    const pallets = (t.pallet && t.pallet.length > 0 ? t.pallet : lotPallet)
+      .map((p) => (p || "").trim())
+      .filter(Boolean);
+    for (const k of KIEN_KEYS) {
+      if ((Number(t[`kien_${k}`]) || 0) <= 0) continue;
+      for (const p of pallets) {
+        const set = kienByPallet.get(p) || new Set<string>();
+        set.add(k.toUpperCase());
+        kienByPallet.set(p, set);
+      }
+    }
+  }
+  if (kienByPallet.size === 0) return joinUniqueSlash(lotPallet);
+  if (kienByPallet.size === 1) return [...kienByPallet.keys()][0];
+  return [...kienByPallet.entries()]
+    .sort((a, b) => Math.min(...[...a[1]].map((x) => x.charCodeAt(0))) - Math.min(...[...b[1]].map((x) => x.charCodeAt(0))))
+    .map(([p, set]) => `${p} ${[...set].sort().join(", ")}`)
+    .join(" / ");
+}
+
 // Lô hoàn thành (tròn lô) đúng ngày `ngaySx` — dựa trên lots.ngay_ht (do sync_lot_master_snapshot
 // ghi khi lô đủ kiện). Pallet/bọc gom từ giao dịch thật của lô để thấy đúng lô có kiện dùng pallet
 // khác nhau (lots.pallet chỉ là snapshot giao dịch cuối).
@@ -1413,19 +1547,30 @@ async function loadCompletedLotsForDay(factoryId: string, ngaySx: string): Promi
   if (done.length === 0) return [];
 
   const ids = done.map((l) => l.id as string);
-  const txByLot = new Map<string, { boc: string | null; pallet: string[] | null }[]>();
+  type LotTxLite = {
+    lot_id: string; boc: string | null; pallet: string[] | null;
+    kien_a: number | null; kien_b: number | null; kien_c: number | null; kien_d: number | null;
+  };
+  const txByLot = new Map<string, LotTxLite[]>();
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
-    const { data: txs, error: txErr } = await supabase
-      .from("lot_transactions")
-      .select("lot_id,boc,pallet,created_at")
-      .in("lot_id", chunk)
-      .order("created_at", { ascending: true })
-      .range(0, 999);
-    if (txErr) throw new Error(txErr.message);
-    for (const t of txs || []) {
+    let txs: LotTxLite[];
+    try {
+      txs = await fetchAllPaginated<LotTxLite>((from, to) =>
+        supabase
+          .from("lot_transactions")
+          .select("lot_id,boc,pallet,kien_a,kien_b,kien_c,kien_d,created_at,id")
+          .in("lot_id", chunk)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      );
+    } catch (err) {
+      throw new Error((err as { message?: string })?.message || String(err));
+    }
+    for (const t of txs) {
       const list = txByLot.get(t.lot_id) || [];
-      list.push({ boc: t.boc, pallet: t.pallet });
+      list.push(t);
       txByLot.set(t.lot_id, list);
     }
   }
@@ -1437,14 +1582,17 @@ async function loadCompletedLotsForDay(factoryId: string, ngaySx: string): Promi
     if (!l.ma_lo || seen.has(l.ma_lo)) continue;
     seen.add(l.ma_lo);
     const txs = txByLot.get(l.id) || [];
-    const txPallets = txs.flatMap((t) => t.pallet || []);
     rows.push({
       maLo: l.ma_lo,
       num: Number(l.num) || 0,
       loaiCsr: l.loai_csr || "",
       loaiBanh: Number(l.loai_banh) || 0,
-      boc: l.boc || joinUniqueSlash(txs.map((t) => t.boc)),
-      pallet: joinUniqueSlash(txPallets.length > 0 ? txPallets : l.pallet || []),
+      // Sau Thay bọc tròn kiện, 1 lô có thể có kiện khác bọc → in theo kiện như pallet.
+      boc: formatPalletByKien(
+        txs.map((t) => ({ ...t, pallet: t.boc ? [t.boc] : null })),
+        l.boc ? [l.boc] : [],
+      ),
+      pallet: formatPalletByKien(txs, l.pallet || []),
       ghiChu: (l.ghi_chu || "").trim(),
     });
   }
@@ -1465,30 +1613,19 @@ function compareCaCode(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-const CA_NAME_COLUMNS: Record<string, "ca_a_ten" | "ca_b_ten" | "ca_c_ten"> = {
-  A: "ca_a_ten",
-  B: "ca_b_ten",
-  C: "ca_c_ten",
-};
-
-// Tên ca theo cấu hình nhà máy (Cài đặt → Danh mục → Thông tin công ty) — dùng cho cả tiêu đề
-// section trong phiếu báo thành phẩm lẫn gợi ý trong dropdown "Ca sản xuất" ở trang quét QR.
-export async function loadFactoryShiftNames(factoryId: string): Promise<Record<string, string>> {
-  const supabase = getSupabaseAdmin();
-  const { data } = await supabase
-    .from("factories")
-    .select("ca_a_ten, ca_b_ten, ca_c_ten")
-    .eq("id", factoryId)
-    .maybeSingle();
-  return {
-    A: data?.ca_a_ten || "",
-    B: data?.ca_b_ten || "",
-    C: data?.ca_c_ten || "",
-  };
+// Tên ca theo ca trưởng, hiệu lực tại `ngay` (mặc định hôm nay theo giờ nhà máy) — nguồn là bảng
+// lịch sử production_shift_names (Cài đặt → Danh mục → Thông tin công ty), xem shift-names.ts.
+// Dùng cho tiêu đề section phiếu báo thành phẩm lẫn dropdown "Ca sản xuất" ở trang quét QR.
+export async function loadFactoryShiftNames(
+  factoryId: string,
+  ngay?: string,
+): Promise<Record<string, string>> {
+  const day = ngay && /^\d{4}-\d{2}-\d{2}$/.test(ngay) ? ngay : getFactoryTodayISO();
+  return resolveShiftNamesAt(factoryId, day);
 }
 
 function resolveCaName(names: Record<string, string>, ca: string): string {
-  if (!CA_NAME_COLUMNS[ca]) return "";
+  if (!(SHIFT_CODES as readonly string[]).includes(ca)) return "";
   return names[ca] || "";
 }
 
@@ -1514,7 +1651,7 @@ export async function loadShiftReportData(
   );
   const [rows, shiftNames, completedLots] = await Promise.all([
     loadDayTransactions(factoryId, ngaySx),
-    loadFactoryShiftNames(factoryId),
+    loadFactoryShiftNames(factoryId, ngaySx),
     loadCompletedLotsForDay(factoryId, ngaySx),
   ]);
   const nameMap = await resolveProfileNames(rows.map((r) => r.created_by || ""));
@@ -1540,6 +1677,7 @@ export async function loadShiftReportData(
       pallet: string;
       nganMas: Set<string>;
       hoanThanhAt: string | null;
+      firstAt: string | null;
       nguoiNhap: string;
     }
   >();
@@ -1556,7 +1694,9 @@ export async function loadShiftReportData(
     const maLo = lotInfo?.ma_lo || "";
     if (!maLo) continue;
     if (row.ngan_id) nganIdSet.add(row.ngan_id);
-    if (!earliestCreatedAtByCa.has(row.ca)) earliestCreatedAtByCa.set(row.ca, row.created_at || "");
+    // Bỏ qua created_at null: nếu lưu "" thì so sánh chuỗi không bao giờ thay được, ca đó luôn
+    // bị xếp đầu dù thực tế sản xuất sau.
+    if (row.created_at && !earliestCreatedAtByCa.has(row.ca)) earliestCreatedAtByCa.set(row.ca, row.created_at);
     // Fallback lot-level khi giao dịch không tự mang boc/pallet/chi_thi riêng — luôn đúng với dòng
     // nhập tay qua product/page.tsx (xem ghi chú ở ShiftTxLotInfo) — nếu không, phiếu báo thành
     // phẩm hiện trống Bọc/Pallet/Số chỉ thị cho mọi lô có ít nhất 1 giao dịch nhập tay.
@@ -1582,6 +1722,7 @@ export async function loadShiftReportData(
       pallet: rowPallet,
       nganMas: new Set<string>(),
       hoanThanhAt: null,
+      firstAt: null,
       nguoiNhap: "",
     };
     if (Number(row.kien_a || 0) > 0) entry.letters.add("A");
@@ -1591,6 +1732,7 @@ export async function loadShiftReportData(
     entry.soBanh += Number(row.so_banh || 0);
     entry.soKg += Number(row.so_kg || 0);
     if (row.ngan_id) entry.nganMas.add(row.ngan_id);
+    if (row.created_at && (!entry.firstAt || row.created_at < entry.firstAt)) entry.firstAt = row.created_at;
     if (!entry.hoanThanhAt || (row.created_at && row.created_at > entry.hoanThanhAt)) {
       entry.hoanThanhAt = row.created_at;
       entry.nguoiNhap = row.created_by ? nameMap.get(row.created_by) || "—" : "—";
@@ -1605,6 +1747,17 @@ export async function loadShiftReportData(
     const { data: ngans } = await supabase.from("ngans").select("id, ma_ngan").in("id", [...nganIdSet]);
     nganMaById = new Map((ngans || []).map((n) => [n.id, n.ma_ngan || ""]));
   }
+
+  // Mốc quét SỚM NHẤT của mỗi lô trong từng ca — dùng để xếp lô theo thời gian sản xuất nhưng
+  // vẫn gom các dòng cùng lô đứng liền nhau (1 lô bị tách nhiều dòng khi các kiện khác ngăn/pallet).
+  const lotFirstAtBySection = new Map<string, string>();
+  for (const entry of byGroupKey.values()) {
+    const k = `${entry.ca}||${entry.maLo}`;
+    const cur = lotFirstAtBySection.get(k);
+    if (entry.firstAt && (cur === undefined || entry.firstAt < cur)) lotFirstAtBySection.set(k, entry.firstAt);
+  }
+  const kienRank = (letters: string) =>
+    letters ? KIEN_ORDER.indexOf(letters[0] as KienLetter) : KIEN_ORDER.length;
 
   const bySection = new Map<string, ShiftReportLotRow[]>();
   for (const entry of byGroupKey.values()) {
@@ -1634,7 +1787,16 @@ export async function loadShiftReportData(
       return ta.localeCompare(tb) || compareCaCode(a, b);
     })
     .map((ca, idx) => {
-      const caRows = (bySection.get(ca) || []).sort((a, b) => (a.hoanThanhAt || "").localeCompare(b.hoanThanhAt || ""));
+      // Thứ tự in: lô theo mốc quét sớm nhất → cùng lô thì kiện A, B, C, D (dù trực ca quét CD
+      // trước AB) → cuối cùng mới theo thời gian.
+      const lotFirstAt = (maLo: string) => lotFirstAtBySection.get(`${ca}||${maLo}`) || "";
+      const caRows = (bySection.get(ca) || []).sort(
+        (a, b) =>
+          lotFirstAt(a.maLo).localeCompare(lotFirstAt(b.maLo)) ||
+          a.maLo.localeCompare(b.maLo) ||
+          kienRank(a.kienLetters) - kienRank(b.kienLetters) ||
+          (a.hoanThanhAt || "").localeCompare(b.hoanThanhAt || ""),
+      );
       return {
         ca,
         caLabel: `Ca ${idx + 1}`,
@@ -1920,7 +2082,8 @@ export async function deleteDraft(draftId: string, userId: string): Promise<Dele
 export type UpdateDraftKienInput = {
   draftId: string;
   factoryId: string;
-  userId: string;
+  /** Người sửa lấy từ token (không tin userId trình duyệt gửi). */
+  accessToken: string | null;
   nganId: string;
   soBanh: number;
   ngaySx: string;
@@ -1949,14 +2112,15 @@ export async function updateDraftKien(input: UpdateDraftKienInput): Promise<Upda
   if (!input.pallet || input.pallet.length === 0) return { success: false, error: "Chưa chọn loại pallet." };
 
   try {
+    const userId = await assertProductAccess(input.accessToken, input.factoryId, PRODUCT_CREATE_PERMISSIONS, "sửa nháp");
     const supabase = getSupabaseAdmin();
     const { data: draft, error: draftErr } = await supabase
       .from("product_confirm_drafts")
-      .select("id, ma_lo, kien, loai_csr, loai_banh, created_by, factory_id")
+      .select("id, ma_lo, kien, loai_csr, loai_banh, created_by, factory_id, ngan_id, day_chuyen")
       .eq("id", input.draftId)
       .maybeSingle();
     if (draftErr || !draft) return { success: false, error: "Không tìm thấy nháp cần sửa." };
-    if (draft.created_by !== input.userId) return { success: false, error: "Không có quyền sửa nháp này." };
+    if (draft.created_by !== userId) return { success: false, error: "Không có quyền sửa nháp này." };
     if (draft.factory_id !== input.factoryId) return { success: false, error: "Nháp không thuộc nhà máy hiện tại." };
 
     const kien = draft.kien as KienLetter;
@@ -2010,6 +2174,38 @@ export async function updateDraftKien(input: UpdateDraftKienInput): Promise<Upda
       };
     }
 
+    // Đổi ngăn của nháp: nếu nháp đang đúng ngăn KẾ HOẠCH của kiện, bắt buộc đi qua đổi ngăn theo
+    // kế hoạch (kiểm sức chứa + chuyển chỗ giữ sang ngăn mới) — không cho đổi tự do, tránh ngăn cũ vẫn
+    // giữ chỗ kiện này trong khi nháp đã sang ngăn khác (tính trùng).
+    if (input.nganId !== draft.ngan_id) {
+      const { data: plan } = await supabase
+        .from("lot_prediction_lots")
+        .select("kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id")
+        .eq("factory_id", input.factoryId)
+        .eq("ma_lo", draft.ma_lo)
+        .neq("trang_thai", "Hủy")
+        .maybeSingle();
+      const planNgan = plan ? ((plan as Record<string, unknown>)[`kien_${KIEN_LOWER[kien]}_ngan_id`] as string | null) : null;
+      if (planNgan && planNgan === draft.ngan_id) {
+        if (committedBanh > 0) {
+          return { success: false, error: `Kiện ${kien} lô ${draft.ma_lo} đã gửi bành ở ngăn cũ — một kiện không được lấy từ 2 ngăn.` };
+        }
+        // Đổi ngăn kế hoạch cần đúng quyền như màn đổi ngăn (không chỉ quyền nhập nháp).
+        await assertProductAccess(input.accessToken, input.factoryId, PRODUCT_SWAP_NGAN_PERMISSIONS, "đổi ngăn nguồn");
+        const swap = await swapKienNganInternal({
+          factoryId: input.factoryId,
+          maLo: draft.ma_lo,
+          kien,
+          oldNganId: planNgan,
+          newNganId: input.nganId,
+          dayChuyen: draft.day_chuyen ?? null,
+          userId: userId,
+          draftId: input.draftId,
+        });
+        if (!swap.success) return { success: false, error: swap.error };
+      }
+    }
+
     const { error: updateError } = await supabase
       .from("product_confirm_drafts")
       .update({
@@ -2025,7 +2221,7 @@ export async function updateDraftKien(input: UpdateDraftKienInput): Promise<Upda
         ghi_chu: input.ghiChu,
       })
       .eq("id", input.draftId)
-      .eq("created_by", input.userId);
+      .eq("created_by", userId);
     if (updateError) return { success: false, error: updateError.message };
     return { success: true };
   } catch (error) {

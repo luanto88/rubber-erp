@@ -25,6 +25,8 @@ import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
+import { ShiftNamesTab } from "./_components/shift-names-tab"
+import { OpeningStockTab } from "./_components/opening-stock-tab"
 import { Kpi5sLocationsTab } from "./_components/kpi-5s-locations-tab"
 import { Kpi5sZonesTab } from "./_components/kpi-5s-zones-tab"
 import { KpiCriteriaTab } from "./_components/kpi-criteria-tab"
@@ -73,7 +75,6 @@ import {
   Target,
   Eye,
   EyeOff,
-  Sun,
   ListChecks,
   Scale,
 } from "lucide-react"
@@ -100,9 +101,6 @@ type FactoryInfo = {
   contact_email: string
   website: string
   country_en: string
-  ca_a_ten: string
-  ca_b_ten: string
-  ca_c_ten: string
   ty_gia_usd_vnd: string
   ty_gia_usd_khr: string
 }
@@ -218,7 +216,7 @@ type VanBanDocumentTypeRow = {
   is_active: boolean
 }
 
-type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments"
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments" | "opening-stock"
 
 type MaintenanceTab = "assets" | "staff" | "vehicles" | "ext-materials"
 
@@ -514,9 +512,6 @@ function emptyFactoryInfo(): FactoryInfo {
     contact_email: "",
     website: "",
     country_en: "",
-    ca_a_ten: "",
-    ca_b_ten: "",
-    ca_c_ten: "",
     ty_gia_usd_vnd: "",
     ty_gia_usd_khr: "",
   }
@@ -776,6 +771,11 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
     "shift-assignments": {
       // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
       filename: "phan_cong_truc_ca.csv",
+      rows: [],
+    },
+    "opening-stock": {
+      // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
+      filename: "ton_dau_ky_thanh_pham.csv",
       rows: [],
     },
   }
@@ -2065,7 +2065,7 @@ export default function SettingsPage() {
       loadPermissions(),
       supabase
         .from("factories")
-        .select("id, name, full_name_en, address_en, contact_person, contact_email, website, country_en, ca_a_ten, ca_b_ten, ca_c_ten, ty_gia_usd_vnd, ty_gia_usd_khr")
+        .select("id, name, full_name_en, address_en, contact_person, contact_email, website, country_en, ty_gia_usd_vnd, ty_gia_usd_khr")
         .order("name")
         .then(({ data }) => {
           const rows = data || []
@@ -2079,9 +2079,6 @@ export default function SettingsPage() {
               contact_email: ownFactory.contact_email || "",
               website: ownFactory.website || "",
               country_en: ownFactory.country_en || "",
-              ca_a_ten: ownFactory.ca_a_ten || "",
-              ca_b_ten: ownFactory.ca_b_ten || "",
-              ca_c_ten: ownFactory.ca_c_ten || "",
               ty_gia_usd_vnd: ownFactory.ty_gia_usd_vnd != null ? String(ownFactory.ty_gia_usd_vnd) : "",
               ty_gia_usd_khr: ownFactory.ty_gia_usd_khr != null ? String(ownFactory.ty_gia_usd_khr) : "",
             })
@@ -3735,7 +3732,7 @@ export default function SettingsPage() {
                 <SlidersHorizontal size={16} className="text-amber-600" />
                 <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
               </div>
-              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && (
+              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && configTab !== "opening-stock" && (
                 <div className="flex flex-wrap items-center gap-2">
                   {configTab !== "forest-plots" && (
                     <>
@@ -3820,6 +3817,7 @@ export default function SettingsPage() {
                   { key: "forest-plots" as const, label: "Lô vườn" },
                   { key: "quality-targets" as const, label: "Mục tiêu chất lượng" },
                   { key: "shift-assignments" as const, label: "Phân công trực ca" },
+                  { key: "opening-stock" as const, label: "Tồn đầu kỳ thành phẩm" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -4130,6 +4128,8 @@ export default function SettingsPage() {
                 </ResponsiveTableWrapper>
               ) : configTab === "quality-targets" ? (
                 <QualityTargetsTab factoryId={factoryId} canManage={canManageSettings} />
+              ) : configTab === "opening-stock" ? (
+                <OpeningStockTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "shift-assignments" ? (
                 <ShiftAssignmentsTab
                   factoryId={factoryId}
@@ -4316,38 +4316,8 @@ export default function SettingsPage() {
           </div>
           )}
 
-          {masterDataTab === "company" && (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden mt-4">
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-6 py-4 border-b border-slate-200">
-              <div className="flex items-center gap-2">
-                <Sun size={16} className="text-amber-600" />
-                <span className="font-extrabold text-slate-700">Tên ca sản xuất</span>
-              </div>
-              <p className="text-xs text-slate-500 mt-1">
-                Dùng để in trên phiếu báo thành phẩm và gợi ý trong màn hình quét QR xác nhận sản xuất. Để trống nếu không đặt tên riêng cho ca.
-              </p>
-            </div>
-            <div className="p-5">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {[
-                  { label: "Tên Ca A", field: "ca_a_ten" as const },
-                  { label: "Tên Ca B", field: "ca_b_ten" as const },
-                  { label: "Tên Ca C", field: "ca_c_ten" as const },
-                ].map(({ label, field }) => (
-                  <div key={field}>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">{label}</label>
-                    <input
-                      value={factoryInfo[field]}
-                      onChange={(e) => setFactoryInfo((prev) => ({ ...prev, [field]: e.target.value }))}
-                      disabled={!canManageSettings}
-                      placeholder="Vd: Sok Khum"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500 disabled:bg-slate-50 disabled:text-slate-400"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          {masterDataTab === "company" && factoryId && (
+            <ShiftNamesTab factoryId={factoryId} canManage={canManageSettings} />
           )}
 
           {masterDataTab === "company" && (

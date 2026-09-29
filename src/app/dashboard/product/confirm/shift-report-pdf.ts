@@ -234,15 +234,24 @@ function drawTrucCaCell(doc: jsPDF, cell: { x: number; y: number; width: number;
   doc.setTextColor(15, 23, 42);
 }
 
-// Vẽ 1 section ca: tiêu đề "Ca N: X {tên ca}" + bảng chi tiết + dòng "Tổng" của riêng ca đó.
+// Vẽ 1 section ca: tiêu đề "Ca N (Ca ngày/đêm) — Ca X – {ca trưởng}" + bảng chi tiết + dòng "Tổng" của riêng ca đó.
 // Trả về finalY để section/bảng tiếp theo nối tiếp đúng vị trí.
 function renderCaSection(doc: jsPDF, startY: number, section: ShiftReportCaSection): number {
   const y = ensurePageSpace(doc, startY, 26);
   doc.setFont(PDF_FONT_NAME, "bold");
   doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
-  const heading = `${section.caLabel}: ${section.ca}${section.caName ? ` ${section.caName}` : ""}`;
+  // GĐ5: "Ca 1/Ca 2" = ca Ngày/ca Đêm (thứ tự theo giờ quét trong ngày); "Ca A/B/C" = ca theo
+  // ca trưởng — in phụ nhỏ hơn ngay cạnh, tên lấy theo ngày hiệu lực (production_shift_names).
+  const dayNight = section.caLabel === "Ca 1" ? " (Ca ngày)" : section.caLabel === "Ca 2" ? " (Ca đêm)" : "";
+  const heading = `${section.caLabel}${dayNight}`;
   doc.text(heading, PAGE_LEFT, y + 6);
+  const headingWidth = doc.getTextWidth(heading);
+  doc.setFont(PDF_FONT_NAME, "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`—  Ca ${section.ca}${section.caName ? ` – ${section.caName}` : ""}`, PAGE_LEFT + headingWidth + 3, y + 6);
+  doc.setTextColor(15, 23, 42);
 
   const body = section.rows.map((r) => [
     `${r.maLo}${r.kienLetters ? ` ${r.kienLetters}` : ""}`,
@@ -360,14 +369,38 @@ export function buildShiftReportFileName(data: ShiftReportData): string {
 
 // jsPDF.output("bloburl") trả về URL blob PDF sẵn có, không cần tự tạo/thu hồi qua
 // URL.createObjectURL — mở trực tiếp trong tab mới bằng trình xem PDF gốc của trình duyệt.
-export function openShiftReportPdfInNewTab(doc: jsPDF): void {
+// GĐ7b: PDF có thể là jsPDF vừa dựng HOẶC Blob của bản cứng tải về từ bucket private.
+export type PdfSource = jsPDF | Blob;
+
+function isBlobSource(source: PdfSource): source is Blob {
+  return typeof Blob !== "undefined" && source instanceof Blob;
+}
+
+export function pdfSourceToBlob(source: PdfSource): Blob {
+  return isBlobSource(source) ? source : (source.output("blob") as Blob);
+}
+
+export function openShiftReportPdfInNewTab(doc: PdfSource): void {
   if (typeof window === "undefined") return;
-  const url = doc.output("bloburl") as unknown as string;
+  const url = isBlobSource(doc)
+    ? URL.createObjectURL(doc)
+    : (doc.output("bloburl") as unknown as string);
   window.open(url, "_blank");
 }
 
-export function downloadShiftReportPdfDoc(doc: jsPDF, fileName: string): void {
-  doc.save(fileName);
+export function downloadShiftReportPdfDoc(doc: PdfSource, fileName: string): void {
+  if (!isBlobSource(doc)) {
+    doc.save(fileName);
+    return;
+  }
+  const url = URL.createObjectURL(doc);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // Ghép toàn bộ trang PDF thành 1 ảnh PNG dài duy nhất rồi chia sẻ — thay cho chia sẻ PDF thô, vì
@@ -375,7 +408,7 @@ export function downloadShiftReportPdfDoc(doc: jsPDF, fileName: string): void {
 // (đã là dependency sẵn có, dùng lại đúng cách render canvas PDF ở SignPlacementModal của ISO —
 // worker PHẢI trỏ asset local qua import.meta.url, KHÔNG dùng CDN, để ổn định trên Vercel
 // production). Nút "Tải phiếu PDF" không đổi, vẫn dùng downloadShiftReportPdfDoc ở trên.
-export async function shareShiftReportImage(doc: jsPDF, fileName: string): Promise<void> {
+export async function shareShiftReportImage(doc: PdfSource, fileName: string): Promise<void> {
   await shareReportImages([{ doc, fileName }]);
 }
 
@@ -395,10 +428,10 @@ async function loadPdfjs() {
 // Rasterize MỌI trang của 1 doc rồi ghép dọc thành 1 PNG. null nếu không rasterize được.
 async function rasterizeDocToPng(
   pdfjsLib: Awaited<ReturnType<typeof loadPdfjs>>,
-  doc: jsPDF,
+  doc: PdfSource,
   imageFileName: string,
 ): Promise<File | null> {
-  const blob = doc.output("blob") as Blob;
+  const blob = pdfSourceToBlob(doc);
   const pdfBytes = await blob.arrayBuffer();
   const pdfDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
 
@@ -459,7 +492,7 @@ function downloadFile(file: File) {
 
 // Chia sẻ nhiều mẫu cùng lúc, MỖI doc = 1 ảnh riêng (vd Báo cáo lô F11 + Báo cáo sản xuất hằng
 // ngày F12 → 2 ảnh tách rời trong cùng 1 lần share). Doc nào không rasterize được thì tải PDF gốc.
-export async function shareReportImages(items: Array<{ doc: jsPDF; fileName: string }>): Promise<void> {
+export async function shareReportImages(items: Array<{ doc: PdfSource; fileName: string }>): Promise<void> {
   if (typeof window === "undefined" || items.length === 0) return;
   const pdfjsLib = await loadPdfjs();
 
