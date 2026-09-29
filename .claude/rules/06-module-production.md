@@ -273,6 +273,19 @@ thay bọc / sang pallet nhưng **phải đổi NGUYÊN KIỆN**. Hệ quả: 1 
   / theo kiện**: F11 in "Bọc X A, B / Bọc Y C, D", F12 xuất kho tính bọc theo từng kiện.
 - `sk_history` giữ nguyên cấu trúc; bản ghi mới có `split=false`, `residual_*=null`.
 
+### GĐ6b (2026-09-29) — lọc theo kiện, nguồn bắt buộc, chặn đổi trùng
+- Modal: ô "Tìm lô nhanh" (theo `ma_lo`) kết hợp các lọc. Mở modal nạp 1 lần `loadSkKienAvailability`
+  cho mọi lô Hoàn thành — mỗi kiện `{produced, assigned, boc, pallet}` (bọc/pallet = giao dịch cuối chứa
+  kiện). Lọc bọc/pallet **theo kiện**: lô hiện nếu có kiện `produced > assigned` mang đúng bọc / chứa pallet.
+- **Bắt buộc chọn nguồn**: tab Thay bọc cần "Bọc hiện tại", tab Sang kiện cần "Pallet hiện tại"; chưa chọn thì
+  danh sách lô khóa. Đổi tab/nguồn → xóa lô đang chờ. Thẻ lô chỉ hiện kiện mang đúng nguồn.
+- "Bọc mới" = giao `getBocsForLoaiCSR(dc, csr)` của các lô đang chờ, trừ bọc nguồn. Server action kiểm bọc
+  mới hợp lệ theo CSR; RPC chặn kiện đã mang đúng bọc mới / đúng tập pallet mới.
+- Migration `20261004_sang_kien_guard_kien_changes.sql`: `sk_history.kien_changes` (bọc/pallet TRƯỚC khi
+  đổi đọc từ giao dịch, theo kiện) + `sk_history.ngay` theo giờ nhà máy. `sk_history.from_boc` cũ lấy theo
+  `lots.boc` nên **không tin được theo kiện** (đã có bản ghi "nhãn→nhãn" thực tế trơn→nhãn).
+- Sửa bọc bằng "Sửa giao dịch" (admin) KHÔNG ghi `sk_history` — là sửa sai, không phải thay bọc.
+
 ### Lô tồn dư `…r` cũ
 - Kiểm DB 2026-09-28: 0 lô `…r`. Nếu phát sinh (dữ liệu cũ) → `scripts/reconcile-f12-stock.mjs` mục [1].
 
@@ -578,6 +591,15 @@ theo quy tắc "tròn kiện" — xem mục 4.5.
 - Công thức: mốc chốt gần nhất ≤ ngày báo cáo ⇒ tồn = chốt + nhập − xuất **sau** ngày chốt; nhóm
   không có trong chốt = 0. Chưa chốt ⇒ toàn bộ nhập − toàn bộ xuất. PDF ghi rõ nguồn số tồn.
 - Bỏ ép tồn âm về 0 — âm tô đỏ trên PDF. Lũy kế tháng/năm không đổi.
+- **GĐ6b (2026-09-29) — nhập theo BỌC LÚC SẢN XUẤT + sổ cái Thay bọc** (người dùng chốt): RPC ghi đè
+  `lot_transactions.boc` tại chỗ nên F12 dựng lại bằng `src/lib/sk-boc-ledger.ts` (`buildBocLedger`) từ
+  `sk_history` (ưu tiên `kien_changes`; bản ghi cũ dựng tuần tự theo kiện từ `source_snapshot.boc` của lần
+  đầu). Ngày SX ghi bọc gốc; ngày thao tác ghi −bọc nguồn / +bọc đích (cùng CSR + nguồn gốc + bành), cộng
+  cả lũy kế tháng/năm và tồn; lượng = sản lượng THẬT của kiện từ giao dịch (không theo số ghi ở sk_history).
+  Cột "Ghi chú" của dòng: "+N bành từ Thay bọc nhãn 0,04→trơn 0,04" (bù trừ đi–về trong ngày).
+  **Lưới an toàn**: kiện có bất kỳ giao dịch nào mang bọc ≠ trạng thái dựng lại (sửa tay) → giữ cách cũ (bọc
+  hiện tại). Xuất kho vẫn theo bọc hiện tại của kiện. F12 không tách pallet ⇒ Sang kiện không ảnh hưởng.
+  Kiểm chứng 2026-09-29: tổng tồn không đổi; tồn theo bọc ngày 29/09 khớp tuyệt đối bọc hiện tại.
 - Đơn xuất trỏ `lot_id` không còn tồn tại: thử khớp theo `ma_lo` (chỉ khi mã lô duy nhất); vẫn không
   khớp ⇒ không trừ tồn, PDF in dòng đỏ "Có N bành trong M đơn xuất trỏ tới lô không còn tồn tại".
 - Lô không có giao dịch ⇒ nhập = `lots.tong_kg` tại `ngay_ht || ngay_sx` (không vào Mục 2).

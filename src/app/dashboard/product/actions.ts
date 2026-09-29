@@ -12,7 +12,15 @@ import {
   assertProductAdmin,
   PRODUCT_CREATE_PERMISSIONS,
 } from "@/app/dashboard/product/confirm/report-access";
-import { getLoaiBanhConfig } from "@/lib/product-lot-config";
+import { getBocsForLoaiCSR, getLoaiBanhConfig } from "@/lib/product-lot-config";
+import {
+  applyTxToKienBoc,
+  applyTxToKienPallet,
+  kienBocOf,
+  kienPalletOf,
+  type KienBoc,
+  type KienPallet,
+} from "@/lib/lot-kien-boc";
 
 type SaveLotTransactionInput = {
   lot: {
@@ -604,7 +612,12 @@ export async function saveDateHeaderEdits(input: SaveDateHeaderEditsInput): Prom
 // Không còn tách lô tồn dư "…r". Ghi qua RPC perform_sang_kien_thay_boc (service role).
 
 export type SkKienKey = "a" | "b" | "c" | "d";
-export type SkKienAvailability = Record<SkKienKey, { produced: number; assigned: number }>;
+// boc/pallet = bọc/pallet HIỆN TẠI của kiện theo giao dịch cuối chứa kiện (lots.boc/pallet chỉ là bản chụp
+// giao dịch cuối của cả lô — sau Thay bọc tròn kiện 1 lô có kiện khác bọc).
+export type SkKienAvailability = Record<
+  SkKienKey,
+  { produced: number; assigned: number; boc: string; pallet: string[] }
+>;
 
 const SK_PERMISSIONS = ["product.edit"];
 const SK_KIENS: SkKienKey[] = ["a", "b", "c", "d"];
@@ -621,29 +634,34 @@ export async function loadSkKienAvailability(
   if (ids.length === 0) return out;
   const supabase = getSupabaseAdmin();
   const empty = (): SkKienAvailability => ({
-    a: { produced: 0, assigned: 0 },
-    b: { produced: 0, assigned: 0 },
-    c: { produced: 0, assigned: 0 },
-    d: { produced: 0, assigned: 0 },
+    a: { produced: 0, assigned: 0, boc: "", pallet: [] },
+    b: { produced: 0, assigned: 0, boc: "", pallet: [] },
+    c: { produced: 0, assigned: 0, boc: "", pallet: [] },
+    d: { produced: 0, assigned: 0, boc: "", pallet: [] },
   });
+  const kienBoc = new Map<string, KienBoc>();
+  const kienPallet = new Map<string, KienPallet>();
+  const lotSnap = new Map<string, { boc: string | null; pallet: string[] | null }>();
   const maToId = new Map<string, string>();
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
     const { data: lots, error: lotErr } = await supabase
       .from("lots")
-      .select("id,ma_lo")
+      .select("id,ma_lo,boc,pallet")
       .eq("factory_id", factoryId)
       .in("id", chunk);
     if (lotErr) throw new Error(lotErr.message);
     for (const l of lots || []) {
       out[l.id] = empty();
+      lotSnap.set(l.id, { boc: l.boc ?? null, pallet: (l.pallet as string[] | null) ?? null });
       if (l.ma_lo) maToId.set(String(l.ma_lo).trim().toLowerCase(), l.id);
     }
     for (let from = 0; ; from += 1000) {
       const { data: txs, error: txErr } = await supabase
         .from("lot_transactions")
-        .select("id,lot_id,kien_a,kien_b,kien_c,kien_d")
+        .select("id,lot_id,kien_a,kien_b,kien_c,kien_d,boc,pallet,created_at")
         .in("lot_id", chunk)
+        .order("created_at", { ascending: true })
         .order("id", { ascending: true })
         .range(from, from + 999);
       if (txErr) throw new Error(txErr.message);
@@ -651,6 +669,9 @@ export async function loadSkKienAvailability(
         const row = out[t.lot_id];
         if (!row) continue;
         for (const k of SK_KIENS) row[k].produced += Number(t[`kien_${k}`]) || 0;
+        const snap = lotSnap.get(t.lot_id);
+        applyTxToKienBoc(kienBoc, t, snap?.boc);
+        applyTxToKienPallet(kienPallet, t, snap?.pallet);
       }
       if (!txs || txs.length < 1000) break;
     }
@@ -674,6 +695,13 @@ export async function loadSkKienAvailability(
       }
     }
     if (!orders || orders.length < 1000) break;
+  }
+  for (const [lotId, row] of Object.entries(out)) {
+    const snap = lotSnap.get(lotId);
+    for (const k of SK_KIENS) {
+      row[k].boc = kienBocOf(kienBoc, lotId, k, snap?.boc);
+      row[k].pallet = kienPalletOf(kienPallet, lotId, k, snap?.pallet);
+    }
   }
   return out;
 }
@@ -699,6 +727,26 @@ export async function performSangKienThayBoc(input: {
       .filter((l) => l.lot_id && l.kiens.length > 0);
     if (lots.length === 0) return { success: false, error: "Chưa chọn kiện nào để đổi." };
     const supabase = getSupabaseAdmin();
+    // Bọc mới phải hợp lệ theo dây chuyền + CSR của từng lô (không chỉ ẩn ở giao diện). Chặn bọc trùng
+    // bọc kiện đang mang nằm trong RPC (đọc đúng giao dịch của kiện).
+    if (input.loai === "Thay bọc") {
+      const newBoc = (input.newBoc || "").trim();
+      if (!newBoc) return { success: false, error: "Chưa chọn bọc mới." };
+      const { data: lotRows, error: lotErr } = await supabase
+        .from("lots")
+        .select("id,ma_lo,day_chuyen,loai_csr")
+        .eq("factory_id", input.factoryId)
+        .in("id", lots.map((l) => l.lot_id));
+      if (lotErr) return { success: false, error: lotErr.message };
+      for (const l of lotRows || []) {
+        const folded = String(l.day_chuyen || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+        const dc = folded.includes("nuoc") ? "Mủ nước" : "Mủ tạp";
+        const allowed = getBocsForLoaiCSR(dc, String(l.loai_csr || "").trim());
+        if (!allowed.includes(newBoc)) {
+          return { success: false, error: `Bọc "${newBoc}" không dùng được cho lô ${l.ma_lo} (${l.loai_csr}, ${dc}).` };
+        }
+      }
+    }
     const { error } = await supabase.rpc("perform_sang_kien_thay_boc", {
       p_factory_id: input.factoryId,
       p_actor_id: actorId,

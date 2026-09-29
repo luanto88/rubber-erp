@@ -41,3 +41,33 @@ export function buildLotKienBocMap(rows: KienTxRow[], lotBocById?: Map<string, s
 export function kienBocOf(map: Map<string, KienBoc>, lotId: string, kien: KienKey, lotBoc?: string | null) {
   return (map.get(lotId)?.[kien] ?? lotBoc ?? "").trim();
 }
+
+// ── Pallet theo từng kiện (Sang kiện tròn kiện đổi pallet của đúng giao dịch chứa kiện) ──
+export type KienPallet = Partial<Record<KienKey, string[]>>;
+export type KienPalletTxRow = KienTxRow & { pallet?: string[] | null };
+
+const normPallet = (p: string[] | null | undefined) =>
+  [...new Set((p || []).map((x) => String(x || "").trim()).filter(Boolean))];
+
+/** Như applyTxToKienBoc nhưng cho pallet (mảng). Gọi theo thứ tự thời gian tăng dần. */
+export function applyTxToKienPallet(
+  map: Map<string, KienPallet>,
+  tx: KienPalletTxRow,
+  fallbackPallet?: string[] | null,
+) {
+  const pallet = normPallet(tx.pallet && tx.pallet.length > 0 ? tx.pallet : fallbackPallet);
+  if (pallet.length === 0) return;
+  const kp = map.get(tx.lot_id) || {};
+  for (const k of KIEN_KEYS) if ((Number(tx[`kien_${k}`]) || 0) > 0) kp[k] = pallet;
+  map.set(tx.lot_id, kp);
+}
+
+/** Pallet của 1 kiện: theo giao dịch, không có thì theo bản chụp của lô. */
+export function kienPalletOf(
+  map: Map<string, KienPallet>,
+  lotId: string,
+  kien: KienKey,
+  lotPallet?: string[] | null,
+): string[] {
+  return map.get(lotId)?.[kien] ?? normPallet(lotPallet);
+}

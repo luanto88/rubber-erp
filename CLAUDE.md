@@ -7869,3 +7869,17 @@ Chi tiết: `.claude/rules/06-module-production.md` mục **4.15**. Tóm tắt:
 `20260930_product_opening_stock` → `20260930b_sang_kien_thay_boc_tron_kien` →
 `20261001_admin_update_lot_transaction_fixes` → `20261002_production_shift_names` →
 `20261003_product_shift_report_snapshots`.
+
+## Cập nhật (2026-09-29, GĐ6b) — Sang kiện / Thay bọc lọc theo kiện + F12 cộng/trừ thay bọc
+
+Chi tiết: `.claude/rules/06-module-production.md` mục 4.5 (GĐ6b) và 4.13 (F12). Tóm tắt:
+
+- Modal Sang kiện / Thay bọc: ô "Tìm lô nhanh"; lọc bọc/pallet **theo kiện** (không theo `lots.boc`);
+  bắt buộc chọn nguồn (bọc hiện tại / pallet hiện tại) trước khi thêm lô, thẻ lô chỉ hiện kiện mang đúng
+  nguồn; "Bọc mới" theo CSR và loại bọc nguồn; chặn pallet mới trùng pallet hiện tại.
+- Server chặn thật: server action kiểm bọc mới hợp lệ theo CSR; RPC chặn kiện đã mang đúng bọc/pallet mới.
+- F12 tính nhập theo **bọc lúc sản xuất** + ngày thao tác ghi −nguồn/+đích (kể cả lũy kế), ghi chú trên dòng.
+- Migration mới `20261004_sang_kien_guard_kien_changes.sql` — **CHƯA CHẠY** (code tự chạy được khi chưa có
+  cột `kien_changes`, nhưng RPC cũ chưa chặn đổi trùng).
+- Phát hiện khi đối soát: `sk_history.from_boc` cũ không tin được theo kiện; 1679cs/26 bị sửa bọc tay qua
+  "Sửa giao dịch" (không có trong sk_history) ⇒ F12 bỏ dựng lại lô này (lưới an toàn), tính theo bọc hiện tại.

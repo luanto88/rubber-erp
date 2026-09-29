@@ -114,7 +114,8 @@ function renderDailyReportPage(
     blankZero(r.xuatThangKg),
     blankZero(r.xuatNamKg),
     numFmt(r.tonKg),
-    "",
+    // ± do Thay bọc trong ngày (GĐ6b) — vd "+144 bành từ Thay bọc nhãn 0,04→trơn 0,04".
+    r.ghiChu || "",
   ]);
   const sum = (pick: (r: (typeof stock)[number]) => number) =>
     stock.reduce((s, r) => s + pick(r), 0);
@@ -181,7 +182,7 @@ function renderDailyReportPage(
       10: { cellWidth: 20, halign: "right" },
       11: { cellWidth: 22, halign: "right" },
       12: { cellWidth: 21, halign: "right" },
-      13: { cellWidth: 24, halign: "left" },
+      13: { cellWidth: 24, halign: "left", fontSize: 6.5 },
     },
     didParseCell: (hook) => {
       if (hook.section === "body" && hook.row.index === stockTotalIndex) {

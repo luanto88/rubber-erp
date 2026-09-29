@@ -1458,6 +1458,10 @@ export default function ProductPage() {
   const [skFilterLoai, setSkFilterLoai] = useState("");
   const [skFilterBoc, setSkFilterBoc] = useState("");
   const [skFilterPallet, setSkFilterPallet] = useState("");
+  const [skSearch, setSkSearch] = useState("");
+  // Bọc/pallet/số bành theo TỪNG KIỆN của mọi lô Hoàn thành — lots.boc/pallet chỉ là bản chụp giao dịch cuối.
+  const [skKienInfo, setSkKienInfo] = useState<Record<string, SkKienAvailability> | null>(null);
+  const [skInfoLoading, setSkInfoLoading] = useState(false);
   const [skToBoc, setSkToBoc] = useState("");
   const [skToPallet, setSkToPallet] = useState<string[]>([]);
   const [skPending, setSkPending] = useState<SkPendingLot[]>([]);
@@ -1787,31 +1791,128 @@ export default function ProductPage() {
   };
 
 // Sang kien / Thay boc computed
-  const skEligibleLots = useMemo(() => {
+  // Kiện "còn bành chưa xuất" (produced > assigned) kèm bọc/pallet theo giao dịch. Chưa có số liệu kiện
+  // (lô mới tạo sau khi mở modal) → dựa bản chụp của lô.
+  const skOpenKiens = useCallback(
+    (l: Lot) => {
+      const info = skKienInfo?.[l.id];
+      if (!info) {
+        return SK_KIEN_KEYS.filter((k) => (Number(l[`kien_${k}`]) || 0) > 0).map((k) => ({
+          k,
+          boc: (l.boc || "").trim(),
+          pallet: l.pallet || [],
+        }));
+      }
+      return SK_KIEN_KEYS.filter((k) => info[k].produced > info[k].assigned).map((k) => ({
+        k,
+        boc: info[k].boc,
+        pallet: info[k].pallet,
+      }));
+    },
+    [skKienInfo],
+  );
+  // Lô qua các lọc không phụ thuộc kiện (dùng để dựng danh sách lựa chọn bọc/pallet nguồn).
+  const skBaseLots = useMemo(() => {
     const pendingIds = new Set(skPending.map((p) => p.lot.id));
+    const q = skSearch.replace(/\s+/g, "").toLowerCase();
     return lots.filter((l) => {
       if (normalizeLotStatus(l.trang_thai) !== "Hoàn thành") return false;
       if (pendingIds.has(l.id)) return false;
       if (skFilterDC && normalizeDayChuyen(l.day_chuyen) !== normalizeDayChuyen(skFilterDC)) return false;
       if (skFilterLoai && l.loai_csr !== skFilterLoai) return false;
-      if (skFilterBoc && l.boc !== skFilterBoc) return false;
-      if (skFilterPallet && !l.pallet?.includes(skFilterPallet)) return false;
+      if (q && !(l.ma_lo || "").replace(/\s+/g, "").toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [lots, skPending, skFilterDC, skFilterLoai, skFilterBoc, skFilterPallet]);
+  }, [lots, skPending, skFilterDC, skFilterLoai, skSearch]);
+  // Lọc bọc/pallet theo KIỆN: lô hiện nếu có ≥1 kiện còn bành chưa xuất mang đúng bọc / có pallet đang lọc.
+  const skEligibleLots = useMemo(
+    () =>
+      skBaseLots.filter((l) => {
+        const kiens = skOpenKiens(l);
+        if (kiens.length === 0) return false;
+        return kiens.some(
+          (x) =>
+            (!skFilterBoc || x.boc === skFilterBoc) &&
+            (!skFilterPallet || x.pallet.includes(skFilterPallet)),
+        );
+      }),
+    [skBaseLots, skOpenKiens, skFilterBoc, skFilterPallet],
+  );
 
   const skLoaiOptions = useMemo(
     () => [...new Set(lots.filter((l) => normalizeLotStatus(l.trang_thai) === "Hoàn thành").map((l) => l.loai_csr))],
     [lots],
   );
   const skBocOptions = useMemo(
-    () => [...new Set(skEligibleLots.map((l) => l.boc).filter(Boolean))] as string[],
-    [skEligibleLots],
+    () =>
+      [
+        ...new Set(
+          skBaseLots
+            .flatMap((l) => skOpenKiens(l))
+            .filter((x) => !skFilterPallet || x.pallet.includes(skFilterPallet))
+            .map((x) => x.boc)
+            .filter(Boolean),
+        ),
+      ].sort() as string[],
+    [skBaseLots, skOpenKiens, skFilterPallet],
   );
   const skPalletOptions = useMemo(
-    () => [...new Set(skEligibleLots.flatMap((l) => l.pallet || []).filter(Boolean))] as string[],
-    [skEligibleLots],
+    () =>
+      [
+        ...new Set(
+          skBaseLots
+            .flatMap((l) => skOpenKiens(l))
+            .filter((x) => !skFilterBoc || x.boc === skFilterBoc)
+            .flatMap((x) => x.pallet)
+            .filter(Boolean),
+        ),
+      ].sort() as string[],
+    [skBaseLots, skOpenKiens, skFilterBoc],
   );
+  // Nguồn bắt buộc theo tab: Thay bọc cần bọc hiện tại, Sang kiện cần pallet hiện tại.
+  const skSourceReady = skTab === "thay_boc" ? !!skFilterBoc : !!skFilterPallet;
+  // Kiện mang đúng nguồn đang chọn (chỉ kiện này được hiện/chọn ở thẻ lô đang chờ).
+  const skKienInSource = useCallback(
+    (p: SkPendingLot, k: SkKienKey) => {
+      if (!p.avail) return false;
+      return skTab === "thay_boc"
+        ? p.avail[k].boc === skFilterBoc
+        : p.avail[k].pallet.includes(skFilterPallet);
+    },
+    [skTab, skFilterBoc, skFilterPallet],
+  );
+  const skCanPick = useCallback(
+    (p: SkPendingLot, k: SkKienKey) => skKienSelectable(p, k) && skKienInSource(p, k),
+    [skKienInSource],
+  );
+  // Bọc mới hợp lệ = giao getBocsForLoaiCSR theo (dây chuyền, CSR) của các lô đang chờ (chưa có lô → theo
+  // lọc), trừ bọc nguồn (không thay nhãn → nhãn). Server cũng kiểm lại.
+  const skNewBocOptions = useMemo(() => {
+    const inferDc = (csr: string) =>
+      ["L", "3L", "CV50", "CV60"].some((x) => csr.endsWith(x)) ? DAY_CHUYEN_NUOC : DAY_CHUYEN_TAP;
+    const pairs: Array<[string, string]> =
+      skPending.length > 0
+        ? skPending.map((p) => [normalizeDayChuyen(p.lot.day_chuyen), p.lot.loai_csr])
+        : skFilterLoai
+          ? [[skFilterDC ? normalizeDayChuyen(skFilterDC) : inferDc(skFilterLoai), skFilterLoai]]
+          : [];
+    let opts: string[] | null = null;
+    for (const [dc, csr] of pairs) {
+      const list = getBocsForLoaiCSR(dc, csr);
+      opts = opts ? opts.filter((b) => list.includes(b)) : list;
+    }
+    return (opts ?? skBocOptions).filter((b) => b !== skFilterBoc);
+  }, [skPending, skFilterLoai, skFilterDC, skBocOptions, skFilterBoc]);
+  const skToBocValid = !!skToBoc && skNewBocOptions.includes(skToBoc);
+  // Sang kiện: lô có kiện đang chọn mà tập pallet hiện tại trùng đúng tập pallet mới.
+  const skPalletDupLots = useMemo(() => {
+    if (skTab !== "sang_kien" || skToPallet.length === 0) return [] as string[];
+    const norm = (arr: string[]) => [...new Set(arr.map((x) => x.trim()).filter(Boolean))].sort().join("|");
+    const target = norm(skToPallet);
+    return skPending
+      .filter((p) => p.avail && SK_KIEN_KEYS.some((k) => p[`kien_${k}`] > 0 && norm(p.avail![k].pallet) === target))
+      .map((p) => p.lot.ma_lo);
+  }, [skTab, skToPallet, skPending]);
 
 // Create view computed
   const nganKgMap = useMemo(() => {
@@ -2773,14 +2874,43 @@ export default function ProductPage() {
   };
 
 // Sang kien / Thay boc handlers
+  // Nạp bọc/pallet/số bành theo kiện cho mọi lô Hoàn thành (1 lần khi mở modal + sau mỗi lần lưu).
+  const loadSkKienInfo = async () => {
+    if (!factoryId) return;
+    const ids = lots.filter((l) => normalizeLotStatus(l.trang_thai) === "Hoàn thành").map((l) => l.id);
+    setSkInfoLoading(true);
+    try {
+      const token = (await getFreshAuthSession())?.access_token ?? null;
+      setSkKienInfo(await loadSkKienAvailability(factoryId, token, ids));
+    } catch (e) {
+      setSkError(getErrorMessage(e));
+    } finally {
+      setSkInfoLoading(false);
+    }
+  };
   const openSk = () => {
     setSkDone(new Set());
     setSkPending([]);
     setSkTab("sang_kien");
-    setSkFilterDC(""); setSkFilterLoai(""); setSkFilterBoc(""); setSkFilterPallet("");
+    setSkFilterDC(""); setSkFilterLoai(""); setSkFilterBoc(""); setSkFilterPallet(""); setSkSearch("");
     setSkToBoc(""); setSkToPallet([]);
     setSkConfirm(false); setSkError(null);
+    setSkKienInfo(null);
     setSkOpen(true);
+    void loadSkKienInfo();
+  };
+  // Đổi tab / đổi nguồn → bỏ các lô đang chờ (kiện hiển thị phụ thuộc nguồn, tránh lẫn).
+  const changeSkTab = (tab: "sang_kien" | "thay_boc") => {
+    if (tab === skTab) return;
+    setSkTab(tab); setSkPending([]); setSkConfirm(false); setSkError(null);
+  };
+  const changeSkSourceBoc = (v: string) => {
+    setSkFilterBoc(v);
+    if (skTab === "thay_boc") { setSkPending([]); setSkConfirm(false); }
+  };
+  const changeSkSourcePallet = (v: string) => {
+    setSkFilterPallet(v);
+    if (skTab === "sang_kien") { setSkPending([]); setSkConfirm(false); }
   };
   const closeSk = () => {
     setSkOpen(false);
@@ -2790,17 +2920,25 @@ export default function ProductPage() {
   // chọn mọi kiện đổi được. Kiện đã gán đơn xuất (dù 1 bành) không chọn được.
   const skAddLot = async (lot: Lot) => {
     if (!factoryId || skPending.some((p) => p.lot.id === lot.id)) return;
+    if (!skSourceReady) {
+      setSkError(skTab === "thay_boc" ? "Chọn bọc hiện tại trước khi thêm lô." : "Chọn pallet hiện tại trước khi thêm lô.");
+      return;
+    }
     setSkPending((prev) => [...prev, { lot, kien_a: 0, kien_b: 0, kien_c: 0, kien_d: 0, avail: null }]);
     try {
-      const token = (await getFreshAuthSession())?.access_token ?? null;
-      const map = await loadSkKienAvailability(factoryId, token, [lot.id]);
-      const avail = map[lot.id];
+      let avail = skKienInfo?.[lot.id];
+      if (!avail) {
+        const token = (await getFreshAuthSession())?.access_token ?? null;
+        const map = await loadSkKienAvailability(factoryId, token, [lot.id]);
+        avail = map[lot.id];
+      }
       if (!avail) throw new Error(`Không tải được số liệu kiện của lô ${lot.ma_lo}.`);
+      const loaded = avail;
       setSkPending((prev) =>
         prev.map((p) => {
           if (p.lot.id !== lot.id) return p;
-          const next: SkPendingLot = { ...p, avail };
-          for (const k of SK_KIEN_KEYS) next[`kien_${k}`] = skKienSelectable(next, k) ? avail[k].produced : 0;
+          const next: SkPendingLot = { ...p, avail: loaded };
+          for (const k of SK_KIEN_KEYS) next[`kien_${k}`] = skCanPick(next, k) ? loaded[k].produced : 0;
           return next;
         }),
       );
@@ -2815,7 +2953,7 @@ export default function ProductPage() {
   const skToggleKien = (lotId: string, k: SkKienKey) => {
     setSkPending((prev) =>
       prev.map((p) => {
-        if (p.lot.id !== lotId || !p.avail || !skKienSelectable(p, k)) return p;
+        if (p.lot.id !== lotId || !p.avail || !skCanPick(p, k)) return p;
         const field = `kien_${k}` as const;
         return { ...p, [field]: p[field] > 0 ? 0 : p.avail[k].produced };
       }),
@@ -2826,7 +2964,7 @@ export default function ProductPage() {
       prev.map((p) => {
         if (p.lot.id !== lotId || !p.avail) return p;
         const next = { ...p };
-        for (const k of SK_KIEN_KEYS) next[`kien_${k}`] = skKienSelectable(p, k) ? p.avail[k].produced : 0;
+        for (const k of SK_KIEN_KEYS) next[`kien_${k}`] = skCanPick(p, k) ? p.avail[k].produced : 0;
         return next;
       }),
     );
@@ -2836,6 +2974,12 @@ export default function ProductPage() {
     if (!factoryId || skPending.length === 0) return;
     if (skTab === "thay_boc" && !skToBoc) { setSkError("Chưa chọn bọc mới"); return; }
     if (skTab === "sang_kien" && skToPallet.length === 0) { setSkError("Chưa chọn pallet mới"); return; }
+    if (!skSourceReady) { setSkError("Chưa chọn bọc/pallet hiện tại (nguồn)."); return; }
+    if (skTab === "thay_boc" && !skToBocValid) { setSkError("Bọc mới trùng bọc hiện tại hoặc không hợp lệ cho CSR của lô."); return; }
+    if (skTab === "sang_kien" && skPalletDupLots.length > 0) {
+      setSkError(`Pallet mới trùng pallet hiện tại của lô ${skPalletDupLots.join(", ")}.`);
+      return;
+    }
 
     setSkSaving(true); setSkError(null);
     try {
@@ -2884,11 +3028,12 @@ export default function ProductPage() {
       }
 
       const historyPayload = {
-        ngay: new Date().toISOString().slice(0, 10),
+        // RPC tự dùng ngày theo giờ nhà máy (migration 20261004); gửi kèm cho bản RPC cũ.
+        ngay: getFactoryTodayISO(),
         chung_loai: skFilterLoai || skPending[0]?.lot.loai_csr || "",
-        from_boc: skTab === "thay_boc" ? (skFilterBoc || skPending[0]?.lot.boc || null) : null,
+        from_boc: skTab === "thay_boc" ? skFilterBoc : null,
         to_boc: skTab === "thay_boc" ? skToBoc : null,
-        from_pallet: skTab === "sang_kien" ? (skFilterPallet || null) : null,
+        from_pallet: skTab === "sang_kien" ? skFilterPallet : null,
         to_pallet: skTab === "sang_kien" ? skToPallet.join(", ") : null,
         lots: historyLots,
       };
@@ -2908,6 +3053,7 @@ export default function ProductPage() {
       setSkPending([]);
       setSkConfirm(false);
       void loadData(factoryId);
+      void loadSkKienInfo();
     } catch (e) {
       setSkError(getErrorMessage(e));
     } finally {
@@ -6362,13 +6508,7 @@ export default function ProductPage() {
           OVERLAY: Sang kiện / Thay bọc
           ============================================================ */}
       {skOpen && (() => {
-        // Tính boc options cho dropdown "Bọc mới"
-        const inferred_dc = skFilterLoai
-          ? (["L","3L","CV50","CV60"].some((s) => skFilterLoai.includes(s)) ? DAY_CHUYEN_NUOC : DAY_CHUYEN_TAP)
-          : "";
-        const newBocOpts = skFilterLoai
-          ? getBocsForLoaiCSR(inferred_dc, skFilterLoai)
-          : skBocOptions;
+        const newBocOpts = skNewBocOptions;
 
         const totalConvertBanh = skPending.reduce(
           (s, p) => s + p.kien_a + p.kien_b + p.kien_c + p.kien_d,
@@ -6382,7 +6522,8 @@ export default function ProductPage() {
         const canConfirm =
           skPending.length > 0 &&
           skPending.every((p) => !!p.avail && SK_KIEN_KEYS.some((k) => p[`kien_${k}`] > 0)) &&
-          (skTab === "thay_boc" ? !!skToBoc : skToPallet.length > 0);
+          skSourceReady &&
+          (skTab === "thay_boc" ? skToBocValid : skToPallet.length > 0 && skPalletDupLots.length === 0);
 
         return (
           <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex justify-end">
@@ -6415,6 +6556,15 @@ export default function ProductPage() {
 
                   {/* Filter bar */}
                   <div className="p-3 border-b border-slate-100 flex flex-wrap gap-2 items-center shrink-0">
+                    <div className="relative">
+                      <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        value={skSearch}
+                        onChange={(e) => setSkSearch(e.target.value)}
+                        placeholder="Tìm lô nhanh (vd 1679)"
+                        className="w-40 text-sm border border-slate-200 rounded-lg pl-7 pr-2 py-1.5 outline-none focus:border-violet-400"
+                      />
+                    </div>
                     <select
                       value={skFilterDC}
                       onChange={(e) => setSkFilterDC(e.target.value)}
@@ -6434,23 +6584,30 @@ export default function ProductPage() {
                     </select>
                     <select
                       value={skFilterBoc}
-                      onChange={(e) => setSkFilterBoc(e.target.value)}
-                      className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-violet-400"
+                      onChange={(e) => changeSkSourceBoc(e.target.value)}
+                      className={`text-sm border rounded-lg px-2 py-1.5 outline-none focus:border-violet-400 ${
+                        skTab === "thay_boc" && !skFilterBoc ? "border-amber-400 bg-amber-50" : "border-slate-200"
+                      }`}
                     >
                       <option value="">Bọc hiện tại</option>
                       {skBocOptions.map((b) => <option key={b}>{b}</option>)}
                     </select>
                     <select
                       value={skFilterPallet}
-                      onChange={(e) => setSkFilterPallet(e.target.value)}
-                      className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-violet-400"
+                      onChange={(e) => changeSkSourcePallet(e.target.value)}
+                      className={`text-sm border rounded-lg px-2 py-1.5 outline-none focus:border-violet-400 ${
+                        skTab === "sang_kien" && !skFilterPallet ? "border-amber-400 bg-amber-50" : "border-slate-200"
+                      }`}
                     >
                       <option value="">Pallet hiện tại</option>
                       {skPalletOptions.map((p) => <option key={p}>{p}</option>)}
                     </select>
-                    {(skFilterDC || skFilterLoai || skFilterBoc || skFilterPallet) && (
+                    {(skFilterDC || skFilterLoai || skFilterBoc || skFilterPallet || skSearch) && (
                       <button
-                        onClick={() => { setSkFilterDC(""); setSkFilterLoai(""); setSkFilterBoc(""); setSkFilterPallet(""); }}
+                        onClick={() => {
+                          setSkFilterDC(""); setSkFilterLoai(""); setSkFilterBoc(""); setSkFilterPallet(""); setSkSearch("");
+                          setSkPending([]); setSkConfirm(false);
+                        }}
                         className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500"
                       >
                         <X size={12} /> Xóa lọc
@@ -6463,7 +6620,22 @@ export default function ProductPage() {
 
                   {/* Lot list */}
                   <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-                    {skEligibleLots.length === 0 ? (
+                    {skInfoLoading && !skKienInfo ? (
+                      <div className="py-12 text-center text-slate-400">
+                        <Loader2 size={24} className="mx-auto mb-2 animate-spin" />
+                        <p className="text-sm">Đang tải số liệu bọc/pallet theo kiện...</p>
+                      </div>
+                    ) : !skSourceReady ? (
+                      <div className="py-12 text-center text-amber-600">
+                        <Package size={32} className="mx-auto mb-2 opacity-40" />
+                        <p className="text-sm font-bold">
+                          {skTab === "thay_boc"
+                            ? "Chọn \"Bọc hiện tại\" (bọc nguồn) trước khi thêm lô"
+                            : "Chọn \"Pallet hiện tại\" (pallet nguồn) trước khi thêm lô"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">Lọc theo từng kiện — lô hiện ra nếu có kiện còn bành chưa xuất mang đúng nguồn.</p>
+                      </div>
+                    ) : skEligibleLots.length === 0 ? (
                       <div className="py-12 text-center text-slate-400">
                         <Package size={32} className="mx-auto mb-2 opacity-30" />
                         <p className="text-sm">Không có lô phù hợp với bộ lọc</p>
@@ -6520,7 +6692,7 @@ export default function ProductPage() {
                     {(["sang_kien", "thay_boc"] as const).map((tab) => (
                       <button
                         key={tab}
-                        onClick={() => setSkTab(tab)}
+                        onClick={() => changeSkTab(tab)}
                         className={`px-4 py-1.5 rounded-xl text-sm font-bold transition-all ${
                           skTab === tab
                             ? "bg-violet-600 text-white shadow-sm"
@@ -6540,13 +6712,16 @@ export default function ProductPage() {
                           Bọc mới
                         </label>
                         <select
-                          value={skToBoc}
+                          value={skToBocValid ? skToBoc : ""}
                           onChange={(e) => setSkToBoc(e.target.value)}
                           className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
                         >
                           <option value="">— Chọn bọc mới —</option>
                           {newBocOpts.map((b) => <option key={b}>{b}</option>)}
                         </select>
+                        {skFilterBoc && (
+                          <p className="mt-1 text-[11px] text-slate-400">Đã loại bọc nguồn “{skFilterBoc}”.</p>
+                        )}
                       </div>
                     ) : (
                       <div>
@@ -6577,6 +6752,11 @@ export default function ProductPage() {
                             );
                           })}
                         </div>
+                        {skPalletDupLots.length > 0 && (
+                          <p className="mt-1.5 text-[11px] font-bold text-red-600">
+                            Pallet mới trùng pallet hiện tại của lô {skPalletDupLots.join(", ")} — chọn pallet khác.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -6631,9 +6811,15 @@ export default function ProductPage() {
                               </div>
                             ) : (
                               <div className="grid grid-cols-4 gap-1.5 mb-2">
-                                {SK_KIEN_KEYS.map((k) => {
+                                {SK_KIEN_KEYS.filter((k) => p.avail![k].produced > 0 && skKienInSource(p, k)).length === 0 && (
+                                  <div className="col-span-4 rounded-lg bg-amber-50 px-2 py-2 text-center text-xs text-amber-700">
+                                    Lô không có kiện mang {skTab === "thay_boc" ? `bọc “${skFilterBoc}”` : `pallet “${skFilterPallet}”`}.
+                                  </div>
+                                )}
+                                {/* Chỉ hiện kiện đang mang đúng bọc/pallet nguồn — kiện khác giữ nguyên. */}
+                                {SK_KIEN_KEYS.filter((k) => p.avail![k].produced > 0 && skKienInSource(p, k)).map((k) => {
                                   const a = p.avail![k];
-                                  const selectable = skKienSelectable(p, k);
+                                  const selectable = skCanPick(p, k);
                                   const selected = p[`kien_${k}`] > 0;
                                   const note = a.produced <= 0 ? "Trống" : a.assigned > 0 ? `Đã xuất ${a.assigned}` : `${a.produced} bành`;
                                   return (

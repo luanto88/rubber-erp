@@ -18,8 +18,14 @@
 //   - Bỏ ép tồn âm về 0 (ép 0 từng dòng rồi cộng làm tổng bị thổi phồng, che mất sai lệch).
 //   - Đơn xuất trỏ lô không còn tồn tại → báo riêng (unmatchedExport), không bỏ im lặng.
 //   - Lô không có giao dịch (lô mồ côi) → nhập = lots.tong_kg tại ngày hoàn thành/ngày SX.
+// GĐ6b (2026-09-29): nhập theo BỌC LÚC SẢN XUẤT; ngày thao tác Thay bọc ghi −bọc nguồn / +bọc đích (cùng
+//   CSR + nguồn gốc + loại bành, tổng không đổi), cộng cả lũy kế tháng/năm, kèm ghi chú trên dòng. Sổ cái
+//   dựng từ sk_history qua src/lib/sk-boc-ledger.ts (RPC ghi đè lot_transactions.boc tại chỗ nên giao
+//   dịch chỉ còn bọc hiện tại). Xuất kho vẫn theo bọc hiện tại của kiện. F12 không tách pallet ⇒ Sang
+//   kiện không ảnh hưởng.
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { applyTxToKienBoc, KIEN_KEYS, kienBocOf, type KienBoc } from "@/lib/lot-kien-boc";
+import { buildBocLedger, buildKienBocSets, shortBocLabel, type SkHistoryEvent } from "@/lib/sk-boc-ledger";
 import {
   assertProductAccess,
   assertReportAccess,
@@ -39,6 +45,7 @@ export type DailyStockRow = {
   xuatKg: number; // trong ngày
   xuatThangKg: number;
   xuatNamKg: number;
+  ghiChu: string; // ± do Thay bọc trong ngày báo cáo
   // Tồn tới hết ngày báo cáo. CÓ THỂ ÂM (không ép 0 nữa — âm là dấu hiệu lệch dữ liệu, PDF tô đỏ).
   // Có mốc chốt: tồn chốt + nhập − xuất SAU ngày chốt; chưa có: toàn bộ nhập − toàn bộ xuất.
   tonKg: number;
@@ -179,6 +186,38 @@ function compareCaCode(a: string, b: string): number {
 const groupKey = (loaiCsr: string, nguon: string, boc: string, banh: number) =>
   `${loaiCsr}||${nguon}||${boc}||${round2(banh)}`;
 
+type LaterTxRow = {
+  lot_id: string;
+  boc: string | null;
+  kien_a: number | null;
+  kien_b: number | null;
+  kien_c: number | null;
+  kien_d: number | null;
+};
+
+// Toàn bộ sk_history Thay bọc của nhà máy (không lọc ngày — lưới an toàn cần đủ mọi lần thao tác).
+// Cột kien_changes (migration 20261004) chưa có → đọc lại không có cột, dựng lại theo cách cũ.
+async function loadThayBocEvents(factoryId: string): Promise<SkHistoryEvent[]> {
+  const supabase = getSupabaseAdmin();
+  const load = (cols: string) =>
+    fetchAllPages<SkHistoryEvent>((from, to) =>
+      supabase
+        .from("sk_history")
+        .select(cols)
+        .eq("factory_id", factoryId)
+        .eq("loai", "Thay bọc")
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+  try {
+    return await load("id,ngay,created_at,to_boc,lots,kien_changes");
+  } catch (err) {
+    if (!/kien_changes/i.test(err instanceof Error ? err.message : String(err))) throw err;
+    return load("id,ngay,created_at,to_boc,lots");
+  }
+}
+
 type StockComputation = {
   stockRows: DailyStockRow[];
   shiftRows: DailyShiftRow[];
@@ -208,10 +247,10 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
     ),
     // Lô có giao dịch SAU ngày báo cáo (hoặc giao dịch thiếu ngày) — chỉ để biết lô đó KHÔNG phải lô mồ
     // côi. Thiếu bước này, lô có ngay_sx ≤ ngày nhưng giao dịch ghi ngày sau bị cộng thừa lots.tong_kg.
-    fetchAllPages<{ lot_id: string }>((from, to) =>
+    fetchAllPages<LaterTxRow>((from, to) =>
       supabase
         .from("lot_transactions")
-        .select("id,lot_id,lots!inner(factory_id)")
+        .select("id,lot_id,boc,kien_a,kien_b,kien_c,kien_d,lots!inner(factory_id)")
         .eq("lots.factory_id", factoryId)
         .or(`ngay_nhap.gt.${ngay},ngay_nhap.is.null`)
         .order("id", { ascending: true })
@@ -241,6 +280,7 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
   ]);
   if (suffixRes.error) throw new Error(suffixRes.error.message);
   const resolveNguon = makeNguonResolver((suffixRes.data || []) as SuffixRow[]);
+  const skEvents = await loadThayBocEvents(factoryId);
 
   // Mốc chốt tồn gần nhất ≤ ngày báo cáo.
   let ngayChotTon: string | null = null;
@@ -284,7 +324,7 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
     let row = stock.get(k);
     if (!row) {
       row = {
-        loaiCsr, nguonGoc: nguon, boc, loaiBanh: banh,
+        loaiCsr, nguonGoc: nguon, boc, loaiBanh: banh, ghiChu: "",
         nhapBanh: 0, nhapKg: 0, nhapThangKg: 0, nhapNamKg: 0,
         xuatKg: 0, xuatThangKg: 0, xuatNamKg: 0, tonKg: 0,
       };
@@ -309,6 +349,13 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
   const lotsWithTx = new Set<string>(laterTxRows.map((t) => t.lot_id));
   // Bọc theo từng kiện (sau Thay bọc tròn kiện, 1 lô có thể có kiện khác bọc) — dùng cho xuất kho.
   const kienBoc = new Map<string, KienBoc>();
+  // Sổ cái Thay bọc: bọc lúc SX theo kiện + các lần chuyển. So với bọc HIỆN TẠI của mọi giao dịch
+  // (kể cả giao dịch sau ngày báo cáo) để lưới an toàn hoạt động đúng.
+  const lotBocById = new Map<string, string | null>(allLots.map((l) => [l.id, l.boc]));
+  // Sản lượng thật theo (lô|kiện) tới ngày báo cáo — lượng thay bọc lấy theo đây, KHÔNG theo số bành ghi
+  // trong sk_history (bản ghi cũ có thể ghi số "đã chuyển" khác số bành thật của kiện).
+  const kienProd = new Map<string, { bales: number; kg: number }>();
+  const ledger = buildBocLedger(skEvents, buildKienBocSets([...txRows, ...laterTxRows], lotBocById));
 
   for (const tx of txRows) {
     lotsWithTx.add(tx.lot_id);
@@ -321,7 +368,26 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
     const kg = Number(tx.so_kg) || 0;
     const bales = Number(tx.so_banh) || 0;
     const d = tx.ngay_nhap;
-    addNhap(getRow(loaiCsr, resolveNguon(lot?.suffix), boc, banh), d, kg, bales);
+    const nguon = resolveNguon(lot?.suffix);
+    const prod = ledger.prodBoc.get(tx.lot_id);
+    const kienBales = KIEN_KEYS.map((k) => [k, Number(tx[`kien_${k}`]) || 0] as const).filter(([, b]) => b > 0);
+    const totalKienBales = kienBales.reduce((sum, [, b]) => sum + b, 0);
+    for (const [k, b] of kienBales) {
+      // Sản lượng thật của từng kiện (kg chia theo tỷ lệ bành) — dùng cho cả nhập lẫn lượng thay bọc.
+      const kgK = totalKienBales > 0 ? (kg * b) / totalKienBales : b * banh;
+      const pk = `${tx.lot_id}|${k}`;
+      const cur = kienProd.get(pk) || { bales: 0, kg: 0 };
+      kienProd.set(pk, { bales: cur.bales + b, kg: cur.kg + kgK });
+    }
+    if (prod && kienBales.length > 0) {
+      // Lô từng Thay bọc: mỗi kiện vào bọc LÚC SẢN XUẤT.
+      for (const [k, b] of kienBales) {
+        const kgK = totalKienBales > 0 ? (kg * b) / totalKienBales : b * banh;
+        addNhap(getRow(loaiCsr, nguon, (prod[k] || boc).trim(), banh), d, kgK, b);
+      }
+    } else {
+      addNhap(getRow(loaiCsr, nguon, boc, banh), d, kg, bales);
+    }
 
     const ca = (tx.ca || "").trim();
     if (!ca || d < yearStart) continue;
@@ -352,6 +418,45 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
     if (kg <= 0 || !d || d > ngay) continue;
     const row = getRow((l.loai_csr || "").trim() || "—", resolveNguon(l.suffix), (l.boc || "").trim(), Number(l.loai_banh) || 0);
     addNhap(row, d, kg, Number(l.tong_banh) || 0);
+  }
+
+  // Thay bọc: −bọc nguồn / +bọc đích vào đúng ngày thao tác (≤ ngày báo cáo).
+  type NoteAgg = { loaiCsr: string; nguon: string; banh: number; a: string; b: string; bales: number };
+  const noteNet = new Map<string, NoteAgg>();
+  for (const t of ledger.transfers) {
+    if (t.ngay > ngay) continue;
+    const lot = lotInfo.get(t.lotId);
+    if (!lot) continue;
+    const loaiCsr = (lot.loai_csr || "").trim() || "—";
+    const nguon = resolveNguon(lot.suffix);
+    const banh = Number(lot.loai_banh) || 0;
+    const real = kienProd.get(`${t.lotId}|${t.kien}`);
+    const bales = real ? real.bales : t.bales;
+    const kg = real ? real.kg : t.bales * banh;
+    if (!bales && !kg) continue;
+    addNhap(getRow(loaiCsr, nguon, t.from, banh), t.ngay, -kg, -bales);
+    addNhap(getRow(loaiCsr, nguon, t.to, banh), t.ngay, kg, bales);
+    if (t.ngay !== ngay) continue;
+    // Gộp theo cặp bọc (không phân chiều) để bù trừ đi–về trong cùng ngày.
+    const [a, b] = [t.from, t.to].sort();
+    const nk = `${loaiCsr}||${nguon}||${round2(banh)}||${a}||${b}`;
+    const cur = noteNet.get(nk) || { loaiCsr, nguon, banh, a, b, bales: 0 };
+    cur.bales += t.from === a ? bales : -bales; // dương = a→b
+    noteNet.set(nk, cur);
+  }
+  const rowNotes = new Map<string, string[]>();
+  const addNote = (k: string, text: string) => rowNotes.set(k, [...(rowNotes.get(k) || []), text]);
+  for (const v of noteNet.values()) {
+    if (v.bales === 0) continue;
+    const [from, to] = v.bales > 0 ? [v.a, v.b] : [v.b, v.a];
+    const n = Math.abs(v.bales);
+    const label = `Thay bọc ${shortBocLabel(from)}→${shortBocLabel(to)}`;
+    addNote(groupKey(v.loaiCsr, v.nguon, to, v.banh), `+${n} bành từ ${label}`);
+    addNote(groupKey(v.loaiCsr, v.nguon, from, v.banh), `−${n} bành do ${label}`);
+  }
+  for (const [k, texts] of rowNotes) {
+    const row = stock.get(k);
+    if (row) row.ghiChu = texts.join("; ");
   }
 
   // Xuất kho: kg = số bành gán × loại bành của lô.
@@ -407,7 +512,7 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
       xuatNamKg: round2(r.xuatNamKg),
       tonKg: round2(r.tonKg),
     }))
-    .filter((r) => r.nhapNamKg > 0 || r.xuatNamKg > 0 || r.tonKg !== 0)
+    .filter((r) => r.nhapNamKg !== 0 || r.xuatNamKg !== 0 || r.tonKg !== 0 || r.ghiChu !== "")
     .sort(
       (a, b) =>
         a.loaiCsr.localeCompare(b.loaiCsr) ||
