@@ -83,7 +83,7 @@ type FullPlacement = {
   ghiChuText?: string | null
   ghiChuX?: number; ghiChuY?: number; ghiChuWidth?: number; ghiChuHeight?: number
   kyNhayX?: number; kyNhayY?: number; kyNhayWidth?: number; kyNhayHeight?: number
-  qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number
+  qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number; qrPage?: number; qrAllPages?: boolean
   // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng ở bước Phê duyệt, chỉ áp
   // dụng cho PDF (không có khái niệm tương đương cho DOCX/XLSX).
   showPrefix?: boolean
@@ -1552,6 +1552,8 @@ function SignPlacementModal({
         placement.qrY = qrPdf.y
         placement.qrWidth = qrPdf.width
         placement.qrHeight = qrPdf.height
+        placement.qrPage = 1
+        placement.qrAllPages = false
       }
 
       if (isFinalStep && signAs !== "none") {
@@ -3712,52 +3714,20 @@ export default function IsoFormInstancePage() {
                 <h2 className="text-sm font-extrabold text-slate-800">Thông tin hồ sơ</h2>
               </div>
 
-              <div className="p-5 flex-1 flex flex-col justify-between">
-                <div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <InfoRow label="Biểu mẫu gốc" value={template?.ten_tai_lieu || "—"} />
-                    <InfoRow label="Mã biểu mẫu" value={template?.ma_tai_lieu || "—"} />
-                    <InfoRow
-                      label="Loại hồ sơ"
-                      value={template?.loai_tai_lieu ? (LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu] || template.loai_tai_lieu) : "Biểu mẫu"}
-                    />
-                    <InfoRow label="Phòng ban" value={template?.phong_ban || "—"} />
-                    <InfoRow
-                      label="Người lập hồ sơ"
-                      value={instance.soan_thao || (instance.nguoi_tao ? (allApproverProfiles.find((p) => p.id === instance.nguoi_tao)?.full_name || instance.nguoi_tao) : "—")}
-                    />
-                    <InfoRow label="Ngày lập hồ sơ" value={fmtDate(instance.created_at)} />
-                    <InfoRow
-                      label="Cấp hồ sơ"
-                      value={
-                        isNStepRecord
-                          ? `${instance.so_buoc_tong || steps.length} bước ký`
-                          : instance.cap_tl || "—"
-                      }
-                    />
-                    <InfoRow
-                      label="Ngày phê duyệt"
-                      value={instance.ky_phe_duyet_at ? fmtDate(instance.ky_phe_duyet_at) : (isDone ? fmtDate(instance.updated_at) : "Chưa duyệt")}
-                    />
-                    {template?.mo_ta_tim_kiem && (
-                      <div className="sm:col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
-                        <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Mô tả biểu mẫu</dt>
-                        <dd className="text-sm text-slate-700 italic">{template.mo_ta_tim_kiem}</dd>
-                      </div>
+              <div className="p-5 flex-1 flex flex-col">
+                {/* ── Phân vùng File hồ sơ nổi bật (Được đưa lên đầu theo yêu cầu) ── */}
+                <div className="mb-5 p-4 rounded-2xl bg-gradient-to-br from-emerald-50/70 via-slate-50 to-teal-50/50 border border-emerald-200/80 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between pb-1 border-b border-emerald-100/60">
+                    <dt className="text-xs font-extrabold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                      <FileText size={15} className="text-emerald-600" />
+                      Tệp hồ sơ
+                    </dt>
+                    {instance.draft_file_url && (
+                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                        {isDone ? "✓ Hoàn thành" : "Đang xử lý"}
+                      </span>
                     )}
                   </div>
-
-                  {instance.ghi_chu && (
-                    <div className="mt-4 pt-4 border-t border-slate-100">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
-                      <p className="text-sm text-slate-700">{instance.ghi_chu}</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Phân vùng File hồ sơ nằm gọn gàng bên trong thẻ Thông tin hồ sơ */}
-                <div className="mt-5 pt-4 border-t border-slate-100 space-y-3">
-                  <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tệp hồ sơ</dt>
 
                   {/* Banner hướng dẫn khi biểu mẫu gốc chỉ có PDF */}
                   {!instance.draft_file_url && (template?.file_signed_pdf_url || template?.file_goc_url) && (
@@ -3769,7 +3739,7 @@ export default function IsoFormInstancePage() {
                         <button
                           type="button"
                           onClick={() => void openSecureFile(`/api/iso/documents/${template.id}/file-url?variant=main&download=1`)}
-                          className="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg"
+                          className="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg transition-colors"
                         >
                           <Download size={12} /> Tải PDF mẫu
                         </button>
@@ -3779,10 +3749,10 @@ export default function IsoFormInstancePage() {
 
                   {/* File đã ký duyệt (khi hoàn thành) */}
                   {isDone && (instance.final_pdf_url || instance.final_office_url) && (
-                    <div className="flex items-center gap-2.5 p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl">
-                      <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
+                    <div className="flex items-center gap-2.5 p-3.5 bg-white border border-emerald-300 rounded-xl shadow-xs">
+                      <CheckCircle2 size={22} className="text-emerald-600 shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-emerald-900 truncate">
+                        <p className="text-xs font-bold text-emerald-950 truncate">
                           {instance.tieu_de || "File đã ký duyệt"}
                         </p>
                         <p className="text-[10px] text-emerald-600 font-semibold uppercase">
@@ -3793,13 +3763,13 @@ export default function IsoFormInstancePage() {
                         <button
                           type="button"
                           onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-white hover:bg-emerald-100 border border-emerald-200 rounded-lg shadow-2xs transition-all"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg shadow-2xs transition-all"
                         >
                           <Eye size={13} /> Xem
                         </button>
                         <button
                           onClick={handleDownload}
-                          className="p-1.5 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors"
+                          className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
                           title="Tải về"
                         >
                           <Download size={14} />
@@ -3810,38 +3780,38 @@ export default function IsoFormInstancePage() {
 
                   {/* File nháp / file đang xử lý */}
                   {instance.draft_file_url && !uploading && !isDone && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                        <FileText size={20} className="text-violet-600 shrink-0" />
+                    <div className="space-y-2.5">
+                      <div className="flex items-center gap-2.5 p-3.5 bg-white border border-slate-200 hover:border-violet-300 rounded-xl shadow-xs transition-colors">
+                        <FileText size={22} className="text-violet-600 shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-slate-800 truncate">
+                          <p className="text-xs font-bold text-slate-900 truncate">
                             {instance.tieu_de || "File hồ sơ"}
                           </p>
-                          <span className="text-[10px] font-bold uppercase text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">
+                          <span className="text-[10px] font-extrabold uppercase text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">
                             {instance.draft_file_type ?? "file"}
                           </span>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
                             onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                            className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
                             title="Xem file"
                           >
-                            <Eye size={15} />
+                            <Eye size={13} /> Xem
                           </button>
                           <button
                             onClick={handleDownload}
-                            className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
+                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors border border-slate-200"
                             title="Tải về"
                           >
-                            <Download size={15} />
+                            <Download size={13} />
                           </button>
                           {canManageDraft && (
                             <button
                               onClick={() => fileInputRef.current?.click()}
                               disabled={uploading}
-                              className="flex items-center gap-1 px-2 py-1 text-xs font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-50 rounded-lg transition-colors"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 rounded-lg transition-colors border border-violet-200"
                               title="Thay file"
                             >
                               <RotateCcw size={12} /> Thay file
@@ -3853,7 +3823,7 @@ export default function IsoFormInstancePage() {
                       {/* Công tắc / checkbox Tự động chuyển sang PDF sau phê duyệt cho file DOCX/XLSX */}
                       {instance.draft_file_type !== "pdf" && (
                         <label
-                          className={`flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-white transition-all ${
+                          className={`flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-white shadow-2xs transition-all ${
                             canManageDraft ? "cursor-pointer hover:bg-slate-50 hover:border-violet-300" : "cursor-default opacity-80"
                           }`}
                         >
@@ -3916,9 +3886,9 @@ export default function IsoFormInstancePage() {
                     <div>
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="w-full py-3 border-2 border-dashed border-slate-300 hover:border-violet-300 hover:bg-violet-50 rounded-xl text-xs text-slate-500 hover:text-violet-600 transition-colors flex items-center justify-center gap-2 font-medium"
+                        className="w-full py-3.5 border-2 border-dashed border-emerald-300 hover:border-emerald-500 bg-white hover:bg-emerald-50/60 rounded-xl text-xs text-emerald-800 hover:text-emerald-900 shadow-2xs transition-all flex items-center justify-center gap-2 font-bold"
                       >
-                        <Upload size={14} />
+                        <Upload size={15} className="text-emerald-600" />
                         Tải lên file hồ sơ (.docx, .xlsx, .pdf)
                       </button>
                     </div>
@@ -3944,6 +3914,49 @@ export default function IsoFormInstancePage() {
                           dangerouslySetInnerHTML={{ __html: docxPreviewHtml }}
                         />
                       )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Bảng thông tin hồ sơ chi tiết ── */}
+                <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <InfoRow label="Biểu mẫu gốc" value={template?.ten_tai_lieu || "—"} />
+                    <InfoRow label="Mã biểu mẫu" value={template?.ma_tai_lieu || "—"} />
+                    <InfoRow
+                      label="Loại hồ sơ"
+                      value={template?.loai_tai_lieu ? (LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu] || template.loai_tai_lieu) : "Biểu mẫu"}
+                    />
+                    <InfoRow label="Phòng ban" value={template?.phong_ban || "—"} />
+                    <InfoRow
+                      label="Người lập hồ sơ"
+                      value={instance.soan_thao || (instance.nguoi_tao ? (allApproverProfiles.find((p) => p.id === instance.nguoi_tao)?.full_name || instance.nguoi_tao) : "—")}
+                    />
+                    <InfoRow label="Ngày lập hồ sơ" value={fmtDate(instance.created_at)} />
+                    <InfoRow
+                      label="Cấp hồ sơ"
+                      value={
+                        isNStepRecord
+                          ? `${instance.so_buoc_tong || steps.length} bước ký`
+                          : instance.cap_tl || "—"
+                      }
+                    />
+                    <InfoRow
+                      label="Ngày phê duyệt"
+                      value={instance.ky_phe_duyet_at ? fmtDate(instance.ky_phe_duyet_at) : (isDone ? fmtDate(instance.updated_at) : "Chưa duyệt")}
+                    />
+                    {template?.mo_ta_tim_kiem && (
+                      <div className="sm:col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
+                        <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Mô tả biểu mẫu</dt>
+                        <dd className="text-sm text-slate-700 italic">{template.mo_ta_tim_kiem}</dd>
+                      </div>
+                    )}
+                  </div>
+
+                  {instance.ghi_chu && (
+                    <div className="mt-4 pt-4 border-t border-slate-100">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
+                      <p className="text-sm text-slate-700">{instance.ghi_chu}</p>
                     </div>
                   )}
                 </div>

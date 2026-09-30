@@ -75,6 +75,8 @@ type SignPlacement = {
   qrY?: number
   qrWidth?: number
   qrHeight?: number
+  qrPage?: number
+  qrAllPages?: boolean
   // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng ở bước Phê duyệt, chỉ áp
   // dụng cho PDF (vẽ hộp riêng, không có khái niệm tương đương cho DOCX/XLSX).
   showPrefix?: boolean
@@ -136,7 +138,7 @@ async function stampPdf(
   placements: Array<{ userId: string; placement: SignPlacement; signerName: string; prefixText?: string | null }>,
   factoryId: string,
   qrUrl: string | null,
-  qrPlacementOverride?: { x: number; y: number; width: number; height: number; page: number } | null,
+  qrPlacementOverride?: { x: number; y: number; width: number; height: number; page?: number; allPages?: boolean } | null,
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.load(pdfBytes)
   pdfDoc.registerFontkit(fontkit)
@@ -156,9 +158,21 @@ async function stampPdf(
       const qrImage = await pdfDoc.embedPng(qrBuffer)
 
       if (qrPlacementOverride) {
-        // Stamp QR ở vị trí người dùng đặt trên TẤT CẢ trang
-        for (const page of pdfDoc.getPages()) {
-          page.drawImage(qrImage, {
+        if (qrPlacementOverride.allPages) {
+          // Stamp QR ở vị trí người dùng đặt trên TẤT CẢ trang nếu được cấu hình
+          for (const page of pdfDoc.getPages()) {
+            page.drawImage(qrImage, {
+              x: qrPlacementOverride.x,
+              y: qrPlacementOverride.y,
+              width: qrPlacementOverride.width,
+              height: qrPlacementOverride.height,
+            })
+          }
+        } else {
+          // Stamp QR ở vị trí người dùng đặt trên ĐÚNG TRANG chỉ định (mặc định trang 1)
+          const targetPageIndex = Math.max(0, Math.min(pdfDoc.getPageCount() - 1, (qrPlacementOverride.page ?? 1) - 1))
+          const targetPage = pdfDoc.getPage(targetPageIndex)
+          targetPage.drawImage(qrImage, {
             x: qrPlacementOverride.x,
             y: qrPlacementOverride.y,
             width: qrPlacementOverride.width,
@@ -570,7 +584,8 @@ export async function POST(
           y: effectivePlacement.qrY,
           width: effectivePlacement.qrWidth ?? 54,
           height: effectivePlacement.qrHeight ?? 54,
-          page: effectivePlacement.page ?? 1,
+          page: effectivePlacement.qrPage ?? effectivePlacement.page ?? 1,
+          allPages: Boolean(effectivePlacement.qrAllPages),
         }
       }
 
@@ -970,7 +985,8 @@ export async function POST(
             y: soanThaoPlacement.qrY!,
             width: soanThaoPlacement.qrWidth ?? 54,
             height: soanThaoPlacement.qrHeight ?? 54,
-            page: 1,
+            page: soanThaoPlacement.qrPage ?? soanThaoPlacement.page ?? 1,
+            allPages: Boolean(soanThaoPlacement.qrAllPages),
           }
         : null
 
@@ -984,7 +1000,14 @@ export async function POST(
       const fileBytes = await downloadFile(sourceUrl)
       const qrFromCurrent =
         typeof placement.qrX === "number"
-          ? { x: placement.qrX!, y: placement.qrY!, width: placement.qrWidth ?? 54, height: placement.qrHeight ?? 54, page: 1 }
+          ? {
+              x: placement.qrX!,
+              y: placement.qrY!,
+              width: placement.qrWidth ?? 54,
+              height: placement.qrHeight ?? 54,
+              page: placement.qrPage ?? placement.page ?? 1,
+              allPages: Boolean(placement.qrAllPages),
+            }
           : null
 
       let signedBytes: Uint8Array

@@ -518,6 +518,28 @@ export default function SignTemplateEditorPage() {
     thu_tu_ky_json?: Array<{ user_id?: string; ten?: string }> | null
   } | null>(null)
 
+  const formattedLoaiTitle = useMemo(() => {
+    if (!activeLoai) return ""
+    if (activeLoai.startsWith("iso:code:")) {
+      return `Biểu mẫu ${activeLoai.slice("iso:code:".length)}`
+    }
+    if (activeLoai.startsWith("iso:loai:")) {
+      return `Loại ${activeLoai.slice("iso:loai:".length)}`
+    }
+    return activeLoai
+  }, [activeLoai])
+
+  const formattedLoaiBadge = useMemo(() => {
+    if (!activeLoai) return ""
+    if (activeLoai.startsWith("iso:code:")) {
+      return activeLoai.slice("iso:code:".length)
+    }
+    if (activeLoai.startsWith("iso:loai:")) {
+      return activeLoai.slice("iso:loai:".length)
+    }
+    return activeLoai
+  }, [activeLoai])
+
   // Kiểm tra tài liệu hiện tại có được miễn trừ quy tắc ký đủ 3 khung (Biểu mẫu F, Phụ lục HD/PL, hồ sơ con)
   const isExemptIsoDoc = useMemo(() => {
     if (!isIso) return false
@@ -2436,15 +2458,16 @@ export default function SignTemplateEditorPage() {
   )
 
   return (
-    <div className="flex flex-col h-screen bg-[#f2f8f5]">
+    <div className="flex flex-col h-[100dvh] min-h-[100dvh] bg-[#f2f8f5]">
       {/* Top bar */}
-      <div className="text-white px-3 sm:px-5 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3" style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}>
-        <div className="flex flex-col gap-0.5 sm:gap-1 min-w-0 max-w-[50%] sm:max-w-none">
+      <div className="text-white px-3 sm:px-5 py-2 sm:py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 shrink-0" style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}>
+        {/* Desktop view */}
+        <div className="hidden sm:flex flex-col gap-0.5 sm:gap-1 min-w-0">
           <div className="text-[10px] sm:text-[11px] opacity-75 truncate">
-            {isIso ? "Cài đặt vị trí ký ISO" : "Cài đặt vị trí ký"} · {activeLoai}
+            {isIso ? "Cài đặt vị trí ký ISO" : "Cài đặt vị trí ký"} · {formattedLoaiTitle}
           </div>
           <div className="text-sm sm:text-base font-bold flex items-center gap-1.5 sm:gap-2 truncate">
-            <span className="font-mono text-[11px] sm:text-xs bg-white/15 px-1.5 sm:px-2 py-0.5 rounded shrink-0">{activeLoai}</span>
+            <span className="font-mono text-[11px] sm:text-xs bg-white/15 px-1.5 sm:px-2 py-0.5 rounded shrink-0">{formattedLoaiBadge}</span>
             <span className="truncate">{activeDocLabel}</span>
             {isCurrentDocFullyPlaced ? (
               <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/25 text-emerald-200 border border-emerald-400/40 font-bold shrink-0 flex items-center gap-1">
@@ -2461,7 +2484,62 @@ export default function SignTemplateEditorPage() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+
+        {/* Mobile view: Row 1 (Title + Action Buttons) */}
+        <div className="flex sm:hidden items-center justify-between gap-2 w-full">
+          <div className="text-xs font-bold truncate">
+            {isIso ? "Cài đặt vị trí ký ISO" : "Cài đặt vị trí"}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={handleCancel} className="px-2 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
+              Huỷ
+            </button>
+            <button
+              onClick={resetToBlankTemplate}
+              className="px-2 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-amber-200 hover:text-amber-100"
+              title="Xóa toàn bộ các khung đã đặt và tạo mẫu mới từ đầu"
+            >
+              Mới
+            </button>
+            {templateExisted && (
+              <button onClick={resetToSaved} className="px-2 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
+                Đặt lại
+              </button>
+            )}
+            <button
+              onClick={() => void handleConfirmAndSend()}
+              disabled={saving}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-white text-[#1c3a32] hover:bg-emerald-50 disabled:opacity-50 shadow-xs"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+              <span>{returnTo ? "Gửi đi" : "Lưu"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile view: Row 2 (Badge + Doc Label + Status) */}
+        <div className="flex sm:hidden items-center justify-between gap-2 pt-1 border-t border-white/10 w-full text-xs">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
+            <span className="font-mono text-[10px] font-bold bg-white/20 px-1.5 py-0.5 rounded shrink-0">{formattedLoaiBadge}</span>
+            <span className="truncate text-white/90 text-[11px] font-medium">{activeDocLabel}</span>
+          </div>
+          {isCurrentDocFullyPlaced ? (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 font-bold shrink-0">
+              ✓ Đã đặt
+            </span>
+          ) : isCurrentDocPartiallyPlaced ? (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-amber-500/30 text-amber-200 border border-amber-400/40 font-bold shrink-0">
+              ⚠ Thiếu {missingRequired.length} bước
+            </span>
+          ) : (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-white/10 text-white/70 border border-white/20 font-bold shrink-0">
+              • Chưa đặt
+            </span>
+          )}
+        </div>
+
+        {/* Desktop buttons */}
+        <div className="hidden sm:flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button onClick={handleCancel} className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
             Huỷ
           </button>
