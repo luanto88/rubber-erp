@@ -98,6 +98,9 @@ type SignPlacement = {
     x: number; y: number; width: number; height: number
     showSignature: boolean; showSignerName: boolean
     nameX: number; nameY: number; nameWidth: number; nameHeight: number
+    showChucVu?: boolean
+    chucVuX?: number; chucVuY?: number; chucVuWidth?: number; chucVuHeight?: number
+    chucVuText?: string
   }>
 }
 type ElemState = { x: number; y: number; w: number; h: number }
@@ -283,6 +286,7 @@ function SignPlacementModal({
   lockedQrAdjustable,
   lockedPrefixText,
   signerChucVu,
+  signerChucVuByKey,
   placementAll,
   signStepKey,
   signedStepKeys,
@@ -324,6 +328,7 @@ function SignPlacementModal({
   lockedPrefixText: string
   /** Chức vụ thật của người ký — quyết định có khối "chức danh" để kéo hay không. */
   signerChucVu: string
+  signerChucVuByKey?: { chinh_quyen?: string; kiem_nhiem?: string } | null
   /**
    * TOÀN BỘ `placement_ky` của văn bản — CHỈ để vẽ xem trước (thumbnail + lớp mờ trên canvas),
    * giúp người ký thấy khung của mình nằm ở trang nào và bố cục chữ ký chung của cả văn bản.
@@ -407,7 +412,8 @@ function SignPlacementModal({
     id: number
     sigX: number; sigY: number; sigW: number; sigH: number
     nameX: number; nameY: number; nameW: number; nameH: number
-    showSignature: boolean; showSignerName: boolean
+    cvX: number; cvY: number; cvW: number; cvH: number
+    showSignature: boolean; showSignerName: boolean; showChucVu: boolean
   }>>([])
 
   // ── Chế độ "vị trí CỨNG": 3 khối con xê dịch trong khung mẫu ────────────────
@@ -420,12 +426,22 @@ function SignPlacementModal({
   const [ghiChuOff, setGhiChuOff] = useState(false)
   const [confirmError, setConfirmError] = useState("")
 
+  const resolveBoxChucVu = useCallback((box: TemplateSignBox) => {
+    if (box.chuc_vu_key === "kiem_nhiem") {
+      return signerChucVuByKey?.kiem_nhiem || signerChucVu
+    }
+    if (box.chuc_vu_key === "doan_the") {
+      return "Chức danh đoàn thể"
+    }
+    return signerChucVuByKey?.chinh_quyen || signerChucVu
+  }, [signerChucVu, signerChucVuByKey])
+
   useEffect(() => {
     if (!lockedEntry) { setLockedLayouts([]); return }
     setLockedLayouts(
-      lockedEntry.boxes.map((box) => buildDefaultLockedLayout(box, signerChucVu, lockedPrefixText)),
+      lockedEntry.boxes.map((box) => buildDefaultLockedLayout(box, resolveBoxChucVu(box), lockedPrefixText)),
     )
-  }, [lockedEntry, signerChucVu, lockedPrefixText])
+  }, [lockedEntry, resolveBoxChucVu, lockedPrefixText])
 
   useEffect(() => {
     if (!lockedGhiChuBox) { setNoteLayout(null); return }
@@ -809,12 +825,16 @@ function SignPlacementModal({
       placementObj.extraPlacements = extraSigBoxes.map((box) => {
         const sPdf = toPdf(box.sigX, box.sigY, box.sigW, box.sigH)
         const nPdf = toPdf(box.nameX, box.nameY, box.nameW, box.nameH)
+        const cPdf = toPdf(box.cvX, box.cvY, box.cvW, box.cvH)
         return {
           page: currentPage,
           x: sPdf.x, y: sPdf.y, width: sPdf.width, height: sPdf.height,
           showSignature: box.showSignature,
           showSignerName: box.showSignerName,
           nameX: nPdf.x, nameY: nPdf.y, nameWidth: nPdf.width, nameHeight: nPdf.height,
+          showChucVu: box.showChucVu && !!signerChucVu,
+          chucVuX: cPdf.x, chucVuY: cPdf.y, chucVuWidth: cPdf.width, chucVuHeight: cPdf.height,
+          chucVuText: signerChucVu,
         }
       })
     }
@@ -933,8 +953,13 @@ function SignPlacementModal({
                     nameY: nameState.y + offset,
                     nameW: nameState.w,
                     nameH: nameState.h,
+                    cvX: nameState.x + offset,
+                    cvY: nameState.y + offset + 26,
+                    cvW: nameState.w,
+                    cvH: 18,
                     showSignature: true,
                     showSignerName: true,
+                    showChucVu: !!signerChucVu,
                   },
                 ])
               }}
@@ -1155,9 +1180,9 @@ function SignPlacementModal({
                           size={{ width: sigState.w, height: sigState.h }}
                           onResizeStop={(_, __, ___, delta) =>
                             setSigState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          enable={showSig ? { right: true, bottom: true, bottomRight: true } : false}
                           minWidth={40} minHeight={20}
-                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#d97706" title="Kéo để co giãn khung chữ ký" /> }}
+                          handleComponent={showSig ? { bottomRight: <ResizeHandleIcon color="#d97706" title="Kéo để co giãn khung chữ ký" /> } : undefined}
                           handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                           handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                         >
@@ -1207,8 +1232,13 @@ function SignPlacementModal({
                                       nameY: nameState.y + offset,
                                       nameW: nameState.w,
                                       nameH: nameState.h,
+                                      cvX: nameState.x + offset,
+                                      cvY: nameState.y + offset + 26,
+                                      cvW: nameState.w,
+                                      cvH: 18,
                                       showSignature: true,
                                       showSignerName: true,
+                                      showChucVu: !!signerChucVu,
                                     },
                                   ])
                                 }}
@@ -1236,9 +1266,9 @@ function SignPlacementModal({
                           size={{ width: nameState.w, height: nameState.h }}
                           onResizeStop={(_, __, ___, delta) =>
                             setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          enable={showName ? { right: true, bottom: true, bottomRight: true } : false}
                           minWidth={60} minHeight={16}
-                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung họ tên" /> }}
+                          handleComponent={showName ? { bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung họ tên" /> } : undefined}
                           handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                           handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                         >
@@ -1280,8 +1310,13 @@ function SignPlacementModal({
                                       nameY: nameState.y + offset,
                                       nameW: nameState.w,
                                       nameH: nameState.h,
+                                      cvX: nameState.x + offset,
+                                      cvY: nameState.y + offset + 26,
+                                      cvW: nameState.w,
+                                      cvH: 18,
                                       showSignature: true,
                                       showSignerName: true,
+                                      showChucVu: !!signerChucVu,
                                     },
                                   ])
                                 }}
@@ -1368,9 +1403,9 @@ function SignPlacementModal({
                             size={{ width: box.sigW, height: box.sigH }}
                             onResizeStop={(_, __, ___, delta) =>
                               setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, sigW: b.sigW + delta.width, sigH: b.sigH + delta.height } : b))}
-                            enable={{ right: true, bottom: true, bottomRight: true }}
+                            enable={box.showSignature ? { right: true, bottom: true, bottomRight: true } : false}
                             minWidth={40} minHeight={20}
-                            handleComponent={{ bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung chữ ký bản sao" /> }}
+                            handleComponent={box.showSignature ? { bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung chữ ký bản sao" /> } : undefined}
                             handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                             handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                           >
@@ -1424,9 +1459,9 @@ function SignPlacementModal({
                             size={{ width: box.nameW, height: box.nameH }}
                             onResizeStop={(_, __, ___, delta) =>
                               setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
-                            enable={{ right: true, bottom: true, bottomRight: true }}
+                            enable={box.showSignerName ? { right: true, bottom: true, bottomRight: true } : false}
                             minWidth={60} minHeight={16}
-                            handleComponent={{ bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung họ tên bản sao" /> }}
+                            handleComponent={box.showSignerName ? { bottomRight: <ResizeHandleIcon color="#2563eb" title="Kéo để co giãn khung họ tên bản sao" /> } : undefined}
                             handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                             handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                           >
@@ -1451,6 +1486,44 @@ function SignPlacementModal({
                             </div>
                           </Resizable>
                         </ExtraDraggableBox>
+
+                        {signerChucVu && (
+                          <ExtraDraggableBox
+                            position={{ x: box.cvX, y: box.cvY }}
+                            onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, cvX: d.x, cvY: d.y } : b))}
+                          >
+                            <Resizable
+                              size={{ width: box.cvW, height: box.cvH }}
+                              onResizeStop={(_, __, ___, delta) =>
+                                setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, cvW: b.cvW + delta.width, cvH: b.cvH + delta.height } : b))}
+                              enable={box.showChucVu ? { right: true, bottom: true, bottomRight: true } : false}
+                              minWidth={60} minHeight={16}
+                              handleComponent={box.showChucVu ? { bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung chức vụ bản sao" /> } : undefined}
+                              handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
+                              handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                            >
+                              <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/70 rounded relative select-none flex items-center justify-center">
+                                {box.showChucVu ? (
+                                  <span className="text-[10px] font-medium text-violet-700 truncate px-1">{signerChucVu}</span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400">Ẩn chức vụ bản sao</span>
+                                )}
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onTouchStart={(e) => e.stopPropagation()}
+                                  onTouchEnd={(e) => e.stopPropagation()}
+                                  onClick={(e) => { e.stopPropagation(); setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, showChucVu: !b.showChucVu } : b)) }}
+                                  className="absolute -top-3 -right-3 w-7 h-7 sm:w-5 sm:h-5 bg-white border border-slate-200 rounded-full shadow flex items-center justify-center hover:bg-slate-50 text-slate-600 active:scale-95 transition-transform"
+                                  style={{ zIndex: 20 }}
+                                  title={box.showChucVu ? "Ẩn chức vụ bản sao" : "Hiện chức vụ bản sao"}
+                                >
+                                  {box.showChucVu ? <EyeOff size={12} /> : <Eye size={12} />}
+                                </button>
+                              </div>
+                            </Resizable>
+                          </ExtraDraggableBox>
+                        )}
                       </Fragment>
                     ))}
                   </>
@@ -1470,7 +1543,8 @@ function SignPlacementModal({
                       // Thẻ Tên/Chức vụ/Tiền tố LUÔN hiện khi mẫu cho phép — tắt thì chuyển xám mờ
                       // + gạch ngang chứ không biến mất, để icon mắt trên thẻ còn bấm bật lại được.
                       const nameCan = box.show_name && layout.name ? toCanvas(layout.name) : null
-                      const allowChucVu = box.show_chuc_vu && !!signerChucVu
+                      const boxChucVuText = resolveBoxChucVu(box)
+                      const allowChucVu = box.show_chuc_vu && !!boxChucVuText
                       const chucVuCan = allowChucVu && layout.chuc_vu ? toCanvas(layout.chuc_vu) : null
                       return (
                         <div
@@ -1534,9 +1608,9 @@ function SignPlacementModal({
                                 size={{ width: nameCan.w, height: nameCan.h }}
                                 onResizeStop={(_, __, ___, delta) =>
                                   setLockedRect(idx, "name", nameCan.x, nameCan.y, nameCan.w + delta.width, nameCan.h + delta.height)}
-                                enable={{ right: true, bottom: true, bottomRight: true }}
+                                enable={layout.show_name ? { right: true, bottom: true, bottomRight: true } : false}
                                 minWidth={30} minHeight={10}
-                                handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung họ tên" /> }}
+                                handleComponent={layout.show_name ? { bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung họ tên" /> } : undefined}
                                 handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                                 handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                               >
@@ -1566,9 +1640,9 @@ function SignPlacementModal({
                                 size={{ width: chucVuCan.w, height: chucVuCan.h }}
                                 onResizeStop={(_, __, ___, delta) =>
                                   setLockedRect(idx, "chuc_vu", chucVuCan.x, chucVuCan.y, chucVuCan.w + delta.width, chucVuCan.h + delta.height)}
-                                enable={{ right: true, bottom: true, bottomRight: true }}
+                                enable={layout.show_chuc_vu ? { right: true, bottom: true, bottomRight: true } : false}
                                 minWidth={30} minHeight={10}
-                                handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung chức danh" /> }}
+                                handleComponent={layout.show_chuc_vu ? { bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung chức danh" /> } : undefined}
                                 handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                                 handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                               >
@@ -1579,7 +1653,7 @@ function SignPlacementModal({
                                   onToggle={() => toggleLockedBlock(idx, "chuc_vu")}
                                   toggleTitle={layout.show_chuc_vu ? "Ẩn chức danh" : "Hiện lại chức danh"}
                                 >
-                                  {signerChucVu}
+                                  {boxChucVuText}
                                 </SignBlockCard>
                               </Resizable>
                             </ExtraDraggableBox>
@@ -1599,9 +1673,9 @@ function SignPlacementModal({
                                   size={{ width: preCan.w, height: preCan.h }}
                                   onResizeStop={(_, __, ___, delta) =>
                                     setLockedRect(idx, "prefix", preCan.x, preCan.y, preCan.w + delta.width, preCan.h + delta.height)}
-                                  enable={{ right: true, bottom: true, bottomRight: true }}
+                                  enable={layout.show_prefix ? { right: true, bottom: true, bottomRight: true } : false}
                                   minWidth={24} minHeight={10}
-                                  handleComponent={{ bottomRight: <ResizeHandleIcon color="#ea580c" title="Kéo để co giãn khung tiền tố ký thay" /> }}
+                                  handleComponent={layout.show_prefix ? { bottomRight: <ResizeHandleIcon color="#ea580c" title="Kéo để co giãn khung tiền tố ký thay" /> } : undefined}
                                   handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                                   handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                                 >
@@ -2074,20 +2148,16 @@ export default function DocumentDetailPage() {
   // này, gửi thẳng như cũ. Đây CHỈ là điều hướng UI — chưa đụng gì tới
   // api/documents/sign/route.ts hay logic đóng dấu PDF thật.
   const handleGuiKy = async () => {
-    if (doc && docExt === "pdf" && docSourceUrl && doc.loai_van_ban) {
-      // Vá bảo mật 2026-09-20: `pdfUrl` không còn là URL public thô — màn "Cài đặt vị trí ký"
-      // tự `pdfjs.getDocument({url: pdfUrl})` trong trình duyệt, nên phải là Signed URL (bucket
-      // iso-documents sẽ chuyển private). `handleReplaceFile` đã persist DB ngay khi upload nên
-      // không có race condition "vừa thay file nhưng DB chưa kịp cập nhật" cần xử lý thêm.
+    if (doc && docExt === "pdf" && docSourceUrl) {
       const result = await fetchSecureUrl(`/api/documents/${doc.id}/file-url`)
       if (!result.ok) {
         setActionError(result.error)
         return
       }
       const qs = new URLSearchParams({
-        loai: doc.loai_van_ban,
+        loai: doc.loai_van_ban || doc.phong_ban || "KHONG_MA",
         pdfUrl: result.url,
-        docLabel: doc.ten_van_ban || doc.ma_van_ban || doc.loai_van_ban,
+        docLabel: doc.ten_van_ban || doc.ma_van_ban || doc.loai_van_ban || "Văn bản nội bộ",
         returnTo: `/dashboard/documents/${doc.id}`,
         docId: doc.id,
       })
@@ -2129,6 +2199,7 @@ export default function DocumentDetailPage() {
   // hiển thị/kéo hay không. Tái dùng đúng route mà màn "Cài đặt vị trí ký" đang dùng
   // (maintenance_staff.chuc_vu_chinh_quyen || chuc_vu qua profile_id), không tự tra kiểu khác.
   const [signerChucVu, setSignerChucVu] = useState("")
+  const [signerChucVuByKey, setSignerChucVuByKey] = useState<{ chinh_quyen?: string; kiem_nhiem?: string } | null>(null)
 
   useEffect(() => {
     const uid = user?.id
@@ -2142,8 +2213,12 @@ export default function DocumentDetailPage() {
         { headers: { Authorization: `Bearer ${token}` } },
       )
       if (!res.ok) return
-      const rows = (await res.json()) as Array<{ id: string; chuc_vu: string }>
-      if (!cancelled) setSignerChucVu(rows.find((r) => r.id === uid)?.chuc_vu || "")
+      const rows = (await res.json()) as Array<{ id: string; chuc_vu: string; chuc_vu_by_key?: { chinh_quyen?: string; kiem_nhiem?: string } }>
+      const found = rows.find((r) => r.id === uid)
+      if (!cancelled) {
+        setSignerChucVu(found?.chuc_vu || "")
+        setSignerChucVuByKey(found?.chuc_vu_by_key || null)
+      }
     }
     void load().catch(() => {})
     return () => { cancelled = true }
@@ -2817,6 +2892,7 @@ export default function DocumentDetailPage() {
           lockedQrAdjustable={signQrAdjustable}
           lockedPrefixText={signPrefixText}
           signerChucVu={signerChucVu}
+          signerChucVuByKey={signerChucVuByKey}
           placementAll={(doc.placement_ky as Record<string, unknown> | null) ?? null}
           signStepKey={signStepKey}
           signedStepKeys={signedStepKeys}

@@ -369,8 +369,12 @@ export default function NewDocumentPage() {
   const handleSave = async () => {
     if (!factoryId || !userId) return
 
-    if (!form.loai_van_ban || !form.phong_ban || !form.ten_van_ban.trim()) {
-      setSaveError("Vui lòng điền đầy đủ: Loại văn bản, Phòng ban, Tên văn bản.")
+    if ((!khongCoMa && !form.loai_van_ban) || !form.phong_ban || !form.ten_van_ban.trim()) {
+      setSaveError(
+        !khongCoMa
+          ? "Vui lòng điền đầy đủ: Loại văn bản, Phòng ban, Tên văn bản."
+          : "Vui lòng điền đầy đủ: Phòng ban, Tên văn bản.",
+      )
       return
     }
     if (form.pham_vi === "Don_vi") {
@@ -491,7 +495,7 @@ export default function NewDocumentPage() {
         factory_id: factoryId,
         ma_van_ban: khongCoMa ? null : finalMa,
         ten_van_ban: form.ten_van_ban.trim(),
-        loai_van_ban: form.loai_van_ban,
+        loai_van_ban: khongCoMa ? null : (form.loai_van_ban || null),
         phong_ban: form.phong_ban,
         so_van_ban: finalSoStr,
         nam: new Date().getFullYear(),
@@ -666,27 +670,51 @@ export default function NewDocumentPage() {
                 onCheDoXemChange={(val) => setForm((f) => ({ ...f, che_do_xem: val }))}
               />
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    Loại văn bản <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-                    value={form.loai_van_ban}
+              <div className="mb-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={khongCoMa}
                     onChange={(e) => {
-                      setForm((f) => ({ ...f, loai_van_ban: e.target.value }))
-                      setMaVanBanEdited(false)
+                      const checked = e.target.checked
+                      setKhongCoMa(checked)
+                      if (checked) {
+                        setMaVanBan("")
+                        setMaVanBanEdited(false)
+                        setForm((f) => ({ ...f, loai_van_ban: "" }))
+                      }
                     }}
-                  >
-                    <option value="">— Chọn loại —</option>
-                    {docTypes.map((t) => (
-                      <option key={t.code} value={t.code}>
-                        {t.name} ({t.ky_hieu})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    className="rounded"
+                  />
+                  <span className="text-xs font-bold text-slate-600">
+                    Văn bản này không có mã (VD: danh sách, chứng nhận không theo khuôn số)
+                  </span>
+                </label>
+              </div>
+
+              <div className={khongCoMa ? "grid grid-cols-1 gap-4" : "grid grid-cols-2 gap-4"}>
+                {!khongCoMa && (
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                      Loại văn bản <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                      value={form.loai_van_ban}
+                      onChange={(e) => {
+                        setForm((f) => ({ ...f, loai_van_ban: e.target.value }))
+                        setMaVanBanEdited(false)
+                      }}
+                    >
+                      <option value="">— Chọn loại —</option>
+                      {docTypes.map((t) => (
+                        <option key={t.code} value={t.code}>
+                          {t.name} ({t.ky_hieu})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">
                     Phòng ban soạn thảo <span className="text-red-500">*</span>
@@ -707,35 +735,7 @@ export default function NewDocumentPage() {
                 </div>
               </div>
 
-              {/* Bug 2: Editable mã văn bản với cảnh báo — checkbox "không có mã" luôn hiện,
-                  không chờ chọn xong Loại VB + Phòng ban mới hiện (2 trường đó chỉ cần thiết
-                  để auto-sinh/preview mã, không cần thiết để quyết định có-mã-hay-không). */}
               <div>
-                <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={khongCoMa}
-                    onChange={(e) => {
-                      const checked = e.target.checked
-                      setKhongCoMa(checked)
-                      if (checked) {
-                        setMaVanBan("")
-                        setMaVanBanEdited(false)
-                      }
-                    }}
-                    className="rounded"
-                  />
-                  <span className="text-xs font-bold text-slate-600">
-                    Văn bản này không có mã (VD: danh sách, chứng nhận không theo khuôn số)
-                  </span>
-                </label>
-                {khongCoMa && (
-                  <p className="mb-2 text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 leading-snug">
-                    Vẫn cần chọn <strong>Loại văn bản</strong>: ngoài việc sinh mã, nó là khóa để hệ
-                    thống chọn đúng <strong>mẫu vị trí ký</strong> cho văn bản này, và dùng để lọc,
-                    thống kê, tìm kiếm bằng AI.
-                  </p>
-                )}
                 {!khongCoMa && form.loai_van_ban && form.phong_ban && (
                   <>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">

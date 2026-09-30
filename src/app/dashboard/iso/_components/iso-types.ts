@@ -579,6 +579,8 @@ export type ExtraSignPlacement = {
 }
 
 export type SignPlacement = ExtraSignPlacement & {
+  qrPage?: number
+  qrAllPages?: boolean
   qrX?: number
   qrY?: number
   qrWidth?: number

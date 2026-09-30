@@ -27,6 +27,7 @@ import {
   drawSignPrefix,
   drawExtraPlacements,
   VAN_BAN_SIGNER_NAME_STYLE,
+  type ExtraSignaturePlacement,
 } from "@/lib/signing/stamp-pdf"
 import { getLatestSignTemplate } from "@/lib/signing/templates"
 import {
@@ -67,6 +68,12 @@ type SignPlacement = {
   nameY?: number
   nameWidth?: number
   nameHeight?: number
+  showChucVu?: boolean
+  chucVuX?: number
+  chucVuY?: number
+  chucVuWidth?: number
+  chucVuHeight?: number
+  chucVuText?: string | null
   // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ áp dụng cho PDF, vẽ tách biệt khỏi
   // tên người ký. Không có khái niệm tương đương cho DOCX/XLSX (theo yêu cầu nghiệp vụ).
   showPrefix?: boolean
@@ -83,19 +90,7 @@ type SignPlacement = {
   qrY?: number
   qrWidth?: number
   qrHeight?: number
-  extraPlacements?: Array<{
-    page: number
-    x: number
-    y: number
-    width: number
-    height: number
-    showSignature?: boolean
-    showSignerName?: boolean
-    nameX?: number
-    nameY?: number
-    nameWidth?: number
-    nameHeight?: number
-  }>
+  extraPlacements?: Array<ExtraSignaturePlacement>
 }
 
 // Vị trí QR đã "chốt" cho cả văn bản — lưu tại placement_ky.qr, thiết lập đúng 1 lần
@@ -493,7 +488,7 @@ async function stampPdfStep(
   if (sigBuf) await drawSignatureImage(pdfDoc, page, sigBuf, effectiveBox)
   drawSignerName(page, signerName, effectiveBox, signerFont, VAN_BAN_SIGNER_NAME_STYLE)
   drawSignPrefix(page, prefixText, placement ?? {}, signerFont)
-  await drawExtraPlacements(pdfDoc, placement?.extraPlacements, sigBuf, signerName, signerFont, VAN_BAN_SIGNER_NAME_STYLE)
+  await drawExtraPlacements(pdfDoc, placement?.extraPlacements, sigBuf, signerName, signerFont, VAN_BAN_SIGNER_NAME_STYLE, placement?.chucVuText)
 
   // QR trỏ về trang chi tiết văn bản — vẽ trên TẤT CẢ trang. Ưu tiên vị trí người
   // ký đã kéo-thả chọn ở lượt ký đầu tiên (qrBox, đã "chốt" trong placement_ky.qr —
@@ -664,9 +659,18 @@ async function performFileStamp(
         }
       }
     } else {
-      // Luồng cũ (văn bản gửi ký trước khi có mẫu, hoặc mẫu thiếu khung cho đúng bước này) —
-      // giữ nguyên tuyệt đối, người ký tự kéo-thả như trước.
+      // Luồng cũ (văn bản gửi ký trước khi có mẫu hoặc có placement tự do)
       const placement = (d.placement_ky?.[stepKey] as SignPlacement | undefined) ?? null
+      const hasTemplateConfig = !!(
+        d.placement_ky &&
+        (d.placement_ky._mau || Object.keys(d.placement_ky).some((k) => k.startsWith("ky_buoc") || k === "phe_duyet"))
+      )
+      if (hasTemplateConfig && !placement) {
+        throw new Error(`Bước ký ${stepKey} chưa được cài đặt vị trí trong mẫu ký của văn bản.`)
+      }
+      if (!placement) {
+        throw new Error(`Chưa có vị trí ký cho bước này. Vui lòng liên hệ người tạo để cấu hình vị trí ký.`)
+      }
       // Kịch bản hỗn hợp: văn bản đã chốt mẫu nhưng mẫu thiếu khung cho ĐÚNG bước này → bước
       // này ký theo luồng cũ, nhưng QR vẫn phải dùng vị trí trong mẫu (entry qr có shape
       // {tu_mau, boxes}, không phải QrBox) — nếu không sẽ rơi về góc trên-phải và sinh QR thứ 2.
@@ -973,11 +977,12 @@ export async function POST(req: NextRequest) {
       // lượt "Gửi ký" của văn bản nguồn PDF đều vừa đi qua màn /dashboard/ky/mau-vi-tri nên mẫu
       // chắc chắn đã được người soạn thảo xem lại/xác nhận. Snapshot (không join sống) để admin
       // sửa mẫu giữa chừng không làm lệch vị trí của văn bản đang luân chuyển dở.
-      // Lỗi đọc mẫu KHÔNG chặn gửi ký — rơi về {} như luồng cũ (người ký tự kéo-thả).
       let seededPlacementKy: Record<string, unknown> = {}
+      const isPdfSource = getFileExt(d.file_goc_url) === "pdf"
       try {
-        if (d.loai_van_ban && getFileExt(d.file_goc_url) === "pdf") {
-          const template = await getLatestSignTemplate(factoryId, d.loai_van_ban)
+        if (isPdfSource) {
+          const templateKey = d.loai_van_ban || d.phong_ban || "KHONG_MA"
+          const template = await getLatestSignTemplate(factoryId, templateKey)
           if (template?.khung?.length) {
             seededPlacementKy =
               buildPlacementKyFromTemplate({
@@ -992,6 +997,16 @@ export async function POST(req: NextRequest) {
         seededPlacementKy = {}
       }
 
+      const effectivePlacementKy =
+        Object.keys(seededPlacementKy).length > 0 ? seededPlacementKy : (d.placement_ky || {})
+
+      if (isPdfSource && Object.keys(effectivePlacementKy).length === 0) {
+        return NextResponse.json(
+          { error: "Văn bản PDF chưa được cài đặt vị trí ký. Vui lòng vào màn Cài đặt vị trí ký để thiết lập trước khi gửi đi." },
+          { status: 400 },
+        )
+      }
+
       // Dọn sạch toàn bộ dữ liệu ký của vòng trước (nếu có) — bắt buộc kể cả khi văn bản
       // chưa từng được ký lần nào (draft → gui_ky lần đầu, các field này vốn đã rỗng nên
       // ghi đè không đổi gì). Nếu không dọn, timeline sẽ hiển thị nhầm các bước cũ (trước
@@ -1003,7 +1018,7 @@ export async function POST(req: NextRequest) {
           trang_thai: nextStatus,
           buoc_hien_tai: 0,
           nguoi_ky: {},
-          placement_ky: seededPlacementKy,
+          placement_ky: effectivePlacementKy,
           file_signed_pdf_url: null,
           file_signed_office_url: null,
           file_signed_office_type: null,
@@ -1084,6 +1099,19 @@ export async function POST(req: NextRequest) {
       // lần lúc vẽ), BỎ QUA sign_as client gửi lên. Quy tắc cũ giữ nguyên: chỉ áp dụng ký thay
       // cho bước phong_ban (Phó ký thay) — ca_nhan đã đích danh 1 người, không có "ký thay".
       const lockedStep = getTemplateStepPlacement(d.placement_ky, String(stepIndex + 1))
+      const isPdfStep = getFileExt(d.file_signed_office_url || d.file_signed_pdf_url || d.file_goc_url) === "pdf"
+      const hasTemplateConfig = !!(
+        d.placement_ky &&
+        (d.placement_ky._mau || Object.keys(d.placement_ky).some((k) => k.startsWith("ky_buoc") || k === "phe_duyet"))
+      )
+      if (isPdfStep && hasTemplateConfig && !lockedStep) {
+        return NextResponse.json(
+          {
+            error: `Bước ${stepIndex + 1} chưa được cài đặt vị trí trong mẫu ký của văn bản. Vui lòng liên hệ người tạo để cấu hình vị trí ký.`,
+          },
+          { status: 400 },
+        )
+      }
       const rawSignAs: unknown = lockedStep ? lockedStep.sign_as : sign_as
       const signAsFromTemplate: SignAsType =
         step.type === "phong_ban" && isValidSignAs(rawSignAs) ? rawSignAs : "none"
@@ -1183,6 +1211,19 @@ export async function POST(req: NextRequest) {
       // hiển thị đúng lịch sử, nhưng không còn ghi thêm từ đây trở đi).
       // Nếu bước phê duyệt đã khoá vị trí theo mẫu, tiền tố lấy từ mẫu và bỏ qua sign_as client.
       const lockedPD = getTemplateStepPlacement(d.placement_ky, "phe_duyet")
+      const isPdfPD = getFileExt(d.file_signed_office_url || d.file_signed_pdf_url || d.file_goc_url) === "pdf"
+      const hasTemplateConfigPD = !!(
+        d.placement_ky &&
+        (d.placement_ky._mau || Object.keys(d.placement_ky).some((k) => k.startsWith("ky_buoc") || k === "phe_duyet"))
+      )
+      if (isPdfPD && hasTemplateConfigPD && !lockedPD) {
+        return NextResponse.json(
+          {
+            error: "Vị trí Phê duyệt chưa được cài đặt trong mẫu ký của văn bản. Vui lòng liên hệ người tạo để cấu hình vị trí ký.",
+          },
+          { status: 400 },
+        )
+      }
       const rawSignAsPD: unknown = lockedPD ? lockedPD.sign_as : sign_as
       const signAsFromTemplatePD: SignAsType = isValidSignAs(rawSignAsPD) ? rawSignAsPD : "none"
       // Lãnh đạo tắt khối tiền tố trên mọi khung = không ký thay nữa (xem signerTurnedPrefixOff).

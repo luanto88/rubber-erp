@@ -94,6 +94,16 @@ type SignPlacement = {
     nameY?: number
     nameWidth?: number
     nameHeight?: number
+    showChucVu?: boolean
+    chucVuText?: string | null
+    cvX?: number
+    cvY?: number
+    cvWidth?: number
+    cvHeight?: number
+    chucVuX?: number
+    chucVuY?: number
+    chucVuWidth?: number
+    chucVuHeight?: number
   }>
 }
 
@@ -184,7 +194,7 @@ async function stampPdf(
     drawChucVu(page, placement, signerNameFont, ISO_SIGNER_NAME_STYLE)
     await drawMetaTextBoxes(page, placement, signerNameFont, ISO_SIGNER_NAME_STYLE, { pdfDoc, sigImg })
     drawSignPrefix(page, prefixText, placement, signerNameFont)
-    await drawExtraPlacements(pdfDoc, placement.extraPlacements, sigImg, signerName, signerNameFont, ISO_SIGNER_NAME_STYLE)
+    await drawExtraPlacements(pdfDoc, placement.extraPlacements, sigImg, signerName, signerNameFont, ISO_SIGNER_NAME_STYLE, placement.chucVuText)
   }
 
   return await pdfDoc.save()

@@ -74,6 +74,7 @@ type FullPlacement = {
   showChucVu?: boolean
   chucVuText?: string | null
   cvX?: number; cvY?: number; cvWidth?: number; cvHeight?: number
+  chucVuX?: number; chucVuY?: number; chucVuWidth?: number; chucVuHeight?: number
   // Ngày ký / Ghi chú — nội dung tự điền theo mẫu, mỗi thứ CHỈ gắn vào placement của ĐÚNG một
   // bước (ngày ký: phê duyệt; ghi chú: soạn thảo) để bước phê duyệt vẽ lại không chồng 3 lớp.
   ngayKyText?: string | null
@@ -92,6 +93,10 @@ type FullPlacement = {
     x: number; y: number; width: number; height: number
     showSignature: boolean; showSignerName: boolean
     nameX: number; nameY: number; nameWidth: number; nameHeight: number
+    showChucVu?: boolean
+    chucVuText?: string | null
+    cvX?: number; cvY?: number; cvWidth?: number; cvHeight?: number
+    chucVuX?: number; chucVuY?: number; chucVuWidth?: number; chucVuHeight?: number
   }>
 }
 
@@ -650,6 +655,7 @@ type ExtraBoxItem = {
   sigX: number; sigY: number; sigW: number; sigH: number
   nameX: number; nameY: number; nameW: number; nameH: number
   cvX: number; cvY: number; cvW: number; cvH: number
+  chucVuText?: string
   showSignature: boolean
   showSignerName: boolean
   showChucVu: boolean
@@ -669,6 +675,7 @@ function SignPlacementModal({
   signatureUrl,
   userName,
   userChucVu,
+  userStaffTitles,
   ghiChuText,
   factoryId,
   templateMa,
@@ -691,6 +698,7 @@ function SignPlacementModal({
   signatureUrl: string | null
   userName: string
   userChucVu: string
+  userStaffTitles?: { kiem_nhiem: string; chinh_quyen: string }
   ghiChuText: string
   factoryId: string | null
   templateMa: string | null
@@ -710,6 +718,12 @@ function SignPlacementModal({
   const isFinalStep = typeof totalSteps === "number" && typeof stepIndex === "number"
     ? stepIndex + 1 >= totalSteps
     : action === "phe_duyet"
+
+  // Chức vụ thực tế hiển thị (có thể thay đổi linh hoạt theo cờ kiem_nhiem vs chinh_quyen của mẫu)
+  const [currentChucVuText, setCurrentChucVuText] = useState(userChucVu)
+  useEffect(() => {
+    setCurrentChucVuText(userChucVu)
+  }, [userChucVu])
 
   // Màu sắc nhận diện chuẩn của người ký theo bước (đồng bộ 100% với bảng màu cài đặt trong mau-vi-tri)
   const activeStepColor = useMemo(() => {
@@ -801,23 +815,39 @@ function SignPlacementModal({
   const [ngayKyPreview] = useState(() => `Hồ sơ được ký ${formatFactoryDateTimeVN(new Date())}`)
   const [mainBoxPage, setMainBoxPage] = useState<number>(1)
   const [extraSigBoxes, setExtraSigBoxes] = useState<ExtraBoxItem[]>([])
-  // Theo dõi các trang có khung ký đã được người ký duyệt qua (Reviewed Pages)
-  const [reviewedPages, setReviewedPages] = useState<Set<number>>(() => new Set([1]))
+  // Theo dõi các trang có khung ký đã được người ký duyệt qua (Reviewed Pages) — KHÔNG khởi tạo trước trang 1
+  const [reviewedPages, setReviewedPages] = useState<Set<number>>(() => new Set<number>())
+
+  // Toàn bộ danh sách khung ký người ký này cần xem qua
+  const allBoxes = useMemo(() => {
+    const list: Array<{ id: string | number; page: number; name: string }> = [
+      { id: "main", page: mainBoxPage, name: "Khung chính" },
+    ]
+    extraSigBoxes.forEach((b, idx) => {
+      list.push({ id: b.id, page: b.page || 1, name: `Khung nhân bản ${idx + 1}` })
+    })
+    return list
+  }, [mainBoxPage, extraSigBoxes])
 
   const signingPages: number[] = useMemo(() => {
-    return Array.from(new Set([mainBoxPage, ...extraSigBoxes.map((b) => b.page || 1)])).sort((a, b) => a - b)
-  }, [mainBoxPage, extraSigBoxes])
-  const totalSigs = 1 + extraSigBoxes.length
+    return Array.from(new Set(allBoxes.map((b) => b.page || 1))).sort((a, b) => a - b)
+  }, [allBoxes])
+  const totalSigs = allBoxes.length
   const unreviewedPages: number[] = useMemo(() => {
     return signingPages.filter((p: number) => !reviewedPages.has(p))
   }, [signingPages, reviewedPages])
   const allPagesReviewed = unreviewedPages.length === 0
 
   useEffect(() => {
-    if (step === "placement") {
-      setReviewedPages((prev) => new Set([...prev, currentPage]))
+    if (step === "placement" && canvasReady) {
+      setReviewedPages((prev) => {
+        if (prev.has(currentPage)) return prev
+        const next = new Set(prev)
+        next.add(currentPage)
+        return next
+      })
     }
-  }, [currentPage, step])
+  }, [currentPage, step, canvasReady])
 
   // Cập nhật toạ độ và kích thước 2 khối con bên trong khung Ghi chú (ô text và chữ ký nháy)
   const setNoteRect = (which: "text" | "ky_nhay", x: number, y: number, w: number, h: number) => {
@@ -982,12 +1012,18 @@ function SignPlacementModal({
             : null
           const withPrefix = isFinalStep && !!tmplSignAs
 
+          const selectedCvKey = (roleBox.chuc_vu_key as string) || "chinh_quyen"
+          const resolvedCv = selectedCvKey === "kiem_nhiem"
+            ? (userStaffTitles?.kiem_nhiem || userStaffTitles?.chinh_quyen || userChucVu)
+            : (userStaffTitles?.chinh_quyen || userStaffTitles?.kiem_nhiem || userChucVu)
+          setCurrentChucVuText(resolvedCv)
+
           // Tầng 1: Mẫu quyết định CHO PHÉP hiển thị
           setTmplAllowName(tmplShowName)
           setTmplAllowChucVu(tmplShowCv)
           // Tầng 2: Trạng thái bật/tắt ban đầu của người ký
           setShowName(tmplShowName)
-          setShowChucVu(tmplShowCv && !!userChucVu)
+          setShowChucVu(tmplShowCv && !!resolvedCv)
           if (isFinalStep) {
             setSignAs(tmplSignAs ?? "none")
           }
@@ -1021,26 +1057,38 @@ function SignPlacementModal({
           const cvCanvas = toCanvas(cvPt)
 
           const snugName = computeSnugBoxSize(userName, "name", 1.0)
-          const snugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.0)
+          const snugCv = computeSnugBoxSize(resolvedCv, "chuc_vu", 1.0)
 
-          const snugNameW = Math.min(roleCanvas.w, snugName.w)
-          const snugCvW = Math.min(roleCanvas.w, snugCv.w)
+          const snugNameW = Math.min(roleCanvas.w - 8, snugName.w)
+          const snugCvW = Math.min(roleCanvas.w - 8, snugCv.w)
 
-          const snugNameX = Math.max(roleCanvas.x, roleCanvas.x + Math.round((roleCanvas.w - snugNameW) / 2))
-          const snugCvX = Math.max(roleCanvas.x, roleCanvas.x + Math.round((roleCanvas.w - snugCvW) / 2))
+          const snugNameX = Math.max(roleCanvas.x + 4, roleCanvas.x + Math.round((roleCanvas.w - snugNameW) / 2))
+          const snugCvX = Math.max(roleCanvas.x + 4, roleCanvas.x + Math.round((roleCanvas.w - snugCvW) / 2))
 
-          setSigState(toCanvas(sigPt))
+          const mainNameH = snugName.h
+          const mainNameY = roleCanvas.y + roleCanvas.h - mainNameH - 4
+
+          const mainCvH = snugCv.h
+          const mainCvY = tmplShowName ? (mainNameY - mainCvH - 4) : (roleCanvas.y + roleCanvas.h - mainCvH - 4)
+
+          const mainSigBottom = (tmplShowName || tmplShowCv) ? (tmplShowCv ? mainCvY : mainNameY) - 4 : (roleCanvas.y + roleCanvas.h - 4)
+          const mainSigY = roleCanvas.y + 4
+          const mainSigH = Math.max(20, mainSigBottom - mainSigY)
+          const mainSigW = Math.max(40, roleCanvas.w - 8)
+          const mainSigX = roleCanvas.x + 4
+
+          setSigState({ x: mainSigX, y: mainSigY, w: mainSigW, h: mainSigH })
           setNameState({
             x: snugNameX,
-            y: nameCanvas.y,
+            y: mainNameY,
             w: snugNameW,
-            h: snugName.h,
+            h: mainNameH,
           })
           setCvState({
             x: snugCvX,
-            y: cvCanvas.y,
+            y: mainCvY,
             w: snugCvW,
-            h: snugCv.h,
+            h: mainCvH,
           })
 
           if (withPrefix && (activeSub.prefix || fullSub.prefix)) {
@@ -1081,13 +1129,14 @@ function SignPlacementModal({
                 width: num(cBox.w_pt, 160),
                 height: num(cBox.h_pt, 75),
               }
-              const cShowName = typeof cBox.show_name === "boolean" ? cBox.show_name : true
-              const cShowCv = typeof cBox.show_chuc_vu === "boolean" ? cBox.show_chuc_vu : cShowName
-              const cSub = computeDefaultSubLayout(cBoxPt, { withName: cShowName, withChucVu: cShowCv })
-              const cFull = computeDefaultSubLayout(cBoxPt, { withName: true, withChucVu: true })
-              const cSigPt = clampRectToBox(cSub.sig, cBoxPt)
-              const cNamePt = clampRectToBox(cSub.name ?? cFull.name ?? cSub.sig, cBoxPt)
-              const cCvPt = clampRectToBox(cSub.chuc_vu ?? cFull.chuc_vu ?? cSub.sig, cBoxPt)
+              const cShowName = typeof cBox.show_name === "boolean" ? cBox.show_name : false
+              const cShowCv = typeof cBox.show_chuc_vu === "boolean" ? cBox.show_chuc_vu : false
+
+              // Phân giải chức vụ riêng biệt theo chuc_vu_key của bản sao này
+              const cCvKey = (cBox.chuc_vu_key as string) || "chinh_quyen"
+              const cResolvedCv = cCvKey === "kiem_nhiem"
+                ? (userStaffTitles?.kiem_nhiem || userStaffTitles?.chinh_quyen || userChucVu)
+                : (userStaffTitles?.chinh_quyen || userStaffTitles?.kiem_nhiem || userChucVu)
 
               const cPage = num(cBox.so_trang, 0) || (cBox.neo_trang === "cuoi" ? (pdf.numPages || 1) : 1)
               const cDim = pageDims[cPage] || pageDims[1] || { w: 595.28, h: curPageH }
@@ -1100,36 +1149,47 @@ function SignPlacementModal({
                 h: r.height * curScale,
               })
 
-              const cSigCanvas = cToCanvas(cSigPt)
-              const cNameCanvas = cToCanvas(cNamePt)
-              const cCvCanvas = cToCanvas(cCvPt)
               const cRoleCanvas = cToCanvas(cBoxPt)
               const cSnugName = computeSnugBoxSize(userName, "name", 1.0)
-              const cSnugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.0)
-              const cSnugNameW = Math.min(cRoleCanvas.w, cSnugName.w)
-              const cSnugNameX = Math.max(cRoleCanvas.x, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugNameW) / 2))
-              const cSnugCvW = Math.min(cRoleCanvas.w, cSnugCv.w)
-              const cSnugCvX = Math.max(cRoleCanvas.x, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugCvW) / 2))
+              const cSnugCv = computeSnugBoxSize(cResolvedCv, "chuc_vu", 1.0)
+
+              const cSnugNameW = Math.min(cRoleCanvas.w - 8, cSnugName.w)
+              const cSnugNameX = Math.max(cRoleCanvas.x + 4, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugNameW) / 2))
+              const cSnugCvW = Math.min(cRoleCanvas.w - 8, cSnugCv.w)
+              const cSnugCvX = Math.max(cRoleCanvas.x + 4, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugCvW) / 2))
+
+              const cNameH = cSnugName.h
+              const cNameY = cRoleCanvas.y + cRoleCanvas.h - cNameH - 4
+
+              const cCvH = cSnugCv.h
+              const cCvY = cShowName ? (cNameY - cCvH - 4) : (cRoleCanvas.y + cRoleCanvas.h - cCvH - 4)
+
+              const cSigBottom = (cShowName || cShowCv) ? (cShowCv ? cCvY : cNameY) - 4 : (cRoleCanvas.y + cRoleCanvas.h - 4)
+              const cSigY = cRoleCanvas.y + 4
+              const cSigH = Math.max(20, cSigBottom - cSigY)
+              const cSigW = Math.max(40, cRoleCanvas.w - 8)
+              const cSigX = cRoleCanvas.x + 4
 
               return {
                 id: Date.now() + Math.random() + idx,
                 page: cPage,
                 templateBox: cRoleCanvas,
-                sigX: cSigCanvas.x,
-                sigY: cSigCanvas.y,
-                sigW: cSigCanvas.w,
-                sigH: cSigCanvas.h,
+                sigX: cSigX,
+                sigY: cSigY,
+                sigW: cSigW,
+                sigH: cSigH,
                 nameX: cSnugNameX,
-                nameY: cNameCanvas.y,
+                nameY: cNameY,
                 nameW: cSnugNameW,
-                nameH: cNameCanvas.h,
+                nameH: cNameH,
                 cvX: cSnugCvX,
-                cvY: cCvCanvas.y,
+                cvY: cCvY,
                 cvW: cSnugCvW,
-                cvH: cCvCanvas.h,
+                cvH: cCvH,
+                chucVuText: cResolvedCv,
                 showSignature: true,
                 showSignerName: cShowName,
-                showChucVu: cShowCv && !!userChucVu,
+                showChucVu: cShowCv && !!cResolvedCv,
                 tmplAllowName: cShowName,
                 tmplAllowChucVu: cShowCv,
               }
@@ -1417,7 +1477,8 @@ function SignPlacementModal({
       const sigPdf = fit(toPdf(sigState.x, sigState.y, sigState.w, sigState.h))
       const namePdf = fit(toPdf(nameState.x, nameState.y, nameState.w, nameState.h))
       const cvPdf = fit(toPdf(cvState.x, cvState.y, cvState.w, cvState.h))
-      const cvOn = tmplAllowChucVu && showChucVu && !!userChucVu
+      const activeCv = currentChucVuText || userChucVu
+      const cvOn = tmplAllowChucVu && showChucVu && !!activeCv
 
       placement = {
         page: mainBoxPage,
@@ -1427,8 +1488,9 @@ function SignPlacementModal({
         nameX: namePdf.x, nameY: namePdf.y, nameWidth: namePdf.width, nameHeight: namePdf.height,
         // Chỉ gửi khối chức vụ khi mẫu cho phép, người ký bật VÀ có nội dung
         showChucVu: cvOn,
-        chucVuText: cvOn ? userChucVu : null,
+        chucVuText: cvOn ? activeCv : null,
         cvX: cvPdf.x, cvY: cvPdf.y, cvWidth: cvPdf.width, cvHeight: cvPdf.height,
+        chucVuX: cvPdf.x, chucVuY: cvPdf.y, chucVuWidth: cvPdf.width, chucVuHeight: cvPdf.height,
         ...(ngayKyPdf ? {
           ngayKyText: ngayKyPreview,
           ngayKyX: ngayKyPdf.x, ngayKyY: ngayKyPdf.y,
@@ -1474,10 +1536,12 @@ function SignPlacementModal({
             page: bPage,
             x: sX, y: sY, width: sW, height: sH,
             showSignature: true,
-            showSignerName: box.tmplAllowName && box.showSignerName,
+            showSignerName: !!(box.tmplAllowName && box.showSignerName),
             nameX: nX, nameY: nY, nameWidth: nW, nameHeight: nH,
-            showChucVu: box.tmplAllowChucVu && box.showChucVu && !!userChucVu,
+            showChucVu: !!(box.tmplAllowChucVu && box.showChucVu && (box.chucVuText || activeCv)),
             chucVuX: cX, chucVuY: cY, chucVuWidth: cW, chucVuHeight: cH,
+            cvX: cX, cvY: cY, cvWidth: cW, cvHeight: cH,
+            chucVuText: box.chucVuText || activeCv,
           }
         })
       }
@@ -1994,12 +2058,12 @@ function SignPlacementModal({
                         size={{ width: nameState.w, height: nameState.h }}
                         onResizeStop={(_, __, ___, delta) =>
                           setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        enable={showName ? { right: true, bottom: true, bottomRight: true } : false}
                         minWidth={50} minHeight={16}
                         {...maxSizeIn(templateBox, nameState)}
-                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên" /> }}
-                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                        handleComponent={showName ? { bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên" /> } : undefined}
+                        handleClasses={showName ? { bottomRight: RESIZE_HANDLE_CLASS } : {}}
+                        handleStyles={showName ? { bottomRight: RESIZE_HANDLE_STYLE } : {}}
                       >
                         <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/60 rounded relative select-none flex items-center justify-center">
                           {showName ? (
@@ -2033,7 +2097,7 @@ function SignPlacementModal({
 
                 {/* Chức vụ — khối kéo-thả thứ 3, ĐỘC LẬP với chữ ký và tên (vị trí riêng, công
                     tắc riêng). Chỉ dựng khi mẫu CHO PHÉP và người ký đã khai chức vụ trong Nhân sự bảo trì. */}
-                {currentPage === mainBoxPage && tmplAllowChucVu && !!userChucVu && (
+                {currentPage === mainBoxPage && tmplAllowChucVu && !!(currentChucVuText || userChucVu) && (
                   <Draggable
                     nodeRef={cvNodeRef as RefObject<HTMLElement>}
                     position={{ x: cvState.x, y: cvState.y }}
@@ -2050,20 +2114,20 @@ function SignPlacementModal({
                         size={{ width: cvState.w, height: cvState.h }}
                         onResizeStop={(_, __, ___, delta) =>
                           setCvState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        enable={showChucVu ? { right: true, bottom: true, bottomRight: true } : false}
                         minWidth={45} minHeight={14}
                         {...maxSizeIn(templateBox, cvState)}
-                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ" /> }}
-                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                        handleComponent={showChucVu ? { bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ" /> } : undefined}
+                        handleClasses={showChucVu ? { bottomRight: RESIZE_HANDLE_CLASS } : {}}
+                        handleStyles={showChucVu ? { bottomRight: RESIZE_HANDLE_STYLE } : {}}
                       >
                         <div className="w-full h-full border border-dashed border-sky-400 bg-sky-50/60 rounded relative select-none flex items-center justify-center">
                           {showChucVu ? (
                             <span
                               className="text-sky-700 truncate px-1"
-                              style={previewTextStyle(userChucVu, cvState.w)}
+                              style={previewTextStyle(currentChucVuText || userChucVu, cvState.w)}
                             >
-                              {userChucVu}
+                              {currentChucVuText || userChucVu}
                             </span>
                           ) : (
                             <span className="text-[10px] text-slate-400">Ẩn chức vụ</span>
@@ -2182,12 +2246,12 @@ function SignPlacementModal({
                           size={{ width: box.nameW, height: box.nameH }}
                           onResizeStop={(_, __, ___, delta) =>
                             setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
-                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          enable={box.showSignerName ? { right: true, bottom: true, bottomRight: true } : false}
                           minWidth={50} minHeight={16}
                           {...(box.templateBox ? maxSizeIn(box.templateBox, { w: box.nameW, h: box.nameH, x: box.nameX, y: box.nameY }) : {})}
-                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên bản sao" /> }}
-                          handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                          handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                          handleComponent={box.showSignerName ? { bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên bản sao" /> } : undefined}
+                          handleClasses={box.showSignerName ? { bottomRight: RESIZE_HANDLE_CLASS } : {}}
+                          handleStyles={box.showSignerName ? { bottomRight: RESIZE_HANDLE_STYLE } : {}}
                         >
                           <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/70 rounded relative select-none flex items-center justify-center">
                             {box.showSignerName ? (
@@ -2219,7 +2283,7 @@ function SignPlacementModal({
                     )}
 
                     {/* 4. Khối Chức vụ bản sao — kẹp trong templateBox, có Eye/EyeOff */}
-                    {box.tmplAllowChucVu && !!userChucVu && (
+                    {box.tmplAllowChucVu && !!(box.chucVuText || currentChucVuText || userChucVu) && (
                       <ExtraDraggableBox
                         position={{ x: box.cvX, y: box.cvY }}
                         onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, cvX: d.x, cvY: d.y } : b))}
@@ -2230,20 +2294,20 @@ function SignPlacementModal({
                           size={{ width: box.cvW, height: box.cvH }}
                           onResizeStop={(_, __, ___, delta) =>
                             setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, cvW: b.cvW + delta.width, cvH: b.cvH + delta.height } : b))}
-                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          enable={box.showChucVu ? { right: true, bottom: true, bottomRight: true } : false}
                           minWidth={45} minHeight={14}
                           {...(box.templateBox ? maxSizeIn(box.templateBox, { w: box.cvW, h: box.cvH, x: box.cvX, y: box.cvY }) : {})}
-                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ bản sao" /> }}
-                          handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                          handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                          handleComponent={box.showChucVu ? { bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ bản sao" /> } : undefined}
+                          handleClasses={box.showChucVu ? { bottomRight: RESIZE_HANDLE_CLASS } : {}}
+                          handleStyles={box.showChucVu ? { bottomRight: RESIZE_HANDLE_STYLE } : {}}
                         >
                           <div className="w-full h-full border border-dashed border-sky-400 bg-sky-50/70 rounded relative select-none flex items-center justify-center">
                             {box.showChucVu ? (
                               <span
                                 className="text-sky-700 truncate px-1"
-                                style={previewTextStyle(userChucVu, box.cvW)}
+                                style={previewTextStyle(box.chucVuText || currentChucVuText || userChucVu, box.cvW)}
                               >
-                                {userChucVu}
+                                {box.chucVuText || currentChucVuText || userChucVu}
                               </span>
                             ) : (
                               <span className="text-[10px] text-slate-400">Ẩn chức vụ</span>
@@ -2403,15 +2467,18 @@ export default function IsoFormInstancePage() {
   const [userName, setUserName] = useState("")
   const [userRole, setUserRole] = useState<string | null>(null)
   const [userChucVu, setUserChucVu] = useState("")
+  const [userStaffTitles, setUserStaffTitles] = useState<{ kiem_nhiem: string; chinh_quyen: string }>({ kiem_nhiem: "", chinh_quyen: "" })
   // Biểu mẫu này đã có mẫu vị trí ký chưa — nguồn sự thật là bảng `mau_vi_tri`, KHÔNG dùng cờ
   // tạm trong state hay query param: người ký có thể vào trang từ link trực tiếp, F5 giữa
   // chừng, hoặc mẫu do người khác vẽ từ hồ sơ khác của cùng biểu mẫu.
   // `null` = đang kiểm tra (chưa biết) → chưa chặn vội, tránh nháy nút.
   const [templateExists, setTemplateExists] = useState<boolean | null>(null)
+  const [templateConfirmed, setTemplateConfirmed] = useState<boolean>(false)
 
   useEffect(() => {
     if (searchParams?.get("confirmedSignTemplate") === "1") {
       setTemplateExists(true)
+      setTemplateConfirmed(true)
     }
   }, [searchParams])
   const [loading, setLoading] = useState(true)
@@ -2493,15 +2560,17 @@ export default function IsoFormInstancePage() {
         // đúng thứ tự đang dùng ở module Văn bản và Soạn thảo ISO.
         const { data: staff } = await supabase
           .from("maintenance_staff")
-          .select("chuc_vu, chuc_vu_chinh_quyen")
+          .select("chuc_vu, chuc_vu_chinh_quyen, chuc_vu_kim_nhiem")
           .eq("factory_id", fid)
           .eq("profile_id", uid)
           .eq("active", true)
           .maybeSingle()
         if (staff) {
-          setUserChucVu(
-            (staff.chuc_vu_chinh_quyen as string) || (staff.chuc_vu as string) || "",
-          )
+          const s = staff as { chuc_vu?: string | null; chuc_vu_chinh_quyen?: string | null; chuc_vu_kim_nhiem?: string | null }
+          const kn = s.chuc_vu_kim_nhiem || s.chuc_vu || ""
+          const cq = s.chuc_vu_chinh_quyen || s.chuc_vu || ""
+          setUserStaffTitles({ kiem_nhiem: kn, chinh_quyen: cq })
+          setUserChucVu(cq || kn || "")
         }
         // Load user's signature URL — vá bảo mật 2026-09-20: mint Signed URL thay vì
         // getPublicUrl() trực tiếp (bucket iso-documents sẽ chuyển private).
@@ -2991,16 +3060,6 @@ export default function IsoFormInstancePage() {
       const { error } = await supabase.from("iso_form_instances").update(updates).eq("id", instanceId)
       if (error) { setActionError(error.message); return null }
 
-      // Gửi thông báo phân công cho Người soạn thảo (bước 1) nếu được gán cho người khác
-      if (instance.trang_thai === "draft" && isNStep && Array.isArray(updates.thu_tu_ky_json)) {
-        const fSteps = updates.thu_tu_ky_json as ThuTuKyStep[]
-        const newStep1Uid = fSteps[0]?.user_id
-        const prevStep1Uid = (instance.thu_tu_ky_json as ThuTuKyStep[])?.[0]?.user_id
-        if (newStep1Uid && newStep1Uid !== userId && (newStep1Uid !== prevStep1Uid || !prevStep1Uid)) {
-          sendNotify("phan_cong_soan_thao", [newStep1Uid])
-        }
-      }
-
       return await loadInstance(factoryId)
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Lỗi lưu cài đặt")
@@ -3105,21 +3164,24 @@ export default function IsoFormInstancePage() {
 
   const openSendModal = async () => {
     if (!instance || !factoryId) return
+    if (needsSignTemplate && templateExists === true && !templateConfirmed) {
+      setActionError("Vui lòng bấm 'Xem mẫu vị trí ký' để kiểm tra mẫu trước khi thực hiện ký & gửi hồ sơ.")
+      return
+    }
     const reloaded = await persistApprovalConfig()
     if (!reloaded) return
     const fileSrc = await mintInstanceFileUrl()
     if (!fileSrc) return
 
-    if ((reloaded.so_buoc_tong ?? 0) > 0) {
-      setSignModal({
-        action: (reloaded.so_buoc_tong ?? 1) === 1 ? "phe_duyet" : "ky_buoc",
-        stepIndex: 0,
-        totalSteps: reloaded.so_buoc_tong ?? 1,
-        sourceFileUrl: fileSrc,
-      })
-    } else {
-      setSignModal({ action: "soan_thao", sourceFileUrl: fileSrc })
-    }
+    const total = (reloaded.so_buoc_tong ?? 0) > 0
+      ? (reloaded.so_buoc_tong ?? 1)
+      : (reloaded.cap_tl === "Cấp 2" ? 2 : 3)
+    setSignModal({
+      action: total === 1 ? "phe_duyet" : "soan_thao",
+      stepIndex: 0,
+      totalSteps: total,
+      sourceFileUrl: fileSrc,
+    })
   }
 
   /** Lưu cấu hình TRƯỚC rồi mới sang màn cài đặt vị trí ký — xem cảnh báo ở `persistApprovalConfig`. */
@@ -3152,7 +3214,7 @@ export default function IsoFormInstancePage() {
   const openSignStepModal = async () => {
     if (!instance) return
     const curIdx = instance.buoc_hien_tai ?? 0
-    const total = instance.so_buoc_tong ?? 1
+    const total = instance.so_buoc_tong ?? (Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0 ? instance.thu_tu_ky_json.length : 1)
     const isFinalStep = curIdx + 1 >= total
     const src = await mintInstanceFileUrl()
     setSignModal({
@@ -3165,14 +3227,32 @@ export default function IsoFormInstancePage() {
 
   const openXemXetModal = async () => {
     if (!instance) return
+    const total = (Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0)
+      ? instance.thu_tu_ky_json.length
+      : 3
+    const stepIdx = 1
     const src = await mintInstanceFileUrl()
-    setSignModal({ action: "xem_xet", sourceFileUrl: src })
+    setSignModal({
+      action: "xem_xet",
+      stepIndex: stepIdx,
+      totalSteps: total,
+      sourceFileUrl: src,
+    })
   }
 
   const openPheDuyetModal = async () => {
     if (!instance) return
+    const total = (Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0)
+      ? instance.thu_tu_ky_json.length
+      : (instance.cap_tl === "Cấp 2" ? 2 : 3)
+    const stepIdx = total - 1
     const src = await mintInstanceFileUrl()
-    setSignModal({ action: "phe_duyet", sourceFileUrl: src })
+    setSignModal({
+      action: "phe_duyet",
+      stepIndex: stepIdx,
+      totalSteps: total,
+      sourceFileUrl: src,
+    })
   }
 
   // ── Return ───────────────────────────────────────────────────────────────
@@ -3480,8 +3560,9 @@ export default function IsoFormInstancePage() {
             {canSignStep1 && (!needsSignTemplate || templateExists === true) && (
               <button
                 onClick={openSendModal}
-                disabled={saving || !instance.draft_file_url}
+                disabled={saving || !instance.draft_file_url || (needsSignTemplate && templateExists === true && !templateConfirmed)}
                 className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-md transition-all"
+                title={needsSignTemplate && templateExists === true && !templateConfirmed ? "Vui lòng xem qua mẫu vị trí ký trước khi ký & gửi" : undefined}
               >
                 {saving ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
                 {isNStepRecord || steps.length > 0
@@ -3548,7 +3629,7 @@ export default function IsoFormInstancePage() {
               </button>
             )}
 
-            {/* Nút Cài đặt vị trí ký: nổi bật rực rỡ khi hồ sơ chưa có mẫu vị trí ký */}
+            {/* Nút Cài đặt / Xem mẫu vị trí ký */}
             {isEditable && canManageDraft && templateSignSetupUrl && (
               <button
                 onClick={() => void goToTemplateSetup()}
@@ -3556,13 +3637,15 @@ export default function IsoFormInstancePage() {
                 className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-xl transition-all ${
                   mustSetupTemplate
                     ? "bg-violet-600 hover:bg-violet-700 text-white border border-violet-600 shadow-md ring-2 ring-violet-300 animate-pulse"
-                    : "bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 border border-sky-200"
+                    : !templateConfirmed
+                      ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 shadow-xs ring-1 ring-amber-200"
+                      : "bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 border border-sky-200"
                 }`}
                 title={signStepsReady
-                  ? (mustSetupTemplate ? "Cần cài đặt vị trí ký trước khi ký & gửi hồ sơ" : "Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng")
+                  ? (mustSetupTemplate ? "Cần cài đặt vị trí ký trước khi ký & gửi hồ sơ" : "Xem / kiểm tra vị trí chữ ký của biểu mẫu này")
                   : "Chọn đủ người ký ở 'Cấu hình phê duyệt' trước khi cài đặt vị trí ký"}
               >
-                <LayoutTemplate size={15} /> Cài đặt vị trí ký
+                <LayoutTemplate size={15} /> {templateExists ? "Xem mẫu vị trí ký" : "Cài đặt vị trí ký"}
               </button>
             )}
 
@@ -4256,7 +4339,7 @@ export default function IsoFormInstancePage() {
           stepName={
             typeof signModal.stepIndex === "number" && Array.isArray(instance.thu_tu_ky_json)
               ? instance.thu_tu_ky_json[signModal.stepIndex]?.ten
-              : undefined
+              : (signModal.action === "xem_xet" ? "Xem xét" : signModal.action === "phe_duyet" ? "Phê duyệt" : undefined)
           }
           sourceFileUrl={signModal.sourceFileUrl}
           fileType={instance.draft_file_type}
@@ -4264,6 +4347,7 @@ export default function IsoFormInstancePage() {
           signatureUrl={signatureUrl}
           userName={userName}
           userChucVu={userChucVu}
+          userStaffTitles={userStaffTitles}
           ghiChuText={instance.ghi_chu ?? ""}
           factoryId={factoryId}
           templateMa={template?.ma_tai_lieu ?? null}

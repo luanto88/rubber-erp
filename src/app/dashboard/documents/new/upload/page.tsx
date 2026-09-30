@@ -449,7 +449,7 @@ export default function UploadVanBanPage() {
         factory_id: factoryId,
         ma_van_ban: khongCoMa ? null : finalMa,
         ten_van_ban: form.ten_van_ban.trim(),
-        loai_van_ban: form.loai_van_ban || null,
+        loai_van_ban: khongCoMa ? null : (form.loai_van_ban || null),
         phong_ban: form.phong_ban,
         so_van_ban: soStr,
         nam,
@@ -668,56 +668,9 @@ export default function UploadVanBanPage() {
                 onCheDoXemChange={(val) => setForm((f) => ({ ...f, che_do_xem: val }))}
               />
 
-              {/* Loại văn bản */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Loại văn bản{" "}
-                  {khongCoMa ? (
-                    <span className="font-normal text-slate-400">(không bắt buộc khi văn bản không có mã)</span>
-                  ) : (
-                    <span className="text-red-500">*</span>
-                  )}
-                </label>
-                <select
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-                  value={form.loai_van_ban}
-                  onChange={(e) => {
-                    setForm((f) => ({ ...f, loai_van_ban: e.target.value }))
-                    setMaVanBanEdited(false)
-                  }}
-                >
-                  <option value="">— Chọn loại văn bản —</option>
-                  {docTypes.map((t) => (
-                    <option key={t.code} value={t.code}>
-                      {t.name} ({t.ky_hieu})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Phòng ban */}
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  Phòng ban <span className="text-red-500">*</span>
-                </label>
-                <select
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
-                  value={form.phong_ban}
-                  onChange={(e) => {
-                    setForm((f) => ({ ...f, phong_ban: e.target.value }))
-                    setMaVanBanEdited(false)
-                  }}
-                >
-                  <option value="">— Chọn phòng ban —</option>
-                  {PHONG_BAN_VAN_BAN_OPTIONS.map((pb) => (
-                    <option key={pb} value={pb}>{pb}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Mã văn bản — editable */}
-              <div>
-                <label className="flex items-center gap-2 mb-2 cursor-pointer select-none">
+              {/* Checkbox "không có mã" */}
+              <div className="mb-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={khongCoMa}
@@ -727,6 +680,7 @@ export default function UploadVanBanPage() {
                       if (checked) {
                         setMaVanBan("")
                         setMaVanBanEdited(false)
+                        setForm((f) => ({ ...f, loai_van_ban: "" }))
                       }
                     }}
                     className="rounded"
@@ -735,6 +689,56 @@ export default function UploadVanBanPage() {
                     Văn bản này không có mã (VD: danh sách, chứng nhận không theo khuôn số)
                   </span>
                 </label>
+              </div>
+
+              <div className={khongCoMa ? "grid grid-cols-1 gap-4" : "grid grid-cols-2 gap-4"}>
+                {/* Loại văn bản */}
+                {!khongCoMa && (
+                  <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                      Loại văn bản <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                      value={form.loai_van_ban}
+                      onChange={(e) => {
+                        setForm((f) => ({ ...f, loai_van_ban: e.target.value }))
+                        setMaVanBanEdited(false)
+                      }}
+                    >
+                      <option value="">— Chọn loại văn bản —</option>
+                      {docTypes.map((t) => (
+                        <option key={t.code} value={t.code}>
+                          {t.name} ({t.ky_hieu})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Phòng ban */}
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                    Phòng ban <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    value={form.phong_ban}
+                    onChange={(e) => {
+                      setForm((f) => ({ ...f, phong_ban: e.target.value }))
+                      setMaVanBanEdited(false)
+                    }}
+                  >
+                    <option value="">— Chọn phòng ban —</option>
+                    {PHONG_BAN_VAN_BAN_OPTIONS.map((pb) => (
+                      <option key={pb} value={pb}>{pb}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Mã văn bản — editable */}
+              <div>
                 {!khongCoMa && (
                   <>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">

@@ -92,6 +92,8 @@ type ExtraSignPlacement = {
 }
 
 type SignPlacement = ExtraSignPlacement & {
+  qrPage?: number
+  qrAllPages?: boolean
   qrX?: number
   qrY?: number
   qrWidth?: number
@@ -717,7 +719,7 @@ async function fillMetadataPlaceholders(
   doc: Record<string, unknown>,
   font: PDFFont,
   qrBuffer: Buffer,
-  manualQrPlacement: { x: number; y: number; width: number; height: number } | null,
+  manualQrPlacement: { x: number; y: number; width: number; height: number; page?: number; allPages?: boolean } | null,
   maTl: string,
   lsStr: string,
   dateStr: string,
@@ -862,16 +864,20 @@ async function fillMetadataPlaceholders(
           const anchorItem = directMatchItem ?? line[0]
 
           if (header.label === "QR") {
-            const qrImage = await pdfDoc.embedPng(qrBuffer)
+            const isQrTargetPage = manualQrPlacement?.allPages || (pageIdx === ((manualQrPlacement?.page ?? 1) - 1))
             if (manualQrPlacement) {
-              page.drawImage(qrImage, {
-                x: manualQrPlacement.x,
-                y: manualQrPlacement.y,
-                width: manualQrPlacement.width,
-                height: manualQrPlacement.height,
-              })
-              filled.add(header.expected)
+              if (isQrTargetPage) {
+                const qrImage = await pdfDoc.embedPng(qrBuffer)
+                page.drawImage(qrImage, {
+                  x: manualQrPlacement.x,
+                  y: manualQrPlacement.y,
+                  width: manualQrPlacement.width,
+                  height: manualQrPlacement.height,
+                })
+                filled.add(header.expected)
+              }
             } else {
+              const qrImage = await pdfDoc.embedPng(qrBuffer)
               const qrSize = Math.max((anchorItem.height ?? 10) * 2.64, 26)
               const maxWidth = Math.max(viewport.width - drawX - 12, 18)
               const drawSize = Math.min(qrSize, maxWidth)
@@ -904,9 +910,9 @@ async function fillMetadataPlaceholders(
         }
       }
 
-      // Draw manual QR on every page (header QR tag xuất hiện ở mọi trang).
-      // Dùng pageFound (per-page) thay filled (cross-page) để QR được vẽ trên mọi trang mà không bị chặn sau trang 1.
-      if (manualQrPlacement && !pageFound.has("QR")) {
+      // Draw manual QR on target page(s) (nếu template chọn "mọi trang" thì vẽ tất cả các trang, nếu chọn trang chỉ định thì chỉ vẽ đúng trang đó)
+      const isTargetQrPage = manualQrPlacement?.allPages || (pageIdx === ((manualQrPlacement?.page ?? 1) - 1))
+      if (manualQrPlacement && isTargetQrPage && !pageFound.has("QR")) {
         const qrImage = await pdfDoc.embedPng(qrBuffer)
         page.drawImage(qrImage, {
           x: manualQrPlacement.x,
@@ -928,7 +934,7 @@ async function fillMetadataPlaceholders(
         found.add("QR")
       }
 
-      if (shouldDrawDefaultChildQr && !manualQrPlacement && !pageFound.has("QR")) {
+      if (shouldDrawDefaultChildQr && pageIdx === 0 && !manualQrPlacement && !pageFound.has("QR")) {
         await drawDefaultChildQr(pdfDoc, page, qrBuffer)
         pageFound.add("QR")
         found.add("QR")
@@ -1347,8 +1353,8 @@ export async function POST(req: NextRequest) {
         phe_duyet_placement: 2,
       }
       const index = keyToIndex[currentSignerKey]
-      if (index !== undefined && allPlacements[index].placement === null) {
-        allPlacements[index] = { ...allPlacements[index], placement: signaturePlacement }
+      if (index !== undefined) {
+        allPlacements[index] = { ...allPlacements[index], signerUserId: userId, placement: signaturePlacement }
       }
     }
     if (signFileKind !== "main" && signaturePlacement) {
@@ -1376,7 +1382,14 @@ export async function POST(req: NextRequest) {
       typeof soanPlacement.qrWidth === "number" &&
       typeof soanPlacement.qrHeight === "number"
     )
-      ? { x: soanPlacement.qrX, y: soanPlacement.qrY, width: soanPlacement.qrWidth, height: soanPlacement.qrHeight, page: soanPlacement.page }
+      ? {
+          x: soanPlacement.qrX,
+          y: soanPlacement.qrY,
+          width: soanPlacement.qrWidth,
+          height: soanPlacement.qrHeight,
+          page: soanPlacement.qrPage || 1,
+          allPages: Boolean(soanPlacement.qrAllPages),
+        }
       : null
 
     const [pSoan, pXem, pPhe] = await Promise.all([
@@ -1531,15 +1544,26 @@ export async function POST(req: NextRequest) {
             // đã kéo QR tới (placement.page), không hard-code trang đầu tiên.
             if (shouldStampQr && manualQrPlacement && !metaResult.filled.includes("QR")) {
               try {
-                const qrPageIndex = (manualQrPlacement.page ?? 1) - 1
-                if (qrPageIndex >= 0 && qrPageIndex < originalPages.getPageCount()) {
-                  const qrImgFallback = await originalPages.embedPng(qrBuffer)
-                  originalPages.getPage(qrPageIndex).drawImage(qrImgFallback, {
-                    x: manualQrPlacement.x,
-                    y: manualQrPlacement.y,
-                    width: manualQrPlacement.width,
-                    height: manualQrPlacement.height,
-                  })
+                const qrImgFallback = await originalPages.embedPng(qrBuffer)
+                if (manualQrPlacement.allPages) {
+                  for (let pIdx = 0; pIdx < originalPages.getPageCount(); pIdx++) {
+                    originalPages.getPage(pIdx).drawImage(qrImgFallback, {
+                      x: manualQrPlacement.x,
+                      y: manualQrPlacement.y,
+                      width: manualQrPlacement.width,
+                      height: manualQrPlacement.height,
+                    })
+                  }
+                } else {
+                  const qrPageIndex = (manualQrPlacement.page ?? 1) - 1
+                  if (qrPageIndex >= 0 && qrPageIndex < originalPages.getPageCount()) {
+                    originalPages.getPage(qrPageIndex).drawImage(qrImgFallback, {
+                      x: manualQrPlacement.x,
+                      y: manualQrPlacement.y,
+                      width: manualQrPlacement.width,
+                      height: manualQrPlacement.height,
+                    })
+                  }
                 }
               } catch { /* bỏ qua nếu embed thất bại */ }
             }
@@ -1617,64 +1641,65 @@ export async function POST(req: NextRequest) {
                     color: rgb(0, 0, 0),
                   })
                 }
-              } catch (err) {
-                sigEmbedErrors.push({ userId: signerUserId, error: err instanceof Error ? err.message : String(err) })
-              }
-            }
 
-            // Nhúng các bản sao chữ ký (clone) nếu có
-            if (signaturePlacement?.extraPlacements?.length) {
-              const extraSigImg = await getSignatureImage(factoryId, userId)
-              const extraSignerName = signerNames.get(userId)?.trim()
-              for (const extraP of signaturePlacement.extraPlacements) {
-                const extraPageIndex = extraP.page - 1
-                if (extraPageIndex < 0 || extraPageIndex >= originalPages.getPageCount()) continue
-                try {
-                  if (extraSigImg && extraP.showSignature !== false) {
-                    const embedded = await originalPages.embedPng(extraSigImg).catch(() => originalPages!.embedJpg(extraSigImg))
-                    originalPages.getPage(extraPageIndex).drawImage(embedded, {
-                      x: extraP.x,
-                      y: extraP.y,
-                      width: extraP.width,
-                      height: extraP.height,
-                      opacity: 0.92,
-                    })
-                  }
-                  if (extraSignerName && extraP.showSignerName !== false) {
-                    const extraSlot = computeNameSlot(extraP as SignPlacement, ISO_SIGNER_NAME_STYLE)
-                    const formattedExtraName = toTitleCase(extraSignerName)
-                    const nameFontSize = 13
-                    const nameWidth = signerNameFont.widthOfTextAtSize(formattedExtraName, nameFontSize)
-                    originalPages.getPage(extraPageIndex).drawText(formattedExtraName, {
-                      x: extraSlot.xCenter - nameWidth / 2,
-                      y: extraSlot.y,
-                      size: nameFontSize,
-                      font: signerNameFont,
-                      color: rgb(0, 0, 0),
-                    })
-                  }
-                  if (extraP.showChucVu === true) {
-                    const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, userId, extraP.chucVuKey)
-                    if (extraCvText && extraCvText.trim()) {
-                      const cvFontSize = 13
-                      const cvWidth = signerNameFont.widthOfTextAtSize(extraCvText.trim(), cvFontSize)
-                      const cvXCenter = typeof extraP.chucVuX === "number"
-                        ? extraP.chucVuX + (extraP.chucVuWidth ?? 100) / 2
-                        : (typeof extraP.nameX === "number" ? extraP.nameX + (extraP.nameWidth ?? 100) / 2 : extraP.x + extraP.width / 2)
-                      const cvY = typeof extraP.chucVuY === "number"
-                        ? extraP.chucVuY
-                        : (typeof extraP.nameY === "number" ? extraP.nameY + (extraP.nameHeight ?? 20) + 2 : Math.max(0, extraP.y - 36))
+                // Nhúng các bản sao chữ ký (clone) của signer này nếu có
+                if (placement.extraPlacements?.length) {
+                  const extraSignerName = signerNames.get(signerUserId)?.trim()
+                  for (const extraP of placement.extraPlacements) {
+                    const extraPageIndex = (extraP.page ?? 1) - 1
+                    if (extraPageIndex < 0 || extraPageIndex >= originalPages.getPageCount()) continue
+                    try {
+                      if (sigImg && extraP.showSignature !== false) {
+                        const embedded = await originalPages.embedPng(sigImg).catch(() => originalPages!.embedJpg(sigImg))
+                        originalPages.getPage(extraPageIndex).drawImage(embedded, {
+                          x: extraP.x,
+                          y: extraP.y,
+                          width: extraP.width,
+                          height: extraP.height,
+                          opacity: 0.92,
+                        })
+                      }
+                      if (extraSignerName && extraP.showSignerName !== false) {
+                        const extraSlot = computeNameSlot(extraP as SignPlacement, ISO_SIGNER_NAME_STYLE)
+                        const formattedExtraName = toTitleCase(extraSignerName)
+                        const nameFontSize = 13
+                        const nameWidth = signerNameFont.widthOfTextAtSize(formattedExtraName, nameFontSize)
+                        originalPages.getPage(extraPageIndex).drawText(formattedExtraName, {
+                          x: extraSlot.xCenter - nameWidth / 2,
+                          y: extraSlot.y,
+                          size: nameFontSize,
+                          font: signerNameFont,
+                          color: rgb(0, 0, 0),
+                        })
+                      }
+                      if (extraP.showChucVu === true) {
+                        const extraCvText = extraP.chucVuText || await getStaffChucVu(factoryId, signerUserId, extraP.chucVuKey)
+                        if (extraCvText && extraCvText.trim()) {
+                          const cvFontSize = 13
+                          const cvWidth = signerNameFont.widthOfTextAtSize(extraCvText.trim(), cvFontSize)
+                          const cvXCenter = typeof extraP.chucVuX === "number"
+                            ? extraP.chucVuX + (extraP.chucVuWidth ?? 100) / 2
+                            : (typeof extraP.nameX === "number" ? extraP.nameX + (extraP.nameWidth ?? 100) / 2 : extraP.x + extraP.width / 2)
+                          const cvY = typeof extraP.chucVuY === "number"
+                            ? extraP.chucVuY
+                            : (typeof extraP.nameY === "number" ? extraP.nameY + (extraP.nameHeight ?? 20) + 2 : Math.max(0, extraP.y - 36))
 
-                      originalPages.getPage(extraPageIndex).drawText(extraCvText.trim(), {
-                        x: cvXCenter - cvWidth / 2,
-                        y: cvY,
-                        size: cvFontSize,
-                        font: signerNameFont,
-                        color: rgb(0, 0, 0),
-                      })
+                          originalPages.getPage(extraPageIndex).drawText(extraCvText.trim(), {
+                            x: cvXCenter - cvWidth / 2,
+                            y: cvY,
+                            size: cvFontSize,
+                            font: signerNameFont,
+                            color: rgb(0, 0, 0),
+                          })
+                        }
+                      }
+                    } catch (extraErr) {
+                      sigEmbedErrors.push({ userId: signerUserId, error: extraErr instanceof Error ? extraErr.message : String(extraErr) })
                     }
                   }
-                } catch { /* bỏ qua lỗi embed bản sao */ }
+                }
+              } catch (err) {
+                sigEmbedErrors.push({ userId: signerUserId, error: err instanceof Error ? err.message : String(err) })
               }
             }
 
@@ -1757,15 +1782,26 @@ export async function POST(req: NextRequest) {
       }
       if (shouldStampQr && manualQrPlacement && !metaResult.filled.includes("QR")) {
         try {
-          const qrPageIndex = (manualQrPlacement.page ?? 1) - 1
-          if (qrPageIndex >= 0 && qrPageIndex < originalPages.getPageCount()) {
-            const qrImgFallback = await originalPages.embedPng(qrBuffer)
-            originalPages.getPage(qrPageIndex).drawImage(qrImgFallback, {
-              x: manualQrPlacement.x,
-              y: manualQrPlacement.y,
-              width: manualQrPlacement.width,
-              height: manualQrPlacement.height,
-            })
+          const qrImgFallback = await originalPages.embedPng(qrBuffer)
+          if (manualQrPlacement.allPages) {
+            for (let pIdx = 0; pIdx < originalPages.getPageCount(); pIdx++) {
+              originalPages.getPage(pIdx).drawImage(qrImgFallback, {
+                x: manualQrPlacement.x,
+                y: manualQrPlacement.y,
+                width: manualQrPlacement.width,
+                height: manualQrPlacement.height,
+              })
+            }
+          } else {
+            const qrPageIndex = (manualQrPlacement.page ?? 1) - 1
+            if (qrPageIndex >= 0 && qrPageIndex < originalPages.getPageCount()) {
+              originalPages.getPage(qrPageIndex).drawImage(qrImgFallback, {
+                x: manualQrPlacement.x,
+                y: manualQrPlacement.y,
+                width: manualQrPlacement.width,
+                height: manualQrPlacement.height,
+              })
+            }
           }
         } catch { /* bỏ qua nếu embed thất bại */ }
       }

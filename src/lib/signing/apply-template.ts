@@ -240,15 +240,20 @@ export async function loadSignerChucVu(factoryId: string, userId: string): Promi
   try {
     const { data } = await getSupabaseAdmin()
       .from("maintenance_staff")
-      .select("chuc_vu, chuc_vu_chinh_quyen")
+      .select("chuc_vu, chuc_vu_chinh_quyen, chuc_vu_kim_nhiem")
       .eq("factory_id", factoryId)
       .eq("profile_id", userId)
       .eq("active", true)
       .maybeSingle()
-    const row = data as { chuc_vu: string | null; chuc_vu_chinh_quyen: string | null } | null
+    const row = data as {
+      chuc_vu: string | null
+      chuc_vu_chinh_quyen: string | null
+      chuc_vu_kim_nhiem: string | null
+    } | null
     return {
-      ...EMPTY_CHUC_VU,
       chinh_quyen: row?.chuc_vu_chinh_quyen || row?.chuc_vu || "",
+      kiem_nhiem: row?.chuc_vu_kim_nhiem || "",
+      doan_the: "",
     }
   } catch {
     return { ...EMPTY_CHUC_VU }
