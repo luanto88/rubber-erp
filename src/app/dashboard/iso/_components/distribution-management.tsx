@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Eye, Download, X, ChevronDown, ChevronRight, Users } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { authFetch } from "@/lib/auth-fetch"
 
 type RecipientRow = {
   id: string
@@ -156,7 +157,7 @@ export function DistributionManagement({
     setRevoking(recipientId)
     setRevokeError(null)
     try {
-      const res = await fetch(`/api/iso/distribute/recipient/${recipientId}`, {
+      const res = await authFetch(`/api/iso/distribute/recipient/${recipientId}`, {
         method: "DELETE",
       })
       const json = (await res.json()) as { ok?: boolean; error?: string }

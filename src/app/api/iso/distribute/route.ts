@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import nodemailer from "nodemailer"
+import { isoActorHasPermission, isoAuthErrorStatus, resolveIsoActor, type IsoActor } from "../_lib/iso-actor"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,19 +10,46 @@ const supabaseAdmin = createClient(
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
 
+/**
+ * Route chạy service role — trước 2026-10-02 KHÔNG xác thực gì: ai biết URL cũng phân phối
+ * được tài liệu của mọi nhà máy và đọc danh sách nhân sự. Nay bắt buộc Bearer token, người gọi
+ * phải có `iso.distribute` (hoặc admin) và chỉ thao tác trên đúng nhà máy của chính họ.
+ */
+async function guardDistributor(
+  req: NextRequest,
+  factoryId: string | null | undefined,
+): Promise<{ actor: IsoActor } | { response: NextResponse }> {
+  try {
+    const actor = await resolveIsoActor(req)
+    if (factoryId && factoryId !== actor.factoryId) {
+      return { response: NextResponse.json({ error: "Không đúng nhà máy của bạn" }, { status: 403 }) }
+    }
+    if (!(await isoActorHasPermission(actor, ["iso.distribute"]))) {
+      return { response: NextResponse.json({ error: "Bạn không có quyền phân phối tài liệu ISO" }, { status: 403 }) }
+    }
+    return { actor }
+  } catch (err) {
+    return {
+      response: NextResponse.json(
+        { error: err instanceof Error ? err.message : "Phiên đăng nhập không hợp lệ" },
+        { status: isoAuthErrorStatus(err) },
+      ),
+    }
+  }
+}
+
 // GET /api/iso/distribute?factoryId=xxx&docIds=id1,id2
 // Trả về danh sách active profiles + thông tin đã nhận trước đó
 // Dùng supabaseAdmin để bypass RLS (manager cần xem tất cả users trong factory)
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
-    const factoryId = searchParams.get("factoryId")
     const docIdsParam = searchParams.get("docIds")
     const itemType = searchParams.get("itemType") || "document"
 
-    if (!factoryId) {
-      return NextResponse.json({ error: "Thiếu factoryId" }, { status: 400 })
-    }
+    const guard = await guardDistributor(req, searchParams.get("factoryId"))
+    if ("response" in guard) return guard.response
+    const factoryId = guard.actor.factoryId
 
     const docIds = docIdsParam ? docIdsParam.split(",").filter(Boolean) : []
 
@@ -99,22 +127,22 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { factoryId, docIds, recipientUserIds, ghiChu, distributorUserId, itemType = "document" } =
-      (await req.json()) as {
-        factoryId: string
-        docIds: string[]
-        recipientUserIds: string[]
-        ghiChu?: string
-        distributorUserId: string
-        itemType?: "document" | "form"
-      }
+    const body = (await req.json()) as {
+      factoryId?: string
+      docIds: string[]
+      recipientUserIds: string[]
+      ghiChu?: string
+      itemType?: "document" | "form"
+    }
+    const { docIds, recipientUserIds, ghiChu, itemType = "document" } = body
 
-    if (
-      !factoryId ||
-      !docIds?.length ||
-      !recipientUserIds?.length ||
-      !distributorUserId
-    ) {
+    const guard = await guardDistributor(req, body.factoryId)
+    if ("response" in guard) return guard.response
+    // Nhà máy và người phân phối lấy từ phiên đã xác thực — bỏ qua giá trị client gửi lên.
+    const factoryId = guard.actor.factoryId
+    const distributorUserId = guard.actor.userId
+
+    if (!docIds?.length || !recipientUserIds?.length) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 

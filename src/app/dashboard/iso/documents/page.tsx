@@ -118,17 +118,16 @@ export default function IsoDocumentsPage() {
         // Cache session (đã gồm mảng permissions) — mirror đúng cách trang chi tiết ISO đang
         // làm. Quyền vừa được admin cấp chỉ có hiệu lực sau khi tải lại trang, vì chỉ bootstrap
         // của dashboard/layout.tsx mới gọi hydrateActiveSession() làm mới cache này.
-        setUser(JSON.parse(localStorage.getItem("erp_user") || "{}") as SessionUser)
-        const [profRes, permRes] = await Promise.all([
-          supabase.from("profiles").select("role").eq("id", uid).single(),
-          supabase.from("user_permissions").select("permission_code").eq("user_id", uid).eq("permission_code", "iso.distribute"),
-        ])
+        const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "{}") as SessionUser
+        setUser(cachedUser)
+        const profRes = await supabase.from("profiles").select("role").eq("id", uid).single()
         if (profRes.data) setUserRole(profRes.data.role || "")
+        // Dùng danh sách quyền hiệu lực trong cache session (đã gộp user_permissions đã cấp +
+        // role_permissions) thay vì đọc thẳng user_permissions — cách cũ bỏ qua quyền cấp theo
+        // vai trò và không xét cột `granted` (quyền đã thu hồi vẫn hiện nút).
         setCanDistribute(
           profRes.data?.role === "admin" ||
-          ((permRes.data || []) as Array<{ permission_code: string }>).some(
-            (p) => p.permission_code === "iso.distribute",
-          ),
+          (Array.isArray(cachedUser.permissions) && cachedUser.permissions.includes("iso.distribute")),
         )
       }
       setFactoryId(fid)

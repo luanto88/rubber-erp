@@ -15,6 +15,7 @@ import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+import { authFetch } from "@/lib/auth-fetch"
 
 type KhoItem = {
   recipientId: string
@@ -57,7 +58,7 @@ function fileUrlEndpoint(item: Pick<KhoItem, "docId" | "itemType">, download?: b
 }
 
 async function trackAction(docId: string, action: "view" | "download") {
-  await fetch("/api/iso/distribute/track", {
+  await authFetch("/api/iso/distribute/track", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ docId, action }),

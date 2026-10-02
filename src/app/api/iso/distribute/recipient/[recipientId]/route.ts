@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { getFreshAuthSession } from "@/lib/auth"
+import { isoAuthErrorStatus, resolveIsoActor } from "../../../_lib/iso-actor"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,14 +8,23 @@ const supabaseAdmin = createClient(
 )
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ recipientId: string }> },
 ) {
   try {
-    const session = await getFreshAuthSession()
-    const uid = session?.user?.id
-    if (!uid) {
-      return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 })
+    // getFreshAuthSession() chỉ chạy ở trình duyệt — gọi ở route server luôn trả null nên route
+    // này trước đây LUÔN báo 401. Xác thực bằng Bearer token.
+    let uid: string
+    let actorFactoryId: string
+    try {
+      const actor = await resolveIsoActor(req)
+      uid = actor.userId
+      actorFactoryId = actor.factoryId
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Phiên đăng nhập không hợp lệ" },
+        { status: isoAuthErrorStatus(err) },
+      )
     }
 
     const { recipientId } = await params
@@ -32,7 +41,7 @@ export async function DELETE(
       .eq("id", recipientId)
       .single()
 
-    if (fetchErr || !recipient) {
+    if (fetchErr || !recipient || recipient.factory_id !== actorFactoryId) {
       return NextResponse.json(
         { error: "Không tìm thấy bản ghi" },
         { status: 404 },

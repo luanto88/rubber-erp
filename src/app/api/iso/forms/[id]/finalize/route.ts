@@ -32,6 +32,25 @@ const supabaseAdmin = createClient(
 )
 const BUCKET = "iso-documents"
 
+function buildFinalStoragePath(
+  factoryId: string,
+  instanceId: string,
+  maTaiLieu: string | null | undefined,
+  tieuDe: string | null | undefined,
+  ext: string,
+): string {
+  const title = (tieuDe || "ho_so").trim()
+  const raw = maTaiLieu ? `${maTaiLieu}_${title}` : title
+  const safeName = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d").replace(/Đ/g, "D")
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "ho_so"
+  return `${factoryId}/iso/instances/${instanceId}/${safeName}.${ext}`
+}
+
 type SignPlacement = {
   page: number
   x: number
@@ -428,6 +447,16 @@ export async function POST(
 
     const factoryId = instance.factory_id as string
     const soBuocTong = (instance.so_buoc_tong as number) || 0
+
+    let templateDocCode: string | null = null
+    if (instance.template_doc_id) {
+      const { data: tDoc } = await supabaseAdmin
+        .from("iso_documents")
+        .select("ma_tai_lieu")
+        .eq("id", instance.template_doc_id)
+        .maybeSingle()
+      templateDocCode = tDoc?.ma_tai_lieu || null
+    }
 
     // =========================================================================
     // N-BƯỚC KÝ ĐỘNG (Dynamic N-step workflow khi so_buoc_tong > 0)
@@ -856,7 +885,7 @@ export async function POST(
         }
 
         const signedContentHash = computeIntegrityHash(finalBytes)
-        const finalPath = `${factoryId}/iso/instances/${instanceId}/final.${finalExt}`
+        const finalPath = buildFinalStoragePath(factoryId, instanceId, templateDocCode, instance.tieu_de as string, finalExt)
         const finalMime = finalExt === "pdf" ? "application/pdf" : "application/octet-stream"
         await supabaseAdmin.storage.from(BUCKET).upload(finalPath, new Blob([Buffer.from(finalBytes)], { type: finalMime }), { upsert: true })
         const { data: finalUrlData } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(finalPath)
@@ -1312,7 +1341,7 @@ export async function POST(
       }
 
       const signedContentHash = computeIntegrityHash(finalBytes)
-      const finalPath = `${factoryId}/iso/instances/${instanceId}/final.${finalExt}`
+      const finalPath = buildFinalStoragePath(factoryId, instanceId, templateDocCode, instance.tieu_de as string, finalExt)
       const finalBlob = new Blob([Buffer.from(finalBytes)], {
         type: finalExt === "pdf" ? "application/pdf" : "application/octet-stream",
       })

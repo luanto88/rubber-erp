@@ -65,6 +65,7 @@ import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { DistributionModal } from "../../_components/distribution-modal"
 import { DistributionManagement } from "../../_components/distribution-management"
+import { authFetch } from "@/lib/auth-fetch"
 
 type ProfileOption = {
   id: string
@@ -542,14 +543,15 @@ export default function IsoDocumentDetailPage() {
     // service-role) như 3 danh sách quyền bên dưới, nếu không người soát xét/phê duyệt
     // không phải admin chỉ thấy đúng 1 dòng của chính mình trong `profiles` (RLS), khiến
     // select không khớp option nào và hiện rỗng dù giá trị thật vẫn đúng.
-    const [allList, soatXetList, xemXetList, pheDuyetList] = await Promise.all([
+    // GĐ2 chuẩn hoá quyền (2026-10-02): bỏ `iso.soat_xet`, chỉ còn `iso.xem_xet`
+    // (migration 20261006 đã chép người có soát xét sang xem xét).
+    const [allList, xemXetList, pheDuyetList] = await Promise.all([
       loadProfilesByPermission(fid, ""),
-      loadProfilesByPermission(fid, "iso.soat_xet"),
       loadProfilesByPermission(fid, "iso.xem_xet"),
       loadProfilesByPermission(fid, "iso.phe_duyet"),
     ])
     setProfilesAll(allList)
-    setProfilesXemXet(soatXetList.length > 0 ? soatXetList : xemXetList)
+    setProfilesXemXet(xemXetList)
     setProfilesPheDuyet(pheDuyetList)
   }, [loadProfilesByPermission])
 
@@ -773,16 +775,12 @@ export default function IsoDocumentDetailPage() {
       setUser(erp)
       setFactoryId(fid)
 
-      // Check iso.distribute permission
-      const [profRes, permRes] = await Promise.all([
-        supabase.from("profiles").select("role").eq("id", uid).single(),
-        supabase.from("user_permissions").select("permission_code").eq("user_id", uid).eq("permission_code", "iso.distribute"),
-      ])
+      // Quyền phân phối: dùng danh sách quyền hiệu lực trong cache session (đã gộp
+      // user_permissions đã cấp + role_permissions), không đọc thẳng user_permissions.
+      const profRes = await supabase.from("profiles").select("role").eq("id", uid).single()
       setCanDistribute(
         profRes.data?.role === "admin" ||
-        ((permRes.data || []) as Array<{ permission_code: string }>).some(
-          (p) => p.permission_code === "iso.distribute",
-        ),
+        (Array.isArray(erp?.permissions) && (erp.permissions as string[]).includes("iso.distribute")),
       )
 
       void loadMasterData()
@@ -1000,7 +998,7 @@ export default function IsoDocumentDetailPage() {
     : false
   const isAdmin = user?.role === "admin"
   // Phải là đúng người được chỉ định VÀ có quyền
-  const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
+  const canXemXet = hasPermission(user, "iso.xem_xet") && !!userId && userId === doc?.xem_xet_user_id
   const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
 
   const isNguoiTao = !!userId && (userId === doc?.created_by || isNew)
@@ -1864,7 +1862,7 @@ export default function IsoDocumentDetailPage() {
         }
         // Trigger notify-obsolete cho các bản đã hết hiệu lực (soát xét)
         for (const obsoleteId of invalidatedIds) {
-          void fetch("/api/iso/distribute/notify-obsolete", {
+          void authFetch("/api/iso/distribute/notify-obsolete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ obsoleteDocId: obsoleteId, newDocId: docId, factoryId }),

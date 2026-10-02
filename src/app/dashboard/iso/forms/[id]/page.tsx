@@ -15,7 +15,7 @@ import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession, hasPermission, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession } from "@/lib/auth"
 import { fetchSecureUrl, openSecureFile } from "../../../_components/secure-file-open"
 import { formatFactoryDateVN, formatFactoryDateTimeVN } from "@/lib/date-utils"
 import {
@@ -1751,7 +1751,12 @@ function SignPlacementModal({
               const hasMainSig = pageNum === mainBoxPage
               const extraCountOnPage = extraSigBoxes.filter((b) => (b.page || 1) === pageNum).length
               const totalSigsOnPage = (hasMainSig ? 1 : 0) + extraCountOnPage
-              const hasSigningOnPage = totalSigsOnPage > 0
+              const hasQrOnPage = isFirstStep && pageNum === 1
+              const hasSigningOnPage = totalSigsOnPage > 0 || hasQrOnPage
+              const mainBox = templateBox || (hasMainSig ? sigState : null)
+              const qrBoxToRender = hasQrOnPage ? (templateQrBox || qrState) : null
+              const cW = canvasRef.current?.width || 800
+              const cH = canvasRef.current?.height || 1100
               return (
                 <button
                   key={`thumb-${pageNum}`}
@@ -1775,21 +1780,42 @@ function SignPlacementModal({
                       </div>
                     )}
                     {hasSigningOnPage && (
-                      <span className="absolute top-1 right-1 px-1 py-0.5 bg-emerald-600 text-white text-[9px] font-extrabold rounded shadow flex items-center gap-0.5 z-10">
-                        ✍️ {totalSigsOnPage}
+                      <span className="absolute top-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-emerald-600 text-white text-[9px] font-extrabold rounded shadow flex items-center gap-0.5 z-10 pointer-events-none whitespace-nowrap">
+                        {totalSigsOnPage > 0 && hasQrOnPage
+                          ? `✍️ ${totalSigsOnPage} · QR`
+                          : totalSigsOnPage > 0
+                            ? `✍️ ${totalSigsOnPage}`
+                            : "📱 QR"}
                       </span>
                     )}
-                    {/* Vẽ mini-rectangles mô phỏng tất cả vị trí khung ký trên trang này - cùng màu với bước ký đang thực hiện */}
+                    {/* Vẽ mini-rectangles mô phỏng tất cả vị trí khung ký & QR trên trang này */}
                     {hasSigningOnPage && (
                       <>
-                        {hasMainSig && templateBox && (
+                        {/* Khung QR mini — trang 1 bước đầu tiên (z-20 hiển thị trên badge nếu có chạm) */}
+                        {hasQrOnPage && qrBoxToRender && (
+                          <span
+                            className="absolute pointer-events-none rounded-[1px] z-20 shadow-xs flex items-center justify-center font-mono font-bold text-[7px] text-blue-700 bg-blue-100/70 select-none"
+                            style={{
+                              left: `${Math.max(0, Math.min(92, (qrBoxToRender.x / cW) * 100))}%`,
+                              top: `${Math.max(0, Math.min(92, (qrBoxToRender.y / cH) * 100))}%`,
+                              width: `${Math.max(8, Math.min(100, (qrBoxToRender.w / cW) * 100))}%`,
+                              height: `${Math.max(6, Math.min(100, (qrBoxToRender.h / cH) * 100))}%`,
+                              border: "1.5px dashed #2563eb",
+                              backgroundColor: "rgba(37, 99, 235, 0.35)",
+                            }}
+                            title="Mã QR liên kết hồ sơ"
+                          >
+                            QR
+                          </span>
+                        )}
+                        {hasMainSig && mainBox && (
                           <span
                             className="absolute pointer-events-none rounded-[1px] z-5 shadow-xs"
                             style={{
-                              left: `${Math.max(0, Math.min(92, (templateBox.x / (canvasRef.current?.width || 800)) * 100))}%`,
-                              top: `${Math.max(0, Math.min(92, (templateBox.y / (canvasRef.current?.height || 1100)) * 100))}%`,
-                              width: `${Math.max(8, Math.min(100, (templateBox.w / (canvasRef.current?.width || 800)) * 100))}%`,
-                              height: `${Math.max(6, Math.min(100, (templateBox.h / (canvasRef.current?.height || 1100)) * 100))}%`,
+                              left: `${Math.max(0, Math.min(92, (mainBox.x / cW) * 100))}%`,
+                              top: `${Math.max(0, Math.min(92, (mainBox.y / cH) * 100))}%`,
+                              width: `${Math.max(8, Math.min(100, (mainBox.w / cW) * 100))}%`,
+                              height: `${Math.max(6, Math.min(100, (mainBox.h / cH) * 100))}%`,
                               border: `1.5px solid ${activeStepColor.fg}`,
                               backgroundColor: activeStepColor.bg,
                             }}
@@ -1803,10 +1829,10 @@ function SignPlacementModal({
                               key={`mini-extra-${pageNum}-${bIdx}`}
                               className="absolute pointer-events-none rounded-[1px] z-5 shadow-xs"
                               style={{
-                                left: `${Math.max(0, Math.min(92, (b.templateBox.x / (canvasRef.current?.width || 800)) * 100))}%`,
-                                top: `${Math.max(0, Math.min(92, (b.templateBox.y / (canvasRef.current?.height || 1100)) * 100))}%`,
-                                width: `${Math.max(8, Math.min(100, (b.templateBox.w / (canvasRef.current?.width || 800)) * 100))}%`,
-                                height: `${Math.max(6, Math.min(100, (b.templateBox.h / (canvasRef.current?.height || 1100)) * 100))}%`,
+                                left: `${Math.max(0, Math.min(92, (b.templateBox.x / cW) * 100))}%`,
+                                top: `${Math.max(0, Math.min(92, (b.templateBox.y / cH) * 100))}%`,
+                                width: `${Math.max(8, Math.min(100, (b.templateBox.w / cW) * 100))}%`,
+                                height: `${Math.max(6, Math.min(100, (b.templateBox.h / cH) * 100))}%`,
                                 border: `1.5px solid ${activeStepColor.fg}`,
                                 backgroundColor: activeStepColor.bg,
                               }}
@@ -2465,7 +2491,6 @@ export default function IsoFormInstancePage() {
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
   const [userName, setUserName] = useState("")
   const [userRole, setUserRole] = useState<string | null>(null)
   const [userChucVu, setUserChucVu] = useState("")
@@ -2541,12 +2566,11 @@ export default function IsoFormInstancePage() {
       try {
         const fid = await getActiveFactoryId()
         if (!fid) { setLoading(false); return }
-        const { session, user: authUser } = await hydrateActiveSession()
+        const { session } = await hydrateActiveSession()
         const uid = session?.user?.id
         if (!uid) { setLoading(false); return }
         setFactoryId(fid)
         setUserId(uid)
-        setCurrentUser(authUser)
         // Load user profile for full name & role
         const { data: profile } = await supabase
           .from("profiles")
@@ -2701,14 +2725,21 @@ export default function IsoFormInstancePage() {
   }, [instanceId, userId, loadDeptUsers])
 
   const loadProfiles = useCallback(async (fid: string) => {
+    // GĐ2 chuẩn hoá quyền ISO: người phê duyệt hồ sơ thực hiện lọc theo `iso.forms.approve`;
+    // người xem xét = có `iso.xem_xet` HOẶC `iso.forms.approve` (hợp 2 tập, để không ai đang có
+    // tên trong danh sách cũ — vốn chỉ lọc `iso.forms.approve` — bị mất khỏi danh sách).
     const [resX, resP] = await Promise.all([
-      fetch(`/api/iso/profiles-by-permission?factoryId=${fid}&permCode=iso.forms.approve`),
+      fetch(`/api/iso/profiles-by-permission?factoryId=${fid}&permCode=iso.xem_xet`),
       fetch(`/api/iso/profiles-by-permission?factoryId=${fid}&permCode=iso.forms.approve`),
     ])
     const dataX = resX.ok ? (await resX.json() as { profiles?: ProfileOption[] }) : {}
     const dataP = resP.ok ? (await resP.json() as { profiles?: ProfileOption[] }) : {}
-    const px = Array.isArray(dataX.profiles) ? dataX.profiles : []
+    const xemXetOnly = Array.isArray(dataX.profiles) ? dataX.profiles : []
     const pp = Array.isArray(dataP.profiles) ? dataP.profiles : []
+    const xemXetMap = new Map<string, ProfileOption>()
+    xemXetOnly.forEach((p) => xemXetMap.set(p.id, p))
+    pp.forEach((p) => xemXetMap.set(p.id, p))
+    const px = Array.from(xemXetMap.values())
     setProfilesXemXet(px)
     setProfilesPheDuyet(pp)
 
@@ -3469,9 +3500,12 @@ export default function IsoFormInstancePage() {
   const firstStepSignerId = firstStep ? stepSignerUserId(firstStep) : null
   const isDrafter = firstStepSignerId === userId
   const isStep1Signer = isDrafter || isNguoiTao
-  const hasSignPerm = hasPermission(currentUser, "iso.sign") || hasPermission(currentUser, "iso.create") || hasPermission(currentUser, "iso.signature") || userRole === "admin"
-  const canManageDraft = isEditable && (isNguoiTao || isDrafter || hasPermission(currentUser, "iso.create") || userRole === "admin")
-  const canSignStep1 = isEditable && hasSignPerm && (isStep1Signer || userRole === "admin")
+  // Chỉ chính người tạo / người ký bước 1 / admin — quyền `iso.create` KHÔNG cho sửa nháp của
+  // người khác (trước đây có, nhưng RLS chặn nên bấm xong lưu thất bại âm thầm).
+  const canManageDraft = isEditable && (isNguoiTao || isDrafter || userRole === "admin")
+  // GĐ2 chuẩn hoá quyền ISO: bỏ quyền "ký số" (`iso.sign` chưa từng tồn tại, `iso.signature` đã
+  // gỡ). Người tạo / người được chọn ký bước 1 thì bắt buộc phải ký được — không cần thêm quyền.
+  const canSignStep1 = isEditable && (isStep1Signer || userRole === "admin")
   const canChangeSigner = !isEditable && !isDone && instance.trang_thai !== "tra_ve" && (
     isStep1Signer
   )
@@ -3749,17 +3783,21 @@ export default function IsoFormInstancePage() {
 
                   {/* File đã ký duyệt (khi hoàn thành) */}
                   {isDone && (instance.final_pdf_url || instance.final_office_url) && (
-                    <div className="flex items-center gap-2.5 p-3.5 bg-white border border-emerald-300 rounded-xl shadow-xs">
-                      <CheckCircle2 size={22} className="text-emerald-600 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-emerald-950 truncate">
-                          {instance.tieu_de || "File đã ký duyệt"}
-                        </p>
-                        <p className="text-[10px] text-emerald-600 font-semibold uppercase">
-                          {instance.final_pdf_url ? "PDF ĐÃ KÝ DUYỆT" : instance.draft_file_type?.toUpperCase()}
-                        </p>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white border border-emerald-300 rounded-xl shadow-xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <CheckCircle2 size={22} className="text-emerald-600 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-xs font-bold text-emerald-950 truncate max-w-full">
+                              {instance.tieu_de || "File đã ký duyệt"}
+                            </p>
+                            <span className="text-[10px] text-emerald-700 bg-emerald-100 font-extrabold px-1.5 py-0.5 rounded uppercase shrink-0">
+                              {instance.final_pdf_url ? "PDF ĐÃ KÝ DUYỆT" : instance.draft_file_type?.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
                         <button
                           type="button"
                           onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
@@ -3769,7 +3807,7 @@ export default function IsoFormInstancePage() {
                         </button>
                         <button
                           onClick={handleDownload}
-                          className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
+                          className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-200"
                           title="Tải về"
                         >
                           <Download size={14} />
@@ -3781,17 +3819,21 @@ export default function IsoFormInstancePage() {
                   {/* File nháp / file đang xử lý */}
                   {instance.draft_file_url && !uploading && !isDone && (
                     <div className="space-y-2.5">
-                      <div className="flex items-center gap-2.5 p-3.5 bg-white border border-slate-200 hover:border-violet-300 rounded-xl shadow-xs transition-colors">
-                        <FileText size={22} className="text-violet-600 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-slate-900 truncate">
-                            {instance.tieu_de || "File hồ sơ"}
-                          </p>
-                          <span className="text-[10px] font-extrabold uppercase text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">
-                            {instance.draft_file_type ?? "file"}
-                          </span>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white border border-slate-200 hover:border-violet-300 rounded-xl shadow-xs transition-colors">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <FileText size={22} className="text-violet-600 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-xs font-bold text-slate-900 truncate max-w-full">
+                                {instance.tieu_de || "File hồ sơ"}
+                              </p>
+                              <span className="text-[10px] font-extrabold uppercase text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded shrink-0">
+                                {instance.draft_file_type ?? "file"}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap self-end sm:self-auto">
                           <button
                             type="button"
                             onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}

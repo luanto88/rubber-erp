@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
-import { getFreshAuthSession } from "@/lib/auth"
+import { isoAuthErrorStatus, resolveIsoActor } from "../../_lib/iso-actor"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,10 +9,16 @@ const supabaseAdmin = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getFreshAuthSession()
-    const uid = session?.user?.id
-    if (!uid) {
-      return NextResponse.json({ error: "Chưa đăng nhập" }, { status: 401 })
+    // getFreshAuthSession() chỉ chạy ở trình duyệt — gọi ở route server luôn trả null nên route
+    // này trước đây LUÔN báo 401 (không bao giờ ghi được mốc đã xem/đã tải). Dùng Bearer token.
+    let uid: string
+    try {
+      uid = (await resolveIsoActor(req)).userId
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Phiên đăng nhập không hợp lệ" },
+        { status: isoAuthErrorStatus(err) },
+      )
     }
 
     const { docId, action } = (await req.json()) as {

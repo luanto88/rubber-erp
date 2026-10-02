@@ -672,8 +672,31 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "documents.print": "in văn bản",
   "documents.upload_signed": "tải lên bản đã ký tay",
   "documents.distribute": "phân phối văn bản",
+  // Bộ 9 quyền ISO sau chuẩn hoá (GĐ2, 2026-10-02) — xem .claude/rules/16-iso-vanban-module.md
+  "iso.view": "vào module ISO (Việc của tôi, Kho của tôi)",
+  "iso.view_library": "xem kho tài liệu ISO",
+  "iso.create": "tạo tài liệu hồ sơ (soạn mới + soát xét)",
+  "iso.xem_xet": "xem xét tài liệu hồ sơ",
+  "iso.phe_duyet": "phê duyệt tài liệu hồ sơ",
+  "iso.distribute": "phân phối tài liệu",
   "iso.view_het_hieu_luc": "xem file bản hết hiệu lực",
+  "iso.forms.create": "tạo hồ sơ thực hiện",
+  "iso.forms.approve": "phê duyệt hồ sơ thực hiện",
+  "iso.forms.view_all": "xem tất cả hồ sơ thực hiện",
 }
+
+// Mã quyền đã bỏ nhưng bản ghi `permissions` còn giữ tạm (migration 20261006 chỉ gỡ khỏi
+// role_permissions/user_permissions). Ẩn khỏi danh sách tick để admin không tick nhầm ô chết.
+const DEPRECATED_PERMISSION_CODES = new Set([
+  "iso.edit",
+  "iso.delete",
+  "iso.print",
+  "iso.soat_xet",
+  "iso.signature",
+  "iso.forms.view",
+  "iso.forms.edit",
+  "iso.forms.delete",
+])
 
 function prettifyPermissionModule(moduleName: string) {
   return PERMISSION_MODULE_LABELS[moduleName] || moduleName.replaceAll("_", " ")
@@ -829,7 +852,9 @@ export default function SettingsPage() {
   const canEditPermissions = hasPermission(user, "users.edit_permission")
   const canViewMasterData = isAdmin || hasPermission(user, "settings.master_data")
   const canViewMaintenanceConfig = isAdmin || hasPermission(user, "settings.maintenance_config")
-  const canViewIsoSignature = isAdmin || hasPermission(user, "iso.signature")
+  // GĐ2 chuẩn hoá quyền ISO (2026-10-02): bỏ quyền `iso.signature`. Ai được chọn soạn/xem xét/
+  // phê duyệt thì bắt buộc phải ký, nên tab Chữ ký cá nhân luôn hiện cho mọi người đã đăng nhập.
+  const canViewIsoSignature = !!user
   const canManageKpiConfig = isAdmin || hasPermission(user, "kpi.manage_config")
   const isKpiDeptLeader = kpiLeaderDepartmentId != null
   // Dùng cho tab "KPI & 5S" (sidebar + CRUD Vị trí/Khu vực) — mở rộng thêm lãnh đạo phòng ban,
@@ -1076,7 +1101,7 @@ export default function SettingsPage() {
     }
 
     setPermissionOptions(
-      data.map((item) => ({
+      data.filter((item) => !DEPRECATED_PERMISSION_CODES.has(item.code)).map((item) => ({
         code: item.code,
         module_name: item.module_name,
         action_name: item.action_name,
@@ -2043,20 +2068,9 @@ export default function SettingsPage() {
     // chặn vào Cài đặt chỉ vì thiếu mọi quyền Cài đặt khác.
     const leaderDeptId = await resolveMyLeaderDepartmentId(sessionUser.id, fid)
     setKpiLeaderDepartmentId(leaderDeptId)
-    if (
-      !hasPermission(sessionUser, "settings.manage_config") &&
-      !hasPermission(sessionUser, "users.view") &&
-      !hasPermission(sessionUser, "users.approve") &&
-      !hasPermission(sessionUser, "settings.master_data") &&
-      !hasPermission(sessionUser, "settings.maintenance_config") &&
-      !hasPermission(sessionUser, "iso.signature") &&
-      !hasPermission(sessionUser, "kpi.manage_config") &&
-      leaderDeptId == null
-    ) {
-      setLoading(false)
-      window.location.replace("/dashboard")
-      return
-    }
+    // GĐ2 chuẩn hoá quyền ISO (2026-10-02): bỏ guard "phải có ít nhất 1 quyền Cài đặt". Tab
+    // "ISO & Văn bản" (Chữ ký cá nhân + PIN) nay mở cho MỌI người dùng đã đăng nhập, nên ai vào
+    // trang này cũng luôn có ít nhất 1 tab hợp lệ. Các tab còn lại vẫn tự ẩn theo quyền riêng.
 
     await Promise.all([
       loadSuffixes(fid),
@@ -2184,6 +2198,23 @@ export default function SettingsPage() {
       void loadSignInfo()
     }
   }, [tab, user, factoryId])
+
+  // Tab mặc định là "system" — người dùng không có quyền Hệ thống (vd user thường chỉ vào để đặt
+  // chữ ký/PIN) phải tự chuyển sang tab hợp lệ đầu tiên, nếu không sẽ thấy nội dung tab bị ẩn.
+  useEffect(() => {
+    if (!user) return
+    const visibility: Record<SettingsTab, boolean> = {
+      system: canViewUsers || canEditPermissions,
+      "factory-config": canManageSettings,
+      "master-data": canViewMasterData,
+      maintenance: canViewMaintenanceConfig,
+      "iso-vanban": canViewIsoSignature,
+      "kpi-5s": canManageKpi5s,
+    }
+    if (visibility[tab]) return
+    const firstVisible = (Object.keys(visibility) as SettingsTab[]).find((key) => visibility[key])
+    if (firstVisible) setTab(firstVisible)
+  }, [user, tab, canViewUsers, canEditPermissions, canManageSettings, canViewMasterData, canViewMaintenanceConfig, canViewIsoSignature, canManageKpi5s])
 
   const selectedVehicleAssignmentHistory = useMemo(() => {
     if (!assignmentHistoryVehicleId) return []

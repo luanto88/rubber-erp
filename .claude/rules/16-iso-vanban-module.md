@@ -600,3 +600,58 @@ Khi có mâu thuẫn giữa tài liệu lịch sử, ưu tiên theo thứ tự:
 3. Nội dung lịch sử cũ
 
 File này là bản đã gộp và làm sạch. Các quy tắc cũ mâu thuẫn xem như hết hiệu lực.
+
+## Chuẩn hoá phân quyền ISO — GĐ1 vá bảo mật (2026-10-02)
+
+Kế hoạch đầy đủ (đánh giá 16 quyền → bộ 9 quyền, ẩn/hiện tab, Thu hồi): `C:\Users\Software\.claude\plans\nh-gi-ph-n-quy-n-functional-seal.md`.
+Đã chốt với người dùng: người xem xét/phê duyệt được mở bản hết hiệu lực mình đã ký; user thường
+được xem tab Tài liệu ISO; bỏ quyền "ký số"; thu hồi/sửa/xóa sau khi gửi CHỈ của chính người tạo.
+
+GĐ1 đã code (chưa test tay):
+
+- Migration `20261005_iso_rls_hardening.sql` (**ĐÃ CHẠY 2026-10-02**, đã kiểm `pg_policies` còn đúng 4 policy): `iso_documents` bỏ policy `FOR ALL`
+  → 4 policy; UPDATE cho admin / người tham gia ký của cả bộ tài liệu (hàm SECURITY DEFINER
+  `iso_doc_family_participant`) / người có `iso.phe_duyet` khi hạ bản `co_hieu_luc`; DELETE chỉ
+  nháp + người tạo/soạn hoặc admin. `iso_form_instances` UPDATE thêm người ký trong
+  `thu_tu_ky_json` (`iso_steps_include_user`) — trước đó người ký bước 2+ bấm "Trả về" bị lọc âm thầm.
+- 4 route `/api/iso/distribute*` trước đây **không xác thực** (route chính) hoặc gọi
+  `getFreshAuthSession()` ở server — hàm chỉ chạy ở trình duyệt, luôn null ⇒ "đánh dấu đã xem" và
+  "thu hồi phân phối" luôn 401. Nay dùng `resolveIsoActor()` / `isoActorHasPermission()`
+  (`src/app/api/iso/_lib/iso-actor.ts`, mirror `fetchPermissionCodesForUser`), nhà máy + người
+  phân phối lấy từ phiên. Client gọi qua `authFetch()` (`src/lib/auth-fetch.ts`).
+- `canDistribute` (danh sách + chi tiết) dùng quyền hiệu lực trong cache session thay vì đọc
+  thẳng `user_permissions` (bỏ qua quyền theo vai trò và cột `granted`).
+- `forms/[id]` `canManageDraft` bỏ nhánh `iso.create` (sửa nháp của người khác).
+
+⚠️ Không gọi `getFreshAuthSession()` trong route server — dùng `requireAuthUser(req)`.
+
+## Chuẩn hoá phân quyền ISO — GĐ2 bộ quyền mới (2026-10-02)
+
+Đã code, **migration `20261006_iso_permissions_normalize.sql` CHƯA CHẠY**, chưa test tay.
+
+Bộ quyền ISO còn lại (10 mã): `iso.view`, `iso.view_library` (mới), `iso.create`, `iso.xem_xet`,
+`iso.phe_duyet`, `iso.distribute`, `iso.view_het_hieu_luc`, `iso.forms.create`,
+`iso.forms.approve`, `iso.forms.view_all` (mới). Đã bỏ: `iso.edit`, `iso.delete`, `iso.print`,
+`iso.soat_xet` (→ `iso.xem_xet`), `iso.signature`, `iso.forms.view/edit/delete`; `iso.sign` chưa
+từng tồn tại. Bản ghi trong bảng `permissions` của mã bỏ vẫn giữ tạm, Cài đặt ẩn đi
+(`DEPRECATED_PERMISSION_CODES` trong `settings/page.tsx`).
+
+- Migration chép quyền TRƯỚC khi gỡ, vào cả `user_permissions` lẫn `role_permissions`:
+  soát xét→xem xét (ghi đè cả `granted=false`); xem xét/phê duyệt/soát xét→`forms.view_all`;
+  phê duyệt→`forms.approve`; `iso.view`→`view_library` + `forms.create`; `iso.create`→`forms.create`.
+- `scripts/audit-iso-permissions.mjs` (chỉ đọc) mô phỏng đúng các bước đó trên DB thật, so khả năng
+  thao tác từng user trước/sau. Chạy 2026-10-02: 30 user active, **0 người mất quyền**, 0 người rơi
+  về role_permissions. Thay đổi đáng chú ý: 2 người có `iso.phe_duyet` (Trần Hoàng Giang, Huỳnh Ngô
+  Ngọc Khoa) giờ có tên trong danh sách chọn người phê duyệt hồ sơ thực hiện.
+  **Đặc tả COPY_RULES/DEPRECATED trong script PHẢI khớp file SQL.**
+- Tab "ISO & Văn bản" (Chữ ký cá nhân + PIN) trong Cài đặt mở cho MỌI người đã đăng nhập; bỏ guard
+  "phải có ít nhất 1 quyền Cài đặt"; menu Cài đặt không còn gate `settings.view` (chỉ ẩn với
+  customer); trang tự chuyển sang tab hợp lệ đầu tiên nếu tab mặc định bị ẩn.
+- `forms/[id]`: ký bước 1 không cần quyền (người tạo/người được chọn là ký được); danh sách người
+  xem xét = `iso.xem_xet` ∪ `iso.forms.approve`, người phê duyệt = `iso.forms.approve`.
+- `api/signing/templates` (lưu mẫu vị trí ISO): `iso.create` hoặc `iso.forms.create`.
+- `iso.forms.view_all` và `iso.view_library` mới chỉ seed, CHƯA gate gì — để GĐ3.
+
+⚠️ Thứ tự triển khai: **chạy migration TRƯỚC, deploy code SAU, càng sát càng tốt**. Khoảng giữa,
+code cũ vẫn chạy được (dùng `soat_xet || xem_xet`), chỉ có người không có `iso.create` tạm không lưu
+được mẫu vị trí ký và người chỉ có `iso.signature` tạm không vào được Cài đặt.
