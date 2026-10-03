@@ -363,3 +363,5 @@ dùng chung bồn (`uses_shared_oil_stock`) gộp **1 nhãn/kho** (không phải
 **Kiểu action thống nhất** — `InventoryActionButton` / `InventoryActionLink` trong `inventory-ui.tsx`: viên thuốc `rounded-full`, nền nhạt + viền cùng tông, chữ đậm. `size`: `md` (header) · `sm` (nút có chữ trong dòng bảng) · `icon`. Quy ước màu: emerald = ghi sổ/duyệt/Excel/thêm nhập · amber = thêm xuất · sky = thêm chuyển/lưu/xem · violet = nhãn QR · rose = hủy · slate = in/làm mới/quay lại. Code mới trong module kho dùng 2 component này, không tự viết class nút riêng.
 
 Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng chung bộ lọc giữa 2 thẻ Báo cáo qua URL; `inventory/settings/page.tsx` (không có link nào trỏ tới) vẫn GIỮ — chỉ xóa khi người dùng xác nhận.
+
+**Cụm nút cân đối (2026-10-03, tiếp)** — mọi cụm nút đặt trong `InventoryActionBar` (hoặc class `INVENTORY_ACTION_BAR_CLASS`): mobile lưới 2 cột (số nút lẻ thì nút cuối trải 2 cột), từ `md` 1 hàng các cột bằng nhau; chữ dài bị cắt "…" chứ không xuống dòng. `InventoryPageShell` tự bọc `action` bằng cụm này. Giữ nhãn nút ngắn (≤ ~14 ký tự): "Lưu", "Ghi sổ", "Ghi sổ N kho", "In nhãn (N)".

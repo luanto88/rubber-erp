@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { ArrowLeft, Check, CheckCheck, Droplet, Printer, Tag, X } from "lucide-react"
-import { InventoryActionButton, InventoryActionLink } from "../_components/inventory-ui"
+import { InventoryActionBar, InventoryActionButton, InventoryActionLink } from "../_components/inventory-ui"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { loadInventoryAdminData, type InventoryItemOption, type InventoryWarehouseOption, type InventoryWarehouseRule } from "../_components/inventory-data"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -232,18 +232,20 @@ export default function InventoryCardsPage() {
         ref={revealRef}
         className="scroll-reveal flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
       >
-        <div className="flex flex-wrap items-center gap-2">
-          <InventoryActionButton icon={CheckCheck} label={`Chọn tất cả (${entries.length})`} tone="slate" onClick={selectAll} />
+        <span className="text-sm text-slate-500">
+          Đã chọn: <b className="text-slate-700">{selectedKeys.size}</b> / {entries.length} nhãn
+        </span>
+        <InventoryActionBar>
+          <InventoryActionButton icon={CheckCheck} label="Chọn tất cả" tone="slate" onClick={selectAll} />
           <InventoryActionButton icon={X} label="Bỏ chọn" tone="slate" onClick={clearAll} disabled={selectedKeys.size === 0} />
-          <span className="text-sm text-slate-500">Đã chọn: {selectedKeys.size}</span>
-        </div>
-        <InventoryActionButton
-          icon={Printer}
-          tone="violet"
-          onClick={() => void handlePrint()}
-          disabled={selectedKeys.size === 0 || printing}
-          label={printing ? "Đang tạo file..." : `In nhãn QR đã chọn (${selectedKeys.size})`}
-        />
+          <InventoryActionButton
+            icon={Printer}
+            tone="violet"
+            onClick={() => void handlePrint()}
+            disabled={selectedKeys.size === 0 || printing}
+            label={printing ? "Đang tạo file..." : `In nhãn (${selectedKeys.size})`}
+          />
+        </InventoryActionBar>
       </section>
 
       {loading ? (

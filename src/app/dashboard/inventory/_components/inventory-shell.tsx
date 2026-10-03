@@ -7,6 +7,7 @@ import type { ReactNode } from "react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+import { InventoryActionBar } from "./inventory-ui"
 
 type SubTab = {
   href: string
@@ -127,7 +128,7 @@ export function InventoryPageShell({
               )
             })}
           </div>
-          {action ? <div className="flex flex-wrap items-center gap-2 lg:justify-end">{action}</div> : null}
+          {action ? <InventoryActionBar className="lg:shrink-0">{action}</InventoryActionBar> : null}
         </div>
       </section>
 

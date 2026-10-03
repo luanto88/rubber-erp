@@ -687,7 +687,7 @@ export default function InventoryLookupPage() {
                       {movement.balance_after === null ? "Chưa có" : movement.balance_after.toLocaleString("vi-VN")}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-nowrap items-center gap-2">
                         {canApprove &&
                           movement.documentType !== "transfer" &&
                           !documentInfoById[movement.document_id]?.approved && (

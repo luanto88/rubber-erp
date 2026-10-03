@@ -8,7 +8,7 @@ import { supabase } from "@/lib/supabase"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryDocumentList } from "../_components/inventory-document-list"
-import { InventoryActionButton, InventoryActionLink } from "../_components/inventory-ui"
+import { INVENTORY_ACTION_BAR_CLASS, InventoryActionButton, InventoryActionLink } from "../_components/inventory-ui"
 import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
@@ -1329,7 +1329,7 @@ function InventoryReceiptsPageForm() {
             </p>
           </div>
           <div className="flex flex-col gap-3 lg:items-end">
-            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <div className={INVENTORY_ACTION_BAR_CLASS}>
               <InventoryActionLink href="/dashboard/inventory/receipts" icon={ArrowLeft} label="Danh sách" tone="slate" />
               {draft.documentId ? (
                 <InventoryActionLink
@@ -1344,14 +1344,14 @@ function InventoryReceiptsPageForm() {
                 <>
                   <InventoryActionButton
                     icon={Save}
-                    label={saving ? "Đang lưu..." : draft.documentId ? "Lưu thay đổi" : "Lưu nháp"}
+                    label={saving ? "Đang lưu..." : draft.documentId ? "Lưu" : "Lưu nháp"}
                     tone="sky"
                     onClick={() => void saveReceiptDraft()}
                     disabled={!canSave || saving || posting || loading}
                   />
                   <InventoryActionButton
                     icon={BookCheck}
-                    label={posting ? "Đang ghi sổ..." : "Ghi sổ nhập kho"}
+                    label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
                     tone="emerald"
                     onClick={() => void postReceiptDraft()}
                     disabled={saving || posting || loading}
