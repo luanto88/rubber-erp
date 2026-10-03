@@ -1843,14 +1843,29 @@ export default function QualityPage() {
     const deduped = Array.from(statsMap.values())
     const khongDatCount = deduped.filter(r=>r.dat_hang?.endsWith("RH")).length
     const datCount = deduped.length - khongDatCount
+    const rawDatPct = deduped.length ? (datCount / deduped.length) * 100 : 0
+    const rawKhongDatPct = deduped.length ? (khongDatCount / deduped.length) * 100 : 0
+    const tyLeStr = deduped.length === 0
+      ? "0%"
+      : khongDatCount > 0
+        ? `${Math.min(rawDatPct, 99.99).toFixed(2)}%`
+        : "100%"
+    const tyLeKhongDatStr = deduped.length === 0
+      ? "0%"
+      : khongDatCount > 0
+        ? `${Math.max(rawKhongDatPct, 0.01).toFixed(2)}%`
+        : "0%"
+
     return {
       latestPerLot: map,
       stats: {
         total: deduped.length,
         dat: datCount,
         khongDat: khongDatCount,
-        tyLe:      deduped.length ? Math.round(datCount/deduped.length*100) : 0,
-        tyLeKhongDat: deduped.length ? Math.round(khongDatCount/deduped.length*100) : 0,
+        tyLe: rawDatPct,
+        tyLeKhongDat: rawKhongDatPct,
+        tyLeStr,
+        tyLeKhongDatStr,
       }
     }
   }, [results, statsResults])
@@ -2295,8 +2310,8 @@ export default function QualityPage() {
                 {[
                   { label:"Tổng lô (mới nhất)", value:stats.total,                                            color:"text-slate-700",   Icon:ClipboardCheck, ic:"text-slate-400"   },
                   { label:"Đạt hạng",            value:`${stats.dat} lô`,                                     color:"text-emerald-600", Icon:Check,          ic:"text-emerald-400" },
-                  { label:"Rớt hạng",            value:`${stats.khongDat} lô (${stats.tyLeKhongDat}%)`,       color:"text-red-500",     Icon:XCircle,        ic:"text-red-400"     },
-                  { label:"Tỷ lệ đạt",           value:stats.tyLe+"%",                                        color:"text-blue-600",    Icon:BarChart2,      ic:"text-blue-400"    },
+                  { label:"Rớt hạng",            value:`${stats.khongDat} lô (${stats.tyLeKhongDatStr})`,       color:"text-red-500",     Icon:XCircle,        ic:"text-red-400"     },
+                  { label:"Tỷ lệ đạt",           value:stats.tyLeStr,                                         color:"text-blue-600",    Icon:BarChart2,      ic:"text-blue-400"    },
                 ].map(s=>(
                   <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
                     <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
@@ -2799,17 +2814,7 @@ export default function QualityPage() {
           )}
 
           {mainTab === "thong_ke" && (
-            <>
-              <div className="flex justify-end mb-3">
-                <Link
-                  href="/dashboard/quality/reports"
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all"
-                >
-                  <Printer size={15} /> In báo cáo thống kê chất lượng
-                </Link>
-              </div>
-              <QualityAnalyticsPage embedded factoryId={factoryId} />
-            </>
+            <QualityAnalyticsPage embedded factoryId={factoryId} />
           )}
         </div>
       )}
