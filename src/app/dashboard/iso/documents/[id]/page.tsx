@@ -58,6 +58,7 @@ import {
   ChevronUp,
   FileSignature,
   Edit3,
+  Undo2,
 } from "lucide-react"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
@@ -592,6 +593,11 @@ export default function IsoDocumentDetailPage() {
 
   // Success toast
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null)
+  // GĐ4: thu hồi tài liệu đã gửi về nháp (người tạo/soạn thảo hoặc admin, chưa có ký bước sau).
+  const [recallOpen, setRecallOpen] = useState(false)
+  const [recallReason, setRecallReason] = useState("")
+  const [recalling, setRecalling] = useState(false)
+  const [lastRecall, setLastRecall] = useState<{ at: string; lyDo: string | null } | null>(null)
 
   // Header mismatch warnings from generate-pdf
   const [headerMismatchWarnings, setHeaderMismatchWarnings] = useState<Array<{ found: string; expected: string }>>([])
@@ -755,6 +761,22 @@ export default function IsoDocumentDetailPage() {
     } else {
       setChildDocs([])
       setSiblingDocs([])
+    }
+
+    // GĐ4: lần thu hồi gần nhất (chỉ hiện banner khi dòng nhật ký MỚI NHẤT là thu_hoi).
+    if (d.trang_thai === "draft") {
+      const { data: lastLog } = await supabase
+        .from("doc_approval_log")
+        .select("action, ly_do, created_at")
+        .eq("factory_id", fid)
+        .eq("doc_id", id)
+        .eq("doc_type", "iso")
+        .order("created_at", { ascending: false })
+        .limit(1)
+      const top = (lastLog || [])[0] as { action: string; ly_do: string | null; created_at: string } | undefined
+      setLastRecall(top?.action === "thu_hoi" ? { at: top.created_at, lyDo: top.ly_do } : null)
+    } else {
+      setLastRecall(null)
     }
 
     let soHieu = ""
@@ -1103,6 +1125,12 @@ export default function IsoDocumentDetailPage() {
 
   // Ký bước 1 (Soạn thảo): chỉ người được chỉ định là người soạn thảo hoặc admin
   const canSignStep1 = !isNew && (trangThai === "draft" || trangThai === "tra_ve") && (isDrafter || isAdmin)
+  // GĐ4 Thu hồi — chỉ để hiện nút; server (/api/iso/documents/[id]/recall) kiểm lại trên DB.
+  const isRecordOwner = !!userId && (userId === doc?.created_by || userId === doc?.soan_thao_user_id)
+  const canRecall = !isNew && !!doc && (isRecordOwner || isAdmin) && !doc.ky_xem_xet_at && !doc.ky_phe_duyet_at && (
+    trangThai === "cho_xem_xet" || (trangThai === "cho_phe_duyet" && doc.cap_tl !== "Cấp 1")
+  )
+  const recallBatchCount = canRecall ? childDocs.filter((c) => c.trang_thai === trangThai && !c.ky_xem_xet_at && !c.ky_phe_duyet_at).length : 0
   // Người soạn thảo của tài liệu này (hoặc đang tạo mới)
   const isSoanThao = isNew || (!!userId && userId === doc?.soan_thao_user_id)
   const canToggleAutoConvert = (trangThai === "draft" || trangThai === "tra_ve") && (isDrafter || isNguoiTao || isAdmin)
@@ -1110,6 +1138,32 @@ export default function IsoDocumentDetailPage() {
   // thông tin chi tiết vẫn xem bình thường, chỉ nội dung file bị khoá.
   const canOpenThisFile = canOpenIsoFile(trangThai, user, doc, userId)
   const canAddChildRow = !!(selectedParentDocId && form.loai_tai_lieu_cha && form.so_hieu_cha)
+
+  const handleRecall = async () => {
+    if (!docId || !factoryId) return
+    setRecalling(true)
+    try {
+      const res = await authFetch(`/api/iso/documents/${docId}/recall`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lyDo: recallReason.trim() || undefined }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string; recalledIds?: string[] }
+      if (!res.ok) {
+        showToast(false, json.error || "Không thu hồi được tài liệu")
+        return
+      }
+      setRecallOpen(false)
+      setRecallReason("")
+      const n = json.recalledIds?.length || 1
+      showToast(true, n > 1 ? `Đã thu hồi ${n} tài liệu/hồ sơ về bản nháp` : "Đã thu hồi tài liệu về bản nháp")
+      void loadDoc(docId, factoryId)
+    } catch (err) {
+      showToast(false, err instanceof Error ? err.message : "Không thu hồi được tài liệu")
+    } finally {
+      setRecalling(false)
+    }
+  }
 
   const showToast = (ok: boolean, text: string) => {
     setToast({ ok, text })
@@ -4053,6 +4107,65 @@ export default function IsoDocumentDetailPage() {
           </div>
         )}
 
+        {/* GĐ4: dấu vết lần thu hồi gần nhất */}
+        {trangThai === "draft" && lastRecall && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            <Undo2 size={14} className="mt-0.5 shrink-0 text-amber-600" />
+            <span>
+              Tài liệu đã được thu hồi về nháp lúc <strong>{new Date(lastRecall.at).toLocaleString("vi-VN")}</strong>
+              {lastRecall.lyDo ? <> — lý do: {lastRecall.lyDo}</> : null}. Chữ ký lượt soạn thảo trước đã bị huỷ, cần ký lại khi gửi.
+            </span>
+          </div>
+        )}
+
+        {recallOpen && (
+          <ModalShell
+            title="Thu hồi tài liệu về bản nháp"
+            onClose={() => { if (!recalling) setRecallOpen(false) }}
+            maxWidth="md"
+            footer={
+              <>
+                <button
+                  type="button"
+                  onClick={() => setRecallOpen(false)}
+                  disabled={recalling}
+                  className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Huỷ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRecall()}
+                  disabled={recalling}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-60"
+                >
+                  {recalling ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
+                  {recalling ? "Đang thu hồi..." : "Thu hồi"}
+                </button>
+              </>
+            }
+          >
+            <div className="space-y-3 text-sm text-slate-700">
+              <p>
+                Tài liệu sẽ quay về <strong>Nháp</strong>
+                {recallBatchCount > 0 ? <> cùng <strong>{recallBatchCount}</strong> hồ sơ đi kèm trong bộ</> : null}.
+                Chữ ký lượt soạn thảo bị huỷ; người đang được chờ ký sẽ nhận thông báo và không cần ký nữa.
+              </p>
+              <p className="text-xs text-slate-500">Sau khi thu hồi bạn có thể sửa, thay file hoặc xoá như bản nháp bình thường.</p>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do (không bắt buộc)</label>
+                <textarea
+                  value={recallReason}
+                  onChange={(e) => setRecallReason(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500"
+                  placeholder="VD: Cần sửa lại nội dung mục 3"
+                />
+              </div>
+            </div>
+          </ModalShell>
+        )}
+
         {/* Save error */}
         {saveError && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
@@ -4229,6 +4342,18 @@ export default function IsoDocumentDetailPage() {
                   </>
                 )}
               </>
+            )}
+
+            {/* GĐ4: Thu hồi về nháp (người tạo/soạn thảo hoặc admin, chưa có ký bước sau) */}
+            {canRecall && (
+              <button
+                type="button"
+                onClick={() => { setRecallReason(""); setRecallOpen(true) }}
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 text-sm font-semibold shadow-2xs transition-all active:scale-[0.98]"
+                title="Đưa tài liệu đã gửi về bản nháp để sửa hoặc xoá"
+              >
+                <Undo2 size={14} /> Thu hồi
+              </button>
             )}
 
             {/* Xem xét → gửi phê duyệt */}

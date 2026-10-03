@@ -705,3 +705,25 @@ code cũ vẫn chạy được (dùng `soat_xet || xem_xet`), chỉ có người
   duyệt mình lập hoặc **ký bất kỳ bước** (trước chỉ `nguoi_tao`/`xem_xet_user_id`). Hồ sơ đang luân
   chuyển cố ý KHÔNG vào Kho (ở "Thực hiện hồ sơ"/"Việc của tôi").
 - Khoảng trống: link "bản thay thế" trong Kho với user không có `iso.view_library` sẽ gặp màn chặn.
+
+## Chuẩn hoá phân quyền ISO — GĐ4 "Thu hồi" (2026-10-03)
+
+Thay "xoá sau khi gửi": người tạo đưa bản ĐÃ GỬI về **nháp** khi chưa có ai ký bước sau, rồi
+sửa/xoá như nháp (rule xoá cũ giữ nguyên: chỉ draft + người tạo/soạn hoặc admin). Không migration.
+
+- Route `POST /api/iso/documents/[id]/recall` `{ lyDo? }` — `resolveIsoActor`, service role.
+  Người gọi = `created_by` / `soan_thao_user_id` / admin (khác → 403). Điều kiện (khác → 409):
+  `cho_xem_xet` + chưa ký xem xét, hoặc `cho_phe_duyet` + chưa ký xem xét/phê duyệt + không phải
+  Cấp 1 (Cấp 2 gửi thẳng). Cấp 1 đã qua xem xét → 409 (người ký dùng "Trả về").
+- **Cả bộ**, route tự tính từ DB (mirror `loadDoc`): cha kèm con cùng `trang_thai`; hồ sơ con soạn
+  riêng kèm anh em cùng 3 người ký + `created_by`, không đụng cha. Con lệch đợt (đã có ký sau) bị bỏ qua.
+- Về nháp: xoá `ky_soan_thao_at`, 3 cột `*_placement`, `file_signed_pdf_url`,
+  `file_signed_office_url/type`, 2 cột `*_signed_url` của file phụ. Hồ sơ con Office bị
+  generate-office ghi đè `file_goc_url` ⇒ khôi phục từ `file_template_url`; thiếu → 409. Không xoá Storage.
+- Update có điều kiện chống đua (`eq trang_thai`, `is ky_xem_xet_at/ky_phe_duyet_at null`); dòng
+  chính 0 dòng → 409. Ghi `doc_approval_log` action `thu_hoi` cho từng bản. Báo người đang được chờ
+  qua `/api/iso/notify` (`ACTION_LABELS.thu_hoi`, email màu cảnh báo), lỗi không chặn.
+- UI `documents/[id]`: nút "Thu hồi" (Undo2, viền amber) cạnh nút ký, `canRecall` chỉ để hiện nút;
+  modal + lý do; banner amber khi đang nháp và dòng log mới nhất là `thu_hoi`.
+- Đã kiểm bằng script gọi route thật (tài khoản không phải người tạo → 403; người tạo trên bản đã
+  hiệu lực → 409). CHƯA test tay luồng thu hồi thành công.

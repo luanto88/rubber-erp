@@ -376,6 +376,11 @@ export const ISO_LOG_ACTION_CONFIG: Record<string, IsoLogActionMeta> = {
     badgeCls: "bg-amber-50 text-amber-700 border-amber-200",
     dotCls: "bg-amber-500",
   },
+  thu_hoi: {
+    label: "Đã thu hồi về nháp",
+    badgeCls: "bg-amber-50 text-amber-800 border-amber-300",
+    dotCls: "bg-amber-600",
+  },
 }
 
 export function formatIsoLogAction(action: string): IsoLogActionMeta {

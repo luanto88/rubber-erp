@@ -994,3 +994,16 @@ Không có migration. Chi tiết chung GĐ3 ở rule 16 mục "GĐ3".
   ở bước ký (vd admin lập hộ, bước 1 = người lập thật) không thấy hồ sơ ở Thực hiện hồ sơ lẫn Kho. Bắt buộc
   truyền **chuỗi** `JSON.stringify([{ user_id: uid }])` (đã sửa `forms/page.tsx`, `kho/page.tsx`, có log lỗi).
 - Kho của tôi: bộ lọc "Loại" và cột "Phân loại" hiện nhãn `LOAI_TAI_LIEU_LABEL` ("Quy trình") thay mã (QT).
+
+## Cập nhật 2026-10-03 — GĐ4 "Thu hồi" hồ sơ thực hiện
+
+- Route `POST /api/iso/forms/[id]/recall` `{ lyDo? }`. Được thu hồi: `nguoi_tao`, **người ký bước 1**
+  (admin có thể lập hộ — đã chốt với người dùng), admin. Điều kiện: N bước `buoc_hien_tai = 1` và đang
+  `cho_xem_xet`/`cho_phe_duyet`; legacy: đã ký soạn thảo, chưa ký xem xét/phê duyệt. Khác → 409.
+- Về nháp: `trang_thai=draft`, `buoc_hien_tai=0`, `nguoi_ky={}`, `placement_ky={}`,
+  `soan_thao_signed_url/final_pdf_url/final_office_url/ly_do_tra_ve = null` (legacy thêm `soan_thao`,
+  `soan_thao_placement`, `ky_soan_thao_at`). GIỮ `draft_file_url` — finalize dựng lại từ đó.
+  Update kèm `eq buoc_hien_tai 1` chống đua với người ký bước 2.
+- Log `iso_form_instance_logs` action `thu_hoi` (`ISO_LOG_ACTION_CONFIG.thu_hoi` = "Đã thu hồi về
+  nháp"); báo người ký bước 2 qua `/api/iso/forms/notify`.
+- UI: nút "Thu hồi" sau "Trả về", `canRecall` = trạng thái chờ + (người tạo/người ký bước 1/admin).

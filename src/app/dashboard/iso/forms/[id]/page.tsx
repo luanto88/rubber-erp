@@ -9,7 +9,7 @@ import {
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
   ChevronLeft, ChevronRight, ChevronDown, Plus, LayoutTemplate,
   ArrowUp, ArrowDown, Trash2, Save, UserCheck, Share2,
-  ShieldCheck, Bell,
+  ShieldCheck, Bell, Undo2,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
@@ -39,6 +39,7 @@ import { IsoShell } from "../../_components/iso-shell"
 import { canSeeAllIsoForms, isFormInstanceRelated, readCachedIsoUser } from "../../_components/iso-access"
 import { DistributionModal } from "../../_components/distribution-modal"
 import { ModalShell } from "../../../_components/modal-shell"
+import { authFetch } from "@/lib/auth-fetch"
 import {
   fmtDate,
   fmtDateTime,
@@ -2552,6 +2553,10 @@ export default function IsoFormInstancePage() {
   // Action states
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  // GĐ4: thu hồi hồ sơ đã gửi về nháp
+  const [recallOpen, setRecallOpen] = useState(false)
+  const [recallReason, setRecallReason] = useState("")
+  const [recalling, setRecalling] = useState(false)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [signModal, setSignModal] = useState<{
     action: "soan_thao" | "xem_xet" | "phe_duyet" | "ky_buoc"
@@ -3336,6 +3341,31 @@ export default function IsoFormInstancePage() {
     }
   }
 
+  // GĐ4: Thu hồi về nháp — server (/api/iso/forms/[id]/recall) kiểm lại quyền + trạng thái.
+  const handleRecall = async () => {
+    if (!factoryId) return
+    setRecalling(true)
+    setActionError(null)
+    try {
+      const res = await authFetch(`/api/iso/forms/${instanceId}/recall`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lyDo: recallReason.trim() || undefined }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) { setActionError(json.error || "Không thu hồi được hồ sơ"); return }
+      setRecallOpen(false)
+      setRecallReason("")
+      setActionSuccess("Đã thu hồi hồ sơ về bản nháp")
+      setTimeout(() => setActionSuccess(null), 3000)
+      void loadInstance(factoryId)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Không thu hồi được hồ sơ")
+    } finally {
+      setRecalling(false)
+    }
+  }
+
   // ── Sign confirm ─────────────────────────────────────────────────────────
   const handleSignConfirm = async (
     pin: string,
@@ -3527,6 +3557,13 @@ export default function IsoFormInstancePage() {
   // GĐ2 chuẩn hoá quyền ISO: bỏ quyền "ký số" (`iso.sign` chưa từng tồn tại, `iso.signature` đã
   // gỡ). Người tạo / người được chọn ký bước 1 thì bắt buộc phải ký được — không cần thêm quyền.
   const canSignStep1 = isEditable && (isStep1Signer || userRole === "admin")
+  // GĐ4: bước 1 đã ký, bước 2 chưa ký; chỉ người tạo / người ký bước 1 / admin.
+  const isWaitingState = instance.trang_thai === "cho_xem_xet" || instance.trang_thai === "cho_phe_duyet"
+  const canRecall = isWaitingState && (isStep1Signer || userRole === "admin") && (
+    isNStepRecord
+      ? buocHienTai === 1
+      : (!!instance.ky_soan_thao_at && !instance.ky_xem_xet_at && !instance.ky_phe_duyet_at)
+  )
   const canChangeSigner = !isEditable && !isDone && instance.trang_thai !== "tra_ve" && (
     isStep1Signer
   )
@@ -3673,6 +3710,16 @@ export default function IsoFormInstancePage() {
                 className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-sm font-bold rounded-xl border border-rose-200 transition-all"
               >
                 <RotateCcw size={15} /> Trả về
+              </button>
+            )}
+
+            {canRecall && (
+              <button
+                onClick={() => { setRecallReason(""); setRecallOpen(true) }}
+                className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-amber-50 text-amber-700 text-sm font-bold rounded-xl border border-amber-300 transition-all"
+                title="Đưa hồ sơ đã gửi về bản nháp để sửa hoặc xoá"
+              >
+                <Undo2 size={15} /> Thu hồi
               </button>
             )}
 
@@ -4436,6 +4483,54 @@ export default function IsoFormInstancePage() {
           onConfirm={handleSignConfirm}
           onClose={() => setSignModal(null)}
         />
+      )}
+
+      {/* GĐ4: Thu hồi về nháp */}
+      {recallOpen && (
+        <ModalShell
+          title="Thu hồi hồ sơ về bản nháp"
+          onClose={() => { if (!recalling) setRecallOpen(false) }}
+          maxWidth="md"
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setRecallOpen(false)}
+                disabled={recalling}
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Huỷ
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRecall()}
+                disabled={recalling}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-60"
+              >
+                {recalling ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
+                {recalling ? "Đang thu hồi..." : "Thu hồi"}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-3 text-sm text-slate-700">
+            <p>
+              Hồ sơ sẽ quay về <strong>Nháp</strong>, chữ ký bước 1 bị huỷ. Người đang được chờ ký bước tiếp
+              theo sẽ nhận thông báo và không cần ký nữa.
+            </p>
+            <p className="text-xs text-slate-500">Sau khi thu hồi bạn có thể sửa, thay file hoặc xoá như bản nháp bình thường.</p>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do (không bắt buộc)</label>
+              <textarea
+                value={recallReason}
+                onChange={(e) => setRecallReason(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500"
+                placeholder="VD: Cần sửa lại số liệu"
+              />
+            </div>
+          </div>
+        </ModalShell>
       )}
 
       {/* Return Modal */}
