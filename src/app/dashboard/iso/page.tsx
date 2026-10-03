@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
+import { useRouter } from "next/navigation"
+import { getActiveFactoryId } from "@/lib/auth"
+import { canCreateIsoDocument, canSeeIsoOverview, readCachedIsoUser } from "./_components/iso-access"
 import { IsoShell } from "./_components/iso-shell"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { TRANG_THAI_LABEL, TRANG_THAI_COLOR, fmtDate, type IsoDocument } from "./_components/iso-types"
@@ -23,6 +25,8 @@ export default function IsoOverviewPage() {
   const [loading, setLoading] = useState(true)
   const [kpi, setKpi] = useState<KpiData>({ total: 0, co_hieu_luc: 0, cho_duyet: 0, het_hieu_luc: 0 })
   const [recentDocs, setRecentDocs] = useState<IsoDocument[]>([])
+  const [canCreate, setCanCreate] = useState(false)
+  const router = useRouter()
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
@@ -48,18 +52,20 @@ export default function IsoOverviewPage() {
 
   useEffect(() => {
     const bootstrap = async () => {
-      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
-      if (!hasPermission(cachedUser, "iso.view")) {
-        setLoading(false)
-        window.location.replace("/dashboard")
+      // Quyền vào module (iso.view) đã được iso/layout.tsx kiểm. Tổng quan chỉ dành cho người
+      // duyệt — người khác chuyển thẳng sang "Việc của tôi" (chỉ cần iso.view ⇒ không vòng lặp).
+      const cachedUser = readCachedIsoUser()
+      if (!canSeeIsoOverview(cachedUser)) {
+        router.replace("/dashboard/iso/my-tasks")
         return
       }
+      setCanCreate(canCreateIsoDocument(cachedUser))
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       setFactoryId(fid)
     }
     void bootstrap()
-  }, [])
+  }, [router])
 
   useEffect(() => {
     if (factoryId) void loadData(factoryId)
@@ -81,14 +87,14 @@ export default function IsoOverviewPage() {
           subtitle="Tài liệu quy trình, hướng dẫn và biểu mẫu"
           theme="indigo"
           icon={BadgeCheck}
-          action={
+          action={canCreate ? (
             <Link
               href="/dashboard/iso/documents/new"
               className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-indigo-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
             >
               <Plus size={16} /> Tạo tài liệu
             </Link>
-          }
+          ) : undefined}
         />
 
         {/* KPI Cards */}
@@ -120,9 +126,11 @@ export default function IsoOverviewPage() {
             <div className="p-8 text-center">
               <FileText size={32} className="mx-auto mb-2 text-slate-300" />
               <p className="text-sm text-slate-400">Chưa có tài liệu nào</p>
-              <Link href="/dashboard/iso/documents/new" className="mt-3 inline-flex items-center gap-1 text-sm text-violet-600 hover:underline">
-                <Plus size={14} /> Tạo tài liệu đầu tiên
-              </Link>
+              {canCreate && (
+                <Link href="/dashboard/iso/documents/new" className="mt-3 inline-flex items-center gap-1 text-sm text-violet-600 hover:underline">
+                  <Plus size={14} /> Tạo tài liệu đầu tiên
+                </Link>
+              )}
             </div>
           ) : (
             <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">

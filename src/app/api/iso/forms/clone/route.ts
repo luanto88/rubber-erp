@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { isoActorHasPermission, isoAuthErrorStatus, resolveIsoActor } from "@/app/api/iso/_lib/iso-actor"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -30,21 +31,26 @@ function getFileExt(url: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    // GĐ3 phân quyền ISO: xác thực Bearer, lấy người lập + nhà máy từ CHÍNH phiên đăng nhập
+    // (không tin factoryId/userId client gửi lên), và bắt buộc quyền iso.forms.create.
+    const actor = await resolveIsoActor(req)
+    if (!(await isoActorHasPermission(actor, ["iso.forms.create"]))) {
+      return NextResponse.json({ error: "Bạn không có quyền lập hồ sơ thực hiện" }, { status: 403 })
+    }
+    const factoryId = actor.factoryId
+    const userId = actor.userId
+
     const {
       templateDocId,
       tieu_de,
-      factoryId,
-      userId,
     } = await req.json() as {
       templateDocId?: string
       tieu_de?: string
-      factoryId?: string
-      userId?: string
     }
 
-    if (!templateDocId || !tieu_de?.trim() || !factoryId || !userId) {
+    if (!templateDocId || !tieu_de?.trim()) {
       return NextResponse.json(
-        { error: "Thiếu tham số: templateDocId, tieu_de, factoryId, userId" },
+        { error: "Thiếu tham số: templateDocId, tieu_de" },
         { status: 400 },
       )
     }
@@ -215,6 +221,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ instanceId, ext })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return NextResponse.json({ error: msg }, { status: isoAuthErrorStatus(err) })
   }
 }

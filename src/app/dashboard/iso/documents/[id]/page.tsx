@@ -66,6 +66,81 @@ import { Resizable } from "re-resizable"
 import { DistributionModal } from "../../_components/distribution-modal"
 import { DistributionManagement } from "../../_components/distribution-management"
 import { authFetch } from "@/lib/auth-fetch"
+import { canCreateIsoDocument, canViewIsoLibrary, readCachedIsoUser } from "../../_components/iso-access"
+
+/**
+ * GĐ3 phân quyền ISO — ai được mở trang chi tiết một tài liệu:
+ * - Có `iso.view_library`: mở được bản có hiệu lực; bản hết hiệu lực cần thêm
+ *   `iso.view_het_hieu_luc`; bản nháp / đang luân chuyển chỉ người tham gia.
+ * - Không có `iso.view_library`: chỉ người tham gia.
+ * "Người tham gia" = tạo / soạn / xem xét / phê duyệt (cả bộ cha/con qua RPC
+ * `iso_doc_family_participant` của GĐ1) HOẶC người được phân phối tài liệu (hoặc tài liệu cha).
+ * Nhờ vậy link trong "Việc của tôi", thông báo, Kho, QR của người ký luôn mở được.
+ * Bị chặn ở bản hết hiệu lực → kèm bản thay thế đang có hiệu lực (mirror findReplacement của
+ * api/iso/public-doc/[id]/route.ts).
+ */
+type IsoDocAccess = { allowed: boolean; expired?: boolean; replacementId?: string | null }
+
+async function resolveIsoDocAccess(
+  docId: string,
+  fid: string,
+  uid: string,
+  viewer: SessionUser | null,
+): Promise<IsoDocAccess> {
+  if (viewer?.role === "admin") return { allowed: true }
+  const { data: row } = await supabase
+    .from("iso_documents")
+    .select("id, parent_doc_id, trang_thai, ma_tai_lieu, ma_tai_lieu_moi, created_by, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id")
+    .eq("id", docId)
+    .eq("factory_id", fid)
+    .maybeSingle()
+  // Không đọc được bản ghi → để luồng cũ hiện "Không tìm thấy tài liệu".
+  if (!row) return { allowed: true }
+
+  const hasLibrary = canViewIsoLibrary(viewer)
+  const expired = row.trang_thai === "het_hieu_luc"
+  const openByPermission =
+    hasLibrary &&
+    (row.trang_thai === "co_hieu_luc" || (expired && hasPermission(viewer, "iso.view_het_hieu_luc")))
+  if (openByPermission) return { allowed: true }
+
+  if ([row.created_by, row.soan_thao_user_id, row.xem_xet_user_id, row.phe_duyet_user_id].includes(uid)) {
+    return { allowed: true }
+  }
+  const { data: inFamily } = await supabase.rpc("iso_doc_family_participant", {
+    p_doc_id: row.id,
+    p_parent_id: row.parent_doc_id,
+    p_user_id: uid,
+  })
+  if (inFamily === true) return { allowed: true }
+  const docIds = [row.id, row.parent_doc_id].filter(Boolean) as string[]
+  const { data: recipientRows } = await supabase
+    .from("iso_distribution_recipients")
+    .select("id")
+    .eq("recipient_user_id", uid)
+    .in("iso_document_id", docIds)
+    .limit(1)
+  if ((recipientRows?.length || 0) > 0) return { allowed: true }
+
+  if (!expired) return { allowed: false }
+  // Tìm bản thay thế: (1) theo mã mới / cùng mã đang có hiệu lực, (2) bản mới ghi ma_tai_lieu_cu.
+  // 2 truy vấn .eq() rời — không dùng .or() vì mã tài liệu có thể chứa ký tự đặc biệt.
+  let replacementId: string | null = null
+  const targetCode = (row.ma_tai_lieu_moi as string | null) || (row.ma_tai_lieu as string | null)
+  if (targetCode) {
+    const { data: same } = await supabase
+      .from("iso_documents").select("id").eq("factory_id", fid)
+      .eq("trang_thai", "co_hieu_luc").eq("ma_tai_lieu", targetCode).neq("id", row.id).limit(1)
+    replacementId = (same?.[0]?.id as string | undefined) ?? null
+  }
+  if (!replacementId && row.ma_tai_lieu) {
+    const { data: byOld } = await supabase
+      .from("iso_documents").select("id").eq("factory_id", fid)
+      .eq("trang_thai", "co_hieu_luc").eq("ma_tai_lieu_cu", row.ma_tai_lieu).neq("id", row.id).limit(1)
+    replacementId = (byOld?.[0]?.id as string | undefined) ?? null
+  }
+  return { allowed: false, expired: true, replacementId }
+}
 
 type ProfileOption = {
   id: string
@@ -341,6 +416,7 @@ export default function IsoDocumentDetailPage() {
   const docId = params.id as string
   const isNew = docId === "new-doc"
   const [templateConfirmed, setTemplateConfirmed] = useState(false)
+  const [accessDenied, setAccessDenied] = useState<IsoDocAccess | null>(null)
   const autoSendTriedRef = useRef(false)
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -772,6 +848,23 @@ export default function IsoDocumentDetailPage() {
       if (!session?.user) { setLoading(false); return }
       const uid = session.user.id
       const erp = JSON.parse(localStorage.getItem("erp_user") || "{}")
+
+      // GĐ3: tạo mới cần iso.create; xem tài liệu có sẵn cần iso.view_library HOẶC là người
+      // tham gia / người nhận phân phối (chặn cả khi dán URL trực tiếp).
+      const accessUser = readCachedIsoUser()
+      if (isNew && !canCreateIsoDocument(accessUser)) {
+        router.replace(canViewIsoLibrary(accessUser) ? "/dashboard/iso/documents" : "/dashboard/iso/my-tasks")
+        return
+      }
+      if (!isNew) {
+        const access = await resolveIsoDocAccess(docId, fid, uid, accessUser)
+        if (!access.allowed) {
+          setAccessDenied(access)
+          setLoading(false)
+          return
+        }
+      }
+
       setUser(erp)
       setFactoryId(fid)
 
@@ -792,7 +885,7 @@ export default function IsoDocumentDetailPage() {
       setLoading(false)
     }
     void bootstrap()
-  }, [isNew, docId, loadDoc, loadEffectiveDocs, loadMasterData, loadProfiles])
+  }, [isNew, docId, loadDoc, loadEffectiveDocs, loadMasterData, loadProfiles, router])
 
   useEffect(() => {
     if (!standardsOpen) return
@@ -3887,6 +3980,36 @@ export default function IsoDocumentDetailPage() {
     return (
       <IsoShell>
         <div className="p-10 text-center text-slate-400">Đang tải...</div>
+      </IsoShell>
+    )
+  }
+
+  if (accessDenied) {
+    return (
+      <IsoShell>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center space-y-3">
+          <p className="text-base font-bold text-slate-700">
+            {accessDenied.expired ? "Tài liệu này đã hết hiệu lực" : "Bạn không có quyền xem tài liệu này"}
+          </p>
+          <p className="text-sm text-slate-500">
+            {accessDenied.expired
+              ? "Chỉ người tham gia ký, người được phân phối, hoặc người có quyền \"Xem bản hết hiệu lực\" mới mở được bản cũ."
+              : "Tài liệu chỉ mở được khi bạn có quyền \"Xem kho tài liệu ISO\" (bản có hiệu lực), tham gia ký, hoặc đã được phân phối."}
+          </p>
+          <div className="flex flex-wrap justify-center gap-2 pt-1">
+            {accessDenied.expired && accessDenied.replacementId && canViewIsoLibrary(readCachedIsoUser()) && (
+              <Link href={`/dashboard/iso/documents/${accessDenied.replacementId}`} className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold">
+                Xem bản đang có hiệu lực
+              </Link>
+            )}
+            <Link href="/dashboard/iso/my-tasks" className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold">
+              Về Việc của tôi
+            </Link>
+            <Link href={`/iso-doc/${docId}`} className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm font-bold">
+              Xem thông tin công khai
+            </Link>
+          </div>
+        </div>
       </IsoShell>
     )
   }

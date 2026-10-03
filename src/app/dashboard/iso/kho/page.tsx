@@ -6,6 +6,8 @@ import { Archive, Eye, Download, AlertTriangle, BadgeCheck, ArrowUpRight } from 
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, type SessionUser } from "@/lib/auth"
 import { canOpenIsoFile, EXPIRED_FILE_HINT } from "@/app/dashboard/iso/_components/iso-file-access"
+import { isFormInstanceRelated } from "@/app/dashboard/iso/_components/iso-access"
+import { LOAI_TAI_LIEU_LABEL } from "@/app/dashboard/iso/_components/iso-types"
 // Vá bảo mật 2026-09-20: bucket iso-documents sẽ chuyển private — không còn dùng URL public
 // (`item.file_url`, chỉ để tính "có file hay không" ở dưới) để mở/tải trực tiếp. Mint Signed URL
 // qua route xác thực đúng module (documents/forms) — xem secure-file-open.ts.
@@ -39,6 +41,11 @@ type KhoItem = {
   is_owner?: boolean // user là tác giả / người soạn / người soát xét / người lập
   new_doc_id?: string | null // ID bản mới có hiệu lực thay thế (nếu có)
   new_doc_ma?: string | null // Lần ban hành bản mới
+}
+
+/** Hiện nguyên văn loại tài liệu ("Quy trình") thay vì mã (QT); giá trị lọc vẫn là mã. */
+function loaiLabel(code: string): string {
+  return LOAI_TAI_LIEU_LABEL[code] || code
 }
 
 function getFileUrl(doc: {
@@ -104,10 +111,12 @@ export default function KhoPage() {
         const docIds = rawRows.map((r) => r.iso_document_id).filter(Boolean) as string[]
         const formIds = rawRows.map((r) => r.iso_form_instance_id).filter(Boolean) as string[]
 
-        // 2. Lấy thêm tài liệu do chính user tạo / soạn thảo / soát xét (co_hieu_luc hoặc het_hieu_luc)
-        // 3. Lấy thêm hồ sơ do chính user lập (nguoi_tao = uid) đã phê duyệt
+        // 2. Lấy thêm tài liệu do chính user tạo / soạn thảo / xem xét / phê duyệt (co_hieu_luc hoặc het_hieu_luc)
+        // 3. Lấy thêm hồ sơ đã phê duyệt user lập hoặc ký bất kỳ bước (GĐ3 sau test: trước đây bỏ
+        //    sót người phê duyệt và người ký các bước trong thu_tu_ky_json)
         // 4. Lấy danh sách tài liệu đang có hiệu lực để đối chiếu bản thay thế cho bản hết hiệu lực
-        const [docsRes, formsRes, userDocsRes, userFormsRes, activeDocsRes] = await Promise.all([
+        const formCols = "id, tieu_de, trang_thai, template_doc_id, ky_phe_duyet_at, final_pdf_url, final_office_url, soan_thao_signed_url, draft_file_url, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, thu_tu_ky_json, created_at"
+        const [docsRes, formsRes, userDocsRes, userFormsByColsRes, userFormsByStepsRes, activeDocsRes] = await Promise.all([
           docIds.length > 0
             ? supabase
                 .from("iso_documents")
@@ -124,14 +133,22 @@ export default function KhoPage() {
             .from("iso_documents")
             .select("id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, trang_thai, ngay_hieu_luc, lan_ban_hanh, file_signed_pdf_url, file_signed_office_url, file_goc_url, created_by, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id, created_at")
             .eq("factory_id", fid)
-            .or(`created_by.eq.${uid},soan_thao_user_id.eq.${uid},xem_xet_user_id.eq.${uid}`)
+            .or(`created_by.eq.${uid},soan_thao_user_id.eq.${uid},xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
             .in("trang_thai", ["co_hieu_luc", "het_hieu_luc"])
             .order("created_at", { ascending: false }),
           supabase
             .from("iso_form_instances")
-            .select("id, tieu_de, trang_thai, template_doc_id, ky_phe_duyet_at, final_pdf_url, final_office_url, soan_thao_signed_url, draft_file_url, nguoi_tao, xem_xet_user_id, phe_duyet_user_id, created_at")
+            .select(formCols)
             .eq("factory_id", fid)
-            .or(`nguoi_tao.eq.${uid},xem_xet_user_id.eq.${uid}`)
+            .or(`nguoi_tao.eq.${uid},xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`)
+            .eq("trang_thai", "da_phe_duyet")
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("iso_form_instances")
+            .select(formCols)
+            .eq("factory_id", fid)
+            // ⚠️ Chuỗi JSON, không phải mảng object (mảng → lỗi 22P02, data = null âm thầm).
+            .contains("thu_tu_ky_json", JSON.stringify([{ user_id: uid }]))
             .eq("trang_thai", "da_phe_duyet")
             .order("created_at", { ascending: false }),
           supabase
@@ -148,6 +165,16 @@ export default function KhoPage() {
             activeDocByCode.set(ad.ma_tai_lieu.trim().toLowerCase(), { id: ad.id, lan_ban_hanh: ad.lan_ban_hanh })
           }
         }
+
+        // Gộp 2 truy vấn hồ sơ của mình theo id, lọc lại bằng isFormInstanceRelated.
+        type KhoFormRow = Parameters<typeof isFormInstanceRelated>[0] & { id: string }
+        if (userFormsByColsRes.error) console.error("[iso/kho] hồ sơ theo cột lỗi:", userFormsByColsRes.error.message)
+        if (userFormsByStepsRes.error) console.error("[iso/kho] hồ sơ theo bước ký lỗi:", userFormsByStepsRes.error.message)
+        const userFormsMap = new Map<string, KhoFormRow>()
+        for (const f of [...((userFormsByColsRes.data || []) as KhoFormRow[]), ...((userFormsByStepsRes.data || []) as KhoFormRow[])]) {
+          if (isFormInstanceRelated(f, uid)) userFormsMap.set(f.id, f)
+        }
+        const userFormsRes = { data: [...userFormsMap.values()] }
 
         const docsMap = new Map(((docsRes.data || []) as any[]).map((d) => [d.id, d]))
         const rawForms = (formsRes.data || []) as any[]
@@ -178,7 +205,7 @@ export default function KhoPage() {
             const form = formsMap.get(itemId)
             if (!form) continue
             const tmpl = form.template_doc_id ? tmplMap.get(form.template_doc_id) : null
-            const isOwner = form.nguoi_tao === uid || form.xem_xet_user_id === uid
+            const isOwner = isFormInstanceRelated(form, uid)
             seen.set(itemId, {
               recipientId: row.id,
               docId: itemId,
@@ -201,7 +228,7 @@ export default function KhoPage() {
           } else {
             const doc = docsMap.get(itemId)
             if (!doc) continue
-            const isOwner = doc.created_by === uid || doc.soan_thao_user_id === uid || doc.xem_xet_user_id === uid
+            const isOwner = doc.created_by === uid || doc.soan_thao_user_id === uid || doc.xem_xet_user_id === uid || doc.phe_duyet_user_id === uid
             const normCode = doc.ma_tai_lieu ? doc.ma_tai_lieu.trim().toLowerCase() : ""
             const activeMatch = doc.trang_thai === "het_hieu_luc" && normCode ? activeDocByCode.get(normCode) : null
             const newDocId = activeMatch && activeMatch.id !== itemId ? activeMatch.id : null
@@ -402,7 +429,7 @@ export default function KhoPage() {
                       : "bg-slate-100 hover:bg-slate-200 text-slate-600")
                   }
                 >
-                  {loai}
+                  {loaiLabel(loai)}
                 </button>
               )
             })}
@@ -494,7 +521,7 @@ export default function KhoPage() {
                         {item.ten_tai_lieu}
                       </td>
                       <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
-                        {item.loai_tai_lieu || "—"}
+                        {item.loai_tai_lieu ? loaiLabel(item.loai_tai_lieu) : "—"}
                       </td>
                       <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
                         {new Date(item.ngay_nhan).toLocaleDateString("vi-VN")}

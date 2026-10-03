@@ -36,6 +36,7 @@ import {
 } from "@/lib/signing/template-layout"
 import { computeSnugBoxSize } from "@/lib/signing/text-fit"
 import { IsoShell } from "../../_components/iso-shell"
+import { canSeeAllIsoForms, isFormInstanceRelated, readCachedIsoUser } from "../../_components/iso-access"
 import { DistributionModal } from "../../_components/distribution-modal"
 import { ModalShell } from "../../../_components/modal-shell"
 import {
@@ -2493,6 +2494,8 @@ export default function IsoFormInstancePage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [userName, setUserName] = useState("")
   const [userRole, setUserRole] = useState<string | null>(null)
+  // GĐ3: không có iso.forms.view_all thì chỉ mở được hồ sơ mình liên quan.
+  const [seeAllForms, setSeeAllForms] = useState(false)
   const [userChucVu, setUserChucVu] = useState("")
   const [userStaffTitles, setUserStaffTitles] = useState<{ kiem_nhiem: string; chinh_quyen: string }>({ kiem_nhiem: "", chinh_quyen: "" })
   // Biểu mẫu này đã có mẫu vị trí ký chưa — nguồn sự thật là bảng `mau_vi_tri`, KHÔNG dùng cờ
@@ -2569,6 +2572,7 @@ export default function IsoFormInstancePage() {
         const { session } = await hydrateActiveSession()
         const uid = session?.user?.id
         if (!uid) { setLoading(false); return }
+        setSeeAllForms(canSeeAllIsoForms(readCachedIsoUser()))
         setFactoryId(fid)
         setUserId(uid)
         // Load user profile for full name & role
@@ -3463,6 +3467,23 @@ export default function IsoFormInstancePage() {
           <p>Không tìm thấy hồ sơ</p>
           <button onClick={() => router.push("/dashboard/iso/forms")} className="mt-3 text-sm text-violet-600 hover:underline">
             ← Quay lại danh sách
+          </button>
+        </div>
+      </IsoShell>
+    )
+  }
+
+  if (!seeAllForms && !isFormInstanceRelated(instance, userId)) {
+    return (
+      <IsoShell>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center space-y-3">
+          <AlertTriangle size={32} className="mx-auto text-amber-500" />
+          <p className="text-base font-bold text-slate-700">Bạn không có quyền xem hồ sơ này</p>
+          <p className="text-sm text-slate-500">
+            Chỉ người lập, người có tên trong luồng ký, hoặc người có quyền &quot;Xem tất cả hồ sơ thực hiện&quot; mới mở được.
+          </p>
+          <button onClick={() => router.push("/dashboard/iso/forms")} className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold">
+            Về Thực hiện hồ sơ
           </button>
         </div>
       </IsoShell>

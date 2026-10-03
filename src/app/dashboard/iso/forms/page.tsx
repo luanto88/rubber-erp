@@ -16,6 +16,14 @@ import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapp
 import { PageHeaderBanner } from "../../_components/page-header-banner"
 import { PageBackgroundMotif } from "../../_components/page-background-motif"
 import { openSecureFile } from "../../_components/secure-file-open"
+import { authFetch } from "@/lib/auth-fetch"
+import {
+  canCreateIsoDocument,
+  canCreateIsoForm,
+  canSeeAllIsoForms,
+  isFormInstanceRelated,
+  readCachedIsoUser,
+} from "../_components/iso-access"
 import {
   fmtDate,
   FORM_INSTANCE_STATUS_LABEL,
@@ -49,7 +57,7 @@ function CloneDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/iso/forms/clone", {
+      const res = await authFetch("/api/iso/forms/clone", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templateDocId: template.id, tieu_de: tieu_de.trim(), factoryId, userId }),
@@ -288,7 +296,7 @@ function LapHoSoDialog({
     setSaving(true)
     setError(null)
     try {
-      const res = await fetch("/api/iso/forms/clone", {
+      const res = await authFetch("/api/iso/forms/clone", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templateDocId: selectedDocId, tieu_de: tieuDe.trim(), factoryId, userId }),
@@ -431,6 +439,10 @@ export default function IsoFormsPage() {
 
   // Role & delete
   const [userRole, setUserRole] = useState("")
+  // GĐ3 phân quyền: nút/khối tạo hồ sơ và phạm vi danh sách theo quyền.
+  const [canLapHoSo, setCanLapHoSo] = useState(false)
+  const [canReembed, setCanReembed] = useState(false)
+  const [seeAllForms, setSeeAllForms] = useState(false)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [distributeForm, setDistributeForm] = useState<{ id: string; title: string; code?: string } | null>(null)
 
@@ -446,6 +458,10 @@ export default function IsoFormsPage() {
         const uid = session?.user?.id
         if (!uid) { setLoading(false); return }
         const { data: prof } = await supabase.from("profiles").select("role").eq("id", uid).single()
+        const accessUser = readCachedIsoUser()
+        setCanLapHoSo(canCreateIsoForm(accessUser))
+        setCanReembed(canCreateIsoDocument(accessUser))
+        setSeeAllForms(canSeeAllIsoForms(accessUser))
         setFactoryId(fid)
         setUserId(uid)
         setUserRole(prof?.role || "")
@@ -456,31 +472,56 @@ export default function IsoFormsPage() {
     void bootstrap()
   }, [])
 
-  const loadInstances = useCallback(async (fid: string) => {
+  const loadInstances = useCallback(async (fid: string, uid: string | null, seeAll: boolean) => {
     setInstLoading(true)
     try {
-      const query = supabase
+      const baseQuery = () => supabase
         .from("iso_form_instances")
         .select("*")
         .eq("factory_id", fid)
         .order("created_at", { ascending: false })
         .limit(100)
-      const { data } = await query
-      setInstances((data ?? []) as IsoFormInstance[])
+      if (seeAll) {
+        const { data } = await baseQuery()
+        setInstances((data ?? []) as IsoFormInstance[])
+        return
+      }
+      // GĐ3: không có iso.forms.view_all → chỉ hồ sơ mình liên quan. Lọc NGAY trong câu truy vấn
+      // (lọc sau .limit(100) sẽ mất dòng). 2 truy vấn: theo cột người ký + theo bước trong
+      // thu_tu_ky_json (dùng .contains để supabase-js tự mã hoá JSON, không nhét vào chuỗi .or()).
+      // RLS SELECT vẫn mở toàn nhà máy — đây chỉ là chặn ở giao diện.
+      if (!uid) { setInstances([]); return }
+      const [byColumns, bySteps] = await Promise.all([
+        baseQuery().or(`nguoi_tao.eq.${uid},xem_xet_user_id.eq.${uid},phe_duyet_user_id.eq.${uid}`),
+        // ⚠️ Phải truyền CHUỖI JSON: truyền mảng object thì supabase-js mã hoá thành cú pháp
+        // mảng Postgres `{...}` → PostgREST lỗi 22P02 và trả data = null âm thầm.
+        baseQuery().contains("thu_tu_ky_json", JSON.stringify([{ user_id: uid }])),
+      ])
+      if (byColumns.error) console.error("[iso/forms] lọc theo cột lỗi:", byColumns.error.message)
+      if (bySteps.error) console.error("[iso/forms] lọc theo bước ký lỗi:", bySteps.error.message)
+      const merged = new Map<string, IsoFormInstance>()
+      for (const row of [...(byColumns.data ?? []), ...(bySteps.data ?? [])] as IsoFormInstance[]) {
+        if (isFormInstanceRelated(row, uid)) merged.set(row.id, row)
+      }
+      setInstances(
+        [...merged.values()]
+          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+          .slice(0, 100),
+      )
     } finally {
       setInstLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    if (factoryId) void loadInstances(factoryId)
-  }, [factoryId, loadInstances])
+    if (factoryId) void loadInstances(factoryId, userId, seeAllForms)
+  }, [factoryId, userId, seeAllForms, loadInstances])
 
   const handleDeleteInst = async (instId: string) => {
     if (!factoryId || !userId) return
     await supabase.from("iso_form_instances").delete().eq("id", instId)
     setDelConfirm(null)
-    void loadInstances(factoryId)
+    void loadInstances(factoryId, userId, seeAllForms)
   }
 
   const handleSearch = async () => {
@@ -561,6 +602,7 @@ export default function IsoFormsPage() {
           action={
             <div className="flex flex-col sm:items-end gap-1">
               <div className="flex flex-wrap items-center gap-2">
+                {canReembed && (
                 <button
                   onClick={handleReembed}
                   disabled={reembedding || !factoryId}
@@ -570,6 +612,8 @@ export default function IsoFormsPage() {
                   {reembedding ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
                   Cập nhật chỉ mục AI
                 </button>
+                )}
+                {canLapHoSo && (
                 <button
                   onClick={() => setLapHoSoOpen(true)}
                   disabled={!factoryId}
@@ -578,6 +622,7 @@ export default function IsoFormsPage() {
                   <ClipboardList size={15} />
                   Lập hồ sơ
                 </button>
+                )}
               </div>
               {reembedMsg && (
                 <span className="text-[11px] text-white/80">{reembedMsg}</span>
@@ -586,7 +631,8 @@ export default function IsoFormsPage() {
           }
         />
 
-        {/* ── AI Search ── */}
+        {/* ── AI Search ── (chỉ phục vụ lập hồ sơ qua CloneDialog → gate iso.forms.create) */}
+        {canLapHoSo && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles size={16} className="text-violet-500" />
@@ -649,11 +695,17 @@ export default function IsoFormsPage() {
             </div>
           )}
         </div>
+        )}
 
         {/* ── Instances list ── */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-slate-100">
-            <h2 className="text-sm font-extrabold text-slate-700">Hồ sơ của tôi</h2>
+            <div>
+              <h2 className="text-sm font-extrabold text-slate-700">{seeAllForms ? "Hồ sơ thực hiện" : "Hồ sơ của tôi"}</h2>
+              {!seeAllForms && (
+                <p className="text-[11px] text-slate-400">Đang hiển thị hồ sơ bạn lập hoặc có tên trong luồng ký</p>
+              )}
+            </div>
             {/* Status filter chips */}
             <div className="flex gap-1 flex-wrap">
               {(["all", "draft", "cho_xem_xet", "cho_phe_duyet", "da_phe_duyet", "tra_ve"] as const).map((s) => (
@@ -682,7 +734,7 @@ export default function IsoFormsPage() {
             <div className="p-12 text-center text-slate-400">
               <FolderOpen size={36} className="mx-auto mb-3 opacity-30" />
               <p className="text-sm">Chưa có hồ sơ nào</p>
-              <p className="text-xs mt-1">Tìm biểu mẫu phía trên để bắt đầu</p>
+              {canLapHoSo && <p className="text-xs mt-1">Tìm biểu mẫu phía trên để bắt đầu</p>}
             </div>
           ) : (
             <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">

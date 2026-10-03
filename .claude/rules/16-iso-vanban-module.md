@@ -570,7 +570,9 @@ làm đúng cách: **chính khối file nhảy lên đầu cột** ở `<lg`, kh
 Migration `supabase/migrations/20260915_iso_view_het_hieu_luc_permission.sql` (seed
 `permissions` + `role_permissions` cho admin; **chạy tay** trên Supabase SQL Editor).
 
-- Người chỉ có `iso.view` vẫn xem **đầy đủ thông tin chi tiết** của bản hết hiệu lực (mã, tên,
+- ⚠️ **Đã thay bằng quy tắc GĐ3 (2026-10-03)**: thiếu quyền này thì bản hết hiệu lực bị ẩn khỏi
+  tab Tài liệu ISO và mở URL bị chặn (trừ người tham gia/được phân phối) — xem mục "GĐ3 — sửa sau test".
+  Dòng cũ: Người chỉ có `iso.view` vẫn xem **đầy đủ thông tin chi tiết** của bản hết hiệu lực (mã, tên,
   ngày hiệu lực/hết hiệu lực, lịch sử ký) — chỉ mất nút **mở file** và **tải file**.
 - Helper dùng chung `canOpenIsoFile(trangThai, user)` +
   `EXPIRED_FILE_HINT` trong `src/app/dashboard/iso/_components/iso-file-access.ts`.
@@ -627,7 +629,9 @@ GĐ1 đã code (chưa test tay):
 
 ## Chuẩn hoá phân quyền ISO — GĐ2 bộ quyền mới (2026-10-02)
 
-Đã code, **migration `20261006_iso_permissions_normalize.sql` CHƯA CHẠY**, chưa test tay.
+Đã code, **migration `20261006_iso_permissions_normalize.sql` ĐÃ CHẠY và đã deploy (2026-10-03)**.
+GĐ2 chỉ đổi BỘ MÃ quyền, CHƯA ẩn/hiện gì theo quyền — người dùng test thấy "vẫn thấy tất cả" là
+đúng trạng thái hiện tại, phần chặn nằm ở GĐ3.
 
 Bộ quyền ISO còn lại (10 mã): `iso.view`, `iso.view_library` (mới), `iso.create`, `iso.xem_xet`,
 `iso.phe_duyet`, `iso.distribute`, `iso.view_het_hieu_luc`, `iso.forms.create`,
@@ -655,3 +659,49 @@ từng tồn tại. Bản ghi trong bảng `permissions` của mã bỏ vẫn gi
 ⚠️ Thứ tự triển khai: **chạy migration TRƯỚC, deploy code SAU, càng sát càng tốt**. Khoảng giữa,
 code cũ vẫn chạy được (dùng `soat_xet || xem_xet`), chỉ có người không có `iso.create` tạm không lưu
 được mẫu vị trí ký và người chỉ có `iso.signature` tạm không vào được Cài đặt.
+
+## Chuẩn hoá phân quyền ISO — GĐ3 ẩn/hiện theo quyền (2026-10-03)
+
+Đã code, **không có migration**. `tsc` sạch, `eslint` không thêm lỗi so với HEAD. CHƯA test tay.
+
+- Helper thuần `iso/_components/iso-access.ts`: `readCachedIsoUser`, `canSeeIsoOverview`
+  (xem_xet | phe_duyet | forms.approve | admin), `canViewIsoLibrary`, `canCreateIsoDocument`,
+  `canCreateIsoForm`, `canSeeAllIsoForms`, `isFormInstanceRelated`. Mọi chỗ gate mới dùng các hàm này.
+- `iso/layout.tsx` (mới, mirror `inventory/layout.tsx`): guard `iso.view` cho MỌI trang con, gọi
+  `hydrateActiveSession()` nên cache quyền được làm mới mỗi lần vào module. Đã bỏ guard trùng ở
+  `iso/page.tsx`.
+- `iso-shell.tsx`: tab Tổng quan theo `canSeeIsoOverview`, Tài liệu ISO theo `canViewIsoLibrary`;
+  Việc của tôi / Thực hiện hồ sơ / Kho của tôi luôn hiện.
+- Tổng quan: người không đủ quyền → `router.replace("/dashboard/iso/my-tasks")` (không vòng lặp).
+  Nút "Tạo tài liệu" gate `iso.create`.
+- `documents/page.tsx`: thiếu `iso.view_library` → về Việc của tôi. **Đã bỏ nút "Mẫu vị trí ký" ở
+  header** (vẫn còn icon trên từng dòng + nút trong trang chi tiết). "Tạo tài liệu" gate `iso.create`.
+- `documents/[id]`: `new-doc` thiếu `iso.create` → bị đẩy ra. Tài liệu có sẵn khi thiếu
+  `iso.view_library` chỉ mở được nếu là người tham gia (`created_by/soan/xem_xet/phe_duyet`, rồi RPC
+  `iso_doc_family_participant` của GĐ1 phủ cả bộ cha/con) hoặc người nhận phân phối (tài liệu hoặc
+  tài liệu cha) — `hasIsoDocParticipantAccess()`. Không qua → màn "Bạn không có quyền xem tài liệu
+  này" + link trang công khai `/iso-doc/{id}`.
+- Khoảng trống đã biết: `api/iso/documents/[id]/file-url` vẫn chỉ đòi `iso.view` (người ký/người
+  nhận không có kho vẫn cần mở file) ⇒ người biết UUID vẫn lấy được file. Siết thì phải dùng cùng
+  điều kiện người tham gia ở server.
+- Các nơi khác dùng `iso.view` (sidebar, launcher, widget Dashboard, chuông) đều là "việc của tôi"
+  → giữ nguyên.
+
+
+### GĐ3 — sửa sau test (2026-10-03)
+
+- Tab Tài liệu ISO trước đây tải TẤT CẢ tài liệu nhà máy nên user không có
+  `iso.view_het_hieu_luc` vẫn thấy bản hết hiệu lực, nháp, đang chờ duyệt của người khác. Nay lọc
+  bằng `canSeeIsoDocInLibrary` (`iso-access.ts`): **có hiệu lực** → ai có kho cũng thấy; **hết hiệu
+  lực** → cần `iso.view_het_hieu_luc` hoặc đã tham gia; **nháp/đang luân chuyển** → chỉ người tham
+  gia (tính cả khi tài liệu cha là của mình). Admin thấy hết. Lọc ở giao diện; RLS SELECT
+  `iso_documents` vẫn mở toàn nhà máy.
+- Trang chi tiết: `resolveIsoDocAccess()` dùng cùng 3 tầng; người tham gia (4 cột → RPC
+  `iso_doc_family_participant` → người được phân phối tài liệu/tài liệu cha) luôn mở được. Bị chặn ở
+  bản hết hiệu lực → màn "Tài liệu này đã hết hiệu lực" kèm nút "Xem bản đang có hiệu lực" (tìm như
+  `findReplacement` của `api/iso/public-doc`, chỉ hiện khi có kho) + trang công khai.
+- Kho của tôi = bản được phân phối + bản mình tham gia ở trạng thái đã duyệt: tài liệu có/hết
+  hiệu lực mình tạo/soạn/xem xét/**phê duyệt** (trước bỏ sót phê duyệt); hồ sơ thực hiện đã phê
+  duyệt mình lập hoặc **ký bất kỳ bước** (trước chỉ `nguoi_tao`/`xem_xet_user_id`). Hồ sơ đang luân
+  chuyển cố ý KHÔNG vào Kho (ở "Thực hiện hồ sơ"/"Việc của tôi").
+- Khoảng trống: link "bản thay thế" trong Kho với user không có `iso.view_library` sẽ gặp màn chặn.

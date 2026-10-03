@@ -30,6 +30,7 @@ import { PageBackgroundMotif } from "../../_components/page-background-motif"
 // Vá bảo mật 2026-09-20: bucket iso-documents đang chuyển private — mint Signed URL qua route
 // xác thực thay vì đọc thẳng cột file_*_url public.
 import { fetchSecureUrl, openSecureFile } from "../../_components/secure-file-open"
+import { canCreateIsoDocument, canSeeIsoDocInLibrary, canViewIsoLibrary, isIsoDocParticipant, readCachedIsoUser } from "../_components/iso-access"
 
 export default function IsoDocumentsPage() {
   const router = useRouter()
@@ -59,6 +60,7 @@ export default function IsoDocumentsPage() {
   const [docTypes, setDocTypes] = useState<IsoDocumentTypeMaster[]>(isoDocumentTypeFallback())
   const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({})
   const [canDistribute, setCanDistribute] = useState(false)
+  const [canCreate, setCanCreate] = useState(false)
   const [showDistributeModal, setShowDistributeModal] = useState(false)
   const [distributeDocId, setDistributeDocId] = useState<string | undefined>(undefined)
   const [showManagement, setShowManagement] = useState(false)
@@ -78,14 +80,21 @@ export default function IsoDocumentsPage() {
         supabase
         .from("iso_documents")
         .select(
-          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, soan_thao_user_id, created_by, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at, file_signed_pdf_url, file_signed_office_url, file_goc_url",
+          "id, ma_tai_lieu, ten_tai_lieu, loai_tai_lieu, phong_ban, cap_tl, loai_vb, lan_ban_hanh, trang_thai, soan_thao, soan_thao_user_id, created_by, xem_xet_user_id, phe_duyet_user_id, phe_duyet, ngay_hieu_luc, phan_loai_tl, parent_doc_id, updated_at, created_at, file_signed_pdf_url, file_signed_office_url, file_goc_url",
         )
         .eq("factory_id", fid)
         .order("updated_at", { ascending: false }),
         supabase.from("iso_standards").select("id, tieu_chuan, ten_tieu_chuan, is_active, sort_order").eq("is_active", true).order("sort_order"),
         supabase.from("iso_document_types").select("code, name, can_parent, can_child, force_child, allowed_departments, is_active, sort_order").eq("is_active", true).order("sort_order"),
       ])
-      const rows = (docRes.data || []) as IsoDocument[]
+      // GĐ3 (sau test): lọc theo trạng thái — có hiệu lực ai cũng thấy; hết hiệu lực cần
+      // iso.view_het_hieu_luc hoặc đã tham gia; nháp/đang luân chuyển chỉ người tham gia.
+      const allRows = (docRes.data || []) as IsoDocument[]
+      const viewer = readCachedIsoUser()
+      const session = await getFreshAuthSession()
+      const viewerId = session?.user?.id ?? null
+      const participantDocIds = new Set(allRows.filter((d) => isIsoDocParticipant(d, viewerId)).map((d) => d.id))
+      const rows = allRows.filter((d) => canSeeIsoDocInLibrary(d, viewer, viewerId, participantDocIds))
       const standardList = !standardRes.error && standardRes.data?.length ? standardRes.data as IsoStandard[] : ISO_STANDARD_FALLBACK
       if (!standardRes.error && standardRes.data?.length) setStandards(standardList)
       if (!typeRes.error && typeRes.data?.length) setDocTypes(typeRes.data as IsoDocumentTypeMaster[])
@@ -109,6 +118,13 @@ export default function IsoDocumentsPage() {
 
   useEffect(() => {
     const bootstrap = async () => {
+      // GĐ3: kho tài liệu toàn nhà máy cần iso.view_library — chặn cả khi dán URL trực tiếp.
+      const accessUser = readCachedIsoUser()
+      if (!canViewIsoLibrary(accessUser)) {
+        router.replace("/dashboard/iso/my-tasks")
+        return
+      }
+      setCanCreate(canCreateIsoDocument(accessUser))
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       const session = await getFreshAuthSession()
@@ -133,7 +149,7 @@ export default function IsoDocumentsPage() {
       setFactoryId(fid)
     }
     void bootstrap()
-  }, [])
+  }, [router])
 
   useEffect(() => {
     if (factoryId) void loadData(factoryId)
@@ -239,19 +255,16 @@ export default function IsoDocumentsPage() {
                   <Share2 size={15} /> Phân phối
                 </button>
               )}
-              <Link
-                href="/dashboard/ky/mau-vi-tri?modun=iso"
-                className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 border border-white/40 text-white font-bold rounded-xl transition-all"
-                title="Quản lý và vẽ mẫu vị trí ký cho các loại tài liệu / biểu mẫu ISO"
-              >
-                <FileSignature size={15} /> Mẫu vị trí ký
-              </Link>
-              <Link
-                href="/dashboard/iso/documents/new-doc"
-                className="flex items-center gap-2 px-5 py-2.5 bg-white text-indigo-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
-              >
-                <Plus size={16} /> Tạo tài liệu
-              </Link>
+              {/* GĐ3: bỏ nút "Mẫu vị trí ký" ở header — đã có nút "Cài đặt vị trí ký" đúng lúc
+                  trong trang chi tiết và icon trên từng dòng. */}
+              {canCreate && (
+                <Link
+                  href="/dashboard/iso/documents/new-doc"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white text-indigo-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
+                >
+                  <Plus size={16} /> Tạo tài liệu
+                </Link>
+              )}
             </>
           }
         />
