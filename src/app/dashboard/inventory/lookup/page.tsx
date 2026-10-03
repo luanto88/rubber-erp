@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, ArrowDownLeft, ArrowRightLeft, ArrowUpRight, Check, Clock3, Download, FileText, History, Printer, X } from "lucide-react"
+import { AlertTriangle, ArrowDownLeft, ArrowRightLeft, ArrowUpRight, Check, Clock3, Eye, FileSpreadsheet, FileText, History, Printer, X } from "lucide-react"
 import { saveAs } from "file-saver"
 import * as XLSX from "xlsx"
 import { getFreshAuthSession, hydrateActiveSession, type SessionUser } from "@/lib/auth"
@@ -13,7 +13,7 @@ import {
   type InventoryStockMovementRow,
   type InventoryWarehouseOption,
 } from "../_components/inventory-data"
-import { MultiSelectField } from "../_components/inventory-ui"
+import { InventoryActionButton, InventoryActionLink, MultiSelectField } from "../_components/inventory-ui"
 import { resolveCanApproveInventory } from "../_components/inventory-approval"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -468,27 +468,19 @@ export default function InventoryLookupPage() {
 
   return (
     <InventoryPageShell
-      eyebrow="Nhập xuất tồn"
-      title="Tra cứu"
-      description="Tra cứu lịch sử nhập, xuất, chuyển theo từng vật tư và từng kho để phục vụ truy vết nghiệp vụ."
+      eyebrow="Báo cáo"
+      title="Sổ chi tiết"
+      description="Sổ chi tiết nhập, xuất, chuyển theo kho, phân loại, mã vật tư và khoảng ngày — xuất Excel / in thẻ kho theo đúng bộ lọc đang chọn."
       action={
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={exportExcel}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 shadow-sm transition hover:border-emerald-300 hover:text-emerald-700"
-          >
-            <Download size={16} />
-            Xuất Excel
-          </button>
-          <Link
+        <>
+          <InventoryActionButton icon={FileSpreadsheet} label="Xuất Excel" tone="emerald" onClick={exportExcel} />
+          <InventoryActionLink
+            icon={Printer}
+            label="In thẻ kho"
+            tone="slate"
             href={`/dashboard/inventory/print-report?kind=cards&warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&categories=${encodeURIComponent(selectedCategoryIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}&types=${encodeURIComponent(selectedDocumentTypes.join(","))}&from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
-          >
-            <Printer size={16} />
-            In thẻ kho
-          </Link>
-        </div>
+          />
+        </>
       }
     >
       {warning ? (
@@ -699,23 +691,23 @@ export default function InventoryLookupPage() {
                         {canApprove &&
                           movement.documentType !== "transfer" &&
                           !documentInfoById[movement.document_id]?.approved && (
-                            <button
-                              type="button"
+                            <InventoryActionButton
+                              icon={Check}
+                              tone="emerald"
+                              title="Phê duyệt phiếu"
+                              size="sm"
                               onClick={() => void handleApproveDocument(movement.document_id)}
                               disabled={approvingDocumentId === movement.document_id}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-60"
-                              title="Phê duyệt phiếu"
-                            >
-                              <Check size={13} />
-                              {approvingDocumentId === movement.document_id ? "Đang duyệt..." : "Duyệt"}
-                            </button>
+                              label={approvingDocumentId === movement.document_id ? "Đang duyệt..." : "Duyệt"}
+                            />
                           )}
-                        <Link
+                        <InventoryActionLink
+                          icon={Eye}
+                          tone="sky"
+                          size="sm"
+                          label="Mở phiếu"
                           href={getDocumentHref(movement.movement_type, movement.document_id)}
-                          className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
-                        >
-                          Mở phiếu
-                        </Link>
+                        />
                       </div>
                     </td>
                   </tr>

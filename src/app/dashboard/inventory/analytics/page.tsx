@@ -7,7 +7,6 @@ import {
   BarChart3,
   Boxes,
   Clock3,
-  Download,
   FileSpreadsheet,
   PackageMinus,
   PackagePlus,
@@ -17,6 +16,7 @@ import {
   ShieldAlert,
 } from "lucide-react"
 import { InventoryPageShell, InventoryPlaceholderSection, ScrollReveal, ScrollRevealSection } from "../_components/inventory-shell"
+import { InventoryActionButton } from "../_components/inventory-ui"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import {
@@ -535,19 +535,17 @@ export default function InventoryAnalyticsPage() {
 
   return (
     <InventoryPageShell
-      eyebrow="Thống kê"
-      title="Thống kê kho"
+      eyebrow="Báo cáo"
+      title="Tổng quan kho"
       description="Theo dõi cảnh báo, nhịp nhập xuất tồn và xuất file kiểm tra để phục vụ quản lý nội bộ."
       action={
-        <button
-          type="button"
+        <InventoryActionButton
+          icon={FileSpreadsheet}
+          tone="emerald"
           onClick={() => void handleExportCheckFile()}
           disabled={downloading}
-          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <Download size={16} />
-          {downloading ? "Đang xuất file..." : "Xuất file kiểm tra"}
-        </button>
+          label={downloading ? "Đang xuất file..." : "Xuất file kiểm tra"}
+        />
       }
     >
       {warning ? (
@@ -792,7 +790,7 @@ export default function InventoryAnalyticsPage() {
             href="/dashboard/inventory/lookup"
             className="text-sm font-bold text-emerald-600 transition hover:text-emerald-700 hover:underline"
           >
-            Xem đầy đủ tại Tra cứu →
+            Xem đầy đủ tại Sổ chi tiết →
           </Link>
         </div>
         </ResponsiveTableWrapper>

@@ -2,71 +2,69 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowRightLeft, BarChart3, Boxes, Layers, PackageMinus, PackagePlus, QrCode, ScrollText, type LucideIcon } from "lucide-react"
+import { ArrowRightLeft, BarChart3, Boxes, Layers, LayoutDashboard, PackageMinus, PackagePlus, ScrollText, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
-type PrimaryTab = {
+type SubTab = {
   href: string
   label: string
   icon: LucideIcon
-  matchPrefixes: string[]
+  /** Route phụ (không phải thẻ) vẫn được coi là thuộc thẻ này — vd /cards thuộc Tồn. */
+  extraPrefixes?: string[]
 }
 
-type SecondaryTab = {
-  href: string
+type TabGroup = {
+  key: string
   label: string
   icon: LucideIcon
+  tabs: SubTab[]
 }
 
 type InventoryPageShellProps = {
   title: string
   description: string
   eyebrow?: string
+  /** Nút thao tác — hiển thị bên phải hàng thẻ con, ngay trên nội dung mà nó tác động. */
   action?: ReactNode
   children?: ReactNode
 }
 
-const primaryTabs: PrimaryTab[] = [
+// Cấu trúc 2 nhóm (2026-10-03):
+//  - "Nhập xuất tồn": 4 thẻ nghiệp vụ, mỗi thẻ là 1 danh sách có bộ lọc + nút Thêm.
+//  - "Báo cáo": Tổng quan (thống kê, cảnh báo) + Sổ chi tiết (tra cứu phát sinh, xuất file).
+// "Thẻ kho" (in nhãn QR) không còn là thẻ — mở từ nút "In nhãn QR" trên thẻ Tồn.
+const TAB_GROUPS: TabGroup[] = [
   {
-    href: "/dashboard/inventory/receipts",
+    key: "operations",
     label: "Nhập xuất tồn",
     icon: Layers,
-    matchPrefixes: [
-      "/dashboard/inventory",
-      "/dashboard/inventory/receipts",
-      "/dashboard/inventory/issues",
-      "/dashboard/inventory/transfers",
-      "/dashboard/inventory/on-hand",
-      "/dashboard/inventory/cards",
-      "/dashboard/inventory/lookup",
+    tabs: [
+      { href: "/dashboard/inventory/receipts", label: "Nhập", icon: PackagePlus },
+      { href: "/dashboard/inventory/issues", label: "Xuất", icon: PackageMinus },
+      { href: "/dashboard/inventory/transfers", label: "Chuyển", icon: ArrowRightLeft },
+      { href: "/dashboard/inventory/on-hand", label: "Tồn", icon: Boxes, extraPrefixes: ["/dashboard/inventory/cards"] },
     ],
   },
   {
-    href: "/dashboard/inventory/analytics",
-    label: "Thống kê",
+    key: "reports",
+    label: "Báo cáo",
     icon: BarChart3,
-    matchPrefixes: ["/dashboard/inventory/analytics"],
+    tabs: [
+      { href: "/dashboard/inventory/analytics", label: "Tổng quan", icon: LayoutDashboard },
+      { href: "/dashboard/inventory/lookup", label: "Sổ chi tiết", icon: ScrollText },
+    ],
   },
-]
-
-const operationalTabs: SecondaryTab[] = [
-  { href: "/dashboard/inventory/receipts", label: "Nhập kho", icon: PackagePlus },
-  { href: "/dashboard/inventory/issues", label: "Xuất kho", icon: PackageMinus },
-  { href: "/dashboard/inventory/transfers", label: "Chuyển kho", icon: ArrowRightLeft },
-  { href: "/dashboard/inventory/on-hand", label: "Tồn kho", icon: Boxes },
-  { href: "/dashboard/inventory/cards", label: "Thẻ kho", icon: QrCode },
-  { href: "/dashboard/inventory/lookup", label: "Tra cứu", icon: ScrollText },
 ]
 
 function isActivePath(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`)
 }
 
-function matchesAnyPrefix(pathname: string, prefixes: string[]) {
-  return prefixes.some((prefix) => isActivePath(pathname, prefix))
+function isTabActive(pathname: string, tab: SubTab) {
+  return [tab.href, ...(tab.extraPrefixes || [])].some((prefix) => isActivePath(pathname, prefix))
 }
 
 export function InventoryPageShell({
@@ -77,7 +75,7 @@ export function InventoryPageShell({
 }: InventoryPageShellProps) {
   const pathname = usePathname()
   const revealRef = useScrollReveal()
-  const inOperationalArea = matchesAnyPrefix(pathname, primaryTabs[0].matchPrefixes)
+  const activeGroup = TAB_GROUPS.find((group) => group.tabs.some((tab) => isTabActive(pathname, tab))) || TAB_GROUPS[0]
 
   return (
     <div className="space-y-4">
@@ -86,45 +84,41 @@ export function InventoryPageShell({
 
       <section
         ref={revealRef}
-        className="scroll-reveal rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        className="scroll-reveal rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
       >
-        {action ? <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{action}</div> : null}
-
-        <div className="flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1.5">
-          {primaryTabs.map((tab) => {
-            const active = matchesAnyPrefix(pathname, tab.matchPrefixes)
-            const Icon = tab.icon
+        <div className="flex gap-1.5 rounded-2xl bg-slate-100 p-1.5">
+          {TAB_GROUPS.map((group) => {
+            const active = group.key === activeGroup.key
+            const Icon = group.icon
             return (
               <Link
-                key={tab.href}
-                href={tab.href}
+                key={group.key}
+                href={group.tabs[0].href}
                 className={
-                  "flex items-center gap-2 rounded-2xl px-6 py-2 text-sm font-bold transition-all " +
-                  (active
-                    ? "bg-white text-slate-800 shadow-sm"
-                    : "text-slate-500 hover:text-slate-800")
+                  "flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold transition-all sm:flex-none sm:px-6 " +
+                  (active ? "bg-white text-amber-800 shadow-sm" : "text-slate-500 hover:text-slate-800")
                 }
               >
                 <Icon size={16} />
-                {tab.label}
+                {group.label}
               </Link>
             )
           })}
         </div>
 
-        {inOperationalArea ? (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {operationalTabs.map((tab) => {
-              const active = isActivePath(pathname, tab.href)
+        <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
+            {activeGroup.tabs.map((tab) => {
+              const active = isTabActive(pathname, tab)
               return (
                 <Link
                   key={tab.href}
                   href={tab.href}
                   className={
-                    "flex items-center gap-2 rounded-xl px-6 py-3.5 text-sm font-semibold transition-all " +
+                    "flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all " +
                     (active
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-800")
+                      ? "bg-amber-600 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-amber-50 hover:text-amber-800")
                   }
                 >
                   <tab.icon size={15} />
@@ -133,7 +127,8 @@ export function InventoryPageShell({
               )
             })}
           </div>
-        ) : null}
+          {action ? <div className="flex flex-wrap items-center gap-2 lg:justify-end">{action}</div> : null}
+        </div>
       </section>
 
       {children}
