@@ -156,22 +156,25 @@ export async function loadNgansByIdsRaw(ids: string[]): Promise<PredictAvailable
 export async function getExistingRealKg(
   factoryId: string,
   nganId: string,
+  excludeLotIds: string[] = [],
 ): Promise<number> {
   const supabase = getSupabaseAdmin();
   let total = 0;
   let from = 0;
   const PAGE_SIZE = 1000;
+  const excludeSet = new Set(excludeLotIds);
   for (;;) {
     const { data, error } = await supabase
       .from("lot_transactions")
-      .select("so_kg, lots!inner(factory_id)")
+      .select("so_kg, lot_id, lots!inner(factory_id)")
       .eq("ngan_id", nganId)
       .eq("lots.factory_id", factoryId)
       .range(from, from + PAGE_SIZE - 1);
     if (error) throw new Error(error.message);
-    const rows = data || [];
+    const rawRows = data || [];
+    const rows = rawRows.filter((row) => !excludeSet.has(row.lot_id));
     total += rows.reduce((sum, row) => sum + Number(row.so_kg || 0), 0);
-    if (rows.length < PAGE_SIZE) break;
+    if (rawRows.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
   return total;
@@ -230,7 +233,10 @@ export type RealContinuation = {
 // gốc có thể bị tính dư dung lượng, dẫn tới đề xuất/tạo vượt quá capacity thật. Hàm này tính
 // lại MỖI LẦN gọi, độc lập với việc đã "bridge" hay chưa, dùng thống nhất cho mọi nơi cần biết
 // dung lượng ngăn: lọc ngăn khả dụng, preview, tạo dự đoán, và tỷ lệ lấp đầy hiển thị trên nhãn.
-async function getReservedKgForPartialKien(factoryId: string): Promise<Record<string, number>> {
+async function getReservedKgForPartialKien(
+  factoryId: string,
+  excludeLotIds: string[] = [],
+): Promise<Record<string, number>> {
   const supabase = getSupabaseAdmin();
   const { data: dodangLots } = await supabase
     .from("lots")
@@ -239,13 +245,16 @@ async function getReservedKgForPartialKien(factoryId: string): Promise<Record<st
     .eq("trang_thai", "Dở dang");
   const reservedByNgan: Record<string, number> = {};
 
+  const excludeSet = new Set(excludeLotIds);
+  const activeDodangLots = (dodangLots || []).filter((l) => !excludeSet.has(l.id));
+
   // Dòng dự đoán của các lô ĐÃ thành lô thật (real_lot_id có giá trị) không còn được
   // getExistingPredictedKg/RPC create_lot_prediction_batch đếm (chúng chỉ đếm real_lot_id IS NULL)
   // — trước đây kiện CHƯA SẢN XUẤT (B, C, D) của lô đã quét kiện A bị mất chỗ giữ ở ngăn dự kiến.
   // Bù lại ở đây: kiện có kien_X_ngan_id, chưa có bành thật nào, không thuộc unassignable_kien →
   // giữ trọn kien_weight_kg ở ngăn dự kiến. Không trùng với phần kiện dở dang một phần bên dưới
   // (phần đó chỉ áp dụng khi sum > 0).
-  const dodangIds = (dodangLots || []).map((l) => l.id);
+  const dodangIds = activeDodangLots.map((l) => l.id);
   const predByLotId = new Map<
     string,
     {
@@ -270,7 +279,7 @@ async function getReservedKgForPartialKien(factoryId: string): Promise<Record<st
     }
   }
 
-  for (const lot of dodangLots || []) {
+  for (const lot of activeDodangLots) {
     const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh);
     const { data: txs } = await supabase
       .from("lot_transactions")
@@ -1039,12 +1048,35 @@ export async function loadNganCumulativeBaselines(
     .select("id,ma_ngan,ten_ngan,tong_kho")
     .in("id", uniqueIds);
   if (error) throw new Error(error.message);
-  const reservedMap = await getReservedKgForPartialKien(factoryId);
+
+  // Nếu các lô trong excludePredictionLotIds đã được đưa vào sản xuất thật (real_lot_id != null),
+  // thì khối lượng thực tế của chúng đã nằm trong lot_transactions.
+  // Ta phải loại trừ các real_lot_id này khỏi getExistingRealKg và getReservedKgForPartialKien,
+  // nếu không khối lượng của chúng sẽ bị tính 2 LẦN (double-counting):
+  // 1 lần ở baselineKg và 1 lần ở vòng lặp cộng dồn từng kiện khi in nhãn.
+  // Hiện tượng lỗi: Kiện đầu tiên vừa in đã bị cộng dồn lên 99% (ngang tỷ lệ ngăn hiện tại),
+  // và đến kiện cuối cùng thì % vọt lên >200% làm bật cảnh báo vượt 110%.
+  let excludeRealLotIds: string[] = [];
+  if (excludePredictionLotIds.length > 0) {
+    for (let i = 0; i < excludePredictionLotIds.length; i += 200) {
+      const chunk = excludePredictionLotIds.slice(i, i + 200);
+      const { data: predLots } = await supabase
+        .from("lot_prediction_lots")
+        .select("real_lot_id")
+        .in("id", chunk)
+        .not("real_lot_id", "is", null);
+      (predLots || []).forEach((r) => {
+        if (r.real_lot_id) excludeRealLotIds.push(r.real_lot_id);
+      });
+    }
+  }
+
+  const reservedMap = await getReservedKgForPartialKien(factoryId, excludeRealLotIds);
   const map: Record<string, NganCumulativeBaseline> = {};
   await Promise.all(
     (data || []).map(async (n) => {
       const [realKg, predictedKg] = await Promise.all([
-        getExistingRealKg(factoryId, n.id),
+        getExistingRealKg(factoryId, n.id, excludeRealLotIds),
         getExistingPredictedKg(factoryId, n.id, excludePredictionLotIds),
       ]);
       const reservedKg = reservedMap[n.id] || 0;
