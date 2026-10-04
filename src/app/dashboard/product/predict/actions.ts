@@ -10,6 +10,9 @@ export type PredictAvailableNgan = {
   loai_nl: string;
   tong_kho: number;
   trang_thai: string;
+  nguon_goc?: string | null;
+  ghi_chu?: string | null;
+  chung_nhan?: string | null;
 };
 
 export async function loadPredictAvailableNgans(
@@ -28,7 +31,7 @@ export async function loadPredictNgansWithCapacity(
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ngans")
-    .select("id,ma_ngan,ten_ngan,loai_nl,tong_kho,trang_thai")
+    .select("id,ma_ngan,ten_ngan,loai_nl,tong_kho,trang_thai,nguon_goc,ghi_chu,chung_nhan")
     .eq("factory_id", factoryId)
     .in("trang_thai", ["Chờ sản xuất", "Đang sản xuất"])
     .gt("tong_kho", 0)
@@ -307,13 +310,14 @@ async function getNganReservedKg(factoryId: string, nganId: string): Promise<num
   return map[nganId] || 0;
 }
 
-// Phát hiện lô thật "Dở dang" cùng series (loai_csr+loai_banh+year) CHƯA từng được bridge
+// Phát hiện lô thật "Dở dang" cùng series (loai_csr+loai_banh+suffix+year) CHƯA từng được bridge
 // vào lot_prediction_lots — dùng để RPC tự tạo dòng nối tiếp đúng kiện còn trống (vd kiện D).
 // Xem .claude/rules/06-module-production.md mục "4.6".
 async function findRealContinuationForSeries(
   factoryId: string,
   loaiCsr: string,
   loaiBanh: number,
+  suffix: string,
   year: string,
   maxPerKien: number,
 ): Promise<RealContinuation | null> {
@@ -324,6 +328,7 @@ async function findRealContinuationForSeries(
     .eq("factory_id", factoryId)
     .eq("loai_csr", loaiCsr)
     .eq("loai_banh", loaiBanh)
+    .eq("suffix", suffix)
     .eq("year", year)
     .eq("trang_thai", "Dở dang")
     .order("num", { ascending: false })
@@ -386,6 +391,7 @@ export async function findPendingCarryLot(
   factoryId: string,
   loaiCsr: string,
   loaiBanh: number,
+  suffix: string,
   year: string,
 ): Promise<PendingCarryLot | null> {
   const supabase = getSupabaseAdmin();
@@ -395,6 +401,7 @@ export async function findPendingCarryLot(
     .eq("factory_id", factoryId)
     .eq("loai_csr", loaiCsr)
     .eq("loai_banh", loaiBanh)
+    .eq("suffix", suffix)
     .eq("year", year)
     .eq("carry_over_status", "pending")
     .order("created_at", { ascending: false })
@@ -495,6 +502,7 @@ export async function createLotPredictionBatch(
       input.factoryId,
       input.loaiCsr,
       input.loaiBanh,
+      input.suffix,
       input.year,
       cfg.max_per_kien,
     ),
@@ -630,12 +638,13 @@ export async function createLotPredictionBatchMulti(
 }
 
 // Gợi ý số lô kế tiếp cho tính năng "bắt đầu lô mới" — mirror ĐÚNG công thức fallback MAX+1 của
-// nhánh không-continue trong RPC (supabase/migrations/20260714_lot_prediction_fixes.sql, nhánh
-// ELSE của "IF v_continue THEN ... ELSE ..."), để UI hiển thị gợi ý trước khi submit thật.
+// nhánh không-continue trong RPC, có phân lập chính xác theo hậu tố suffix (để mủ thu mua 'm'
+// không bị gợi ý nhầm số của công ty 'cs').
 export async function suggestNextLotNum(
   factoryId: string,
   loaiCsr: string,
   loaiBanh: number,
+  suffix: string,
   year: string,
 ): Promise<number> {
   const supabase = getSupabaseAdmin();
@@ -646,6 +655,7 @@ export async function suggestNextLotNum(
       .eq("factory_id", factoryId)
       .eq("loai_csr", loaiCsr)
       .eq("loai_banh", loaiBanh)
+      .eq("suffix", suffix)
       .eq("year", year)
       .order("num", { ascending: false })
       .limit(1)
@@ -656,8 +666,8 @@ export async function suggestNextLotNum(
       .eq("factory_id", factoryId)
       .eq("loai_csr", loaiCsr)
       .eq("loai_banh", loaiBanh)
+      .eq("suffix", suffix)
       .eq("year", year)
-      .neq("carry_over_status", "abandoned")
       .order("num", { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -668,9 +678,7 @@ export async function suggestNextLotNum(
 }
 
 // Kiểm tra trùng mã lô — dựng ma_lo ứng viên từ số + hậu tố + năm, kiểm tra tồn tại trong cả
-// `lots` (lô thật) và `lot_prediction_lots` (lô dự kiến, loại abandoned) trong cùng factory.
-// Dùng cho input "Số lô bắt đầu" (tính năng "bắt đầu lô mới") — validate live phía client trước
-// khi submit; RPC vẫn validate lại lần nữa ở server để tránh race condition.
+// `lots` (lô thật) và `lot_prediction_lots` (lô dự kiến) trong cùng factory.
 export async function checkLotNumTaken(
   factoryId: string,
   suffix: string,
@@ -686,7 +694,6 @@ export async function checkLotNumTaken(
       .select("id")
       .eq("factory_id", factoryId)
       .eq("ma_lo", maLo)
-      .neq("carry_over_status", "abandoned")
       .maybeSingle(),
   ]);
   return { taken: !!lotsRes.data || !!predictionRes.data, maLo };

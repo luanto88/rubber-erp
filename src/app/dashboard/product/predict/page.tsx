@@ -194,8 +194,25 @@ export default function ProductPredictPage() {
       setLoaiCsr(defaultCsr);
       setLoaiBanh(getLoaiBanhOptions(defaultCsr)[0] || 35);
     }
+    // Tự động nhận diện hậu tố mã lô theo nguồn gốc ngăn đầu tiên
+    if (justSelected && suffix === null && selectedNgans[0]) {
+      const firstNgan = selectedNgans[0];
+      const nguon = (firstNgan.nguon_goc || "").toUpperCase();
+      const ma = (firstNgan.ma_ngan || "").toUpperCase();
+      const note = (firstNgan.ghi_chu || "").toUpperCase();
+      const isThuMua = nguon === "M" || nguon === "TM" || ma.includes("-TM-") || ma.includes("-M-") || note === "TM";
+      const isNongTruong = nguon === "NT" || ma.includes("-NT-");
+      if (isThuMua && suffixOptions.some((s) => s.code === "m")) {
+        setSuffix("m");
+      } else if (isNongTruong && suffixOptions.some((s) => s.code === "cs")) {
+        setSuffix("cs");
+      } else if (suffixOptions.length > 0) {
+        const matched = suffixOptions.find((s) => s.code.toLowerCase() === nguon.toLowerCase());
+        if (matched) setSuffix(matched.code);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNganIds.length, csrOptions]);
+  }, [selectedNganIds.length, csrOptions, selectedNgans, suffix, suffixOptions]);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -320,19 +337,19 @@ export default function ProductPredictPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId, selectedNganIds, loaiCsr, loaiBanh, continuationOpenKienCount, orderedNganIds]);
 
-  // Kiểm tra carry-over pending mỗi khi đổi series (CSR + bành)
+  // Kiểm tra carry-over pending mỗi khi đổi series (CSR + bành + hậu tố)
   useEffect(() => {
-    if (!factoryId || !loaiCsr || !loaiBanh) {
+    if (!factoryId || !loaiCsr || !loaiBanh || suffix === null) {
       setPendingCarry(null);
       setCarryResolution(null);
       return;
     }
     const year = currentYear2();
-    void findPendingCarryLot(factoryId, loaiCsr, loaiBanh, year).then((row) => {
+    void findPendingCarryLot(factoryId, loaiCsr, loaiBanh, suffix, year).then((row) => {
       setPendingCarry(row);
       setCarryResolution(row ? null : "skip");
     });
-  }, [factoryId, loaiCsr, loaiBanh]);
+  }, [factoryId, loaiCsr, loaiBanh, suffix]);
 
   // Reset "Số lô bắt đầu" mỗi khi đổi series (CSR/bành/hậu tố) — tránh giữ số cũ không còn hợp lệ
   const overrideStartNumTouchedRef = useRef(false);
@@ -344,15 +361,14 @@ export default function ProductPredictPage() {
   }, [loaiCsr, loaiBanh, suffix]);
 
   // Gợi ý số lô kế tiếp khi ở chế độ "bắt đầu lô mới" (carryResolution === "skip") — chỉ tự
-  // điền vào ô khi người dùng CHƯA tự gõ tay (overrideStartNumTouchedRef), giống pattern
-  // auto-suggest loaiCsr ở trên. Xem .claude/rules/06-module-production.md mục "Cập nhật 2026-07-14".
+  // điền vào ô khi người dùng CHƯA tự gõ tay (overrideStartNumTouchedRef), có phân lập theo suffix.
   useEffect(() => {
-    if (!factoryId || !loaiCsr || !loaiBanh || carryResolution !== "skip") {
+    if (!factoryId || !loaiCsr || !loaiBanh || suffix === null || carryResolution !== "skip") {
       setOverrideStartNumSuggested(null);
       return;
     }
     let alive = true;
-    void suggestNextLotNum(factoryId, loaiCsr, loaiBanh, currentYear2()).then((num) => {
+    void suggestNextLotNum(factoryId, loaiCsr, loaiBanh, suffix, currentYear2()).then((num) => {
       if (!alive) return;
       setOverrideStartNumSuggested(num);
       if (!overrideStartNumTouchedRef.current) setOverrideStartNum(String(num));
@@ -360,18 +376,20 @@ export default function ProductPredictPage() {
     return () => {
       alive = false;
     };
-  }, [factoryId, loaiCsr, loaiBanh, carryResolution]);
+  }, [factoryId, loaiCsr, loaiBanh, suffix, carryResolution]);
 
   // Kiểm tra trùng mã lô khi người dùng gõ tay "Số lô bắt đầu" — debounce 400ms, chặn Tạo dự
   // đoán nếu trùng.
   useEffect(() => {
     if (!factoryId || !loaiCsr || !loaiBanh || carryResolution !== "skip" || overrideStartNum === "") {
       setOverrideStartNumError(null);
+      setOverrideStartNumChecking(false);
       return;
     }
     const num = Number(overrideStartNum);
     if (!Number.isFinite(num) || num <= 0) {
       setOverrideStartNumError("Số lô không hợp lệ.");
+      setOverrideStartNumChecking(false);
       return;
     }
     let alive = true;
@@ -389,6 +407,7 @@ export default function ProductPredictPage() {
     return () => {
       alive = false;
       window.clearTimeout(timer);
+      setOverrideStartNumChecking(false);
     };
   }, [factoryId, loaiCsr, loaiBanh, suffix, overrideStartNum, carryResolution]);
 
