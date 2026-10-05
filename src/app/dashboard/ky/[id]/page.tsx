@@ -2,11 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { ChevronDown, ChevronUp, Loader2, X } from "lucide-react"
+import { BarChart3, ChevronDown, ChevronUp, Loader2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { modunLabel, loaiTaiLieuLabel, formatMaHoSoDisplay, isUuid, buildMaintenanceDocLabel } from "@/lib/signing/labels"
 import { fetchSecureUrl } from "@/app/dashboard/_components/secure-file-open"
+import { authFetch } from "@/lib/auth-fetch"
+import { insightWarnings, type PurchaseLineRow } from "@/lib/purchase/types"
+import { PurchaseInsightPanel } from "@/app/dashboard/purchase/_components/purchase-insight-panel"
+
+// Bề rộng hiển thị 1 trang PDF theo KHỔ GIẤY THẬT: A4 dọc (595pt) giữ đúng 672px như trước
+// (max-w-2xl), khổ nhỏ hơn (A5 420pt ≈ 474px) hiện nhỏ hơn đúng tỉ lệ; khổ ngang vẫn kẹp 672px
+// nên module Kiểm nghiệm (ngang) / Bảo trì (A4) không đổi. Khung ký dùng % theo wrapper ⇒ không lệch.
+const PAGE_MAX_PX = 672
+const PX_PER_PT = PAGE_MAX_PX / 595.28
 
 
 
@@ -137,6 +146,11 @@ export default function SignScreenPage() {
   const [returning, setReturning] = useState(false)
 
   const [mySigUrl, setMySigUrl] = useState("")
+  // Chỉ module Đề nghị mua: bằng chứng tồn kho/tiêu hao chụp lúc gửi ký, cho người duyệt xem.
+  const [purchaseLines, setPurchaseLines] = useState<PurchaseLineRow[] | null>(null)
+  const [purchaseError, setPurchaseError] = useState("")
+  const [evidenceOpen, setEvidenceOpen] = useState(false)
+  const [evidenceExpanded, setEvidenceExpanded] = useState<Record<string, boolean>>({})
 
   const loadData = useCallback(async (uid: string) => {
     // Tải signed URL chữ ký của người ký hiện tại (chỉ để preview trong khung ký) — chạy SONG
@@ -403,6 +417,26 @@ export default function SignScreenPage() {
     void run()
     return () => { cancelled = true }
   }, [yeuCau?.file_hien_tai])
+
+  // Đề nghị mua: tải chi tiết phiếu (người ký là participant ⇒ API cho xem) để lấy bản chụp
+  // bằng chứng từng dòng. Module khác không gọi gì.
+  const purchaseBanGhiId = yeuCau?.modun === "purchase" ? yeuCau.ban_ghi_id : null
+  useEffect(() => {
+    if (!purchaseBanGhiId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await authFetch(`/api/purchase/requests/${purchaseBanGhiId}`)
+        const json = (await res.json().catch(() => ({}))) as { lines?: PurchaseLineRow[]; error?: string }
+        if (cancelled) return
+        if (!res.ok) { setPurchaseError(json.error || `Lỗi ${res.status}`); return }
+        setPurchaseLines(json.lines || [])
+      } catch (err) {
+        if (!cancelled) setPurchaseError(err instanceof Error ? err.message : "Không tải được bằng chứng")
+      }
+    })()
+    return () => { cancelled = true }
+  }, [purchaseBanGhiId])
 
   // Quy đổi toạ độ pdf-lib (point, gốc dưới-trái) sang % trong khung trang — dùng %
   // (không phải pixel cố định) để khung luôn khớp đúng vị trí trên ảnh trang bất kể
@@ -694,7 +728,9 @@ export default function SignScreenPage() {
           ? "/dashboard/dispatch"
           : yeuCau.modun === "quality"
             ? "/dashboard/quality"
-            : "/dashboard"
+            : yeuCau.modun === "purchase"
+              ? (banGhiId ? `/dashboard/purchase/${banGhiId}` : "/dashboard/purchase")
+              : "/dashboard"
     router.push(returnUrl)
   }
 
@@ -707,32 +743,49 @@ export default function SignScreenPage() {
           ? (myTurn ? "Đang chờ bạn ký" : "Chưa tới lượt bạn")
           : "Xem hồ sơ"
 
+  const purchaseWarnCount = (purchaseLines || []).filter((l) => l.insight_snapshot && insightWarnings(l.insight_snapshot).length > 0).length
+
   return (
     <div className="flex h-screen flex-col bg-[#f2f8f5]">
-      {/* Topbar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-[#3f7f6f] via-[#4a917f] to-[#5fa593] px-5 py-3.5 text-white shadow-sm">
-        <div className="flex min-w-[220px] flex-col gap-1">
-          <div className="text-[11px] opacity-75">
-            Hệ thống ký số dùng chung · {modunLabel(yeuCau.modun)}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-base font-bold">
-            {loaiTaiLieuLabel(yeuCau.loai_tai_lieu)}
-            {formatMaHoSoDisplay(yeuCau.ma_ho_so) && (
-              <span className="rounded-md bg-white/15 px-2 py-0.5 font-mono text-xs font-semibold">
-                {formatMaHoSoDisplay(yeuCau.ma_ho_so)}
-              </span>
-            )}
+      {/* Topbar — 3 dòng: module · loại tài liệu + mã · [badge (+ Bằng chứng)] ... [Đóng]. Nút Đóng
+          cùng dòng badge, góc phải, để trên mobile (360–430px) không rớt xuống dòng riêng. */}
+      <div className="flex flex-col gap-1 bg-gradient-to-r from-[#3f7f6f] via-[#4a917f] to-[#5fa593] px-4 py-3 text-white shadow-sm sm:px-5">
+        <div className="text-[11px] opacity-75">
+          Hệ thống ký số dùng chung · {modunLabel(yeuCau.modun)}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-base font-bold">
+          {loaiTaiLieuLabel(yeuCau.loai_tai_lieu)}
+          {formatMaHoSoDisplay(yeuCau.ma_ho_so) && (
+            <span className="rounded-md bg-white/15 px-2 py-0.5 font-mono text-xs font-semibold">
+              {formatMaHoSoDisplay(yeuCau.ma_ho_so)}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="rounded-full border border-white/30 bg-white/15 px-2.5 py-1 text-[11px] font-bold">
               {statusBadge}
             </span>
+            {purchaseBanGhiId && (
+              <button
+                type="button"
+                onClick={() => setEvidenceOpen(true)}
+                className="inline-flex items-center gap-1 rounded-full border border-white/40 bg-white/20 px-2.5 py-1 text-[11px] font-bold hover:bg-white/30"
+              >
+                <BarChart3 size={12} /> Bằng chứng tồn kho
+                {purchaseWarnCount > 0 && (
+                  <span className="ml-0.5 rounded-full bg-red-500 px-1.5 text-[10px] leading-4 text-white">{purchaseWarnCount}</span>
+                )}
+              </button>
+            )}
           </div>
+          <button
+            onClick={handleClose}
+            className="shrink-0 rounded-full border border-white bg-white px-3 py-1 text-[11px] font-bold text-teal-700 shadow-sm hover:bg-teal-50"
+          >
+            Đóng
+          </button>
         </div>
-        <button
-          onClick={handleClose}
-          className="rounded-xl border border-white/35 bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/20"
-        >
-          Đóng
-        </button>
       </div>
 
       {pdfLoadError && (
@@ -762,12 +815,16 @@ export default function SignScreenPage() {
                 key={p}
                 ref={(el) => { pageWrapRefs.current[p] = el }}
                 className="relative w-full rounded border border-slate-200 bg-white shadow-sm"
+                style={pageDims[p] ? { maxWidth: `${Math.min(pageDims[p].w * PX_PER_PT, PAGE_MAX_PX)}px` } : undefined}
               >
                 {pageImages[p] ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={pageImages[p]} alt={`Trang ${p}`} className="block w-full rounded" />
                 ) : (
-                  <div className="flex aspect-[210/297] w-full items-center justify-center rounded bg-slate-50">
+                  <div
+                    className="flex aspect-[210/297] w-full items-center justify-center rounded bg-slate-50"
+                    style={pageDims[p] ? { aspectRatio: `${pageDims[p].w} / ${pageDims[p].h}` } : undefined}
+                  >
                     <Loader2 className="animate-spin text-slate-300" size={24} />
                   </div>
                 )}
@@ -1093,6 +1150,69 @@ export default function SignScreenPage() {
           </div>
         </div>
         </div>
+      )}
+
+      {/* Ngăn kéo "Bằng chứng tồn kho" — chỉ module Đề nghị mua. Số liệu là BẢN CHỤP lúc gửi ký. */}
+      {purchaseBanGhiId && evidenceOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setEvidenceOpen(false)} />
+          <div className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-white shadow-2xl sm:w-[560px]">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+              <div>
+                <p className="text-sm font-extrabold text-slate-800">Bằng chứng đề nghị mua</p>
+                <p className="text-[11px] text-slate-500">Tồn kho, tiêu hao, lần mua trước — số liệu lúc người đề nghị gửi ký</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEvidenceOpen(false)}
+                className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+                aria-label="Đóng"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-y-auto p-3">
+              {purchaseError ? (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{purchaseError}</p>
+              ) : !purchaseLines ? (
+                <p className="flex items-center gap-2 text-xs text-slate-500"><Loader2 size={14} className="animate-spin" /> Đang tải...</p>
+              ) : purchaseLines.length === 0 ? (
+                <p className="text-xs text-slate-500">Phiếu không có dòng vật tư.</p>
+              ) : (
+                purchaseLines.map((l, i) => {
+                  const snap = l.insight_snapshot || null
+                  const warns = snap ? insightWarnings(snap) : []
+                  const open = evidenceExpanded[l.id] ?? true
+                  return (
+                    <div key={l.id} className="overflow-hidden rounded-lg border border-slate-200">
+                      <button
+                        type="button"
+                        onClick={() => setEvidenceExpanded((prev) => ({ ...prev, [l.id]: !open }))}
+                        aria-expanded={open}
+                        className="flex w-full items-center gap-2 bg-slate-50 px-3 py-2 text-left hover:bg-slate-100"
+                      >
+                        <span className="text-xs font-bold text-slate-400">{i + 1}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-bold text-slate-800">{l.item_name}</span>
+                          <span className="block text-[11px] text-slate-500">{l.item_code} · SL đề nghị {l.so_luong} {l.unit || ""}</span>
+                        </span>
+                        {warns.length > 0 && (
+                          <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">{warns.length} cảnh báo</span>
+                        )}
+                        {open ? <ChevronUp size={16} className="shrink-0 text-slate-400" /> : <ChevronDown size={16} className="shrink-0 text-slate-400" />}
+                      </button>
+                      {open && (snap ? (
+                        <PurchaseInsightPanel insight={snap} unit={l.unit} capturedAt={snap.capturedAt} compact />
+                      ) : (
+                        <p className="px-3 py-2 text-xs text-slate-500">Phiếu gửi ký trước khi có tính năng chụp số liệu — không có bằng chứng.</p>
+                      ))}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {toast && (

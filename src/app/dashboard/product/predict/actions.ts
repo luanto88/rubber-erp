@@ -10,6 +10,9 @@ export type PredictAvailableNgan = {
   loai_nl: string;
   tong_kho: number;
   trang_thai: string;
+  nguon_goc?: string | null;
+  ghi_chu?: string | null;
+  chung_nhan?: string | null;
 };
 
 export async function loadPredictAvailableNgans(
@@ -28,7 +31,7 @@ export async function loadPredictNgansWithCapacity(
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("ngans")
-    .select("id,ma_ngan,ten_ngan,loai_nl,tong_kho,trang_thai")
+    .select("id,ma_ngan,ten_ngan,loai_nl,tong_kho,trang_thai,nguon_goc,ghi_chu,chung_nhan")
     .eq("factory_id", factoryId)
     .in("trang_thai", ["Chờ sản xuất", "Đang sản xuất"])
     .gt("tong_kho", 0)
@@ -153,22 +156,25 @@ export async function loadNgansByIdsRaw(ids: string[]): Promise<PredictAvailable
 export async function getExistingRealKg(
   factoryId: string,
   nganId: string,
+  excludeLotIds: string[] = [],
 ): Promise<number> {
   const supabase = getSupabaseAdmin();
   let total = 0;
   let from = 0;
   const PAGE_SIZE = 1000;
+  const excludeSet = new Set(excludeLotIds);
   for (;;) {
     const { data, error } = await supabase
       .from("lot_transactions")
-      .select("so_kg, lots!inner(factory_id)")
+      .select("so_kg, lot_id, lots!inner(factory_id)")
       .eq("ngan_id", nganId)
       .eq("lots.factory_id", factoryId)
       .range(from, from + PAGE_SIZE - 1);
     if (error) throw new Error(error.message);
-    const rows = data || [];
+    const rawRows = data || [];
+    const rows = rawRows.filter((row) => !excludeSet.has(row.lot_id));
     total += rows.reduce((sum, row) => sum + Number(row.so_kg || 0), 0);
-    if (rows.length < PAGE_SIZE) break;
+    if (rawRows.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
   return total;
@@ -227,7 +233,10 @@ export type RealContinuation = {
 // gốc có thể bị tính dư dung lượng, dẫn tới đề xuất/tạo vượt quá capacity thật. Hàm này tính
 // lại MỖI LẦN gọi, độc lập với việc đã "bridge" hay chưa, dùng thống nhất cho mọi nơi cần biết
 // dung lượng ngăn: lọc ngăn khả dụng, preview, tạo dự đoán, và tỷ lệ lấp đầy hiển thị trên nhãn.
-async function getReservedKgForPartialKien(factoryId: string): Promise<Record<string, number>> {
+async function getReservedKgForPartialKien(
+  factoryId: string,
+  excludeLotIds: string[] = [],
+): Promise<Record<string, number>> {
   const supabase = getSupabaseAdmin();
   const { data: dodangLots } = await supabase
     .from("lots")
@@ -236,13 +245,16 @@ async function getReservedKgForPartialKien(factoryId: string): Promise<Record<st
     .eq("trang_thai", "Dở dang");
   const reservedByNgan: Record<string, number> = {};
 
+  const excludeSet = new Set(excludeLotIds);
+  const activeDodangLots = (dodangLots || []).filter((l) => !excludeSet.has(l.id));
+
   // Dòng dự đoán của các lô ĐÃ thành lô thật (real_lot_id có giá trị) không còn được
   // getExistingPredictedKg/RPC create_lot_prediction_batch đếm (chúng chỉ đếm real_lot_id IS NULL)
   // — trước đây kiện CHƯA SẢN XUẤT (B, C, D) của lô đã quét kiện A bị mất chỗ giữ ở ngăn dự kiến.
   // Bù lại ở đây: kiện có kien_X_ngan_id, chưa có bành thật nào, không thuộc unassignable_kien →
   // giữ trọn kien_weight_kg ở ngăn dự kiến. Không trùng với phần kiện dở dang một phần bên dưới
   // (phần đó chỉ áp dụng khi sum > 0).
-  const dodangIds = (dodangLots || []).map((l) => l.id);
+  const dodangIds = activeDodangLots.map((l) => l.id);
   const predByLotId = new Map<
     string,
     {
@@ -267,7 +279,7 @@ async function getReservedKgForPartialKien(factoryId: string): Promise<Record<st
     }
   }
 
-  for (const lot of dodangLots || []) {
+  for (const lot of activeDodangLots) {
     const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh);
     const { data: txs } = await supabase
       .from("lot_transactions")
@@ -307,13 +319,14 @@ async function getNganReservedKg(factoryId: string, nganId: string): Promise<num
   return map[nganId] || 0;
 }
 
-// Phát hiện lô thật "Dở dang" cùng series (loai_csr+loai_banh+year) CHƯA từng được bridge
+// Phát hiện lô thật "Dở dang" cùng series (loai_csr+loai_banh+suffix+year) CHƯA từng được bridge
 // vào lot_prediction_lots — dùng để RPC tự tạo dòng nối tiếp đúng kiện còn trống (vd kiện D).
 // Xem .claude/rules/06-module-production.md mục "4.6".
 async function findRealContinuationForSeries(
   factoryId: string,
   loaiCsr: string,
   loaiBanh: number,
+  suffix: string,
   year: string,
   maxPerKien: number,
 ): Promise<RealContinuation | null> {
@@ -324,6 +337,7 @@ async function findRealContinuationForSeries(
     .eq("factory_id", factoryId)
     .eq("loai_csr", loaiCsr)
     .eq("loai_banh", loaiBanh)
+    .eq("suffix", suffix)
     .eq("year", year)
     .eq("trang_thai", "Dở dang")
     .order("num", { ascending: false })
@@ -386,6 +400,7 @@ export async function findPendingCarryLot(
   factoryId: string,
   loaiCsr: string,
   loaiBanh: number,
+  suffix: string,
   year: string,
 ): Promise<PendingCarryLot | null> {
   const supabase = getSupabaseAdmin();
@@ -395,6 +410,7 @@ export async function findPendingCarryLot(
     .eq("factory_id", factoryId)
     .eq("loai_csr", loaiCsr)
     .eq("loai_banh", loaiBanh)
+    .eq("suffix", suffix)
     .eq("year", year)
     .eq("carry_over_status", "pending")
     .order("created_at", { ascending: false })
@@ -495,6 +511,7 @@ export async function createLotPredictionBatch(
       input.factoryId,
       input.loaiCsr,
       input.loaiBanh,
+      input.suffix,
       input.year,
       cfg.max_per_kien,
     ),
@@ -630,12 +647,13 @@ export async function createLotPredictionBatchMulti(
 }
 
 // Gợi ý số lô kế tiếp cho tính năng "bắt đầu lô mới" — mirror ĐÚNG công thức fallback MAX+1 của
-// nhánh không-continue trong RPC (supabase/migrations/20260714_lot_prediction_fixes.sql, nhánh
-// ELSE của "IF v_continue THEN ... ELSE ..."), để UI hiển thị gợi ý trước khi submit thật.
+// nhánh không-continue trong RPC, có phân lập chính xác theo hậu tố suffix (để mủ thu mua 'm'
+// không bị gợi ý nhầm số của công ty 'cs').
 export async function suggestNextLotNum(
   factoryId: string,
   loaiCsr: string,
   loaiBanh: number,
+  suffix: string,
   year: string,
 ): Promise<number> {
   const supabase = getSupabaseAdmin();
@@ -646,6 +664,7 @@ export async function suggestNextLotNum(
       .eq("factory_id", factoryId)
       .eq("loai_csr", loaiCsr)
       .eq("loai_banh", loaiBanh)
+      .eq("suffix", suffix)
       .eq("year", year)
       .order("num", { ascending: false })
       .limit(1)
@@ -656,8 +675,8 @@ export async function suggestNextLotNum(
       .eq("factory_id", factoryId)
       .eq("loai_csr", loaiCsr)
       .eq("loai_banh", loaiBanh)
+      .eq("suffix", suffix)
       .eq("year", year)
-      .neq("carry_over_status", "abandoned")
       .order("num", { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -668,9 +687,7 @@ export async function suggestNextLotNum(
 }
 
 // Kiểm tra trùng mã lô — dựng ma_lo ứng viên từ số + hậu tố + năm, kiểm tra tồn tại trong cả
-// `lots` (lô thật) và `lot_prediction_lots` (lô dự kiến, loại abandoned) trong cùng factory.
-// Dùng cho input "Số lô bắt đầu" (tính năng "bắt đầu lô mới") — validate live phía client trước
-// khi submit; RPC vẫn validate lại lần nữa ở server để tránh race condition.
+// `lots` (lô thật) và `lot_prediction_lots` (lô dự kiến) trong cùng factory.
 export async function checkLotNumTaken(
   factoryId: string,
   suffix: string,
@@ -686,7 +703,6 @@ export async function checkLotNumTaken(
       .select("id")
       .eq("factory_id", factoryId)
       .eq("ma_lo", maLo)
-      .neq("carry_over_status", "abandoned")
       .maybeSingle(),
   ]);
   return { taken: !!lotsRes.data || !!predictionRes.data, maLo };
@@ -1032,12 +1048,35 @@ export async function loadNganCumulativeBaselines(
     .select("id,ma_ngan,ten_ngan,tong_kho")
     .in("id", uniqueIds);
   if (error) throw new Error(error.message);
-  const reservedMap = await getReservedKgForPartialKien(factoryId);
+
+  // Nếu các lô trong excludePredictionLotIds đã được đưa vào sản xuất thật (real_lot_id != null),
+  // thì khối lượng thực tế của chúng đã nằm trong lot_transactions.
+  // Ta phải loại trừ các real_lot_id này khỏi getExistingRealKg và getReservedKgForPartialKien,
+  // nếu không khối lượng của chúng sẽ bị tính 2 LẦN (double-counting):
+  // 1 lần ở baselineKg và 1 lần ở vòng lặp cộng dồn từng kiện khi in nhãn.
+  // Hiện tượng lỗi: Kiện đầu tiên vừa in đã bị cộng dồn lên 99% (ngang tỷ lệ ngăn hiện tại),
+  // và đến kiện cuối cùng thì % vọt lên >200% làm bật cảnh báo vượt 110%.
+  let excludeRealLotIds: string[] = [];
+  if (excludePredictionLotIds.length > 0) {
+    for (let i = 0; i < excludePredictionLotIds.length; i += 200) {
+      const chunk = excludePredictionLotIds.slice(i, i + 200);
+      const { data: predLots } = await supabase
+        .from("lot_prediction_lots")
+        .select("real_lot_id")
+        .in("id", chunk)
+        .not("real_lot_id", "is", null);
+      (predLots || []).forEach((r) => {
+        if (r.real_lot_id) excludeRealLotIds.push(r.real_lot_id);
+      });
+    }
+  }
+
+  const reservedMap = await getReservedKgForPartialKien(factoryId, excludeRealLotIds);
   const map: Record<string, NganCumulativeBaseline> = {};
   await Promise.all(
     (data || []).map(async (n) => {
       const [realKg, predictedKg] = await Promise.all([
-        getExistingRealKg(factoryId, n.id),
+        getExistingRealKg(factoryId, n.id, excludeRealLotIds),
         getExistingPredictedKg(factoryId, n.id, excludePredictionLotIds),
       ]);
       const reservedKg = reservedMap[n.id] || 0;

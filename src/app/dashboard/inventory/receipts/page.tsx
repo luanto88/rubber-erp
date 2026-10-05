@@ -15,6 +15,7 @@ import { buildEffectiveStockBalances, getStockContextLabel, resolveStockThreshol
 import { AddItemButton, CompactItemSelectorCard, MultiSelectField } from "../_components/inventory-ui"
 import { resolveCanApproveInventory } from "../_components/inventory-approval"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { CategoryNameClashWarning, findCategoryNameClashes, isClashConfirmed } from "@/app/dashboard/_components/category-name-clash"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import {
   sendInventoryLowStockAlert,
@@ -306,6 +307,8 @@ export default function InventoryReceiptsPage() {
   const [quickModal, setQuickModal] = useState<QuickModalType>(null)
   const [quickSaving, setQuickSaving] = useState(false)
   const [quickFormError, setQuickFormError] = useState<string | null>(null)
+  // Tên phân loại người dùng đã xác nhận dù trùng tên vật tư (đổi tên thì phải xác nhận lại).
+  const [categoryClashConfirmedName, setCategoryClashConfirmedName] = useState("")
   const [quickCategoryForm, setQuickCategoryForm] = useState<QuickCategoryForm>(() =>
     emptyQuickCategoryForm(),
   )
@@ -772,6 +775,13 @@ export default function InventoryReceiptsPage() {
     }
     if (!quickCategoryForm.name.trim()) {
       setQuickFormError("Tên phân loại vật tư không được để trống.")
+      return
+    }
+    if (
+      findCategoryNameClashes(quickCategoryForm.name, items).length &&
+      !isClashConfirmed(categoryClashConfirmedName, quickCategoryForm.name)
+    ) {
+      setQuickFormError("Tên phân loại trùng tên vật tư — tick xác nhận bên dưới nếu chắc chắn đây là phân loại.")
       return
     }
 
@@ -1762,6 +1772,15 @@ export default function InventoryReceiptsPage() {
                   value={quickCategoryForm.name}
                   onChange={(event) => setQuickCategoryForm((prev) => ({ ...prev, name: event.target.value }))}
                   className={INPUT_CLASS}
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <CategoryNameClashWarning
+                  name={quickCategoryForm.name}
+                  clashes={findCategoryNameClashes(quickCategoryForm.name, items)}
+                  confirmed={isClashConfirmed(categoryClashConfirmedName, quickCategoryForm.name)}
+                  onConfirmChange={(checked) => setCategoryClashConfirmedName(checked ? quickCategoryForm.name : "")}
                 />
               </div>
 

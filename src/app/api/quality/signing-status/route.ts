@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
+import { chunk, readStatusParams, statusErrorResponse } from "@/app/api/signing/_lib/status-query"
 
 export const dynamic = "force-dynamic"
 
@@ -24,11 +25,20 @@ type Row = {
   signers: SignerRow[]
 }
 
+// GET (tương thích cũ, ?dates=...) và POST (body { factoryId, dates[] }) — danh sách ngày dài
+// không vỡ giới hạn URL. Client dùng fetchSigningStatusList (POST).
 export async function GET(req: NextRequest) {
+  return handle(req)
+}
+
+export async function POST(req: NextRequest) {
+  return handle(req)
+}
+
+async function handle(req: NextRequest) {
   try {
     const authUser = await requireAuthUser(req)
-    const factoryId = req.nextUrl.searchParams.get("factoryId")
-    const datesParam = req.nextUrl.searchParams.get("dates")
+    const { factoryId, ids: dates } = await readStatusParams(req, "dates")
     if (!factoryId) {
       return NextResponse.json({ error: "Thiếu factoryId" }, { status: 400 })
     }
@@ -42,38 +52,48 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Không có quyền xem nhà máy này" }, { status: 403 })
     }
 
-    let q = supabaseAdmin
-      .from("yeu_cau_ky")
-      .select("id, ma_ho_so, trang_thai, nguoi_tao, file_hien_tai, tao_luc, tra_ve_ly_do")
-      .eq("factory_id", factoryId)
-      .eq("modun", "quality")
-      .eq("loai_tai_lieu", "quality_kqkn")
-      .in("trang_thai", ["dang_luan_chuyen", "hoan_tat"])
-      .order("tao_luc", { ascending: false })
-    if (datesParam) {
-      const dates = datesParam.split(",").filter(Boolean)
-      if (dates.length) q = q.in("ma_ho_so", dates)
+    const baseQuery = () =>
+      supabaseAdmin
+        .from("yeu_cau_ky")
+        .select("id, ma_ho_so, trang_thai, nguoi_tao, file_hien_tai, tao_luc, tra_ve_ly_do")
+        .eq("factory_id", factoryId)
+        .eq("modun", "quality")
+        .eq("loai_tai_lieu", "quality_kqkn")
+        .in("trang_thai", ["dang_luan_chuyen", "hoan_tat"])
+    const yeuCauRows: Record<string, unknown>[] = []
+    if (dates && dates.length) {
+      for (const part of chunk(dates)) {
+        const { data, error } = await baseQuery().in("ma_ho_so", part)
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+        yeuCauRows.push(...(data || []))
+      }
+    } else {
+      const { data, error } = await baseQuery()
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      yeuCauRows.push(...(data || []))
     }
-
-    const { data: yeuCauRows, error } = await q
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    if (!yeuCauRows?.length) return NextResponse.json([])
+    yeuCauRows.sort((a, b) => String(b.tao_luc).localeCompare(String(a.tao_luc)))
+    if (!yeuCauRows.length) return NextResponse.json([])
 
     const yeuCauIds = yeuCauRows.map((r) => r.id as string)
     // Lấy TOÀN BỘ người ký (không chỉ phe_duyet) — vừa để suy pheDuyetUserId như cũ, vừa để
     // build signers[] đầy đủ phục vụ tính "myTurn" ở badge.
-    const { data: allSignerRows } = await supabaseAdmin
-      .from("nguoi_ky")
-      .select("yeu_cau_id, user_id, vai_tro, thu_tu, trang_thai")
-      .in("yeu_cau_id", yeuCauIds)
+    const allSignerRows: Record<string, unknown>[] = []
+    for (const part of chunk(yeuCauIds)) {
+      const { data } = await supabaseAdmin
+        .from("nguoi_ky")
+        .select("yeu_cau_id, user_id, vai_tro, thu_tu, trang_thai")
+        .in("yeu_cau_id", part)
+      allSignerRows.push(...(data || []))
+    }
     type NguoiKyRow = { yeu_cau_id: string; user_id: string; vai_tro: string; thu_tu: number; trang_thai: string }
     const pheDuyetByYeuCau = new Map(
-      ((allSignerRows || []) as NguoiKyRow[])
+      (allSignerRows as NguoiKyRow[])
         .filter((r) => r.vai_tro === "phe_duyet")
         .map((r) => [r.yeu_cau_id, r.user_id]),
     )
     const signersByYeuCau = new Map<string, SignerRow[]>()
-    for (const r of (allSignerRows || []) as NguoiKyRow[]) {
+    for (const r of allSignerRows as NguoiKyRow[]) {
       const list = signersByYeuCau.get(r.yeu_cau_id) ?? []
       list.push({ userId: r.user_id, thuTu: r.thu_tu, trangThai: r.trang_thai })
       signersByYeuCau.set(r.yeu_cau_id, list)
@@ -106,13 +126,18 @@ export async function GET(req: NextRequest) {
     const hoanTatRows = Array.from(seen.values()).filter((r) => r.trangThai === "hoan_tat")
     if (hoanTatRows.length) {
       const taoLucByYeuCau = new Map(yeuCauRows.map((r) => [r.id as string, r.tao_luc as string]))
-      const { data: qcRows } = await supabaseAdmin
-        .from("qc_results")
-        .select("ngay_kn, created_at, updated_at")
-        .eq("factory_id", factoryId)
-        .in("ngay_kn", hoanTatRows.map((r) => r.date))
+      // Chia lô nhỏ theo ngày: mỗi ngày có thể vài chục phiếu, tránh chạm mốc 1000 dòng.
+      const qcRows: Record<string, unknown>[] = []
+      for (const part of chunk(hoanTatRows.map((r) => r.date), 20)) {
+        const { data } = await supabaseAdmin
+          .from("qc_results")
+          .select("ngay_kn, created_at, updated_at")
+          .eq("factory_id", factoryId)
+          .in("ngay_kn", part)
+        qcRows.push(...(data || []))
+      }
       const latestByDate = new Map<string, number>()
-      for (const r of qcRows || []) {
+      for (const r of qcRows) {
         const key = (r.ngay_kn as string)?.slice(0, 10)
         if (!key) continue
         const t = Math.max(
@@ -130,6 +155,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(Array.from(seen.values()))
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })
+    return statusErrorResponse(err)
   }
 }

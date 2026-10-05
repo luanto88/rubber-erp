@@ -6368,6 +6368,13 @@ export default function ProductPage() {
                               : contributionNgan?.ma_ngan
                                 ? null
                                 : contributionNgan?.ten_ngan || c.ngans?.ten_ngan || null;
+                          const kienParts: string[] = [];
+                          if (c.disp_a) kienParts.push(`A+${c.disp_a}`);
+                          if (c.disp_b) kienParts.push(`B+${c.disp_b}`);
+                          if (c.disp_c) kienParts.push(`C+${c.disp_c}`);
+                          if (c.disp_d) kienParts.push(`D+${c.disp_d}`);
+                          const kienText = kienParts.length > 0 ? kienParts.join(" ") : `+${c.tong_banh_cua_ca}`;
+
                           return (
                             <div
                               key={c.uid}
@@ -6377,8 +6384,8 @@ export default function ProductPage() {
                                 <span className="font-bold text-slate-800 shrink-0">
                                   {c.ma_lo}
                                 </span>
-                                <span className="text-xs text-slate-400 shrink-0">
-                                  +{c.tong_banh_cua_ca} bành ·{" "}
+                                <span className="text-xs text-slate-500 font-medium shrink-0">
+                                  {kienText} bành ·{" "}
                                   {fmtKg(c.tong_kg_cua_ca)}
                                 </span>
                                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 shrink-0">

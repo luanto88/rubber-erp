@@ -6,7 +6,7 @@ import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import {
   AlertCircle, AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, Coins, Edit3, Eye, ExternalLink, FileSignature, FileText, ImagePlus, Loader2, Plus,
-  QrCode, RotateCcw, Save, Send, Trash2, Users, Wrench, X,
+  QrCode, RotateCcw, Save, Send, ShoppingCart, Trash2, Users, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
@@ -53,6 +53,9 @@ import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { prepareImageForUpload, withRetry } from "@/lib/image-upload"
 import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
 import { MaintenanceSignModal } from "../_components/maintenance-sign-modal"
+import { authFetch } from "@/lib/auth-fetch"
+import type { KtRecordStatus } from "@/lib/maintenance-kt"
+import { PURCHASE_STATUS_LABEL, type PurchaseStatus } from "@/lib/purchase/types"
 import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "../_components/maintenance-sign-status"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 
@@ -815,6 +818,19 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }, [])
 
+  // GĐ2g — vật tư mua ngoài đi qua kho tạm KT: trạng thái thiếu/đủ + phiếu đề nghị mua liên kết.
+  const [ktStatus, setKtStatus] = useState<KtRecordStatus | null>(null)
+  const [ktDrafting, setKtDrafting] = useState(false)
+  const loadKtStatus = useCallback(async (recordId: string) => {
+    try {
+      const res = await authFetch(`/api/maintenance/records/${recordId}/kt-status`)
+      const json = (await res.json()) as { status?: KtRecordStatus | null }
+      setKtStatus(res.ok ? json.status || null : null)
+    } catch {
+      setKtStatus(null)
+    }
+  }, [])
+
   const loadRecord = useCallback(async (fid: string, recordId: string) => {
     const { data: rec } = await supabase
       .from("maintenance_records")
@@ -955,6 +971,27 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     if (!factoryId || effectiveIsNew || !signBundle) { setSigningStatus(undefined); return }
     void loadSigningStatus(factoryId, effectiveId)
   }, [factoryId, effectiveId, effectiveIsNew, signBundle, loadSigningStatus])
+
+  // Kho tạm KT cho vật tư mua ngoài — tải lại mỗi lần nạp biên bản (sau Lưu, loadVersion tăng).
+  useEffect(() => {
+    if (!factoryId || effectiveIsNew) { setKtStatus(null); return }
+    void loadKtStatus(effectiveId)
+  }, [factoryId, effectiveId, effectiveIsNew, loadVersion, loadKtStatus])
+
+  const handleCreatePurchaseDraft = async () => {
+    setKtDrafting(true)
+    setSaveError(null)
+    try {
+      const res = await authFetch(`/api/maintenance/records/${effectiveId}/purchase-draft`, { method: "POST" })
+      const json = (await res.json()) as { id?: string; existed?: boolean; error?: string }
+      if (!res.ok || !json.id) { setSaveError(json.error || "Không lập được đề nghị mua"); return }
+      router.push(`/dashboard/purchase/${json.id}`)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Không lập được đề nghị mua")
+    } finally {
+      setKtDrafting(false)
+    }
+  }
 
   // Close material dropdown when clicking outside
   useEffect(() => {
@@ -2687,6 +2724,60 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     </div>
   )
 
+  const renderKtPanel = (st: KtRecordStatus) => {
+    const code = st.ktWarehouse?.code || "KT"
+    const done = st.trangThai === "da_duyet" || st.trangThai === "huy"
+    const short = st.totalShortage > 0
+    const canDraft = !done && st.needsRequest && (isAdmin || (isCreator && hasPermission(user, "maintenance.create")))
+    return (
+      <div className={`p-3 rounded-xl border ${short ? "bg-amber-50 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
+        <label className="text-[11px] font-bold text-slate-600 block mb-2 uppercase tracking-wider">
+          Vật tư mua ngoài — kho tạm {code}
+        </label>
+        {!st.ktWarehouse && (
+          <p className="text-xs font-semibold text-red-600 mb-2">Chưa có kho mã {code} — tạo kho này trong Cài đặt trước.</p>
+        )}
+        <div className="space-y-1">
+          {st.items.map((it) => (
+            <div key={it.itemId} className="flex flex-wrap items-center justify-between gap-x-2 text-xs">
+              <span className="font-semibold text-slate-700 truncate">{it.name}</span>
+              <span className="text-slate-500">
+                cần {it.need} · khả dụng {it.available}{it.unit ? ` ${it.unit}` : ""}
+                {it.pendingRequested > 0 && <> · đang đề nghị {it.pendingRequested}</>}
+                {!done && it.shortage > 0 && <b className="text-red-600"> · thiếu {it.shortage}</b>}
+              </span>
+            </div>
+          ))}
+        </div>
+        {done ? (
+          <p className="mt-2 text-[11px] text-slate-500">Biên bản đã xuất kho — vật tư mua ngoài xuất từ kho {code}.</p>
+        ) : short ? (
+          <p className="mt-2 text-[11px] text-amber-800">Chưa đủ hàng ở kho {code} — chưa gửi ký duyệt được. Lưu biên bản vẫn bình thường.</p>
+        ) : (
+          <p className="mt-2 text-[11px] text-emerald-700">Kho {code} đủ hàng — có thể gửi ký duyệt; ký xong tự xuất kho {code}.</p>
+        )}
+        {st.linkedRequests.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {st.linkedRequests.map((r) => (
+              <Link key={r.id} href={`/dashboard/purchase/${r.id}`} className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-[11px] font-bold text-teal-700 hover:bg-teal-50">
+                {String(r.so).padStart(2, "0")}/ĐNMVT ({r.nam}) · {PURCHASE_STATUS_LABEL[r.trangThai as PurchaseStatus] || r.trangThai}
+              </Link>
+            ))}
+          </div>
+        )}
+        {canDraft && (
+          <button
+            onClick={handleCreatePurchaseDraft}
+            disabled={ktDrafting || !st.ktWarehouse}
+            className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg disabled:opacity-60"
+          >
+            {ktDrafting ? <Loader2 size={12} className="animate-spin" /> : <ShoppingCart size={12} />} Lập đề nghị mua
+          </button>
+        )}
+      </div>
+    )
+  }
+
   const renderSigningCard = () => (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -2708,6 +2799,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       ) : (
         <div className="space-y-3.5">
+          {/* Vật tư mua ngoài qua kho tạm KT (GĐ2g) */}
+          {ktStatus && ktStatus.items.length > 0 && renderKtPanel(ktStatus)}
+
           {/* Tiến độ ký điện tử */}
           {user && (
             <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200/80">
@@ -2718,6 +2812,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 status={signingStatus}
                 currentUser={user}
                 canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
+                blockedReason={ktStatus && ktStatus.totalShortage > 0
+                  ? `Kho tạm ${ktStatus.ktWarehouse?.code || "KT"} chưa đủ vật tư mua ngoài — lập đề nghị mua và nhập kho trước khi gửi ký`
+                  : null}
                 onOpenSignPrompt={() => setSignModalOpen(true)}
                 onCancelled={() => {
                   setSigningStatus(undefined)

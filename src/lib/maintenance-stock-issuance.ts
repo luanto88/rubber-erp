@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { findKtWarehouse, KT_WAREHOUSE_CODE } from "@/lib/maintenance-kt"
 
 // Tách từ `handleApprove()` cũ (client, `records/[id]/page.tsx`) để gọi được server-side
 // khi ký số hoàn tất (thay thế nút "Phê duyệt" thủ công — xem Giai đoạn Thay thế Phê duyệt
@@ -46,10 +47,18 @@ export async function issueMaintenanceStock(params: {
     .eq("record_id", recordId)
   if (matErr) throw new Error(`Không tải được vật tư biên bản: ${matErr.message}`)
 
+  // GĐ2g: vật tư "Bên ngoài" (mua ngoài) cũng xuất kho — từ Kho tạm KT, nơi phiếu Đề nghị mua liên kết
+  // biên bản đã nhập hàng về. "Trong kho" giữ nguyên quy tắc kho chính.
   const inStockMats = ((materials || []) as MaterialRow[]).filter(
-    (m) => m.nguon === "trong_kho" && !!m.inventory_item_id,
+    (m) => (m.nguon === "trong_kho" || m.nguon === "ben_ngoai") && !!m.inventory_item_id && Number(m.so_luong) > 0,
   )
   if (inStockMats.length === 0) return { issueDocIds: [] }
+  let ktWarehouseId: string | null = null
+  if (inStockMats.some((m) => m.nguon === "ben_ngoai")) {
+    const kt = await findKtWarehouse(factoryId)
+    if (!kt) throw new Error(`Chưa có kho tạm mã ${KT_WAREHOUSE_CODE} để xuất vật tư mua ngoài.`)
+    ktWarehouseId = kt.id
+  }
 
   const itemIds = Array.from(new Set(inStockMats.map((m) => m.inventory_item_id as string)))
   const { data: items, error: itemsErr } = await supabase
@@ -84,12 +93,13 @@ export async function issueMaintenanceStock(params: {
     if (item.manages_lot) {
       throw new Error(`Vật tư "${item.name}" đang quản lý theo lô nên chưa thể xuất tự động từ biên bản bảo trì.`)
     }
-    if (!item.primaryWarehouseId) {
+    const sourceWarehouseId = mat.nguon === "ben_ngoai" ? ktWarehouseId : item.primaryWarehouseId
+    if (!sourceWarehouseId) {
       throw new Error(`Vật tư "${item.name}" chưa được gán kho mặc định trong danh mục inventory.`)
     }
-    const group = issueGroups.get(item.primaryWarehouseId) || []
+    const group = issueGroups.get(sourceWarehouseId) || []
     group.push({ mat, item })
-    issueGroups.set(item.primaryWarehouseId, group)
+    issueGroups.set(sourceWarehouseId, group)
   }
 
   const baseDocCode = `X-BT-${maBb}`

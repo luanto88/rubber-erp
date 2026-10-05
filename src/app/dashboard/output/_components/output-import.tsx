@@ -39,9 +39,65 @@ function excelSerialToISO(serial: number): string {
   return normalizeDateInput(d.toISOString().slice(0, 10))
 }
 
+const fmtKg = (v: number) => (Math.round(v * 100) / 100).toLocaleString("vi-VN")
+
 function toNum(v: unknown): number {
   const n = parseFloat(String(v ?? 0))
   return isNaN(n) ? 0 : Math.round(n * 100) / 100
+}
+
+// Auto-calc KL khô nếu cột khô = 0 nhưng tươi và DRC có giá trị
+const calcKhoFromDrc = (t: number, d: number, k: number) =>
+  k === 0 && t > 0 && d > 0 ? Math.round(t * d / 100 * 100) / 100 : k
+
+/** Mẫu "SLRpt_SanLuongNgay_TongHop": STT | Đội | Số xe | Ngày | 5 bộ Tươi/DRC/Khô | Tổng quy khô | Ghi chú. */
+function isSlRptSheet(raw: unknown[][]): boolean {
+  const head = (raw[0] ?? []).map((v) => String(v ?? "").trim().toLowerCase())
+  return head[0] === "stt" && head[1].startsWith("đội") && head[2] === "số xe" && head[3] === "ngày"
+}
+
+/** Mẫu SLRpt KHÔNG có cột Chuyến — chuyến được ghép lần lượt với phiếu Điều xe trong matchRows. */
+function parseSlRptRows(raw: unknown[][]): ParsedSlRow[] {
+  const result: ParsedSlRow[] = []
+  raw.slice(2).forEach((r, idx) => {
+    const row = r as unknown[]
+    const xe = String(row[2] ?? "").trim().toUpperCase()
+    if (!xe || /tổng/i.test(String(row[0] ?? ""))) return
+
+    const ngay = typeof row[3] === "number"
+      ? excelSerialToISO(row[3])
+      : normalizeDateInput(String(row[3] ?? "").trim())
+    if (!ngay) return
+
+    const rawDoi = String(row[1] ?? "").trim()
+    const doiMatch = /(\d+)/.exec(rawDoi)
+    const doi = doiMatch ? parseInt(doiMatch[1]) : 0
+    if (doi < 0 || doi > 12) return
+
+    const { base_xe } = parseVehicleCode(xe)
+    const triple = (i: number) => {
+      const t = toNum(row[i]); const d = toNum(row[i + 1])
+      return [t, d, calcKhoFromDrc(t, d, toNum(row[i + 2]))] as const
+    }
+    const [mn_tuoi, mn_drc, mn_kho] = triple(4)
+    const [ct_tuoi, ct_drc, ct_kho] = triple(7)
+    const [dct_tuoi, dct_drc, dct_kho] = triple(10)
+    const [dkt_tuoi, dkt_drc, dkt_kho] = triple(13)
+    const [dt_tuoi, dt_drc, dt_kho] = triple(16)
+    let ghi_chu = String(row[20] ?? "").trim()
+    if (!ghi_chu && doi === 0) ghi_chu = "TM"
+
+    result.push({
+      row_index: idx + 3,
+      ngay, doi, base_xe, chuyen: 1, chuyen_tu_file: false, ghi_chu,
+      mn_tuoi, mn_drc, mn_kho,
+      ct_tuoi, ct_drc, ct_kho,
+      dct_tuoi, dct_drc, dct_kho,
+      dkt_tuoi, dkt_drc, dkt_kho,
+      dt_tuoi, dt_drc, dt_kho,
+    })
+  })
+  return result
 }
 
 async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
@@ -49,6 +105,7 @@ async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array" })
   const ws = wb.Sheets[wb.SheetNames[0]]
   const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: "" })
+  if (isSlRptSheet(raw)) return parseSlRptRows(raw)
   const dataRows = raw.slice(2) // bỏ 2 dòng header
 
   const result: ParsedSlRow[] = []
@@ -71,9 +128,7 @@ async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
 
     const { base_xe, chuyen } = parseVehicleCode(colC)
 
-    // Auto-calc KL khô nếu cột khô = 0 nhưng tươi và DRC có giá trị
-    const calcKho = (t: number, d: number, k: number) =>
-      k === 0 && t > 0 && d > 0 ? Math.round(t * d / 100 * 100) / 100 : k
+    const calcKho = calcKhoFromDrc
 
     const mn_tuoi = toNum(row[3]);  const mn_drc = toNum(row[4]);  const mn_kho = calcKho(mn_tuoi, mn_drc, toNum(row[5]))
     const ct_tuoi = toNum(row[6]);  const ct_drc = toNum(row[7]);  const ct_kho = calcKho(ct_tuoi, ct_drc, toNum(row[8]))
@@ -165,17 +220,20 @@ function compareExistingRecordPriority(a: ExistingProductionRecord, b: ExistingP
 }
 
 export function matchRows(
-  parsed: ParsedSlRow[],
+  inputRows: ParsedSlRow[],
   dispatches: DispatchEntry[],
   deliveryPoints: DeliveryPoint[],
   existingKeyCounts?: Map<string, number>,
 ): MatchedSlRow[] {
+  let parsed = inputRows
   // doi lookup
   const doiByMaLo = new Map<string, number>(deliveryPoints.map(p => [p.ma_lo, p.doi]))
 
   // dispatch index: "YYYY-MM-DD" → Map<"baseXe:chuyen", {entryId, dxRow}>
   type DxMatch = { entryId: string; tai_xe: string; diem_gn: string[] }
   const dispIdx = new Map<string, Map<string, DxMatch>>()
+  // "YYYY-MM-DD|baseXe" → các chuyến điều xe của xe trong ngày (dùng cho mẫu không có cột Chuyến)
+  const tripsByVehicle = new Map<string, Array<DxMatch & { chuyen: number }>>()
   for (const entry of dispatches) {
     // normalize date to ISO
     let dateKey = entry.ngay
@@ -192,14 +250,41 @@ export function matchRows(
       const matchObj = { entryId: entry.id, tai_xe: row.tai_xe ?? "", diem_gn: row.diem_gn ?? [] }
       dayMap.set(`${base_xe}:${chuyen}`, matchObj)
       dayMap.set(`${rawXe}:${chuyen}`, matchObj)
+      const vKey = `${dateKey}|${base_xe}`
+      const list = tripsByVehicle.get(vKey) ?? []
+      if (!list.some((t) => t.chuyen === chuyen)) list.push({ ...matchObj, chuyen })
+      tripsByVehicle.set(vKey, list)
     }
   }
+  for (const list of tripsByVehicle.values()) list.sort((a, b) => a.chuyen - b.chuyen)
+
+  // Mẫu không có cột Chuyến: gán LẦN LƯỢT dòng thứ k của (ngày, xe, đội) vào chuyến điều xe thứ k
+  // có điểm GN thuộc đội đó. Không xác định được thì giữ chuyến 1 + cảnh báo (không chặn).
+  const assignWarns = new Map<number, WarnCode>()
+  const usedByGroup = new Map<string, number>()
+  parsed = parsed.map((row, i) => {
+    if (row.chuyen_tu_file !== false) return row
+    const trips = tripsByVehicle.get(`${row.ngay}|${row.base_xe}`) ?? []
+    if (trips.length === 0) return row // VEHICLE_NOT_FOUND / NO_DISPATCH_DATE xử lý bên dưới
+    const doi = row.doi ?? 0
+    const candidates = doi > 0
+      ? trips.filter((t) => t.diem_gn.some((ma) => doiByMaLo.get(ma) === doi))
+      : []
+    const gKey = `${row.ngay}|${row.base_xe}|${doi}`
+    const k = usedByGroup.get(gKey) ?? 0
+    usedByGroup.set(gKey, k + 1)
+    if (candidates[k]) return { ...row, chuyen: candidates[k].chuyen }
+    if (candidates.length === 0 && trips.length === 1 && k === 0) return { ...row, chuyen: trips[0].chuyen }
+    assignWarns.set(i, "CHUYEN_NOT_FOUND")
+    return row
+  })
 
   // track duplicates within the file
   const seen = new Map<string, number>()
 
-  return parsed.map(row => {
+  return parsed.map((row, rowIdx) => {
     const warns: WarnCode[] = []
+    const assignWarn = assignWarns.get(rowIdx)
     const fileKey = getMatchedKey(row)
     seen.set(fileKey, (seen.get(fileKey) ?? 0) + 1)
 
@@ -219,7 +304,7 @@ export function matchRows(
     }
 
     const xeKey = `${row.base_xe}:${row.chuyen}`
-    const match = dayMap.get(xeKey)
+    const match = assignWarn ? undefined : dayMap.get(xeKey)
 
     if (!match) {
       // check if vehicle exists with any trip
@@ -540,7 +625,10 @@ export function OutputImport({
       }
 
       const uniqueNgays = [...new Set(rows.map(r => r.ngay))]
-      await Promise.all(uniqueNgays.map((ngay) => writeBackToDispatch(factoryId, ngay, supabase)))
+      // Tuần tự: mỗi lần writeBack đọc-rồi-ghi phiếu điều xe; chạy song song nhiều ngày có thể ghi đè lẫn nhau.
+      for (const ngay of uniqueNgays) {
+        await writeBackToDispatch(factoryId, ngay, supabase)
+      }
       setImportResult({
         ok: rows.length,
         inserted,
@@ -589,31 +677,46 @@ export function OutputImport({
       footer={(step === 1 || step === 2) && (
         <div className="flex flex-col gap-3 w-full">
           {step === 2 && dailySummaries.length > 0 && (
-            <details className="rounded-xl border border-slate-200 bg-slate-50">
-              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-bold text-slate-600">
+            // Luôn hiển thị (không thu gọn) — người dùng cần đối chiếu KL từng loại mủ trước khi nhập.
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60">
+              <p className="px-3 pt-2 text-xs font-bold uppercase tracking-wide text-emerald-800">
                 Tổng hợp trước khi nhập ({dailySummaries.length} ngày)
-              </summary>
-              <div className="max-h-40 overflow-y-auto px-3 pb-2 space-y-2">
-                {dailySummaries.map((day) => (
-                  <div key={day.ngay}>
-                    <p className="text-xs font-bold text-slate-700">{formatDateDisplay(day.ngay) || day.ngay}</p>
-                    <div className="mt-0.5 space-y-0.5">
-                      {day.rows.map((row, idx) => (
-                        <div key={idx} className="flex items-center justify-between gap-2 text-xs text-slate-600">
-                          <span className="truncate">
-                            {row.label}
-                            {row.note && <span className="ml-1.5 text-slate-400">· {row.note}</span>}
-                          </span>
-                          <span className="shrink-0 font-medium text-slate-700">
-                            {row.tuoi.toLocaleString("vi-VN")} kg tươi / {row.kho.toLocaleString("vi-VN")} kg khô
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+              </p>
+              <div className="max-h-56 overflow-y-auto px-3 pb-2 space-y-2">
+                {dailySummaries.map((day) => {
+                  const dayTuoi = day.rows.reduce((sum, row) => sum + row.tuoi, 0)
+                  const dayKho = day.rows.reduce((sum, row) => sum + row.kho, 0)
+                  return (
+                    <table key={day.ngay} className="w-full text-xs">
+                      <thead>
+                        <tr className="text-slate-500">
+                          <th className="py-1 text-left font-bold text-slate-700">{formatDateDisplay(day.ngay) || day.ngay}</th>
+                          <th className="w-32 py-1 text-right font-semibold">Tươi (kg)</th>
+                          <th className="w-32 py-1 text-right font-semibold">Khô (kg)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {day.rows.map((row, idx) => (
+                          <tr key={idx} className="border-t border-emerald-100 text-slate-700">
+                            <td className="py-1 pr-2">
+                              {row.label}
+                              {row.note && <span className="ml-1.5 text-slate-400">· {row.note}</span>}
+                            </td>
+                            <td className="py-1 text-right tabular-nums">{fmtKg(row.tuoi)}</td>
+                            <td className="py-1 text-right tabular-nums">{fmtKg(row.kho)}</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-emerald-300 text-sm font-extrabold text-emerald-800">
+                          <td className="py-1.5">Tổng cộng</td>
+                          <td className="py-1.5 text-right tabular-nums">{fmtKg(dayTuoi)}</td>
+                          <td className="py-1.5 text-right tabular-nums">{fmtKg(dayKho)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  )
+                })}
               </div>
-            </details>
+            </div>
           )}
           <div className="flex flex-col items-end gap-2 w-full sm:flex-row sm:items-center sm:justify-between">
           <button
@@ -762,7 +865,12 @@ export function OutputImport({
                           <td className="px-3 py-1.5 text-slate-700">{r.ngay}</td>
                           <td className="px-3 py-1.5 text-center font-bold text-slate-700">{r.doi}</td>
                           <td className="px-3 py-1.5 font-mono font-bold text-slate-800">{r.base_xe}</td>
-                          <td className="px-3 py-1.5 text-center text-slate-600">{r.chuyen}</td>
+                          <td className="px-3 py-1.5 text-center text-slate-600">
+                            {r.chuyen}
+                            {r.chuyen_tu_file === false && (
+                              <span className="block text-[10px] font-normal text-sky-600" title="File không có cột Chuyến — ghép tự động từ Điều xe theo ngày + số xe + đội lớn">tự ghép</span>
+                            )}
+                          </td>
                           <td className="px-3 py-1.5 text-slate-600">{r.tai_xe || <span className="text-slate-300">—</span>}</td>
                           {activeMaterials.map((def) => {
                             const tuoi = Number(r[def.tuoiKey] ?? 0)

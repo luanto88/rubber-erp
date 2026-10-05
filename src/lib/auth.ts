@@ -547,6 +547,10 @@ export const DEFAULT_PERMISSION_CODES = [
   "kpi.evaluate",
   "kpi.view_all",
   "kpi.manage_config",
+  // Đề nghị mua vật tư hàng hóa (migration 20261007)
+  "purchase.view",
+  "purchase.create",
+  "purchase.view_all",
 ]
 
 export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
@@ -628,6 +632,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "kpi.assign",
     "kpi.evaluate",
     "kpi.view_all",
+    "purchase.view",
+    "purchase.create",
   ],
   user: [
     "dashboard.view",
@@ -655,6 +661,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "notes.edit",
     "notes.delete",
     "kpi.view",
+    "purchase.view",
+    "purchase.create",
   ],
   customer: ["export.view_own"],
 }

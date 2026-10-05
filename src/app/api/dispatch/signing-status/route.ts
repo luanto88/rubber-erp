@@ -3,10 +3,11 @@ import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
 import {
   fetchActiveYeuCau,
   fetchNguoiKyForYeuCau,
-  fetchUpdatedAtMap,
+  chunk,
   readStatusParams,
   statusErrorResponse,
 } from "@/app/api/signing/_lib/status-query"
+import { hashDispatchEntry } from "@/lib/signing/data-fingerprint"
 
 export const dynamic = "force-dynamic"
 
@@ -57,13 +58,11 @@ async function handle(req: NextRequest) {
 
     // Đã sắp tao_luc desc — dòng đầu tiên gặp mỗi bản ghi là mới nhất, giữ lại.
     const seen = new Map<string, Row>()
-    const taoLucByYeuCau = new Map<string, string>()
     const keptRows = [] as typeof yeuCauRows
     for (const r of yeuCauRows) {
       const key = r.ban_ghi_id || r.ma_ho_so
       if (!key || seen.has(key)) continue
       keptRows.push(r)
-      taoLucByYeuCau.set(r.id, r.tao_luc)
       seen.set(key, {
         entryId: key,
         yeuCauId: r.id,
@@ -87,16 +86,21 @@ async function handle(req: NextRequest) {
       if (s.vai_tro === "phe_duyet") row.pheDuyetUserId = s.user_id
     }
 
-    // Phát hiện lệch dữ liệu: so `dispatch_entries.updated_at` với `yeu_cau_ky.tao_luc` (thời
-    // điểm PDF được chốt nội dung để ký). Mới hơn ⇒ phiếu đã bị ghi đè sau khi ký — phổ biến
-    // nhất qua writeBackToDispatch() (module Sản lượng), kênh này KHÔNG bị chặn (theo quyết
-    // định đã chốt) nên chỉ báo cho người dùng biết, không chặn ghi.
+    // Phát hiện lệch dữ liệu THEO NỘI DUNG: so hash các trường in lên PDF (yeu_cau_ky.du_lieu_hash,
+    // chốt lúc gửi ký) với hash tính lại từ dispatch_entries hiện tại. Trước đây so updated_at
+    // với tao_luc → writeBackToDispatch() (module Sản lượng) ghi lại y nguyên vẫn bị báo "đã đổi".
+    // Yêu cầu cũ không có du_lieu_hash (hoặc cột chưa tồn tại) → coi như không đổi.
     const hoanTatRows = Array.from(seen.values()).filter((r) => r.trangThai === "hoan_tat")
     if (hoanTatRows.length) {
-      const updatedAtByEntry = await fetchUpdatedAtMap("dispatch_entries", hoanTatRows.map((r) => r.entryId))
-      for (const row of hoanTatRows) {
-        const taoLuc = new Date(taoLucByYeuCau.get(row.yeuCauId) || 0).getTime()
-        row.dataChanged = (updatedAtByEntry.get(row.entryId) ?? 0) > taoLuc
+      const hashByYeuCau = await fetchDuLieuHash(hoanTatRows.map((r) => r.yeuCauId))
+      const needCheck = hoanTatRows.filter((r) => hashByYeuCau.get(r.yeuCauId))
+      if (needCheck.length) {
+        const currentHashByEntry = await fetchCurrentDispatchHashes(factoryId, needCheck.map((r) => r.entryId))
+        for (const row of needCheck) {
+          const current = currentHashByEntry.get(row.entryId)
+          // Không đọc được phiếu (đã xóa/lỗi) → không khẳng định đã đổi.
+          row.dataChanged = !!current && current !== hashByYeuCau.get(row.yeuCauId)
+        }
       }
     }
 
@@ -108,3 +112,39 @@ async function handle(req: NextRequest) {
 
 export const GET = handle
 export const POST = handle
+
+/** Map yeu_cau_ky.id → du_lieu_hash. Cột chưa tồn tại (migration chưa chạy) → map rỗng. */
+async function fetchDuLieuHash(yeuCauIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  for (const part of chunk([...new Set(yeuCauIds)])) {
+    const { data, error } = await supabaseAdmin.from("yeu_cau_ky").select("id, du_lieu_hash").in("id", part)
+    if (error) {
+      console.warn("[dispatch/signing-status] Không đọc được du_lieu_hash:", error.message)
+      return new Map()
+    }
+    for (const r of (data || []) as { id: string; du_lieu_hash: string | null }[]) {
+      if (r.du_lieu_hash) map.set(r.id, r.du_lieu_hash)
+    }
+  }
+  return map
+}
+
+/** Map dispatch_entries.id → hash nội dung hiện tại (1 query/lô, không N+1). */
+async function fetchCurrentDispatchHashes(factoryId: string, entryIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  for (const part of chunk([...new Set(entryIds)])) {
+    const { data, error } = await supabaseAdmin
+      .from("dispatch_entries")
+      .select("id, ngay, chung_nhan, rows")
+      .eq("factory_id", factoryId)
+      .in("id", part)
+    if (error) {
+      console.warn("[dispatch/signing-status] Không đọc được phiếu điều xe:", error.message)
+      continue
+    }
+    for (const r of (data || []) as { id: string; ngay: string | null; chung_nhan: string | null; rows: unknown }[]) {
+      map.set(r.id, hashDispatchEntry(r))
+    }
+  }
+  return map
+}

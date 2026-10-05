@@ -1,0 +1,31 @@
+MẪU BÁO CÁO SÁNG KIẾN, CẢI TIẾN
+1. Trang bìa
+Trang bìa chính: Tên cơ quan chủ quản, tên đơn vị, tên đề tài sáng kiến, họ và tên tác giả, chức vụ, năm thực hiện.
+Trang bìa phụ: Tên sáng kiến, thông tin tác giả, đồng tác giả (nếu có), đơn vị công tác.
+Mục lục: Các đề mục chính và số trang tương ứng.
+2. Nội dung báo cáo
+Phần I: Mở đầu
+Lý do chọn đề tài: Nêu thực trạng, sự cần thiết phải cải tiến.
+Mục đích và nhiệm vụ của sáng kiến: Giải quyết vấn đề gì, đạt được kết quả cụ thể nào.
+Đối tượng và phạm vi nghiên cứu: Giới hạn về nội dung, không gian, thời gian và nhóm đối tượng áp dụng.
+Phương pháp nghiên cứu: Các phương pháp đã sử dụng (khảo sát, thực nghiệm, thống kê, phân tích...).
+Điểm mới của sáng kiến: Khẳng định sự khác biệt, tính sáng tạo so với giải pháp cũ.
+Phần II: Nội dung
+Cơ sở lý luận và cơ sở thực tiễn:
+Nền tảng lý thuyết hoặc các văn bản, quy định liên quan.
+Thực trạng trước khi áp dụng sáng kiến (nêu rõ các hạn chế, tồn tại và nguyên nhân).
+Các giải pháp/biện pháp đã thực hiện:
+Mô tả chi tiết, cụ thể từng bước của giải pháp cải tiến.
+Cách thức triển khai trong thực tế.
+Hiệu quả của sáng kiến:
+Hiệu quả về mặt chuyên môn/kỹ thuật/hiệu quả công việc.
+Hiệu quả kinh tế hoặc xã hội (nếu có).
+Số liệu minh chứng cụ thể: So sánh kết quả trước và sau khi áp dụng sáng kiến (bắt buộc phải có số liệu thực nghiệm để thuyết phục hội đồng).
+Khả năng áp dụng và mở rộng: Đánh giá tính khả thi khi nhân rộng mô hình ra các bộ phận hoặc đơn vị khác.
+Phần III: Kết luận và kiến nghị
+Kết luận: Tóm tắt lại giá trị cốt lõi và khẳng định sự thành công của đề tài.
+Kiến nghị/đề xuất: Đề xuất với lãnh đạo cơ quan, ban ngành các điều kiện hỗ trợ để duy trì và phát huy sáng kiến.
+3. Phần tài liệu và phụ lục
+Tài liệu tham khảo: Danh mục sách, văn bản, hoặc các tài liệu đã trích dẫn trong báo cáo.
+Phụ lục: Các biểu mẫu, hình ảnh minh họa, bảng số liệu chi tiết, biên bản nghiệm thu hoặc sản phẩm thực tế của sáng kiến.
+4. Lưu ý về thể thức văn bản thông thường: Khổ giấy A4, font chữ Times New Roman, cỡ chữ 14pt, giãn dòng 1.15pt, lề trái 3cm, các lề còn lại 2cm.

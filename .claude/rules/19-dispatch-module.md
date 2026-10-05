@@ -238,3 +238,16 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - Cột "Ký duyệt": route `signing-status` nhận POST body, chia lô 100 (`src/app/api/signing/_lib/
   status-query.ts`), lỗi phiên trả 401. Client dùng `fetchSigningStatusList()` — lỗi thì GIỮ map cũ
   + nút "Thử lại", không render bản PDF chưa ký, không mở Sửa/Xóa khi chưa biết trạng thái ký.
+
+## Cập nhật 2026-10-04 — Đội lớn/Đội nhỏ, ảnh phiếu điều xe kế hoạch, badge ký so nội dung
+
+- `dispatch_delivery_points.doi` = **Đội lớn**; cột mới `doi_nho TEXT` dạng `'<đội lớn>.<số>'` (vd `1.5`, duy nhất toàn công ty, CHECK khớp đội lớn). Migration `20261004_dispatch_delivery_points_doi_nho.sql` (**chạy tay**) nạp 26 điểm từ `cung_cap_dl/doi.xlsx` (P3 = 9.1) cho `phuochoa_kt`; C2/G5/G9/C17 chưa gán. Sửa ở Cài đặt → Cấu hình nhà máy → Điểm giao nhận.
+- Đội nhỏ của chuyến **suy lúc đọc** từ điểm GN (`resolveTripDoiNhos`/`resolveTripDoiNhoFilterKeys` trong `src/lib/dispatch-master.ts`), KHÔNG snapshot vào `rows`. Điểm chưa gán → khóa lọc `DOI_NHO_UNASSIGNED`.
+- Bộ lọc Đội nhỏ (`statsDoiNho`) phụ thuộc Đội lớn, cùng phạm vi với `statsDoi` (Thống kê + 3 PDF thống kê, KHÔNG lọc tab Danh sách). Type `filters.doiNhos` (analytics) / `selectedDoiNhos` (PDF) phải đồng bộ.
+- Bộ lọc dùng `FilterBar layout="grid"` + `FilterMultiSelect fullWidth`; 3 nút PDF thống kê nằm trong hàng hành động của FilterBar.
+- **Ảnh "Phiếu điều xe" kế hoạch** (`src/lib/dispatch-plan-image.ts`, Canvas 2D, KHÔNG dùng jsPDF vì không shaping được chữ Khmer): tiêu đề 2 dòng = `factories.name` + `factories.ten_khmer` (cột mới, nhập ở Cài đặt → Thông tin công ty), font `public/fonts/NotoSansKhmer-Regular.ttf`. Cột Ghi chú lấy `ghi_chu_tu_do` (text tự do), KHÔNG lấy Ký hiệu KT (`ghi_chu`). Gộp ô theo chuyến cho Lộ trình/Số xe/Tài xế/km/Ghi chú.
+- Nhân bản phiếu/dòng reset `ghi_chu_tu_do` (vẫn reset `row_id`). Lộ trình có nút ↑/↓ sắp thứ tự (km tự tính lại). `openAddBlank`/`openClone` mặc định ngày mai theo giờ nhà máy.
+- Cột "Trạng thái" danh sách (suy ra): Kế hoạch / Đã có sản lượng / Đủ sản lượng — chỉ hiển thị, không chặn ký.
+- **Badge "Đã ký — dữ liệu đã đổi"**: trước đây so `updated_at > tao_luc`, bị `writeBackToDispatch` ghi `updated_at` cho MỌI phiếu ⇒ báo sai. Nay lưu `yeu_cau_ky.du_lieu_hash` (migration `20261004_yeu_cau_ky_du_lieu_hash.sql`, **chạy tay**) lúc tạo yêu cầu ký (`src/lib/signing/data-fingerprint.ts`, chỉ băm trường in lên PDF ngày) và so lại khi xem trạng thái. Yêu cầu cũ không có hash ⇒ không bao giờ báo đổi.
+- `writeBackToDispatch` chỉ UPDATE phiếu có dòng đúng ngày và khi `rows` thật sự đổi; các chỗ gọi nhiều ngày chạy **tuần tự** (trước là `Promise.all` → đọc-ghi toàn bộ phiếu ghi đè lẫn nhau, nguy cơ mất KL).
+- Cột "Ký duyệt" ổn định: chỉ tải `loadData` sau khi điểm GN DB tải xong (`deliveryPointsLoaded`), effect trạng thái ký theo `entryIdsKey` + `entriesLoaded`, không reset `signingStatusLoaded`, không gỡ bảng khi tải lại.

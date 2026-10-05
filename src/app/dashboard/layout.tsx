@@ -21,6 +21,7 @@ import {
   Package,
   Settings,
   Shield,
+  ShoppingCart,
   Target,
   Truck,
   Warehouse,
@@ -70,6 +71,7 @@ const MODULE_TASK_TABLES: Record<string, string[]> = {
   "/dashboard/quality-analytics": ["qc_results"],
   "/dashboard/export": ["export_orders"],
   "/dashboard/inventory": ["inventory_documents"],
+  "/dashboard/purchase": ["purchase_requests", "nguoi_ky"],
 }
 
 type NavLeaf = {
@@ -141,6 +143,7 @@ const NAV: NavItem[] = [
       },
       { key: "/dashboard/export", label: "Xuất hàng", icon: FileOutput, permission: "export.view" },
       { key: "/dashboard/maintenance", label: "Bảo trì", icon: Wrench, permission: "maintenance.view" },
+      { key: "/dashboard/purchase", label: "Đề nghị mua vật tư", icon: ShoppingCart, permission: "purchase.view" },
       { key: "/dashboard/process", label: "Kiểm soát quá trình", icon: Activity, permission: "process.view" },
     ],
   },

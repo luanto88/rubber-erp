@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { loadDispatchEntriesWithResolvedRows, type LegacyDispatchRow } from "@/lib/dispatch-entry-rows"
@@ -41,6 +41,7 @@ import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
+import { compareDoiNho, DOI_NHO_UNASSIGNED, doiOfDoiNho, resolveTripDoiNhoFilterKeys, type DiemGN } from "@/lib/dispatch-master"
 
 interface DispatchEntry {
   id: string
@@ -57,6 +58,19 @@ interface DispatchEntry {
 interface DeliveryPoint {
   ma_lo: string
   doi: number
+  doi_nho?: string | null
+}
+
+const DOI_LON_OPTIONS = ["0", ...Array.from({ length: 12 }, (_, i) => String(i + 1))]
+const DOI_LON_LABELS: Record<string, string> = Object.fromEntries(
+  DOI_LON_OPTIONS.map((v) => [v, v === "0" ? "Thu mua" : `Đội ${v}`]),
+)
+const DOI_NHO_LABELS: Record<string, string> = { [DOI_NHO_UNASSIGNED]: "Chưa gán đội nhỏ" }
+
+function toIsoDateKey(value: string): string {
+  if (!value.includes("/")) return value.slice(0, 10)
+  const [d, m, y] = value.split("/")
+  return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
 }
 
 const LATEX_FILTER_OPTIONS = ["Mủ nước", "Mủ chén", "Mủ đông chén", "Mủ đông khối", "Mủ dây"] as const
@@ -186,7 +200,8 @@ export default function OutputPage() {
     return d.toISOString().slice(0, 10)
   })
   const [filterTo, setFilterTo] = useState(() => getTodayISODate())
-  const [filterDoi, setFilterDoi] = useState("")
+  const [filterDoi, setFilterDoi] = useState<string[]>([])
+  const [filterDoiNho, setFilterDoiNho] = useState<string[]>([])
   const [filterXe, setFilterXe] = useState("")
   const [filterGhiChu, setFilterGhiChu] = useState<string[]>([])
   const [filterLoai, setFilterLoai] = useState<string[]>([])
@@ -223,7 +238,7 @@ export default function OutputPage() {
   const loadSupportData = useCallback(async (fid: string) => {
     const { data: dp } = await supabase
       .from("dispatch_delivery_points")
-      .select("ma_lo, doi")
+      .select("ma_lo, doi, doi_nho")
       .eq("factory_id", fid)
       .eq("is_active", true)
     setDeliveryPoints((dp as DeliveryPoint[]) || [])
@@ -307,9 +322,63 @@ export default function OutputPage() {
     }
   }, [factoryId, filterFrom, filterTo])
 
+  // Đội nhỏ của từng bản ghi: lấy từ chuyến điều xe cùng ngày + xe + chuyến, chỉ giữ điểm GN
+  // thuộc đúng đội lớn của bản ghi. Sản lượng nhập theo chuyến nên chuyến đi qua nhiều đội nhỏ
+  // khớp với TẤT CẢ đội nhỏ đó (lọc 1.1 vẫn hiện cả chuyến 7A gộp 1.1 + 1.5).
+  const doiNhoKeysByRecord = useMemo(() => {
+    const points = deliveryPoints as unknown as DiemGN[]
+    const tripIdx = new Map<string, { entryId: string; diem_gn: string[] }[]>()
+    for (const entry of dispatches) {
+      const dateKey = toIsoDateKey(entry.ngay)
+      for (const row of entry.rows) {
+        const key = `${dateKey}|${parseVehicleCode(row.so_xe.toUpperCase()).base_xe}|${row.chuyen}`
+        const bucket = tripIdx.get(key)
+        const item = { entryId: entry.id, diem_gn: row.diem_gn }
+        if (bucket) bucket.push(item)
+        else tripIdx.set(key, [item])
+      }
+    }
+    const out = new Map<string, string[]>()
+    for (const record of records) {
+      const doi = record.doi ?? 0
+      const trips = tripIdx.get(`${record.ngay}|${parseVehicleCode(record.so_xe.toUpperCase()).base_xe}|${record.chuyen}`) ?? []
+      const trip = trips.find((t) => t.entryId === record.dispatch_entry_id) ?? trips[0]
+      if (!trip || doi === 0) { out.set(record.id, [DOI_NHO_UNASSIGNED]); continue }
+      const inDoi = trip.diem_gn.filter((code) => points.find((p) => p.ma_lo === code)?.doi === doi)
+      out.set(record.id, inDoi.length > 0 ? resolveTripDoiNhoFilterKeys(inDoi, points) : [DOI_NHO_UNASSIGNED])
+    }
+    return out
+  }, [records, dispatches, deliveryPoints])
+
+  const matchesDoiFilters = (record: ProductionRecord) => {
+    if (filterDoi.length > 0 && !filterDoi.includes(String(record.doi ?? 0))) return false
+    if (filterDoiNho.length > 0) {
+      const keys = doiNhoKeysByRecord.get(record.id) ?? [DOI_NHO_UNASSIGNED]
+      if (!keys.some((k) => filterDoiNho.includes(k))) return false
+    }
+    return true
+  }
+
+  // Đội nhỏ: lấy từ điểm GN, lọc theo đội lớn đã chọn (mirror dispatch/page.tsx).
+  const doiNhoOptions = (() => {
+    const selectedDois = filterDoi.map(Number)
+    const inScope = deliveryPoints.filter((p) => selectedDois.length === 0 || selectedDois.includes(p.doi))
+    const values = [...new Set(inScope.map((p) => p.doi_nho).filter((v): v is string => !!v))].sort(compareDoiNho)
+    if (inScope.some((p) => !p.doi_nho) || selectedDois.length === 0 || selectedDois.includes(0)) values.push(DOI_NHO_UNASSIGNED)
+    return values
+  })()
+
+  // Đổi đội lớn → tự bỏ các đội nhỏ không còn thuộc đội lớn đã chọn.
+  const handleDoiChange = (next: string[]) => {
+    setFilterDoi(next)
+    if (next.length === 0) return
+    const dois = next.map(Number)
+    setFilterDoiNho((prev) => prev.filter((v) => v === DOI_NHO_UNASSIGNED || dois.includes(doiOfDoiNho(v) ?? -1)))
+  }
+
   const filtered = records
     .filter((record) => {
-      if (filterDoi && record.doi !== Number(filterDoi)) return false
+      if (!matchesDoiFilters(record)) return false
       if (filterXe && !record.so_xe.toUpperCase().includes(filterXe.toUpperCase())) return false
       if (!matchesNoteFilterMulti(record.ghi_chu, filterGhiChu)) return false
       if (!matchesMaterialFilter(record, filterLoai)) return false
@@ -356,7 +425,7 @@ export default function OutputPage() {
 
   const statsFiltered = records.filter((record) => {
     if (!matchesNoteFilterMulti(record.ghi_chu, filterGhiChu)) return false
-    if (filterDoi && record.doi !== Number(filterDoi)) return false
+    if (!matchesDoiFilters(record)) return false
     if (!matchesMaterialFilter(record, filterLoai)) return false
     return true
   })
@@ -391,13 +460,14 @@ export default function OutputPage() {
   }
 
   const hasActiveFilters = Boolean(
-    filterFrom || filterTo || filterDoi || filterXe || filterGhiChu.length > 0 || filterLoai.length > 0 || filterWarnOnly,
+    filterFrom || filterTo || filterDoi.length > 0 || filterDoiNho.length > 0 || filterXe || filterGhiChu.length > 0 || filterLoai.length > 0 || filterWarnOnly,
   )
 
   const resetFilters = () => {
     setFilterFrom("")
     setFilterTo("")
-    setFilterDoi("")
+    setFilterDoi([])
+    setFilterDoiNho([])
     setFilterXe("")
     setFilterGhiChu([])
     setFilterLoai([])
@@ -577,7 +647,10 @@ export default function OutputPage() {
       const affectedDates = [...new Set(redundantRecords.map((record) => record.ngay))]
       const { error } = await supabase.from("production_records").delete().in("id", deleteIds)
       if (error) throw new Error(error.message)
-      await Promise.all(affectedDates.map((ngay) => writeBackToDispatch(factoryId, ngay, supabase)))
+      // Tuần tự: mỗi lần writeBack đọc-rồi-ghi phiếu điều xe; chạy song song nhiều ngày có thể ghi đè lẫn nhau.
+      for (const ngay of affectedDates) {
+        await writeBackToDispatch(factoryId, ngay, supabase)
+      }
       await loadRecords(factoryId)
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Không thể dọn các dòng sản lượng thừa.")
@@ -646,38 +719,51 @@ export default function OutputPage() {
 
       <FilterBar
         className="mb-5"
-        activeCount={[filterFrom, filterTo, filterDoi, filterXe].filter(Boolean).length + (filterGhiChu.length > 0 ? 1 : 0) + (filterLoai.length > 0 ? 1 : 0) + (filterWarnOnly ? 1 : 0)}
+        layout="grid"
+        activeCount={[filterFrom, filterTo, filterXe].filter(Boolean).length + (filterDoi.length > 0 ? 1 : 0) + (filterDoiNho.length > 0 ? 1 : 0) + (filterGhiChu.length > 0 ? 1 : 0) + (filterLoai.length > 0 ? 1 : 0) + (filterWarnOnly ? 1 : 0)}
       >
-          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
-            <CalendarDays size={15} className="shrink-0" />
-            <DateTextInput value={filterFrom} onChange={setFilterFrom} className="text-sm rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
-            <span className="text-slate-300 shrink-0">→</span>
-            <DateTextInput value={filterTo} onChange={setFilterTo} className="text-sm rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
+          {tab === "list" && (
+            <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-emerald-400">
+              <Search size={15} className="shrink-0 text-slate-400" />
+              <input value={filterXe} onChange={(e) => setFilterXe(e.target.value)} placeholder="Tìm số xe..." className="w-full min-w-0 text-sm outline-none" />
+            </div>
+          )}
+
+          <div className="flex w-full items-center gap-2 sm:col-span-2 [&>*]:min-w-0">
+            <CalendarDays size={15} className="shrink-0 text-slate-500" />
+            <DateTextInput value={filterFrom} onChange={setFilterFrom} className="w-full min-w-0 flex-1 text-sm rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
+            <span className="shrink-0 text-slate-300 text-sm">→</span>
+            <DateTextInput value={filterTo} onChange={setFilterTo} className="w-full min-w-0 flex-1 text-sm rounded-lg border border-slate-200 px-3 py-2 outline-none focus:border-emerald-400" />
           </div>
 
           {(tab === "list" || tab === "stats") && (
             <>
-              <select value={filterDoi} onChange={(e) => setFilterDoi(e.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-emerald-400">
-                <option value="">Tất cả đội</option>
-                <option value="0">Thu mua</option>
-                {Array.from({ length: 12 }, (_, i) => i + 1).map((doi) => (
-                  <option key={doi} value={doi}>Đội {doi}</option>
-                ))}
-              </select>
+              <FilterMultiSelect
+                options={DOI_LON_OPTIONS}
+                selected={filterDoi}
+                onChange={handleDoiChange}
+                labels={DOI_LON_LABELS}
+                placeholder="Tất cả đội lớn"
+                searchPlaceholder="Tìm đội lớn..."
+                fullWidth
+              />
 
-              {tab === "list" && (
-                <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
-                  <Search size={14} className="text-slate-400" />
-                  <input value={filterXe} onChange={(e) => setFilterXe(e.target.value)} placeholder="Tìm số xe..." className="w-32 text-sm outline-none" />
-                </div>
-              )}
+              <FilterMultiSelect
+                options={doiNhoOptions}
+                selected={filterDoiNho}
+                onChange={setFilterDoiNho}
+                labels={DOI_NHO_LABELS}
+                placeholder="Tất cả đội nhỏ"
+                searchPlaceholder="Tìm đội nhỏ..."
+                fullWidth
+              />
 
               <FilterMultiSelect
                 options={LATEX_FILTER_OPTIONS}
                 selected={filterLoai}
                 onChange={setFilterLoai}
                 placeholder="Tất cả nguyên liệu"
-                className="min-w-64"
+                fullWidth
               />
 
               <FilterMultiSelect
@@ -687,25 +773,24 @@ export default function OutputPage() {
                 labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
                 placeholder="Tất cả ghi chú đội"
                 searchPlaceholder="Tìm ghi chú..."
-                className="min-w-64"
+                fullWidth
               />
-
-              {tab === "list" && (
-                <button
-                  onClick={() => setFilterWarnOnly((value) => !value)}
-                  className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
-                    filterWarnOnly
-                      ? "border border-amber-300 bg-amber-100 text-amber-700"
-                      : "border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
-                  }`}
-                >
-                  Chỉ cảnh báo
-                </button>
-              )}
             </>
           )}
 
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className={`col-span-full flex flex-wrap items-center justify-end gap-2 ${tab === "list" ? "xl:col-span-5" : ""}`}>
+            {tab === "list" && (
+              <button
+                onClick={() => setFilterWarnOnly((value) => !value)}
+                className={`mr-auto rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+                  filterWarnOnly
+                    ? "border border-amber-300 bg-amber-100 text-amber-700"
+                    : "border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100"
+                }`}
+              >
+                Chỉ cảnh báo
+              </button>
+            )}
             {isAdmin && redundantRecordCount > 0 && (
               <button
                 onClick={() => void handleCleanupDuplicates()}
@@ -1040,6 +1125,12 @@ export default function OutputPage() {
                 <li>C: Số xe</li>
                 <li>D-R: 5 nhóm nguyên liệu, mỗi nhóm gồm Tươi / DRC / Khô</li>
                 <li>S: Ghi chú</li>
+              </ul>
+              <p className="mb-2 mt-4 font-bold">Mẫu báo cáo SLRpt (Sản lượng ngày tổng hợp):</p>
+              <ul className="space-y-1 text-slate-600">
+                <li>Cột: STT / Đội / Số xe / Ngày / 5 nhóm Tươi-DRC-Khô / Tổng quy khô / Ghi chú — hệ thống tự nhận diện.</li>
+                <li>File không có cột Chuyến: hệ thống ghép theo Ngày + Số xe + Đội lớn với phiếu Điều xe. Xe chạy nhiều chuyến vào cùng đội thì gán lần lượt theo thứ tự dòng trong file.</li>
+                <li>Dòng &quot;Tổng cộng&quot; cuối file được bỏ qua.</li>
               </ul>
             </div>
             <div>

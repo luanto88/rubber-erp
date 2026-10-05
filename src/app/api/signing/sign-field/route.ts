@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { jwtVerify } from "jose"
 import { signField, type SigningPlacementOverride } from "@/lib/signing/requests"
 import { scheduleSigningNotify } from "@/lib/signing/notify"
+import { syncPurchaseFromSigning } from "@/lib/purchase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -51,6 +52,9 @@ export async function POST(req: NextRequest) {
     // Báo người ký kế tiếp (hoặc người tạo khi đã hoàn tất) SAU khi response đã trả về —
     // Telegram + SMTP mất 1-3s, không được cộng vào thời gian chờ của người vừa bấm "Ký".
     scheduleSigningNotify(notifyPlan)
+
+    // Module Đề nghị mua: đồng bộ trạng thái phiếu (đã duyệt / hết trả về). No-op với module khác.
+    await syncPurchaseFromSigning(yeuCauId)
 
     return NextResponse.json(result)
   } catch (err) {

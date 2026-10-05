@@ -434,6 +434,22 @@ export async function getMaintenanceTasks(factoryId: string, user: SessionUser):
   return { moduleLabel: "Bảo trì", items }
 }
 
+// ── Đề nghị mua vật tư ───────────────────────────────────────────────────────
+export async function getPurchaseTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
+  const items: ModuleTaskItem[] = []
+  const pending = await getMySigningPending("purchase", "/dashboard/purchase")
+  items.push({ label: "Phiếu đề nghị mua chờ bạn ký", count: pending.count, link: pending.link })
+  // Phiếu của tôi bị trả về — RLS purchase_requests_select cho đọc phiếu mình là người đề nghị.
+  const { count } = await supabase
+    .from("purchase_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("factory_id", factoryId)
+    .eq("nguoi_de_nghi_id", user.id)
+    .eq("trang_thai", "tra_ve")
+  items.push({ label: "Phiếu của bạn bị trả về", count: count || 0, link: "/dashboard/purchase?tab=todo" })
+  return { moduleLabel: "Đề nghị mua vật tư", items }
+}
+
 // ── 5S — vị trí tôi phụ trách (dọn hoặc chấm) đang quá hạn/sắp đến hạn ──────────────────────
 // Chỉ tính vị trí ĐANG ÁP DỤNG và CÓ cấu hình hạn chấm (deadline_weekdays NOT NULL) — mirror
 // đúng ngữ nghĩa isKpi5sDeadlineOverdue/DueSoon (vị trí không cấu hình hạn không bao giờ "quá
@@ -605,5 +621,6 @@ export async function getModuleTasks(
   }
   if (isUnderRoute(pathname, "/dashboard/maintenance")) return getMaintenanceTasks(factoryId, user)
   if (isUnderRoute(pathname, "/dashboard/kpi")) return getKpiTasks(factoryId, user)
+  if (isUnderRoute(pathname, "/dashboard/purchase")) return getPurchaseTasks(factoryId, user)
   return null
 }

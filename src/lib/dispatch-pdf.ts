@@ -13,6 +13,7 @@ import {
   type DispatchFlatTrip,
 } from "@/lib/dispatch-analytics"
 import { describeNoteFilterMulti } from "@/lib/note-filter"
+import { DOI_NHO_UNASSIGNED } from "@/lib/dispatch-master"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
@@ -449,7 +450,7 @@ async function buildDispatchEntryDocAtDensity(params: {
   doc.setFontSize(fontSize)
   const loTextW = loW - density.padH * 2 - 0.5
 
-  const infoHead = ["Xe", "Chuyến", "Tài xế", "Đội", "Điểm GN", "Phiên", "Lô thu hoạch", "Km"]
+  const infoHead = ["Xe", "Chuyến", "Tài xế", "Đội lớn", "Điểm GN", "Phiên", "Lô thu hoạch", "Km"]
   const head = nMat
     ? [
         [
@@ -604,6 +605,7 @@ function buildStatsContext(params: {
   to?: string
   mode: "all" | "doi" | "vehicle"
   selectedDois?: string[]
+  selectedDoiNhos?: string[]
   selectedVehicles?: string[]
   selectedNote?: string[]
 }) {
@@ -612,9 +614,11 @@ function buildStatsContext(params: {
   const note = noteLabel ? `; ${noteLabel}` : ""
   const dois = params.selectedDois || []
   const vehicles = params.selectedVehicles || []
-  if (params.mode === "doi" && dois.length > 0) return `${range}; \u0111\u1ed9i ${dois.join(", ")}${note}`
-  if (params.mode === "vehicle" && vehicles.length > 0) return `${range}; xe ${vehicles.join(", ")}${note}`
-  return `${range}; t\u1ea5t c\u1ea3 \u0111\u1ed9i xe${note}`
+  const doiNhos = (params.selectedDoiNhos || []).map((v) => (v === DOI_NHO_UNASSIGNED ? "ch\u01b0a g\u00e1n" : v))
+  const doiNho = doiNhos.length > 0 ? `; \u0111\u1ed9i nh\u1ecf ${doiNhos.join(", ")}` : ""
+  if (params.mode === "doi" && dois.length > 0) return `${range}; \u0111\u1ed9i l\u1edbn ${dois.join(", ")}${doiNho}${note}`
+  if (params.mode === "vehicle" && vehicles.length > 0) return `${range}; xe ${vehicles.join(", ")}${doiNho}${note}`
+  return `${range}; t\u1ea5t c\u1ea3 \u0111\u1ed9i xe${doiNho}${note}`
 }
 
 export async function downloadDispatchStatsPdf(params: {
@@ -624,6 +628,7 @@ export async function downloadDispatchStatsPdf(params: {
   to?: string
   mode: "all" | "doi" | "vehicle"
   selectedDois?: string[]
+  selectedDoiNhos?: string[]
   selectedVehicles?: string[]
   selectedNote?: string[]
   makerName?: string
@@ -661,7 +666,7 @@ export async function downloadDispatchStatsPdf(params: {
   const heading = params.mode === "vehicle"
     ? "Chi ti\u1ebft theo xe"
     : params.mode === "doi"
-      ? "Chi ti\u1ebft theo \u0111\u1ed9i theo ng\u00e0y"
+      ? "Chi ti\u1ebft theo \u0111\u1ed9i l\u1edbn theo ng\u00e0y"
       : "T\u1ed5ng h\u1ee3p theo ng\u00e0y"
   doc.setFont(PDF_FONT_NAME, "bold")
   doc.setFontSize(11)
@@ -706,7 +711,7 @@ export async function downloadDispatchStatsPdf(params: {
       startY,
       head: [[
         "Ng\u00e0y",
-        params.mode === "doi" ? "\u0110\u1ed9i" : "Nh\u00f3m",
+        params.mode === "doi" ? "\u0110\u1ed9i l\u1edbn" : "Nh\u00f3m",
         ...materialColumns,
       ]],
       body: (params.mode === "doi" ? doiRows : allRows).map((row) => [

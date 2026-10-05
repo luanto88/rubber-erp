@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowRight, FileOutput, FilePlus2, FileText, Package, QrCode, Tag, Truck, X } from "lucide-react"
+import { ArrowRight, FileOutput, FilePlus2, FileText, Package, QrCode, ShoppingCart, Tag, Truck, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { hasPermission } from "@/lib/auth"
 import { downloadStorageBulkQrPdf } from "@/lib/storage-pdf"
@@ -133,9 +133,28 @@ export function QuickActionsPanel({ factoryId, user }: WidgetProps) {
 
   const canPrintLabel = hasPermission(user, "product.predict_view")
 
+  const canPurchase = hasPermission(user, "purchase.create")
+
   return (
     <WidgetCard title="Thao tác nhanh" className="h-full">
       <div className="space-y-1">
+        {canPurchase && (
+          // Thẻ đầu tiên, có vòng sáng nhấp nháy để dễ thấy. Dừng nhấp nháy khi người dùng
+          // bật "giảm chuyển động" (motion-reduce) hoặc khi rê chuột vào.
+          <button
+            onClick={() => router.push("/dashboard/purchase/new")}
+            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 border border-teal-200 transition-all group text-left"
+          >
+            <span className="relative flex w-8 h-8 flex-shrink-0">
+              <span className="absolute inset-0 rounded-lg bg-teal-400 opacity-60 animate-ping group-hover:hidden motion-reduce:hidden" />
+              <span className="relative w-8 h-8 rounded-lg bg-teal-600 flex items-center justify-center">
+                <ShoppingCart size={15} className="text-white" />
+              </span>
+            </span>
+            <span className="text-sm font-bold text-teal-800 flex-1">Đề nghị mua vật tư</span>
+            <ArrowRight size={14} className="text-teal-400 group-hover:text-teal-600 group-hover:translate-x-0.5 transition-all" />
+          </button>
+        )}
         {actions.map((action) => (
           <button
             key={action.label}

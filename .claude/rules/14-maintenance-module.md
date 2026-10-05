@@ -1240,3 +1240,44 @@ này là **nhãn lô in ra** (`product-predict/.../*-large.pdf`), không phải 
   `router.back()` chỉ khi có trang trước cùng origin, ngược lại về màn nghiệp vụ của module (mở từ
   Telegram trước đây bấm Đóng không phản hồi). Header đổi gradient xanh dịu `#3f7f6f→#5fa593`.
 - Cột "Ký duyệt" Bảo trì: cùng cơ chế chống lỗi như Điều xe (xem rule 19, mục 2026-09-26).
+
+## Cột Ký duyệt không nhấp nháy (2026-10-04)
+
+`records/page.tsx`: bỏ `setSigningStatusLoaded(false)` mỗi lần tải; effect theo
+`signRecordIdsKey` (id có luồng ký, sắp xếp) thay vì mảng `records` (đổi identity mỗi lần tải).
+`records/page.tsx` và `maintenance/page.tsx` chỉ hiện "Đang tải..." khi chưa có dữ liệu.
+
+## Màn ký dùng chung `/dashboard/ky/[id]` — cập nhật 2026-10-05 (GĐ2e Đề nghị mua)
+
+- **Bề rộng trang theo khổ giấy thật**: mỗi trang `maxWidth = min(pageWidthPt × 672/595.28, 672)px`
+  (`PX_PER_PT`, `PAGE_MAX_PX`). A4 dọc và trang ngang giữ đúng 672px như trước (Bảo trì/Điều xe/Kiểm nghiệm
+  không đổi); A5 (420pt) ≈ 474px. Khung ký tính bằng % theo wrapper ⇒ `pxBoxFor`/kéo-thả không đổi.
+- **Topbar 3 dòng**: nhãn module · loại tài liệu + mã · [badge trạng thái (+ nút Bằng chứng nếu purchase)]
+  ↔ nút **Đóng** góc phải cùng dòng badge (nền trắng chữ teal, cỡ bằng badge) — không rớt dòng trên mobile.
+- Chỉ `modun === "purchase"` có thêm ngăn kéo "Bằng chứng tồn kho" (xem rule 28 mục GĐ2e).
+- GĐ2f: phiếu Đề nghị mua mới là A5 NGANG (595×420pt) → hiển thị 672px (= `PAGE_MAX_PX`), không cần sửa màn ký.
+
+## Vật tư mua ngoài qua Kho tạm KT (GĐ2g, 2026-10-06)
+
+Trước đây vật tư `nguon='ben_ngoai'` chỉ lưu tên + giá, KHÔNG đi qua kho. Nay mọi vật tư mua ngoài có
+`inventory_item_id` đi theo chuỗi: **Đề nghị mua → nhập kho `KT` → ký biên bản → tự xuất kho `KT`**.
+`trong_kho` giữ nguyên logic cũ. Migration `20261012_purchase_maintenance_link.sql` (**chạy tay**).
+
+- Kho tạm tra theo `inventory_warehouses.code = 'KT'` lúc chạy (`src/lib/maintenance-kt.ts`,
+  `KT_WAREHOUSE_CODE`). ⚠️ Trên DB `phuochoa_kt` kho `KT` đang mang tên **"Kho xưởng cơ khí"** — xác nhận đúng kho.
+- `computeKtStatuses(factoryId, recordId?)`: nhu cầu = vật tư mua ngoài của biên bản chưa duyệt/huỷ; khả dụng
+  của biên bản R = tồn KT − nhu cầu các biên bản tạo TRƯỚC R (giữ hàng theo thứ tự tạo); đang đề nghị = SL dòng
+  phiếu đề nghị liên kết còn hiệu lực − đã nhập. Mua dư (vd cần 1 mua 4) ⇒ biên bản sau dùng tiếp số dư.
+- Biên bản thiếu KT **vẫn lưu được**, nhưng: khối "Vật tư mua ngoài — Kho tạm KT" trong thẻ ký hiện cần/khả
+  dụng/thiếu/đang đề nghị + nút **"Lập đề nghị mua"** (người tạo biên bản/admin, `POST
+  /api/maintenance/records/[id]/purchase-draft` → phiếu NHÁP, đã có nháp thì mở lại); nút "Gửi ký duyệt" khoá
+  (`blockedReason`) và server `create-request` trả **409** khi còn thiếu.
+- Ký xong: `issueMaintenanceStock` xuất cả `ben_ngoai` từ kho KT (mã `X-BT-{ma_bb}-KT`).
+- Banner `KtShortageBanner` ở đầu `maintenance/page.tsx`, `records/page.tsx` (và module Đề nghị mua) —
+  `GET /api/maintenance/kt-shortages`.
+- Dữ liệu cũ: `scripts/backfill-maintenance-external-kt.mjs` (mặc định xem; `--apply --actor=<uuid admin>`).
+  Biên bản đã duyệt → phiếu 00/ĐNMVT (lịch sử, không ký số) + nhập KT `N-KT-LS-{ma_bb}` + xuất KT
+  `X-BT-{ma_bb}-KT` cùng ngày ⇒ tồn KT ròng 0. Vật tư quản lý lô bị bỏ qua (xử lý tay). Chạy ~1,5 phút.
+  Xem trước 2026-10-06 (phuochoa_kt): 73 biên bản có mua ngoài, 23 đủ điều kiện (có mã vật tư), 13 vật tư,
+  1 bỏ qua (lô). CHƯA `--apply`.
+- Chưa làm: hiện "Tồn KT" ngay trong dropdown chọn vật tư mua ngoài (khối thẻ ký đã hiện đủ số liệu).
