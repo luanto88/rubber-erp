@@ -21,6 +21,7 @@ import {
   Package,
   Settings,
   Shield,
+  ShoppingCart,
   Target,
   Truck,
   Warehouse,
@@ -70,6 +71,7 @@ const MODULE_TASK_TABLES: Record<string, string[]> = {
   "/dashboard/quality-analytics": ["qc_results"],
   "/dashboard/export": ["export_orders"],
   "/dashboard/inventory": ["inventory_documents"],
+  "/dashboard/purchase": ["purchase_requests", "nguoi_ky"],
 }
 
 type NavLeaf = {
@@ -141,6 +143,7 @@ const NAV: NavItem[] = [
       },
       { key: "/dashboard/export", label: "Xuất hàng", icon: FileOutput, permission: "export.view" },
       { key: "/dashboard/maintenance", label: "Bảo trì", icon: Wrench, permission: "maintenance.view" },
+      { key: "/dashboard/purchase", label: "Đề nghị mua vật tư", icon: ShoppingCart, permission: "purchase.view" },
       { key: "/dashboard/process", label: "Kiểm soát quá trình", icon: Activity, permission: "process.view" },
     ],
   },
@@ -153,7 +156,10 @@ const NAV: NavItem[] = [
       { key: "/dashboard/documents", label: "Văn bản nội bộ", icon: FileOutput, permission: "documents.view" },
     ],
   },
-  { key: "/dashboard/settings", label: "Cài đặt", icon: Settings, permission: "settings.view" },
+  // GĐ2 chuẩn hoá quyền ISO (2026-10-02): trang Cài đặt luôn có tab "ISO & Văn bản" (Chữ ký cá
+  // nhân + PIN) cho mọi người đã đăng nhập, nên menu không còn gate theo `settings.view`. Các tab
+  // quản trị bên trong vẫn tự ẩn theo quyền riêng.
+  { key: "/dashboard/settings", label: "Cài đặt", icon: Settings, hiddenForRoles: ["customer"] },
 ]
 
 /**

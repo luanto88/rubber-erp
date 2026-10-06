@@ -43,6 +43,8 @@ export interface ParsedSlRow {
   ma_nguon?: string
   base_xe: string
   chuyen: number
+  /** false = file không có cột Chuyến (mẫu SLRpt) — chuyến được ghép tự động từ Điều xe. */
+  chuyen_tu_file?: boolean
   ghi_chu: string
   ghi_chu_tu_do?: string
   mn_tuoi: number; mn_drc: number; mn_kho: number
@@ -290,9 +292,15 @@ export async function writeBackToDispatch(
 
   await Promise.all(
     (entries as Array<{ id: string; ngay: string; rows?: Array<Record<string, unknown>> }>).map(async (entry) => {
+      // Cột `ngay` lẫn định dạng (YYYY-MM-DD / dd/mm/yyyy) nên lọc ở client theo ngày chuẩn hoá.
+      // Phiếu không có dòng nào thuộc ngày đang ghi → bỏ qua hẳn, KHÔNG UPDATE (trước đây mọi
+      // phiếu của nhà máy đều bị ghi lại kèm updated_at=now(), làm badge "Đã ký — dữ liệu đã
+      // đổi" báo sai cho mọi phiếu đã ký).
+      let touchesDay = false
       const nextRows = (entry.rows ?? []).map((row) => {
         const rowDate = normalizeDateInput(String(row._date ?? entry.ngay))
         if (rowDate !== normalizedNgay) return row
+        touchesDay = true
         const rawSoXe = String(row.so_xe ?? "").trim().toUpperCase()
         const rowChuyen = Number(row.chuyen ?? 1)
         const keyExact = `${rawSoXe}:${rowChuyen}`
@@ -313,6 +321,10 @@ export async function writeBackToDispatch(
         if (uid) affectedTripUids.add(uid)
         return next
       })
+
+      if (!touchesDay) return
+      // Chỉ ghi khi nội dung thật sự đổi — ghi lại y nguyên vẫn đẩy updated_at, không cần thiết.
+      if (JSON.stringify(nextRows) === JSON.stringify(entry.rows ?? [])) return
 
       const { error } = await supabase
         .from("dispatch_entries")

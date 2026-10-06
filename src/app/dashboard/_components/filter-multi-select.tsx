@@ -11,6 +11,8 @@ type FilterMultiSelectProps = {
   labels?: Record<string, string>
   className?: string
   searchPlaceholder?: string
+  /** Chiếm trọn ô chứa ở mọi khổ màn hình (dùng trong FilterBar layout="grid"), kiểu ô đồng bộ với input. */
+  fullWidth?: boolean
 }
 
 export function FilterMultiSelect({
@@ -21,8 +23,11 @@ export function FilterMultiSelect({
   labels,
   className = "",
   searchPlaceholder = "Tìm loại...",
+  fullWidth = false,
 }: FilterMultiSelectProps) {
   const [open, setOpen] = useState(false)
+  // Neo dropdown sang phải khi ô nằm sát mép phải màn hình, tránh tràn ra ngoài.
+  const [alignRight, setAlignRight] = useState(false)
   const [search, setSearch] = useState("")
   const rootRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -76,18 +81,27 @@ export function FilterMultiSelect({
   }
 
   return (
-    <div ref={rootRef} className={`relative w-full min-w-0 sm:w-auto sm:min-w-52 ${open ? "z-50" : ""} ${className}`}>
+    <div
+      ref={rootRef}
+      className={`relative w-full min-w-0 ${fullWidth ? "" : "sm:w-auto sm:min-w-52"} ${open ? "z-50" : ""} ${className}`}
+    >
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none transition-colors hover:border-slate-400 focus:border-emerald-500"
+        onClick={() => {
+          const rect = rootRef.current?.getBoundingClientRect()
+          if (rect) setAlignRight(rect.left + 256 > window.innerWidth - 16)
+          setOpen((value) => !value)
+        }}
+        className={`flex w-full items-center justify-between gap-3 bg-white px-3 text-sm text-slate-700 outline-none transition-colors hover:border-slate-400 focus:border-emerald-500 ${
+          fullWidth ? "rounded-lg border border-slate-200 py-2" : "rounded-xl border border-slate-300 py-1.5"
+        }`}
       >
         <span className={`truncate text-left ${selected.length === 0 ? "text-slate-400" : ""}`}>{summary}</span>
         <ChevronDown size={15} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && (
-        <div className="absolute left-0 top-[calc(100%+0.5rem)] z-50 w-full min-w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl">
+        <div className={`absolute ${alignRight ? "right-0" : "left-0"} top-[calc(100%+0.5rem)] z-50 w-full min-w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl`}>
           <div className="mb-2 flex items-center gap-2 rounded-xl border border-slate-200 px-2 py-1.5">
             <Search size={14} className="shrink-0 text-slate-400" />
             <input

@@ -195,3 +195,12 @@ Chi tiết đầy đủ xem `.claude/rules/25-quality-targets-reports-module.md`
 - Bảng `quality_targets` (Cài đặt → Cấu hình nhà máy → Mục tiêu chất lượng) lưu ngưỡng + % mục tiêu theo `(nam, chi_tieu, san_pham)`, **độc lập** với ngưỡng chấm KN chính thức (TCCS/TCVN).
 - `src/lib/quality-stats.ts` là engine tính toán riêng cho 2 báo cáo mới (Bảng thống kê tháng + Phân tích SPC từng chỉ tiêu) — **không** tái dùng `calcGrade` ở trên, chỉ đảm bảo cùng công thức grading per-field.
 - Route in: `/dashboard/quality/reports` (cấu hình bộ lọc) và `/dashboard/quality/reports/print` (in HTML, `window.print()`), truy cập từ nút trong tab Thống kê.
+
+## Cột Ký duyệt không nhấp nháy (2026-10-04)
+
+`quality/page.tsx` dùng đúng pattern Điều xe: `fetchSigningStatusList` (POST, token còn hạn, lỗi
+thì ném) + `datesKey` ổn định (tập ngày sắp xếp) + `signingReqSeq` bỏ response muộn + không reset
+`signingStatusLoaded` khi tải lại + lỗi giữ map cũ, ô ký hiện "Thử lại" và khoá Thêm/Sửa/Xóa
+(`!signingStatusError`). Danh sách chỉ hiện "Đang tải..." khi chưa có dữ liệu (không gỡ bảng).
+Route `/api/quality/signing-status` nhận cả GET (cũ) và POST `{ factoryId, dates[] }`, chia lô
+qua `status-query.ts`, lỗi phiên trả 401.

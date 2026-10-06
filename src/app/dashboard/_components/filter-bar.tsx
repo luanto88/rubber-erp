@@ -8,6 +8,11 @@ type FilterBarProps = {
   activeCount?: number
   defaultOpen?: boolean
   className?: string
+  /**
+   * "flex" (mặc định, giữ nguyên hành vi cũ) hoặc "grid": lưới đều cột, mỗi ô lọc nên
+   * `w-full`; ô cần rộng gấp đôi dùng `sm:col-span-2`, hàng hành động dùng `col-span-full`.
+   */
+  layout?: "flex" | "grid"
 }
 
 /**
@@ -15,7 +20,7 @@ type FilterBarProps = {
  * thu gọn trên mobile thành 1 nút "Bộ lọc" để không chiếm hết màn hình trước bảng dữ liệu.
  * Trên md+ luôn hiển thị đầy đủ như trước, không đổi hành vi desktop.
  */
-export function FilterBar({ children, activeCount, defaultOpen = false, className = "" }: FilterBarProps) {
+export function FilterBar({ children, activeCount, defaultOpen = false, className = "", layout = "flex" }: FilterBarProps) {
   const [open, setOpen] = useState(defaultOpen)
 
   return (
@@ -36,7 +41,11 @@ export function FilterBar({ children, activeCount, defaultOpen = false, classNam
       </button>
 
       <div
-        className={`flex-wrap items-center gap-3 p-4 md:flex md:pt-4 ${open ? "flex border-t border-slate-100 md:border-t-0" : "hidden"}`}
+        className={
+          layout === "grid"
+            ? `grid-cols-1 items-end gap-3 p-4 sm:grid-cols-2 md:grid md:pt-4 lg:grid-cols-4 xl:grid-cols-6 ${open ? "grid border-t border-slate-100 md:border-t-0" : "hidden"}`
+            : `flex-wrap items-center gap-3 p-4 md:flex md:pt-4 ${open ? "flex border-t border-slate-100 md:border-t-0" : "hidden"}`
+        }
       >
         {children}
       </div>

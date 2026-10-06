@@ -58,9 +58,9 @@ const supabaseAdmin = createClient(
 // Quyền phê duyệt ISO của người gọi. Cộng gộp 2 nguồn cấp quyền giống hệt
 // `fetchPermissionCodesForUser()` phía client và các route `dept-users`/`profiles-by-permission`:
 // cấp tường minh cho user (`user_permissions.granted = true`) HOẶC cấp theo vai trò
-// (`role_permissions`). Chấp nhận cả `iso.soat_xet` để tương thích dữ liệu phân quyền cũ,
-// đúng như UI đang làm với `canXemXet`.
-const ISO_APPROVE_PERMISSION_CODES = ["iso.phe_duyet", "iso.soat_xet", "iso.xem_xet"]
+// (`role_permissions`). `iso.soat_xet` đã bỏ (GĐ2 chuẩn hoá quyền, migration 20261006 đã chép
+// sang `iso.xem_xet`), khớp `canXemXet` phía UI.
+const ISO_APPROVE_PERMISSION_CODES = ["iso.phe_duyet", "iso.xem_xet"]
 
 async function hasIsoApprovePermission(userId: string, role: string): Promise<boolean> {
   const [directRes, roleRes] = await Promise.all([

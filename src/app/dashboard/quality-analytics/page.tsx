@@ -2,16 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { resolveEffectiveQcResults, type QcResultRow } from "@/lib/quality-stats"
 import {
   AlertTriangle,
   BarChart2,
   CalendarDays,
+  Check,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
+  FileBarChart2,
   Filter,
+  Printer,
   RefreshCw,
   TrendingUp,
 } from "lucide-react"
@@ -63,6 +68,9 @@ type QcRow = {
   grade: Record<string, GradeEntry>
   dat_hang: string
   trang_thai: string
+  parent_id?: string | null
+  lan?: number
+  created_at?: string
 }
 
 type LotRow = {
@@ -355,13 +363,13 @@ export default function QualityAnalyticsPage({
   const [records, setRecords] = useState<QualityRecord[]>([])
   const [customStdMap, setCustomStdMap] = useState<Map<string, CustomStdRow>>(new Map())
 
-  const [fromDate, setFromDate] = useState(daysAgo(30))
+  const [fromDate, setFromDate] = useState(() => `${new Date().getFullYear()}-01-01`)
   const [toDate, setToDate] = useState(today())
-  const [selectedLoaiCsr, setSelectedLoaiCsr] = useState("all")
+  const [selectedLoaiCsr, setSelectedLoaiCsr] = useState("CSR10")
   const [selectedTieuChuan, setSelectedTieuChuan] = useState<StandardFilter>("all")
   const [selectedLoaiKn, setSelectedLoaiKn] = useState<LoaiKnFilter>("all")
   const [selectedTrangThai, setSelectedTrangThai] = useState("all")
-  const [selectedDayChuyen, setSelectedDayChuyen] = useState("all")
+  const [selectedDayChuyen, setSelectedDayChuyen] = useState("Mủ tạp")
   const [selectedCa, setSelectedCa] = useState("all")
   const [selectedLoaiBanh, setSelectedLoaiBanh] = useState("all")
   const [selectedBoc, setSelectedBoc] = useState("all")
@@ -375,8 +383,22 @@ export default function QualityAnalyticsPage({
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set())
   const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set())
 
+  // Bộ lọc mở rộng & Modal Thống kê chất lượng
+  const [isExtraOpen, setIsExtraOpen] = useState(false)
+  const [openReportModal, setOpenReportModal] = useState(false)
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
+  const [giamDocOptions, setGiamDocOptions] = useState<{ ten: string; chuc_vu: string }[]>([])
+  const [giamDoc, setGiamDoc] = useState("")
+  const [nguoiThucHien, setNguoiThucHien] = useState("")
+  const [includeSummary, setIncludeSummary] = useState(true)
+  const [includeSpc, setIncludeSpc] = useState(true)
+
   useEffect(() => {
     const bootstrap = async () => {
+      const cachedUser = JSON.parse(localStorage.getItem("erp_user") || "null") as SessionUser | null
+      setCurrentUser(cachedUser)
+      setNguoiThucHien(cachedUser?.full_name || cachedUser?.username || "")
+
       if (factoryIdProp) {
         setFactoryId(factoryIdProp)
         return
@@ -391,6 +413,19 @@ export default function QualityAnalyticsPage({
 
   useEffect(() => {
     if (!factoryId) return
+    const loadStaff = async () => {
+      const { data } = await supabase.from("maintenance_staff").select("ten,chuc_vu").eq("factory_id", factoryId)
+      const list = (data || []).filter((s) => (s.chuc_vu || "").toLowerCase().includes("giám đốc"))
+      setGiamDocOptions(list)
+      if (list.length > 0) {
+        setGiamDoc((prev) => prev || list[0].ten)
+      }
+    }
+    void loadStaff()
+  }, [factoryId])
+
+  useEffect(() => {
+    if (!factoryId) return
 
     const load = async () => {
       setLoading(true)
@@ -399,7 +434,7 @@ export default function QualityAnalyticsPage({
         fetchAllPaginated<QcRow>((from, to) =>
           supabase
             .from("qc_results")
-            .select("id,factory_id,lot_id,ma_lo,pkn,ngay_kn,ngay_sx,chung_loai,loai_csr,loai_kn,tieu_chuan,so_mau,samples,grade,dat_hang,trang_thai")
+            .select("id,factory_id,lot_id,ma_lo,pkn,ngay_kn,ngay_sx,chung_loai,loai_csr,loai_kn,tieu_chuan,so_mau,samples,grade,dat_hang,trang_thai,parent_id,lan,created_at")
             .eq("factory_id", factoryId)
             .order("ngay_kn", { ascending: false })
             .range(from, to)
@@ -411,7 +446,8 @@ export default function QualityAnalyticsPage({
         supabase.from("qc_custom_std").select("id,ten_kh,limits").eq("factory_id", factoryId),
       ])
 
-      const qcData = qcDataRes.status === "fulfilled" ? qcDataRes.value : null
+      const qcDataRaw = qcDataRes.status === "fulfilled" ? (qcDataRes.value || []) : []
+      const qcData = resolveEffectiveQcResults(qcDataRaw as unknown as QcResultRow[]) as unknown as QcRow[]
       const lotRows = lotDataRes.status === "fulfilled" ? (lotDataRes.value || []) : []
       const ngansPayload = ngansResult.status === "fulfilled" ? ngansResult.value : null
       const customStdPayload = customStdResult.status === "fulfilled" ? customStdResult.value : null
@@ -503,7 +539,7 @@ export default function QualityAnalyticsPage({
 
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
-      if (record.ngay_kn < fromDate || record.ngay_kn > toDate) return false
+      if (record.ngay_sx < fromDate || record.ngay_sx > toDate) return false
       if (selectedLoaiCsr !== "all" && record.loai_csr !== selectedLoaiCsr) return false
       if (selectedTieuChuan !== "all" && normalizeStandard(record.tieu_chuan) !== selectedTieuChuan) return false
       if (selectedLoaiKn !== "all" && record.loai_kn !== selectedLoaiKn) return false
@@ -949,14 +985,36 @@ export default function QualityAnalyticsPage({
     },
   ]
 
+  const extraFiltersCount = useMemo(() => {
+    let count = 0
+    if (selectedTieuChuan !== "all") count++
+    if (selectedLoaiKn !== "all") count++
+    if (selectedTrangThai !== "all") count++
+    if (selectedLoaiBanh !== "all") count++
+    if (selectedCa !== "all") count++
+    if (selectedBoc !== "all") count++
+    if (selectedNgan !== "all") count++
+    if (driversDimension !== "ca") count++
+    return count
+  }, [
+    driversDimension,
+    selectedBoc,
+    selectedCa,
+    selectedLoaiBanh,
+    selectedLoaiKn,
+    selectedNgan,
+    selectedTieuChuan,
+    selectedTrangThai,
+  ])
+
   const resetFilters = () => {
-    setFromDate(daysAgo(30))
+    setFromDate(`${new Date().getFullYear()}-01-01`)
     setToDate(today())
-    setSelectedLoaiCsr("all")
+    setSelectedDayChuyen("Mủ tạp")
+    setSelectedLoaiCsr("CSR10")
     setSelectedTieuChuan("all")
     setSelectedLoaiKn("all")
     setSelectedTrangThai("all")
-    setSelectedDayChuyen("all")
     setSelectedCa("all")
     setSelectedLoaiBanh("all")
     setSelectedBoc("all")
@@ -969,6 +1027,50 @@ export default function QualityAnalyticsPage({
     setDriversDimension("ca")
     setExpandedGroupKeys(new Set())
     setExpandedDateKeys(new Set())
+    setIsExtraOpen(false)
+  }
+
+  const handleConfirmPrint = () => {
+    if (!factoryId) return
+    const [y, m] = toDate.split("-")
+    const nam = Number(y) || new Date().getFullYear()
+    const thang = Number(m) || new Date().getMonth() + 1
+
+    let sanPhamListStr = ""
+    if (selectedLoaiCsr !== "all") {
+      sanPhamListStr = selectedLoaiCsr.replace(/^(CSR|SVR)/, "")
+    } else {
+      sanPhamListStr = "10,20,L,3L,5"
+    }
+
+    const tieuChuanStr = selectedTieuChuan === "all" ? "TCCS 112:2022" : standardLabel(selectedTieuChuan)
+    const chiTieuStr = selectedMetrics.join(",")
+
+    const spcList: string[] = []
+    if (includeSpc) {
+      const spArr = sanPhamListStr.split(",").filter(Boolean)
+      spArr.forEach((sp) => {
+        selectedMetrics.forEach((ct) => {
+          spcList.push(`${sp}|${ct}`)
+        })
+      })
+    }
+
+    const searchParams = new URLSearchParams({
+      factoryId,
+      nam: String(nam),
+      thang: String(thang),
+      sanPham: sanPhamListStr,
+      tieuChuan: tieuChuanStr,
+      chiTieu: chiTieuStr,
+      summary: includeSummary ? "1" : "0",
+      spc: spcList.join(","),
+      giamDoc: giamDoc.trim(),
+      nguoiThucHien: nguoiThucHien.trim(),
+    })
+
+    window.open(`/dashboard/quality/reports/print?${searchParams.toString()}`, "_blank")
+    setOpenReportModal(false)
   }
 
   const toggleMetric = (metric: MetricKey) => {
@@ -1007,21 +1109,31 @@ export default function QualityAnalyticsPage({
   return (
     <div className="space-y-6">
       {!embedded && (
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-800">Thống kê chất lượng</h1>
             <p className="mt-0.5 text-sm text-slate-500">
               Màn tổng hợp chất lượng theo kỳ báo cáo, đọc xu hướng nhanh rồi drill-down đến từng lô kiểm nghiệm.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
-          >
-            <RefreshCw size={14} />
-            Đặt lại bộ lọc
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setOpenReportModal(true)}
+              className="flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800 shadow-sm transition-all hover:border-emerald-400 hover:bg-emerald-100 active:scale-95"
+            >
+              <Check size={18} className="stroke-[2.5]" />
+              <span>Thống kê chất lượng</span>
+            </button>
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+            >
+              <RefreshCw size={14} />
+              Đặt lại bộ lọc
+            </button>
+          </div>
         </div>
       )}
 
@@ -1042,7 +1154,15 @@ export default function QualityAnalyticsPage({
             <Filter size={15} className="text-emerald-600" />
             Bộ lọc báo cáo
           </div>
-          {embedded && (
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setOpenReportModal(true)}
+              className="flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800 shadow-sm transition-all hover:border-emerald-400 hover:bg-emerald-100 active:scale-95"
+            >
+              <Check size={18} className="stroke-[2.5]" />
+              <span>Thống kê chất lượng</span>
+            </button>
             <button
               type="button"
               onClick={resetFilters}
@@ -1051,10 +1171,11 @@ export default function QualityAnalyticsPage({
               <RefreshCw size={14} />
               Đặt lại bộ lọc
             </button>
-          )}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        {/* 4 trường chính */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <FilterField label="Từ ngày">
             <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={INPUT_CLASS} />
           </FilterField>
@@ -1071,34 +1192,6 @@ export default function QualityAnalyticsPage({
               ))}
             </select>
           </FilterField>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <FilterField label="Tiêu chuẩn">
-            <select value={selectedTieuChuan} onChange={(e) => setSelectedTieuChuan(e.target.value as StandardFilter)} className={INPUT_CLASS}>
-              <option value="all">Tất cả</option>
-              {filterOptions.has3769 && <option value="tcvn3769">TCVN 3769:2016</option>}
-              {filterOptions.has112 && <option value="tcvn112">TCCS 112:2022</option>}
-              {filterOptions.hasTckh && <option value="tckh">TCKH</option>}
-            </select>
-          </FilterField>
-          <FilterField label="Loại kiểm nghiệm">
-            <select value={selectedLoaiKn} onChange={(e) => setSelectedLoaiKn(e.target.value as LoaiKnFilter)} className={INPUT_CLASS}>
-              <option value="all">Tất cả</option>
-              <option value="thuong">Thường</option>
-              <option value="ngat">Ngặt</option>
-            </select>
-          </FilterField>
-          <FilterField label="Trạng thái xếp hạng">
-            <select value={selectedTrangThai} onChange={(e) => setSelectedTrangThai(e.target.value)} className={INPUT_CLASS}>
-              <option value="all">Tất cả</option>
-              <option value="dat">Đạt</option>
-              <option value="khong_dat">Không đạt</option>
-            </select>
-          </FilterField>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <FilterField label="Loại CSR">
             <select value={selectedLoaiCsr} onChange={(e) => setSelectedLoaiCsr(e.target.value)} className={INPUT_CLASS}>
               <option value="all">Tất cả</option>
@@ -1109,53 +1202,12 @@ export default function QualityAnalyticsPage({
               ))}
             </select>
           </FilterField>
-          <FilterField label="Loại bành">
-            <select value={selectedLoaiBanh} onChange={(e) => setSelectedLoaiBanh(e.target.value)} className={INPUT_CLASS}>
-              <option value="all">Tất cả</option>
-              {filterOptions.loaiBanh.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </FilterField>
-          <FilterField label="Ca">
-            <select value={selectedCa} onChange={(e) => setSelectedCa(e.target.value)} className={INPUT_CLASS}>
-              <option value="all">Tất cả</option>
-              {filterOptions.ca.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </FilterField>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <FilterField label="Loại bọc">
-            <select value={selectedBoc} onChange={(e) => setSelectedBoc(e.target.value)} className={INPUT_CLASS}>
-              <option value="all">Tất cả</option>
-              {filterOptions.boc.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </FilterField>
-          <FilterField label="Ngăn lưu" className="md:col-span-2">
-            <select value={selectedNgan} onChange={(e) => setSelectedNgan(e.target.value)} className={INPUT_CLASS}>
-              <option value="all">Tất cả</option>
-              {filterOptions.ngan.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </FilterField>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <FilterField label="Chỉ tiêu phân tích" className="md:col-span-2">
+        {/* Hàng chỉ tiêu phân tích & nút "Thêm" */}
+        <div className="flex flex-col gap-3 border-t border-slate-100 pt-2 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex-1">
+            <label className="mb-1.5 block text-xs font-bold text-slate-600">Chỉ tiêu phân tích</label>
             <div className="flex flex-wrap gap-2">
               {METRICS.map((metric) => {
                 const active = selectedMetrics.includes(metric.key)
@@ -1166,7 +1218,7 @@ export default function QualityAnalyticsPage({
                     onClick={() => toggleMetric(metric.key)}
                     className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
                       active
-                        ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-700 shadow-xs"
                         : "border-slate-200 text-slate-500 hover:border-slate-300"
                     }`}
                   >
@@ -1175,18 +1227,134 @@ export default function QualityAnalyticsPage({
                 )
               })}
             </div>
-          </FilterField>
-          <FilterField label="Tiêu chí phân tích rủi ro">
-            <select value={driversDimension} onChange={(e) => setDriversDimension(e.target.value as DriverDimension)} className={INPUT_CLASS}>
-              <option value="ca">Ca</option>
-              <option value="day_chuyen">Dây chuyền</option>
-              <option value="boc">Loại bọc</option>
-              <option value="loai_banh">Loại bành</option>
-              <option value="ngan_label">Ngăn lưu</option>
-              <option value="tieu_chuan">Tiêu chuẩn</option>
-            </select>
-          </FilterField>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsExtraOpen(!isExtraOpen)}
+              className={`flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition-all ${
+                isExtraOpen || extraFiltersCount > 0
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                  : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              <Filter size={14} className={isExtraOpen || extraFiltersCount > 0 ? "text-emerald-700" : "text-slate-500"} />
+              <span>Thêm</span>
+              {extraFiltersCount > 0 && (
+                <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+                  {extraFiltersCount}
+                </span>
+              )}
+              <ChevronDown
+                size={14}
+                className={`transition-transform duration-200 ${isExtraOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+          </div>
         </div>
+
+        {/* Panel mở rộng: các trường phụ */}
+        {isExtraOpen && (
+          <div className="animate-in fade-in space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-4 transition-all duration-200">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                Bộ lọc bổ sung (Mặc định: Tất cả)
+              </span>
+              {extraFiltersCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTieuChuan("all")
+                    setSelectedLoaiKn("all")
+                    setSelectedTrangThai("all")
+                    setSelectedLoaiBanh("all")
+                    setSelectedCa("all")
+                    setSelectedBoc("all")
+                    setSelectedNgan("all")
+                    setDriversDimension("ca")
+                  }}
+                  className="text-xs font-semibold text-emerald-700 hover:underline"
+                >
+                  Đặt lại bộ lọc phụ
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <FilterField label="Tiêu chuẩn">
+                <select value={selectedTieuChuan} onChange={(e) => setSelectedTieuChuan(e.target.value as StandardFilter)} className={INPUT_CLASS}>
+                  <option value="all">Tất cả</option>
+                  {filterOptions.has3769 && <option value="tcvn3769">TCVN 3769:2016</option>}
+                  {filterOptions.has112 && <option value="tcvn112">TCCS 112:2022</option>}
+                  {filterOptions.hasTckh && <option value="tckh">TCKH</option>}
+                </select>
+              </FilterField>
+              <FilterField label="Loại kiểm nghiệm">
+                <select value={selectedLoaiKn} onChange={(e) => setSelectedLoaiKn(e.target.value as LoaiKnFilter)} className={INPUT_CLASS}>
+                  <option value="all">Tất cả</option>
+                  <option value="thuong">Thường</option>
+                  <option value="ngat">Ngặt</option>
+                </select>
+              </FilterField>
+              <FilterField label="Trạng thái xếp hạng">
+                <select value={selectedTrangThai} onChange={(e) => setSelectedTrangThai(e.target.value)} className={INPUT_CLASS}>
+                  <option value="all">Tất cả</option>
+                  <option value="dat">Đạt</option>
+                  <option value="khong_dat">Không đạt</option>
+                </select>
+              </FilterField>
+              <FilterField label="Loại bành">
+                <select value={selectedLoaiBanh} onChange={(e) => setSelectedLoaiBanh(e.target.value)} className={INPUT_CLASS}>
+                  <option value="all">Tất cả</option>
+                  {filterOptions.loaiBanh.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+              <FilterField label="Ca">
+                <select value={selectedCa} onChange={(e) => setSelectedCa(e.target.value)} className={INPUT_CLASS}>
+                  <option value="all">Tất cả</option>
+                  {filterOptions.ca.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+              <FilterField label="Loại bọc">
+                <select value={selectedBoc} onChange={(e) => setSelectedBoc(e.target.value)} className={INPUT_CLASS}>
+                  <option value="all">Tất cả</option>
+                  {filterOptions.boc.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+              <FilterField label="Ngăn lưu">
+                <select value={selectedNgan} onChange={(e) => setSelectedNgan(e.target.value)} className={INPUT_CLASS}>
+                  <option value="all">Tất cả</option>
+                  {filterOptions.ngan.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </FilterField>
+              <FilterField label="Tiêu chí phân tích rủi ro">
+                <select value={driversDimension} onChange={(e) => setDriversDimension(e.target.value as DriverDimension)} className={INPUT_CLASS}>
+                  <option value="ca">Ca</option>
+                  <option value="day_chuyen">Dây chuyền</option>
+                  <option value="boc">Loại bọc</option>
+                  <option value="loai_banh">Loại bành</option>
+                  <option value="ngan_label">Ngăn lưu</option>
+                  <option value="tieu_chuan">Tiêu chuẩn</option>
+                </select>
+              </FilterField>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
@@ -1687,6 +1855,130 @@ export default function QualityAnalyticsPage({
             </div>
           )} 
       </div>
+
+      {openReportModal && (
+        <ModalShell
+          title="Thống kê chất lượng"
+          onClose={() => setOpenReportModal(false)}
+          maxWidth="lg"
+        >
+          <div className="space-y-4">
+            <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3.5 text-xs text-emerald-950">
+              <div className="flex items-center gap-1.5 text-sm font-bold text-emerald-950">
+                <FileBarChart2 size={16} className="text-emerald-700" />
+                Cấu hình tham số in báo cáo
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-slate-700">
+                <div>
+                  <span className="font-semibold text-slate-900">Kỳ báo cáo:</span> {`Tháng ${Number(toDate.slice(5, 7))}/${toDate.slice(0, 4)}`}
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-900">Sản phẩm:</span> {selectedLoaiCsr === "all" ? "Tất cả" : selectedLoaiCsr}
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-900">Dây chuyền:</span> {selectedDayChuyen === "all" ? "Tất cả" : selectedDayChuyen}
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-900">Tiêu chuẩn:</span> {standardLabel(selectedTieuChuan)}
+                </div>
+              </div>
+              <div className="text-slate-600">
+                <span className="font-semibold text-slate-900">Chỉ tiêu áp dụng:</span> {selectedMetrics.map((m) => METRIC_LABEL_MAP[m]).join(", ")}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-700">
+                  Giám đốc nhà máy (Người duyệt ký)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={giamDoc}
+                    onChange={(e) => setGiamDoc(e.target.value)}
+                    placeholder="Nhập họ và tên Giám đốc..."
+                    className={INPUT_CLASS}
+                  />
+                  {giamDocOptions.length > 0 && (
+                    <select
+                      onChange={(e) => {
+                        if (e.target.value) setGiamDoc(e.target.value)
+                      }}
+                      value=""
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none"
+                    >
+                      <option value="">Gợi ý danh sách</option>
+                      {giamDocOptions.map((gd) => (
+                        <option key={gd.ten} value={gd.ten}>
+                          {gd.ten} ({gd.chuc_vu})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-700">
+                  Người lập bảng
+                </label>
+                <input
+                  type="text"
+                  value={nguoiThucHien}
+                  onChange={(e) => setNguoiThucHien(e.target.value)}
+                  placeholder="Nhập họ và tên người lập bảng..."
+                  className={INPUT_CLASS}
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Người dùng có thể sửa hoặc nhập tự do tên người lập trước khi xuất in.
+                </p>
+              </div>
+
+              <div className="space-y-2 border-t border-slate-200 pt-3">
+                <label className="block text-xs font-bold text-slate-700">Nội dung báo cáo cần in</label>
+                <label className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={includeSummary}
+                    onChange={(e) => setIncludeSummary(e.target.checked)}
+                    className="h-4 w-4 rounded text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>In Bảng thống kê chất lượng tổng hợp (trang tổng quan tháng)</span>
+                </label>
+                <label className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={includeSpc}
+                    onChange={(e) => setIncludeSpc(e.target.checked)}
+                    className="h-4 w-4 rounded text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>In Biểu đồ phân bố & Kiểm soát SPC (bảng dữ liệu và biểu đồ từng chỉ tiêu)</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 border-t border-slate-200 pt-4">
+              <button
+                type="button"
+                onClick={() => setOpenReportModal(false)}
+                className="rounded-xl px-4 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-100"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPrint}
+                disabled={!includeSummary && !includeSpc}
+                className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2 text-sm font-bold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-40"
+              >
+                <Printer size={16} />
+                <span>Xem trước & In</span>
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
     </div>
   )
 }

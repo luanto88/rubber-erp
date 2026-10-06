@@ -1,12 +1,13 @@
 "use client"
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { buildDispatchAnalytics, DISPATCH_MATERIAL_OPTIONS, formatKg, formatKm, formatTon, getTripDois, getTripMaterialFlags } from "@/lib/dispatch-analytics"
-import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, FACTORY_LAT, FACTORY_LNG, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints } from "@/lib/dispatch-master"
+import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcManhattanKmFromPoints, compareDoiNho, DOI_NHO_UNASSIGNED, doiOfDoiNho, FACTORY_LAT, FACTORY_LNG, getAllowedDoi as getAllowedDoiFromPoints, normalizeDeliveryPoints, resolveTripDoiNhos } from "@/lib/dispatch-master"
 import { replaceDispatchEntryRows } from "@/lib/dispatch-entry-rows"
-import { formatDateDisplay, getTodayISODate, isDateInRange } from "@/lib/date-utils"
+import { formatDateDisplay, getFactoryTodayISO, getTodayISODate, isDateInRange } from "@/lib/date-utils"
+import { renderDispatchPlanImage, shareDispatchPlanImage } from "@/lib/dispatch-plan-image"
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { DispatchSignModal } from "@/app/dashboard/dispatch/_components/dispatch-sign-modal"
@@ -24,7 +25,7 @@ import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-se
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye, Loader2, AlertTriangle } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye, Loader2, AlertTriangle, ImageIcon, ArrowUp, ArrowDown } from "lucide-react"
 
 // Types
 type DxRow = {
@@ -141,7 +142,7 @@ const VEHICLES: VehicleInfo[] = [
 ]
 
 // Điểm giao nhận with phiên data
-type DiemGN = { ma_lo: string; lat: number; lng: number; doi: number; phien_a: string[]; phien_b: string[]; phien_c: string[]; phien_d: string[] }
+type DiemGN = { ma_lo: string; lat: number; lng: number; doi: number; doi_nho?: string | null; phien_a: string[]; phien_b: string[]; phien_c: string[]; phien_d: string[] }
 const DIEM_GN: DiemGN[] = [
   { ma_lo:"B5",  doi:2,  lat:12.632736, lng:105.495549, phien_a:["A3","A4","A5","A6","A7","B4","B5","B6","B7","C4","C5D","C5T","D4","D5D","D5T","E4","E5"], phien_b:["B4","C4","D4","E4"], phien_c:["E5","D5D","C5D","C5T"], phien_d:["A3","A4","A5"] },
   { ma_lo:"C16", doi:5,  lat:12.628052, lng:105.546290, phien_a:["A14","A15","A16","A17","A18","B14","B15","B16","B17","B18","C14","C15D","C15T","C16","C17","C18"], phien_b:["A14","B15","B14","C14"], phien_c:["A15","A16","A17","A18"], phien_d:["B18","B17","C17","C18"] },
@@ -225,6 +226,27 @@ function buildLoThuHoach(diem_gn: string[], phien: string[]): string[] {
 
 function formatDoiLabel(dois: number[]) {
   return dois.length > 0 ? dois.join(", ") : "—"
+}
+
+// Ngày mai theo múi giờ nhà máy (YYYY-MM-DD) — phiếu điều xe lập tối hôm trước.
+function getFactoryTomorrowISO() {
+  const [y, m, d] = getFactoryTodayISO().split("-").map(Number)
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
+}
+
+// Trạng thái phiếu SUY RA từ KL (không lưu DB): Kế hoạch / Đã có sản lượng / Đủ sản lượng.
+type EntryProgress = "ke_hoach" | "mot_phan" | "du"
+function getEntryProgress(rows: DxRow[] = []): EntryProgress {
+  const trips = rows.filter(r => r.so_xe)
+  const hasKl = (r: DxRow) => [r.kl_ct, r.kl_dct, r.kl_dkt, r.kl_dt, r.kl_mn].some(v => (parseFloat(v) || 0) > 0)
+  const withKl = trips.filter(hasKl).length
+  if (withKl === 0) return "ke_hoach"
+  return withKl >= trips.length ? "du" : "mot_phan"
+}
+const ENTRY_PROGRESS_UI: Record<EntryProgress, { label: string; cls: string }> = {
+  ke_hoach: { label: "Kế hoạch", cls: "bg-slate-100 text-slate-600" },
+  mot_phan: { label: "Đã có sản lượng", cls: "bg-amber-100 text-amber-700" },
+  du: { label: "Đủ sản lượng", cls: "bg-emerald-100 text-emerald-700" },
 }
 
 function getDispatchRowFresh(row: DxRow) {
@@ -694,6 +716,14 @@ export default function DispatchPage() {
   const [listTab, setListTab] = useState<"list"|"stats">("list")
   const [statsDoi, setStatsDoi] = useState<string[]>([])
   const [statsVehicle, setStatsVehicle] = useState<string[]>([])
+  const [statsDoiNho, setStatsDoiNho] = useState<string[]>([])
+  // Điểm GN từ DB đã tải xong (thành công hoặc lỗi) — chỉ tải phiếu sau mốc này để không chạy
+  // loadData 2 lần (hard-code → DB) gây nhấp nháy cột Ký duyệt.
+  const [deliveryPointsLoaded, setDeliveryPointsLoaded] = useState(false)
+  // Danh sách phiếu đã tải xong ít nhất 1 lần — trước mốc này map trạng thái ký rỗng KHÔNG có
+  // nghĩa là "chưa gửi ký".
+  const [entriesLoaded, setEntriesLoaded] = useState(false)
+  const [planImageBusy, setPlanImageBusy] = useState<string | null>(null)
 
   // Views: list | detail | add | edit
   const [view, setView]           = useState<"list"|"detail"|"add"|"edit">("list")
@@ -716,6 +746,7 @@ export default function DispatchPage() {
   const [klModal, setKlModal]       = useState(false)
   const [factoryName, setFactoryName] = useState("NMCB Phước Hòa Kampong Thom")
   const [factoryCode, setFactoryCode] = useState("")
+  const [factoryNameKhmer, setFactoryNameKhmer] = useState<string | null>(null)
   const [isAdmin, setIsAdmin]       = useState(false)
   const [makerName, setMakerName]   = useState("")
   const [importing, setImporting]   = useState(false)
@@ -758,21 +789,29 @@ export default function DispatchPage() {
   }, [factoryId])
 
   const loadDeliveryPoints = useCallback(async (fid: string) => {
-    const { data, error } = await supabase
-      .from("dispatch_delivery_points")
-      .select("ma_lo, lat, lng, doi, phien_a, phien_b, phien_c, phien_d")
-      .eq("factory_id", fid)
-      .eq("is_active", true)
-      .order("sort_order", { ascending: true })
-      .order("ma_lo", { ascending: true })
+    try {
+      // select("*") để chịu được cột doi_nho chưa tồn tại (migration chưa chạy).
+      const { data, error } = await supabase
+        .from("dispatch_delivery_points")
+        .select("*")
+        .eq("factory_id", fid)
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+        .order("ma_lo", { ascending: true })
 
-    if (error) {
-      console.error("Không tải được điểm giao nhận từ DB:", error)
+      if (error) {
+        console.error("Không tải được điểm giao nhận từ DB:", error)
+        setDeliveryPoints(DIEM_GN)
+        return
+      }
+
+      setDeliveryPoints(normalizeDeliveryPoints(data))
+    } catch (err) {
+      console.error("Không tải được điểm giao nhận từ DB:", err)
       setDeliveryPoints(DIEM_GN)
-      return
+    } finally {
+      setDeliveryPointsLoaded(true)
     }
-
-    setDeliveryPoints(normalizeDeliveryPoints(data))
   }, [])
 
   const loadVehicleMaster = useCallback(async (fid: string) => {
@@ -828,7 +867,7 @@ export default function DispatchPage() {
   }, [deliveryPoints])
 
   const deliveryPointLabels = Object.fromEntries(
-    deliveryPoints.map((point) => [point.ma_lo, `${point.ma_lo} - Đội ${point.doi}`]),
+    deliveryPoints.map((point) => [point.ma_lo, `${point.ma_lo} - Đội ${point.doi}${point.doi_nho ? ` · ${point.doi_nho}` : ""}`]),
   )
 
   const resolveSoKm = useCallback((stops: string[]) => {
@@ -880,6 +919,7 @@ export default function DispatchPage() {
         return { ...e, ma_dx: `DX-${dd}${mm}${yy}/${seq}` }
       })
       setEntries(withCode)
+      setEntriesLoaded(true)
     } finally {
       setLoading(false)
     }
@@ -904,6 +944,7 @@ export default function DispatchPage() {
           const fd = f as Record<string, unknown>
           setFactoryName((fd.ten as string) || (fd.name as string) || "NMCB Phước Hòa Kampong Thom")
           setFactoryCode((fd.code as string) || "")
+          setFactoryNameKhmer(typeof fd.ten_khmer === "string" && fd.ten_khmer.trim() ? fd.ten_khmer.trim() : null)
         }
       })
       const u = JSON.parse(localStorage.getItem("erp_user") || "{}")
@@ -938,9 +979,9 @@ export default function DispatchPage() {
   }, [factoryId, loadNoteOptions])
 
   useEffect(() => {
-    if (!factoryId) return
+    if (!factoryId || !deliveryPointsLoaded) return
     void loadData(factoryId, deliveryPoints)
-  }, [deliveryPoints, factoryId, loadData])
+  }, [deliveryPoints, deliveryPointsLoaded, factoryId, loadData])
 
   // Ký duyệt bảng phân xe — tải trạng thái yeu_cau_ky cho các phiếu đang hiển thị. Gửi id qua
   // POST body (danh sách dài không vỡ URL); lỗi thì giữ dữ liệu cũ + báo "Thử lại"; bỏ qua
@@ -969,10 +1010,13 @@ export default function DispatchPage() {
     }
   }, [])
 
+  // Khóa ổn định theo tập id phiếu: loadData tạo mảng entries mới mỗi lần nhưng id không đổi →
+  // không gọi lại API trạng thái ký (trước đây gây nhấp nháy cột Ký duyệt).
+  const entryIdsKey = useMemo(() => entries.map((e) => e.id).sort().join(","), [entries])
   useEffect(() => {
-    if (!factoryId) return
-    void loadSigningStatus(factoryId, entries.map((e) => e.id))
-  }, [factoryId, entries, loadSigningStatus])
+    if (!factoryId || !entriesLoaded) return
+    void loadSigningStatus(factoryId, entryIdsKey ? entryIdsKey.split(",") : [])
+  }, [factoryId, entryIdsKey, entriesLoaded, loadSigningStatus])
   const filterRowsByActiveFilters = useCallback((rows: DxRow[] = []) => {
     return rows.filter((row) => {
       if (!matchesNoteFilterMulti(row.ghi_chu, filterGhiChu)) return false
@@ -1012,6 +1056,7 @@ export default function DispatchPage() {
   }
   const analytics = buildDispatchAnalytics(exportableEntries, deliveryPoints, {
     dois: statsDoi,
+    doiNhos: statsDoiNho,
     vehicles: statsVehicle,
     note: filterGhiChu,
     materials: filterLoai,
@@ -1033,6 +1078,15 @@ export default function DispatchPage() {
   const doiOptions = [...new Set(exportableEntries.flatMap(entry => (entry.rows || []).flatMap(row => getTripDois(row, deliveryPoints))))].sort((a, b) => a - b)
   const doiOptionStrings = doiOptions.map(String)
   const doiLabels = Object.fromEntries(doiOptions.map(d => [String(d), `Đội ${d}`]))
+  // Đội nhỏ: lấy từ điểm GN, lọc theo đội lớn đã chọn; thêm "Chưa gán" nếu có điểm chưa gán.
+  const doiNhoOptions = (() => {
+    const selectedDois = statsDoi.map(Number)
+    const inScope = deliveryPoints.filter(p => selectedDois.length === 0 || selectedDois.includes(p.doi))
+    const values = [...new Set(inScope.map(p => p.doi_nho).filter((v): v is string => !!v))].sort(compareDoiNho)
+    if (inScope.some(p => !p.doi_nho)) values.push(DOI_NHO_UNASSIGNED)
+    return values
+  })()
+  const doiNhoLabels: Record<string, string> = { [DOI_NHO_UNASSIGNED]: "Chưa gán đội nhỏ" }
   const statVehicleOptions = [...new Set(exportableEntries.flatMap(entry => (entry.rows || []).map(row => row.so_xe).filter(Boolean)))].sort((a, b) => a.localeCompare(b))
 
   const exportStatsPdf = async (mode: "all" | "doi" | "vehicle") => {
@@ -1048,6 +1102,7 @@ export default function DispatchPage() {
         to: filterTo,
         mode,
         selectedDois: statsDoi,
+        selectedDoiNhos: statsDoiNho,
         selectedVehicles: statsVehicle,
         selectedNote: filterGhiChu,
         makerName,
@@ -1055,6 +1110,49 @@ export default function DispatchPage() {
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Không tạo được PDF thống kê")
     }
+  }
+
+  // Đổi đội lớn → tự bỏ các đội nhỏ không còn thuộc đội lớn đã chọn.
+  const handleStatsDoiChange = (next: string[]) => {
+    setStatsDoi(next)
+    if (next.length === 0) return
+    const dois = next.map(Number)
+    setStatsDoiNho(prev => prev.filter(v => v === DOI_NHO_UNASSIGNED || dois.includes(doiOfDoiNho(v) ?? -1)))
+  }
+
+  // Ảnh "Phiếu điều xe" bản kế hoạch (gửi tài xế) — vẽ Canvas, chia sẻ/tải PNG.
+  const exportPlanImage = async (busyKey: string, ngay: string, rows: DxRow[]) => {
+    if (planImageBusy) return
+    if (!rows.some(r => r.so_xe)) {
+      showToast("Phiếu chưa có xe nào để xuất ảnh")
+      return
+    }
+    setPlanImageBusy(busyKey)
+    try {
+      const blob = await renderDispatchPlanImage({
+        ngay,
+        rows,
+        points: deliveryPoints,
+        factoryName,
+        factoryNameKhmer,
+      })
+      const iso = toISO(ngay)
+      await shareDispatchPlanImage(blob, `phieu-dieu-xe-${iso}.png`)
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Không tạo được ảnh phiếu điều xe")
+    } finally {
+      setPlanImageBusy(null)
+    }
+  }
+
+  // Đổi thứ tự 1 điểm trong lộ trình (km tự tính lại qua updateRow).
+  const moveLoTrinh = (idx: number, pos: number, dir: -1 | 1) => {
+    const current = formRows[idx]?.lo_trinh || []
+    const target = pos + dir
+    if (target < 0 || target >= current.length) return
+    const next = [...current]
+    ;[next[pos], next[target]] = [next[target], next[pos]]
+    updateRow(idx, "lo_trinh", next)
   }
 
   const exportTripPdf = async (entry: DispatchEntry, row: DxRow) => {
@@ -1116,6 +1214,7 @@ export default function DispatchPage() {
       kl_dt: "", kl_dk: "",
       kl_mn: "", drc_mn: "", kl_mnk: "",
       ghi_chu: "",
+      ghi_chu_tu_do: "",
       locked: false, _warn: undefined,
     }))
 
@@ -1195,8 +1294,7 @@ export default function DispatchPage() {
   }
 
   const openAddBlank = () => {
-    const today = new Date().toISOString().slice(0, 10)
-    setFormNgay(today)
+    setFormNgay(getFactoryTomorrowISO())
     setFormRows([emptyRow()])
     setClonedFrom(null)
     setRecentEntries([])
@@ -1208,8 +1306,7 @@ export default function DispatchPage() {
 
   // Nhân bản từ phiếu cụ thể (nút Copy trong danh sách hoặc gợi ý)
   const openClone = (entry: DispatchEntry) => {
-    const today = new Date().toISOString().slice(0, 10)
-    setFormNgay(today)
+    setFormNgay(getFactoryTomorrowISO())
     setFormCN(entry.chung_nhan || "PEFC CS")
     setFormDayChuyen(entry.day_chuyen || inferDayChuyenFromRows(entry.rows))
     setFormRows(entry.rows?.length ? cloneRowsTemplate(entry.rows) : [emptyRow()])
@@ -1249,6 +1346,7 @@ export default function DispatchPage() {
       kl_dt: "", kl_dk: "",
       kl_mn: "", drc_mn: "", kl_mnk: "",
       ghi_chu: "",
+      ghi_chu_tu_do: "",
       locked: false, _warn: undefined,
     }
     setFormRows(r => {
@@ -1653,6 +1751,11 @@ export default function DispatchPage() {
           }`}>
           <BarChart3 size={15}/> Thống kê
         </button>
+        {loading && entriesLoaded && (
+          <span className="flex items-center px-2 text-slate-400" title="Đang tải lại dữ liệu...">
+            <Loader2 size={15} className="animate-spin"/>
+          </span>
+        )}
       </div>
 
       {/* Stats */}
@@ -1677,48 +1780,46 @@ export default function DispatchPage() {
 
       {/* Filters */}
       <FilterBar
+        layout="grid"
         activeCount={
           [search, filterFrom, filterTo].filter(Boolean).length +
           (filterGhiChu.length > 0 ? 1 : 0) +
           (filterLoai.length > 0 ? 1 : 0) +
           (statsDoi.length > 0 ? 1 : 0) +
+          (statsDoiNho.length > 0 ? 1 : 0) +
           (statsVehicle.length > 0 ? 1 : 0)
         }
       >
-        <div className="flex items-center gap-2 flex-1 min-w-48">
-          <Search size={15} className="text-slate-400"/>
+        <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-emerald-400">
+          <Search size={15} className="shrink-0 text-slate-400"/>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Tìm ngày, xe, tài xế..."
-            className="flex-1 text-sm outline-none"/>
+            className="w-full min-w-0 text-sm outline-none"/>
         </div>
-        <DateTextInput value={filterFrom} onChange={setFilterFrom}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
-        <span className="text-slate-400 text-sm">{"\u2192"}</span>
-        <DateTextInput value={filterTo} onChange={setFilterTo}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
-        <FilterMultiSelect
-          options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
-          selected={filterGhiChu}
-          onChange={setFilterGhiChu}
-          labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
-          placeholder="Tất cả ghi chú"
-          searchPlaceholder="Tìm ghi chú..."
-          className="min-w-64"
-        />
-        <FilterMultiSelect
-          options={DISPATCH_MATERIAL_OPTIONS}
-          selected={filterLoai}
-          onChange={setFilterLoai}
-          placeholder="Tất cả loại nguyên liệu"
-          className="min-w-64"
-        />
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:col-span-2">
+          <DateTextInput value={filterFrom} onChange={setFilterFrom}
+            className="w-full min-w-0 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
+          <span className="text-slate-400 text-sm">{"\u2192"}</span>
+          <DateTextInput value={filterTo} onChange={setFilterTo}
+            className="w-full min-w-0 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
+        </div>
         <FilterMultiSelect
           options={doiOptionStrings}
           selected={statsDoi}
-          onChange={setStatsDoi}
+          onChange={handleStatsDoiChange}
           labels={doiLabels}
-          placeholder="Tất cả đội"
-          searchPlaceholder="Tìm đội..."
+          placeholder="Tất cả đội lớn"
+          searchPlaceholder="Tìm đội lớn..."
+          fullWidth
+        />
+        <FilterMultiSelect
+          options={doiNhoOptions}
+          selected={statsDoiNho}
+          onChange={setStatsDoiNho}
+          labels={doiNhoLabels}
+          placeholder="Tất cả đội nhỏ"
+          searchPlaceholder="Tìm đội nhỏ..."
+          fullWidth
         />
         <FilterMultiSelect
           options={statVehicleOptions}
@@ -1726,33 +1827,53 @@ export default function DispatchPage() {
           onChange={setStatsVehicle}
           placeholder="Tất cả xe"
           searchPlaceholder="Tìm xe..."
+          fullWidth
         />
-        {(search||filterFrom||filterTo||filterGhiChu.length>0||filterLoai.length>0||statsDoi.length>0||statsVehicle.length>0) &&
-          <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu([]); setFilterLoai([]); setStatsDoi([]); setStatsVehicle([]) }}
-            className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
-            <X size={14}/> Xóa lọc
-          </button>}
+        <FilterMultiSelect
+          options={DISPATCH_MATERIAL_OPTIONS}
+          selected={filterLoai}
+          onChange={setFilterLoai}
+          placeholder="Tất cả loại nguyên liệu"
+          fullWidth
+        />
+        <FilterMultiSelect
+          options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
+          selected={filterGhiChu}
+          onChange={setFilterGhiChu}
+          labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
+          placeholder="Tất cả ghi chú"
+          searchPlaceholder="Tìm ghi chú..."
+          fullWidth
+        />
+        {((search||filterFrom||filterTo||filterGhiChu.length>0||filterLoai.length>0||statsDoi.length>0||statsDoiNho.length>0||statsVehicle.length>0) || listTab === "stats") && (
+          <div className="col-span-full flex flex-wrap items-center justify-end gap-2">
+            {(search||filterFrom||filterTo||filterGhiChu.length>0||filterLoai.length>0||statsDoi.length>0||statsDoiNho.length>0||statsVehicle.length>0) &&
+              <button onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterGhiChu([]); setFilterLoai([]); setStatsDoi([]); setStatsDoiNho([]); setStatsVehicle([]) }}
+                className="flex items-center gap-1 px-3 py-2 text-sm text-slate-500 hover:text-red-500">
+                <X size={14}/> Xóa lọc
+              </button>}
+            {listTab === "stats" && (
+              <>
+                <button onClick={() => exportStatsPdf("all")}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 border border-emerald-200 hover:bg-emerald-50 rounded-lg">
+                  <Download size={13}/> PDF tổng
+                </button>
+                <button onClick={() => exportStatsPdf("doi")}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-700 border border-blue-200 hover:bg-blue-50 rounded-lg">
+                  <Download size={13}/> PDF đội lớn
+                </button>
+                <button onClick={() => exportStatsPdf("vehicle")}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-violet-700 border border-violet-200 hover:bg-violet-50 rounded-lg">
+                  <Download size={13}/> PDF xe
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </FilterBar>
 
       {listTab === "stats" && (
         <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-wrap gap-3 items-center">
-            <div className="ml-auto flex flex-wrap gap-2">
-              <button onClick={() => exportStatsPdf("all")}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 border border-emerald-200 hover:bg-emerald-50 rounded-lg">
-                <Download size={13}/> {"PDF t\u1ed5ng"}
-              </button>
-              <button onClick={() => exportStatsPdf("doi")}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-blue-700 border border-blue-200 hover:bg-blue-50 rounded-lg">
-                <Download size={13}/> {"PDF \u0111\u1ed9i"}
-              </button>
-              <button onClick={() => exportStatsPdf("vehicle")}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-violet-700 border border-violet-200 hover:bg-violet-50 rounded-lg">
-                <Download size={13}/> PDF xe
-              </button>
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
             {([
               { label: "T\u1ed5ng b\u1ea3ng ph\u00e2n xe", value: analytics.totals.entries.toLocaleString("vi-VN"), Icon: Calendar, tone: "text-slate-600" },
@@ -1773,14 +1894,14 @@ export default function DispatchPage() {
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="font-extrabold text-slate-800">{"Theo \u0111\u1ed9i"}</h3>
-                <span className="text-xs text-slate-400">{analytics.byDoi.length} {"\u0111\u1ed9i"}</span>
+                <h3 className="font-extrabold text-slate-800">Theo đội lớn</h3>
+                <span className="text-xs text-slate-400">{analytics.byDoi.length} đội lớn</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50">
                     <tr>
-                      {["\u0110\u1ed9i","Chuy\u1ebfn","Xe","Km","T\u01b0\u01a1i","Kh\u00f4","MN kh\u00f4","T\u1ea1p kh\u00f4"].map(h => (
+                      {["Đội lớn","Chuy\u1ebfn","Xe","Km","T\u01b0\u01a1i","Kh\u00f4","MN kh\u00f4","T\u1ea1p kh\u00f4"].map(h => (
                         <th key={h} className="px-3 py-2 text-left font-bold text-slate-500 uppercase whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -1840,7 +1961,7 @@ export default function DispatchPage() {
 
       {/* List */}
       <ResponsiveTableWrapper className={listTab === "list" ? "" : "hidden"}>
-        {loading ? (
+        {loading && !entriesLoaded ? (
           <div className="p-12 text-center text-slate-400">{"\u0110ang t\u1ea3i..."}</div>
         ) : filtered.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
@@ -1851,7 +1972,7 @@ export default function DispatchPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["M\u00e3 \u0110X","Ng\u00e0y","D\u00e2y chuy\u1ec1n","Ch\u1ee9ng nh\u1eadn","S\u1ed1 xe","T\u1ed5ng KL t\u01b0\u01a1i","T\u1ed5ng KL kh\u00f4","K\u00fd duy\u1ec7t",""].map(h => (
+                {["M\u00e3 \u0110X","Ng\u00e0y","D\u00e2y chuy\u1ec1n","Ch\u1ee9ng nh\u1eadn","Tr\u1ea1ng th\u00e1i","S\u1ed1 xe","T\u1ed5ng KL t\u01b0\u01a1i","T\u1ed5ng KL kh\u00f4","K\u00fd duy\u1ec7t",""].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -1891,6 +2012,16 @@ export default function DispatchPage() {
                       <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
                         {entry.chung_nhan || "PEFC CS"}
                       </span>
+                    </td>
+                    <td className="px-4 py-3" onClick={() => { setSelected(entry); setView("detail") }}>
+                      {(() => {
+                        const progress = ENTRY_PROGRESS_UI[getEntryProgress(entry.rows)]
+                        return (
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${progress.cls}`}>
+                            {progress.label}
+                          </span>
+                        )
+                      })()}
                     </td>
                     <td className="px-4 py-3 font-semibold text-slate-700"
                       onClick={() => { setSelected(entry); setView("detail") }}>
@@ -1955,6 +2086,11 @@ export default function DispatchPage() {
                             <FileText size={14}/>
                           </button>
                         )}
+                        <button onClick={(e) => { e.stopPropagation(); void exportPlanImage(entry.id, entry.ngay, entry.rows || []) }}
+                          disabled={planImageBusy !== null}
+                          className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-lg transition-colors disabled:opacity-50" title="Ảnh phiếu điều xe (gửi tài xế)">
+                          {planImageBusy === entry.id ? <Loader2 size={14} className="animate-spin"/> : <ImageIcon size={14}/>}
+                        </button>
                         <button onClick={(e) => { e.stopPropagation(); openClone(entry) }}
                           className="p-1.5 hover:bg-violet-50 text-violet-500 rounded-lg transition-colors" title="Nhân bản phiếu này">
                           <Copy size={14}/>
@@ -2057,7 +2193,7 @@ export default function DispatchPage() {
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">PDF</th>
-              {["Xe","Chuyến","Tài xế","Điểm GN","Đội","Phiên","Lô thu hoạch","KM","KL tươi","DRC%","KL khô"].map(h => (
+              {["Xe","Chuyến","Tài xế","Điểm GN","Đội lớn","Đội nhỏ","Phiên","Lô thu hoạch","KM","KL tươi","DRC%","KL khô"].map(h => (
                 <th key={h} className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
               <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ký hiệu KT</th>
@@ -2086,6 +2222,7 @@ export default function DispatchPage() {
                   </div>
                 </td>
                 <td className="px-3 py-2.5 text-slate-600">{formatDoiLabel(getTripDois(row, deliveryPoints))}</td>
+                <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{resolveTripDoiNhos(row.diem_gn || [], deliveryPoints).join(", ") || "—"}</td>
                 <td className="px-3 py-2.5 text-slate-500">{(row.phien||[]).join(", ")}</td>
                 <td className="px-3 py-2.5 text-slate-500 text-[10px] max-w-48 truncate">{Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.join(", ") : row.lo_thu_hoach}</td>
                 <td className="px-3 py-2.5 text-slate-600">{row.so_km} km</td>
@@ -2110,10 +2247,10 @@ export default function DispatchPage() {
                 {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dct)||0),0).toLocaleString()}
               </td>
               <td/>
-              <td/>
               <td className="px-3 py-2.5 font-bold text-emerald-700">
                 {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dck)||0),0).toLocaleString()}
               </td>
+              <td/>
               <td/>
             </tr>
           </tfoot>
@@ -2140,6 +2277,12 @@ export default function DispatchPage() {
             Nhân bản từ {clonedFrom.split("-").reverse().join("/")}
           </span>
         )}
+        <button onClick={() => void exportPlanImage("form", formNgay, formRows)}
+          disabled={planImageBusy !== null}
+          title="Xuất ảnh phiếu điều xe kế hoạch để gửi tài xế (không cần lưu trước)"
+          className="ml-auto flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-cyan-700 border border-cyan-200 hover:bg-cyan-50 rounded-lg disabled:opacity-50">
+          {planImageBusy === "form" ? <Loader2 size={13} className="animate-spin"/> : <ImageIcon size={13}/>} Ảnh phiếu điều xe
+        </button>
       </div>
 
       {/* Dây chuyền — luôn đặt đầu tiên */}
@@ -2219,7 +2362,7 @@ export default function DispatchPage() {
         <table className="w-full text-xs">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              {["Xe","Chuyến","Tài xế","Điểm GN","Đội","Phiên","Lô thu hoạch","Lộ trình","Km","Ký hiệu KT","Ghi chú",""].map(h => (
+              {["Xe","Chuyến","Tài xế","Điểm GN","Đội lớn","Đội nhỏ","Phiên","Lô thu hoạch","Lộ trình","Km","Ghi chú","Ký hiệu KT",""].map(h => (
                 <th key={h} className="px-3 py-2.5 text-left text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -2268,9 +2411,14 @@ export default function DispatchPage() {
                   }
                 </td>
 
-                {/* Đội */}
+                {/* Đội lớn */}
                 <td className="px-2 py-1.5 text-slate-600 font-semibold whitespace-nowrap">
                   {formatDoiLabel(resolveAllowedDoi(row.diem_gn))}
+                </td>
+
+                {/* Đội nhỏ — chỉ đọc, suy từ điểm GN */}
+                <td className="px-2 py-1.5 text-slate-600 whitespace-nowrap">
+                  {resolveTripDoiNhos(row.diem_gn, deliveryPoints).join(", ") || "—"}
                 </td>
 
                 {/* Phiên */}
@@ -2326,17 +2474,41 @@ export default function DispatchPage() {
                   }
                 </td>
 
-                {/* Lộ trình — lọc theo đội của Điểm GN */}
-                <td className="px-2 py-1.5 min-w-[130px]">
+                {/* Lộ trình — lọc theo đội của Điểm GN; giữ đúng thứ tự đi, sắp lại bằng ↑/↓ */}
+                <td className="px-2 py-1.5 min-w-[150px]">
                   {row.locked
-                    ? <span className="text-slate-600">{row.lo_trinh.join(", ") || "—"}</span>
+                    ? <span className="text-slate-600 whitespace-nowrap">{row.lo_trinh.join(" → ") || "—"}</span>
                     : (() => {
                         const allowed = resolveAllowedDoi(row.diem_gn)
                         const opts = allowed.length > 0
                           ? deliveryPoints.filter(d => allowed.includes(d.doi)).map(d => d.ma_lo)
                           : deliveryPoints.map(d => d.ma_lo)
-                        return <SmartMultiSelect options={opts} selected={row.lo_trinh} labels={deliveryPointLabels}
-                          onChange={val => updateRow(idx,"lo_trinh",val)} placeholder="Chọn lộ trình..."/>
+                        return (
+                          <div className="space-y-1">
+                            <SmartMultiSelect options={opts} selected={row.lo_trinh} labels={deliveryPointLabels}
+                              onChange={val => updateRow(idx,"lo_trinh",val)} placeholder="Chọn lộ trình..."/>
+                            {row.lo_trinh.length > 1 && (
+                              <div className="flex flex-wrap items-center gap-0.5">
+                                {row.lo_trinh.map((code, pos) => (
+                                  <span key={`${code}-${pos}`} className="inline-flex items-center gap-0.5">
+                                    {pos > 0 && <span className="text-slate-400">→</span>}
+                                    <span className="inline-flex items-center rounded bg-sky-50 px-1 py-0.5 text-[10px] font-semibold text-sky-700">
+                                      <button type="button" onClick={() => moveLoTrinh(idx, pos, -1)} disabled={pos === 0}
+                                        title="Lên trước" className="text-sky-500 hover:text-sky-800 disabled:opacity-25">
+                                        <ArrowUp size={10}/>
+                                      </button>
+                                      {code}
+                                      <button type="button" onClick={() => moveLoTrinh(idx, pos, 1)} disabled={pos === row.lo_trinh.length - 1}
+                                        title="Xuống sau" className="text-sky-500 hover:text-sky-800 disabled:opacity-25">
+                                        <ArrowDown size={10}/>
+                                      </button>
+                                    </span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
                       })()
                   }
                 </td>
@@ -2344,6 +2516,19 @@ export default function DispatchPage() {
                 {/* Km */}
                 <td className="px-2 py-1.5 text-center font-bold text-slate-700 whitespace-nowrap">
                   {row.so_km ? `${row.so_km} km` : "—"}
+                </td>
+
+                {/* Ghi chú tự do — gửi tài xế (in lên ảnh phiếu điều xe) */}
+                <td className="px-2 py-1.5 min-w-[150px]">
+                  {row.locked
+                    ? <span className="text-slate-500 text-xs block max-w-40 truncate" title={row.ghi_chu_tu_do}>{row.ghi_chu_tu_do || "—"}</span>
+                    : <input
+                        value={row.ghi_chu_tu_do || ""}
+                        onChange={e => updateRow(idx, "ghi_chu_tu_do", e.target.value)}
+                        placeholder="Ghi chú gửi tài xế..."
+                        className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400 placeholder:text-slate-300"
+                      />
+                  }
                 </td>
 
                 {/* Ký hiệu KT */}
@@ -2356,19 +2541,7 @@ export default function DispatchPage() {
                         onChange={v => updateRow(idx,"ghi_chu",v)}
                         className="w-32 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400"
                         onError={showToast}
-                      />
-                  }
-                </td>
-
-                {/* Ghi chú sự cố tự do */}
-                <td className="px-2 py-1.5 min-w-[150px]">
-                  {row.locked
-                    ? <span className="text-slate-500 text-xs block max-w-40 truncate" title={row.ghi_chu_tu_do}>{row.ghi_chu_tu_do || "—"}</span>
-                    : <input
-                        value={row.ghi_chu_tu_do || ""}
-                        onChange={e => updateRow(idx, "ghi_chu_tu_do", e.target.value)}
-                        placeholder="Ghi chú sự cố..."
-                        className="w-36 px-2 py-1 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-400 placeholder:text-slate-300"
+                        placeholder="Điền khi xe về"
                       />
                   }
                 </td>

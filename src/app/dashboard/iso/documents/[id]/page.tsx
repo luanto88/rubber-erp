@@ -58,6 +58,7 @@ import {
   ChevronUp,
   FileSignature,
   Edit3,
+  Undo2,
 } from "lucide-react"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
@@ -65,6 +66,82 @@ import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { DistributionModal } from "../../_components/distribution-modal"
 import { DistributionManagement } from "../../_components/distribution-management"
+import { authFetch } from "@/lib/auth-fetch"
+import { canCreateIsoDocument, canViewIsoLibrary, readCachedIsoUser } from "../../_components/iso-access"
+
+/**
+ * GĐ3 phân quyền ISO — ai được mở trang chi tiết một tài liệu:
+ * - Có `iso.view_library`: mở được bản có hiệu lực; bản hết hiệu lực cần thêm
+ *   `iso.view_het_hieu_luc`; bản nháp / đang luân chuyển chỉ người tham gia.
+ * - Không có `iso.view_library`: chỉ người tham gia.
+ * "Người tham gia" = tạo / soạn / xem xét / phê duyệt (cả bộ cha/con qua RPC
+ * `iso_doc_family_participant` của GĐ1) HOẶC người được phân phối tài liệu (hoặc tài liệu cha).
+ * Nhờ vậy link trong "Việc của tôi", thông báo, Kho, QR của người ký luôn mở được.
+ * Bị chặn ở bản hết hiệu lực → kèm bản thay thế đang có hiệu lực (mirror findReplacement của
+ * api/iso/public-doc/[id]/route.ts).
+ */
+type IsoDocAccess = { allowed: boolean; expired?: boolean; replacementId?: string | null }
+
+async function resolveIsoDocAccess(
+  docId: string,
+  fid: string,
+  uid: string,
+  viewer: SessionUser | null,
+): Promise<IsoDocAccess> {
+  if (viewer?.role === "admin") return { allowed: true }
+  const { data: row } = await supabase
+    .from("iso_documents")
+    .select("id, parent_doc_id, trang_thai, ma_tai_lieu, ma_tai_lieu_moi, created_by, soan_thao_user_id, xem_xet_user_id, phe_duyet_user_id")
+    .eq("id", docId)
+    .eq("factory_id", fid)
+    .maybeSingle()
+  // Không đọc được bản ghi → để luồng cũ hiện "Không tìm thấy tài liệu".
+  if (!row) return { allowed: true }
+
+  const hasLibrary = canViewIsoLibrary(viewer)
+  const expired = row.trang_thai === "het_hieu_luc"
+  const openByPermission =
+    hasLibrary &&
+    (row.trang_thai === "co_hieu_luc" || (expired && hasPermission(viewer, "iso.view_het_hieu_luc")))
+  if (openByPermission) return { allowed: true }
+
+  if ([row.created_by, row.soan_thao_user_id, row.xem_xet_user_id, row.phe_duyet_user_id].includes(uid)) {
+    return { allowed: true }
+  }
+  const { data: inFamily } = await supabase.rpc("iso_doc_family_participant", {
+    p_doc_id: row.id,
+    p_parent_id: row.parent_doc_id,
+    p_user_id: uid,
+  })
+  if (inFamily === true) return { allowed: true }
+  const docIds = [row.id, row.parent_doc_id].filter(Boolean) as string[]
+  const { data: recipientRows } = await supabase
+    .from("iso_distribution_recipients")
+    .select("id")
+    .eq("recipient_user_id", uid)
+    .in("iso_document_id", docIds)
+    .limit(1)
+  if ((recipientRows?.length || 0) > 0) return { allowed: true }
+
+  if (!expired) return { allowed: false }
+  // Tìm bản thay thế: (1) theo mã mới / cùng mã đang có hiệu lực, (2) bản mới ghi ma_tai_lieu_cu.
+  // 2 truy vấn .eq() rời — không dùng .or() vì mã tài liệu có thể chứa ký tự đặc biệt.
+  let replacementId: string | null = null
+  const targetCode = (row.ma_tai_lieu_moi as string | null) || (row.ma_tai_lieu as string | null)
+  if (targetCode) {
+    const { data: same } = await supabase
+      .from("iso_documents").select("id").eq("factory_id", fid)
+      .eq("trang_thai", "co_hieu_luc").eq("ma_tai_lieu", targetCode).neq("id", row.id).limit(1)
+    replacementId = (same?.[0]?.id as string | undefined) ?? null
+  }
+  if (!replacementId && row.ma_tai_lieu) {
+    const { data: byOld } = await supabase
+      .from("iso_documents").select("id").eq("factory_id", fid)
+      .eq("trang_thai", "co_hieu_luc").eq("ma_tai_lieu_cu", row.ma_tai_lieu).neq("id", row.id).limit(1)
+    replacementId = (byOld?.[0]?.id as string | undefined) ?? null
+  }
+  return { allowed: false, expired: true, replacementId }
+}
 
 type ProfileOption = {
   id: string
@@ -340,6 +417,7 @@ export default function IsoDocumentDetailPage() {
   const docId = params.id as string
   const isNew = docId === "new-doc"
   const [templateConfirmed, setTemplateConfirmed] = useState(false)
+  const [accessDenied, setAccessDenied] = useState<IsoDocAccess | null>(null)
   const autoSendTriedRef = useRef(false)
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -515,6 +593,11 @@ export default function IsoDocumentDetailPage() {
 
   // Success toast
   const [toast, setToast] = useState<{ ok: boolean; text: string } | null>(null)
+  // GĐ4: thu hồi tài liệu đã gửi về nháp (người tạo/soạn thảo hoặc admin, chưa có ký bước sau).
+  const [recallOpen, setRecallOpen] = useState(false)
+  const [recallReason, setRecallReason] = useState("")
+  const [recalling, setRecalling] = useState(false)
+  const [lastRecall, setLastRecall] = useState<{ at: string; lyDo: string | null } | null>(null)
 
   // Header mismatch warnings from generate-pdf
   const [headerMismatchWarnings, setHeaderMismatchWarnings] = useState<Array<{ found: string; expected: string }>>([])
@@ -542,14 +625,15 @@ export default function IsoDocumentDetailPage() {
     // service-role) như 3 danh sách quyền bên dưới, nếu không người soát xét/phê duyệt
     // không phải admin chỉ thấy đúng 1 dòng của chính mình trong `profiles` (RLS), khiến
     // select không khớp option nào và hiện rỗng dù giá trị thật vẫn đúng.
-    const [allList, soatXetList, xemXetList, pheDuyetList] = await Promise.all([
+    // GĐ2 chuẩn hoá quyền (2026-10-02): bỏ `iso.soat_xet`, chỉ còn `iso.xem_xet`
+    // (migration 20261006 đã chép người có soát xét sang xem xét).
+    const [allList, xemXetList, pheDuyetList] = await Promise.all([
       loadProfilesByPermission(fid, ""),
-      loadProfilesByPermission(fid, "iso.soat_xet"),
       loadProfilesByPermission(fid, "iso.xem_xet"),
       loadProfilesByPermission(fid, "iso.phe_duyet"),
     ])
     setProfilesAll(allList)
-    setProfilesXemXet(soatXetList.length > 0 ? soatXetList : xemXetList)
+    setProfilesXemXet(xemXetList)
     setProfilesPheDuyet(pheDuyetList)
   }, [loadProfilesByPermission])
 
@@ -679,6 +763,22 @@ export default function IsoDocumentDetailPage() {
       setSiblingDocs([])
     }
 
+    // GĐ4: lần thu hồi gần nhất (chỉ hiện banner khi dòng nhật ký MỚI NHẤT là thu_hoi).
+    if (d.trang_thai === "draft") {
+      const { data: lastLog } = await supabase
+        .from("doc_approval_log")
+        .select("action, ly_do, created_at")
+        .eq("factory_id", fid)
+        .eq("doc_id", id)
+        .eq("doc_type", "iso")
+        .order("created_at", { ascending: false })
+        .limit(1)
+      const top = (lastLog || [])[0] as { action: string; ly_do: string | null; created_at: string } | undefined
+      setLastRecall(top?.action === "thu_hoi" ? { at: top.created_at, lyDo: top.ly_do } : null)
+    } else {
+      setLastRecall(null)
+    }
+
     let soHieu = ""
     let maTaiLieuCha = ""
     let loaiTaiLieuCha = "QT"
@@ -770,19 +870,32 @@ export default function IsoDocumentDetailPage() {
       if (!session?.user) { setLoading(false); return }
       const uid = session.user.id
       const erp = JSON.parse(localStorage.getItem("erp_user") || "{}")
+
+      // GĐ3: tạo mới cần iso.create; xem tài liệu có sẵn cần iso.view_library HOẶC là người
+      // tham gia / người nhận phân phối (chặn cả khi dán URL trực tiếp).
+      const accessUser = readCachedIsoUser()
+      if (isNew && !canCreateIsoDocument(accessUser)) {
+        router.replace(canViewIsoLibrary(accessUser) ? "/dashboard/iso/documents" : "/dashboard/iso/my-tasks")
+        return
+      }
+      if (!isNew) {
+        const access = await resolveIsoDocAccess(docId, fid, uid, accessUser)
+        if (!access.allowed) {
+          setAccessDenied(access)
+          setLoading(false)
+          return
+        }
+      }
+
       setUser(erp)
       setFactoryId(fid)
 
-      // Check iso.distribute permission
-      const [profRes, permRes] = await Promise.all([
-        supabase.from("profiles").select("role").eq("id", uid).single(),
-        supabase.from("user_permissions").select("permission_code").eq("user_id", uid).eq("permission_code", "iso.distribute"),
-      ])
+      // Quyền phân phối: dùng danh sách quyền hiệu lực trong cache session (đã gộp
+      // user_permissions đã cấp + role_permissions), không đọc thẳng user_permissions.
+      const profRes = await supabase.from("profiles").select("role").eq("id", uid).single()
       setCanDistribute(
         profRes.data?.role === "admin" ||
-        ((permRes.data || []) as Array<{ permission_code: string }>).some(
-          (p) => p.permission_code === "iso.distribute",
-        ),
+        (Array.isArray(erp?.permissions) && (erp.permissions as string[]).includes("iso.distribute")),
       )
 
       void loadMasterData()
@@ -794,7 +907,7 @@ export default function IsoDocumentDetailPage() {
       setLoading(false)
     }
     void bootstrap()
-  }, [isNew, docId, loadDoc, loadEffectiveDocs, loadMasterData, loadProfiles])
+  }, [isNew, docId, loadDoc, loadEffectiveDocs, loadMasterData, loadProfiles, router])
 
   useEffect(() => {
     if (!standardsOpen) return
@@ -1000,7 +1113,7 @@ export default function IsoDocumentDetailPage() {
     : false
   const isAdmin = user?.role === "admin"
   // Phải là đúng người được chỉ định VÀ có quyền
-  const canXemXet = (hasPermission(user, "iso.soat_xet") || hasPermission(user, "iso.xem_xet")) && !!userId && userId === doc?.xem_xet_user_id
+  const canXemXet = hasPermission(user, "iso.xem_xet") && !!userId && userId === doc?.xem_xet_user_id
   const canApprove = hasPermission(user, "iso.phe_duyet") && !!userId && userId === doc?.phe_duyet_user_id
 
   const isNguoiTao = !!userId && (userId === doc?.created_by || isNew)
@@ -1012,6 +1125,12 @@ export default function IsoDocumentDetailPage() {
 
   // Ký bước 1 (Soạn thảo): chỉ người được chỉ định là người soạn thảo hoặc admin
   const canSignStep1 = !isNew && (trangThai === "draft" || trangThai === "tra_ve") && (isDrafter || isAdmin)
+  // GĐ4 Thu hồi — chỉ để hiện nút; server (/api/iso/documents/[id]/recall) kiểm lại trên DB.
+  const isRecordOwner = !!userId && (userId === doc?.created_by || userId === doc?.soan_thao_user_id)
+  const canRecall = !isNew && !!doc && (isRecordOwner || isAdmin) && !doc.ky_xem_xet_at && !doc.ky_phe_duyet_at && (
+    trangThai === "cho_xem_xet" || (trangThai === "cho_phe_duyet" && doc.cap_tl !== "Cấp 1")
+  )
+  const recallBatchCount = canRecall ? childDocs.filter((c) => c.trang_thai === trangThai && !c.ky_xem_xet_at && !c.ky_phe_duyet_at).length : 0
   // Người soạn thảo của tài liệu này (hoặc đang tạo mới)
   const isSoanThao = isNew || (!!userId && userId === doc?.soan_thao_user_id)
   const canToggleAutoConvert = (trangThai === "draft" || trangThai === "tra_ve") && (isDrafter || isNguoiTao || isAdmin)
@@ -1019,6 +1138,32 @@ export default function IsoDocumentDetailPage() {
   // thông tin chi tiết vẫn xem bình thường, chỉ nội dung file bị khoá.
   const canOpenThisFile = canOpenIsoFile(trangThai, user, doc, userId)
   const canAddChildRow = !!(selectedParentDocId && form.loai_tai_lieu_cha && form.so_hieu_cha)
+
+  const handleRecall = async () => {
+    if (!docId || !factoryId) return
+    setRecalling(true)
+    try {
+      const res = await authFetch(`/api/iso/documents/${docId}/recall`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lyDo: recallReason.trim() || undefined }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string; recalledIds?: string[] }
+      if (!res.ok) {
+        showToast(false, json.error || "Không thu hồi được tài liệu")
+        return
+      }
+      setRecallOpen(false)
+      setRecallReason("")
+      const n = json.recalledIds?.length || 1
+      showToast(true, n > 1 ? `Đã thu hồi ${n} tài liệu/hồ sơ về bản nháp` : "Đã thu hồi tài liệu về bản nháp")
+      void loadDoc(docId, factoryId)
+    } catch (err) {
+      showToast(false, err instanceof Error ? err.message : "Không thu hồi được tài liệu")
+    } finally {
+      setRecalling(false)
+    }
+  }
 
   const showToast = (ok: boolean, text: string) => {
     setToast({ ok, text })
@@ -1864,7 +2009,7 @@ export default function IsoDocumentDetailPage() {
         }
         // Trigger notify-obsolete cho các bản đã hết hiệu lực (soát xét)
         for (const obsoleteId of invalidatedIds) {
-          void fetch("/api/iso/distribute/notify-obsolete", {
+          void authFetch("/api/iso/distribute/notify-obsolete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ obsoleteDocId: obsoleteId, newDocId: docId, factoryId }),
@@ -3893,6 +4038,36 @@ export default function IsoDocumentDetailPage() {
     )
   }
 
+  if (accessDenied) {
+    return (
+      <IsoShell>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center space-y-3">
+          <p className="text-base font-bold text-slate-700">
+            {accessDenied.expired ? "Tài liệu này đã hết hiệu lực" : "Bạn không có quyền xem tài liệu này"}
+          </p>
+          <p className="text-sm text-slate-500">
+            {accessDenied.expired
+              ? "Chỉ người tham gia ký, người được phân phối, hoặc người có quyền \"Xem bản hết hiệu lực\" mới mở được bản cũ."
+              : "Tài liệu chỉ mở được khi bạn có quyền \"Xem kho tài liệu ISO\" (bản có hiệu lực), tham gia ký, hoặc đã được phân phối."}
+          </p>
+          <div className="flex flex-wrap justify-center gap-2 pt-1">
+            {accessDenied.expired && accessDenied.replacementId && canViewIsoLibrary(readCachedIsoUser()) && (
+              <Link href={`/dashboard/iso/documents/${accessDenied.replacementId}`} className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold">
+                Xem bản đang có hiệu lực
+              </Link>
+            )}
+            <Link href="/dashboard/iso/my-tasks" className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold">
+              Về Việc của tôi
+            </Link>
+            <Link href={`/iso-doc/${docId}`} className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm font-bold">
+              Xem thông tin công khai
+            </Link>
+          </div>
+        </div>
+      </IsoShell>
+    )
+  }
+
   if (!isNew && !doc) {
     return (
       <IsoShell>
@@ -3930,6 +4105,65 @@ export default function IsoDocumentDetailPage() {
             <span className="text-sm font-bold">{toast.text}</span>
             <button onClick={() => setToast(null)} className="ml-2 hover:opacity-70"><X size={14} /></button>
           </div>
+        )}
+
+        {/* GĐ4: dấu vết lần thu hồi gần nhất */}
+        {trangThai === "draft" && lastRecall && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+            <Undo2 size={14} className="mt-0.5 shrink-0 text-amber-600" />
+            <span>
+              Tài liệu đã được thu hồi về nháp lúc <strong>{new Date(lastRecall.at).toLocaleString("vi-VN")}</strong>
+              {lastRecall.lyDo ? <> — lý do: {lastRecall.lyDo}</> : null}. Chữ ký lượt soạn thảo trước đã bị huỷ, cần ký lại khi gửi.
+            </span>
+          </div>
+        )}
+
+        {recallOpen && (
+          <ModalShell
+            title="Thu hồi tài liệu về bản nháp"
+            onClose={() => { if (!recalling) setRecallOpen(false) }}
+            maxWidth="md"
+            footer={
+              <>
+                <button
+                  type="button"
+                  onClick={() => setRecallOpen(false)}
+                  disabled={recalling}
+                  className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Huỷ
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRecall()}
+                  disabled={recalling}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-60"
+                >
+                  {recalling ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
+                  {recalling ? "Đang thu hồi..." : "Thu hồi"}
+                </button>
+              </>
+            }
+          >
+            <div className="space-y-3 text-sm text-slate-700">
+              <p>
+                Tài liệu sẽ quay về <strong>Nháp</strong>
+                {recallBatchCount > 0 ? <> cùng <strong>{recallBatchCount}</strong> hồ sơ đi kèm trong bộ</> : null}.
+                Chữ ký lượt soạn thảo bị huỷ; người đang được chờ ký sẽ nhận thông báo và không cần ký nữa.
+              </p>
+              <p className="text-xs text-slate-500">Sau khi thu hồi bạn có thể sửa, thay file hoặc xoá như bản nháp bình thường.</p>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do (không bắt buộc)</label>
+                <textarea
+                  value={recallReason}
+                  onChange={(e) => setRecallReason(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500"
+                  placeholder="VD: Cần sửa lại nội dung mục 3"
+                />
+              </div>
+            </div>
+          </ModalShell>
         )}
 
         {/* Save error */}
@@ -4108,6 +4342,18 @@ export default function IsoDocumentDetailPage() {
                   </>
                 )}
               </>
+            )}
+
+            {/* GĐ4: Thu hồi về nháp (người tạo/soạn thảo hoặc admin, chưa có ký bước sau) */}
+            {canRecall && (
+              <button
+                type="button"
+                onClick={() => { setRecallReason(""); setRecallOpen(true) }}
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 text-sm font-semibold shadow-2xs transition-all active:scale-[0.98]"
+                title="Đưa tài liệu đã gửi về bản nháp để sửa hoặc xoá"
+              >
+                <Undo2 size={14} /> Thu hồi
+              </button>
             )}
 
             {/* Xem xét → gửi phê duyệt */}

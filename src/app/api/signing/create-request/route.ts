@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
 import { createSigningRequest, type SigningSignerInput } from "@/lib/signing/requests"
 import { scheduleSigningNotify } from "@/lib/signing/notify"
+import { computeRecordFingerprint } from "@/lib/signing/data-fingerprint"
+import { computeKtStatuses, KT_WAREHOUSE_CODE } from "@/lib/maintenance-kt"
 
 export const dynamic = "force-dynamic"
 
@@ -87,10 +89,29 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // GĐ2g: biên bản bảo trì có vật tư mua ngoài chỉ được gửi ký khi Kho tạm KT đủ hàng (kể cả admin).
+    if (body.modun === "maintenance" && body.banGhiId) {
+      const [st] = await computeKtStatuses(body.factoryId, body.banGhiId)
+      if (st && st.totalShortage > 0) {
+        const list = st.items.filter((it) => it.shortage > 0).map((it) => `${it.name} (thiếu ${it.shortage})`).join(", ")
+        return NextResponse.json(
+          { error: `Kho tạm ${KT_WAREHOUSE_CODE} chưa đủ vật tư mua ngoài: ${list}. Lập đề nghị mua và nhập kho trước khi gửi ký.` },
+          { status: 409 },
+        )
+      }
+    }
+
     const fileBytes = Buffer.from(body.fileBase64, "base64")
     if (!fileBytes.length) {
       return NextResponse.json({ error: "File rỗng" }, { status: 400 })
     }
+
+    // Dấu vân tay dữ liệu nguồn — tính TRƯỚC khi tạo yêu cầu (gần thời điểm client dựng PDF nhất).
+    // Dùng để phát hiện "Đã ký — dữ liệu đã đổi" theo NỘI DUNG thay vì updated_at.
+    const duLieuHash =
+      body.modun === "dispatch" && body.banGhiId
+        ? await computeRecordFingerprint(body.modun, body.factoryId, body.banGhiId)
+        : null
 
     const { yeuCauId, notifyPlan } = await createSigningRequest({
       factoryId: body.factoryId,
@@ -104,6 +125,19 @@ export async function POST(req: NextRequest) {
       signers: body.signers,
       hanXuLy: body.hanXuLy ?? null,
     })
+
+    if (duLieuHash && yeuCauId) {
+      try {
+        const { error: hashErr } = await supabaseAdmin
+          .from("yeu_cau_ky")
+          .update({ du_lieu_hash: duLieuHash })
+          .eq("id", yeuCauId)
+        // Cột chưa có (migration 20261004 chưa chạy) hoặc lỗi khác → chỉ cảnh báo, không hỏng response.
+        if (hashErr) console.warn("[create-request] Không lưu được du_lieu_hash:", hashErr.message)
+      } catch (err) {
+        console.warn("[create-request] Không lưu được du_lieu_hash:", err)
+      }
+    }
 
     // Báo cho người ký đầu tiên SAU khi response đã trả về (Telegram + SMTP mất 1-3s).
     scheduleSigningNotify(notifyPlan)

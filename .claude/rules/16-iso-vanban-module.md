@@ -570,7 +570,9 @@ làm đúng cách: **chính khối file nhảy lên đầu cột** ở `<lg`, kh
 Migration `supabase/migrations/20260915_iso_view_het_hieu_luc_permission.sql` (seed
 `permissions` + `role_permissions` cho admin; **chạy tay** trên Supabase SQL Editor).
 
-- Người chỉ có `iso.view` vẫn xem **đầy đủ thông tin chi tiết** của bản hết hiệu lực (mã, tên,
+- ⚠️ **Đã thay bằng quy tắc GĐ3 (2026-10-03)**: thiếu quyền này thì bản hết hiệu lực bị ẩn khỏi
+  tab Tài liệu ISO và mở URL bị chặn (trừ người tham gia/được phân phối) — xem mục "GĐ3 — sửa sau test".
+  Dòng cũ: Người chỉ có `iso.view` vẫn xem **đầy đủ thông tin chi tiết** của bản hết hiệu lực (mã, tên,
   ngày hiệu lực/hết hiệu lực, lịch sử ký) — chỉ mất nút **mở file** và **tải file**.
 - Helper dùng chung `canOpenIsoFile(trangThai, user)` +
   `EXPIRED_FILE_HINT` trong `src/app/dashboard/iso/_components/iso-file-access.ts`.
@@ -600,3 +602,128 @@ Khi có mâu thuẫn giữa tài liệu lịch sử, ưu tiên theo thứ tự:
 3. Nội dung lịch sử cũ
 
 File này là bản đã gộp và làm sạch. Các quy tắc cũ mâu thuẫn xem như hết hiệu lực.
+
+## Chuẩn hoá phân quyền ISO — GĐ1 vá bảo mật (2026-10-02)
+
+Kế hoạch đầy đủ (đánh giá 16 quyền → bộ 9 quyền, ẩn/hiện tab, Thu hồi): `C:\Users\Software\.claude\plans\nh-gi-ph-n-quy-n-functional-seal.md`.
+Đã chốt với người dùng: người xem xét/phê duyệt được mở bản hết hiệu lực mình đã ký; user thường
+được xem tab Tài liệu ISO; bỏ quyền "ký số"; thu hồi/sửa/xóa sau khi gửi CHỈ của chính người tạo.
+
+GĐ1 đã code (chưa test tay):
+
+- Migration `20261005_iso_rls_hardening.sql` (**ĐÃ CHẠY 2026-10-02**, đã kiểm `pg_policies` còn đúng 4 policy): `iso_documents` bỏ policy `FOR ALL`
+  → 4 policy; UPDATE cho admin / người tham gia ký của cả bộ tài liệu (hàm SECURITY DEFINER
+  `iso_doc_family_participant`) / người có `iso.phe_duyet` khi hạ bản `co_hieu_luc`; DELETE chỉ
+  nháp + người tạo/soạn hoặc admin. `iso_form_instances` UPDATE thêm người ký trong
+  `thu_tu_ky_json` (`iso_steps_include_user`) — trước đó người ký bước 2+ bấm "Trả về" bị lọc âm thầm.
+- 4 route `/api/iso/distribute*` trước đây **không xác thực** (route chính) hoặc gọi
+  `getFreshAuthSession()` ở server — hàm chỉ chạy ở trình duyệt, luôn null ⇒ "đánh dấu đã xem" và
+  "thu hồi phân phối" luôn 401. Nay dùng `resolveIsoActor()` / `isoActorHasPermission()`
+  (`src/app/api/iso/_lib/iso-actor.ts`, mirror `fetchPermissionCodesForUser`), nhà máy + người
+  phân phối lấy từ phiên. Client gọi qua `authFetch()` (`src/lib/auth-fetch.ts`).
+- `canDistribute` (danh sách + chi tiết) dùng quyền hiệu lực trong cache session thay vì đọc
+  thẳng `user_permissions` (bỏ qua quyền theo vai trò và cột `granted`).
+- `forms/[id]` `canManageDraft` bỏ nhánh `iso.create` (sửa nháp của người khác).
+
+⚠️ Không gọi `getFreshAuthSession()` trong route server — dùng `requireAuthUser(req)`.
+
+## Chuẩn hoá phân quyền ISO — GĐ2 bộ quyền mới (2026-10-02)
+
+Đã code, **migration `20261006_iso_permissions_normalize.sql` ĐÃ CHẠY và đã deploy (2026-10-03)**.
+GĐ2 chỉ đổi BỘ MÃ quyền, CHƯA ẩn/hiện gì theo quyền — người dùng test thấy "vẫn thấy tất cả" là
+đúng trạng thái hiện tại, phần chặn nằm ở GĐ3.
+
+Bộ quyền ISO còn lại (10 mã): `iso.view`, `iso.view_library` (mới), `iso.create`, `iso.xem_xet`,
+`iso.phe_duyet`, `iso.distribute`, `iso.view_het_hieu_luc`, `iso.forms.create`,
+`iso.forms.approve`, `iso.forms.view_all` (mới). Đã bỏ: `iso.edit`, `iso.delete`, `iso.print`,
+`iso.soat_xet` (→ `iso.xem_xet`), `iso.signature`, `iso.forms.view/edit/delete`; `iso.sign` chưa
+từng tồn tại. Bản ghi trong bảng `permissions` của mã bỏ vẫn giữ tạm, Cài đặt ẩn đi
+(`DEPRECATED_PERMISSION_CODES` trong `settings/page.tsx`).
+
+- Migration chép quyền TRƯỚC khi gỡ, vào cả `user_permissions` lẫn `role_permissions`:
+  soát xét→xem xét (ghi đè cả `granted=false`); xem xét/phê duyệt/soát xét→`forms.view_all`;
+  phê duyệt→`forms.approve`; `iso.view`→`view_library` + `forms.create`; `iso.create`→`forms.create`.
+- `scripts/audit-iso-permissions.mjs` (chỉ đọc) mô phỏng đúng các bước đó trên DB thật, so khả năng
+  thao tác từng user trước/sau. Chạy 2026-10-02: 30 user active, **0 người mất quyền**, 0 người rơi
+  về role_permissions. Thay đổi đáng chú ý: 2 người có `iso.phe_duyet` (Trần Hoàng Giang, Huỳnh Ngô
+  Ngọc Khoa) giờ có tên trong danh sách chọn người phê duyệt hồ sơ thực hiện.
+  **Đặc tả COPY_RULES/DEPRECATED trong script PHẢI khớp file SQL.**
+- Tab "ISO & Văn bản" (Chữ ký cá nhân + PIN) trong Cài đặt mở cho MỌI người đã đăng nhập; bỏ guard
+  "phải có ít nhất 1 quyền Cài đặt"; menu Cài đặt không còn gate `settings.view` (chỉ ẩn với
+  customer); trang tự chuyển sang tab hợp lệ đầu tiên nếu tab mặc định bị ẩn.
+- `forms/[id]`: ký bước 1 không cần quyền (người tạo/người được chọn là ký được); danh sách người
+  xem xét = `iso.xem_xet` ∪ `iso.forms.approve`, người phê duyệt = `iso.forms.approve`.
+- `api/signing/templates` (lưu mẫu vị trí ISO): `iso.create` hoặc `iso.forms.create`.
+- `iso.forms.view_all` và `iso.view_library` mới chỉ seed, CHƯA gate gì — để GĐ3.
+
+⚠️ Thứ tự triển khai: **chạy migration TRƯỚC, deploy code SAU, càng sát càng tốt**. Khoảng giữa,
+code cũ vẫn chạy được (dùng `soat_xet || xem_xet`), chỉ có người không có `iso.create` tạm không lưu
+được mẫu vị trí ký và người chỉ có `iso.signature` tạm không vào được Cài đặt.
+
+## Chuẩn hoá phân quyền ISO — GĐ3 ẩn/hiện theo quyền (2026-10-03)
+
+Đã code, **không có migration**. `tsc` sạch, `eslint` không thêm lỗi so với HEAD. CHƯA test tay.
+
+- Helper thuần `iso/_components/iso-access.ts`: `readCachedIsoUser`, `canSeeIsoOverview`
+  (xem_xet | phe_duyet | forms.approve | admin), `canViewIsoLibrary`, `canCreateIsoDocument`,
+  `canCreateIsoForm`, `canSeeAllIsoForms`, `isFormInstanceRelated`. Mọi chỗ gate mới dùng các hàm này.
+- `iso/layout.tsx` (mới, mirror `inventory/layout.tsx`): guard `iso.view` cho MỌI trang con, gọi
+  `hydrateActiveSession()` nên cache quyền được làm mới mỗi lần vào module. Đã bỏ guard trùng ở
+  `iso/page.tsx`.
+- `iso-shell.tsx`: tab Tổng quan theo `canSeeIsoOverview`, Tài liệu ISO theo `canViewIsoLibrary`;
+  Việc của tôi / Thực hiện hồ sơ / Kho của tôi luôn hiện.
+- Tổng quan: người không đủ quyền → `router.replace("/dashboard/iso/my-tasks")` (không vòng lặp).
+  Nút "Tạo tài liệu" gate `iso.create`.
+- `documents/page.tsx`: thiếu `iso.view_library` → về Việc của tôi. **Đã bỏ nút "Mẫu vị trí ký" ở
+  header** (vẫn còn icon trên từng dòng + nút trong trang chi tiết). "Tạo tài liệu" gate `iso.create`.
+- `documents/[id]`: `new-doc` thiếu `iso.create` → bị đẩy ra. Tài liệu có sẵn khi thiếu
+  `iso.view_library` chỉ mở được nếu là người tham gia (`created_by/soan/xem_xet/phe_duyet`, rồi RPC
+  `iso_doc_family_participant` của GĐ1 phủ cả bộ cha/con) hoặc người nhận phân phối (tài liệu hoặc
+  tài liệu cha) — `hasIsoDocParticipantAccess()`. Không qua → màn "Bạn không có quyền xem tài liệu
+  này" + link trang công khai `/iso-doc/{id}`.
+- Khoảng trống đã biết: `api/iso/documents/[id]/file-url` vẫn chỉ đòi `iso.view` (người ký/người
+  nhận không có kho vẫn cần mở file) ⇒ người biết UUID vẫn lấy được file. Siết thì phải dùng cùng
+  điều kiện người tham gia ở server.
+- Các nơi khác dùng `iso.view` (sidebar, launcher, widget Dashboard, chuông) đều là "việc của tôi"
+  → giữ nguyên.
+
+
+### GĐ3 — sửa sau test (2026-10-03)
+
+- Tab Tài liệu ISO trước đây tải TẤT CẢ tài liệu nhà máy nên user không có
+  `iso.view_het_hieu_luc` vẫn thấy bản hết hiệu lực, nháp, đang chờ duyệt của người khác. Nay lọc
+  bằng `canSeeIsoDocInLibrary` (`iso-access.ts`): **có hiệu lực** → ai có kho cũng thấy; **hết hiệu
+  lực** → cần `iso.view_het_hieu_luc` hoặc đã tham gia; **nháp/đang luân chuyển** → chỉ người tham
+  gia (tính cả khi tài liệu cha là của mình). Admin thấy hết. Lọc ở giao diện; RLS SELECT
+  `iso_documents` vẫn mở toàn nhà máy.
+- Trang chi tiết: `resolveIsoDocAccess()` dùng cùng 3 tầng; người tham gia (4 cột → RPC
+  `iso_doc_family_participant` → người được phân phối tài liệu/tài liệu cha) luôn mở được. Bị chặn ở
+  bản hết hiệu lực → màn "Tài liệu này đã hết hiệu lực" kèm nút "Xem bản đang có hiệu lực" (tìm như
+  `findReplacement` của `api/iso/public-doc`, chỉ hiện khi có kho) + trang công khai.
+- Kho của tôi = bản được phân phối + bản mình tham gia ở trạng thái đã duyệt: tài liệu có/hết
+  hiệu lực mình tạo/soạn/xem xét/**phê duyệt** (trước bỏ sót phê duyệt); hồ sơ thực hiện đã phê
+  duyệt mình lập hoặc **ký bất kỳ bước** (trước chỉ `nguoi_tao`/`xem_xet_user_id`). Hồ sơ đang luân
+  chuyển cố ý KHÔNG vào Kho (ở "Thực hiện hồ sơ"/"Việc của tôi").
+- Khoảng trống: link "bản thay thế" trong Kho với user không có `iso.view_library` sẽ gặp màn chặn.
+
+## Chuẩn hoá phân quyền ISO — GĐ4 "Thu hồi" (2026-10-03)
+
+Thay "xoá sau khi gửi": người tạo đưa bản ĐÃ GỬI về **nháp** khi chưa có ai ký bước sau, rồi
+sửa/xoá như nháp (rule xoá cũ giữ nguyên: chỉ draft + người tạo/soạn hoặc admin). Không migration.
+
+- Route `POST /api/iso/documents/[id]/recall` `{ lyDo? }` — `resolveIsoActor`, service role.
+  Người gọi = `created_by` / `soan_thao_user_id` / admin (khác → 403). Điều kiện (khác → 409):
+  `cho_xem_xet` + chưa ký xem xét, hoặc `cho_phe_duyet` + chưa ký xem xét/phê duyệt + không phải
+  Cấp 1 (Cấp 2 gửi thẳng). Cấp 1 đã qua xem xét → 409 (người ký dùng "Trả về").
+- **Cả bộ**, route tự tính từ DB (mirror `loadDoc`): cha kèm con cùng `trang_thai`; hồ sơ con soạn
+  riêng kèm anh em cùng 3 người ký + `created_by`, không đụng cha. Con lệch đợt (đã có ký sau) bị bỏ qua.
+- Về nháp: xoá `ky_soan_thao_at`, 3 cột `*_placement`, `file_signed_pdf_url`,
+  `file_signed_office_url/type`, 2 cột `*_signed_url` của file phụ. Hồ sơ con Office bị
+  generate-office ghi đè `file_goc_url` ⇒ khôi phục từ `file_template_url`; thiếu → 409. Không xoá Storage.
+- Update có điều kiện chống đua (`eq trang_thai`, `is ky_xem_xet_at/ky_phe_duyet_at null`); dòng
+  chính 0 dòng → 409. Ghi `doc_approval_log` action `thu_hoi` cho từng bản. Báo người đang được chờ
+  qua `/api/iso/notify` (`ACTION_LABELS.thu_hoi`, email màu cảnh báo), lỗi không chặn.
+- UI `documents/[id]`: nút "Thu hồi" (Undo2, viền amber) cạnh nút ký, `canRecall` chỉ để hiện nút;
+  modal + lý do; banner amber khi đang nháp và dòng log mới nhất là `thu_hoi`.
+- Đã kiểm bằng script gọi route thật (tài khoản không phải người tạo → 403; người tạo trên bản đã
+  hiệu lực → 409). CHƯA test tay luồng thu hồi thành công.

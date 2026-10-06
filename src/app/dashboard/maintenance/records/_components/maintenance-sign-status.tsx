@@ -69,6 +69,7 @@ export function MaintenanceSignStatusBadge({
   status,
   currentUser,
   canCreate,
+  blockedReason,
   onOpenSignPrompt,
   onCancelled,
   showToast,
@@ -76,6 +77,8 @@ export function MaintenanceSignStatusBadge({
   status: MaintenanceSigningStatus | undefined
   currentUser: SessionUser
   canCreate: boolean
+  /** GĐ2g: có giá trị → khóa nút "Gửi ký duyệt" (vd kho tạm KT chưa đủ vật tư mua ngoài). */
+  blockedReason?: string | null
   onOpenSignPrompt: () => void
   onCancelled: () => void
   showToast: (msg: string, ok?: boolean) => void
@@ -119,7 +122,9 @@ export function MaintenanceSignStatusBadge({
     return (
       <button
         onClick={onOpenSignPrompt}
-        className="flex items-center gap-1 px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded-lg transition-colors"
+        disabled={!!blockedReason}
+        title={blockedReason || undefined}
+        className="flex items-center gap-1 px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <PenTool size={12} /> Gửi ký duyệt
       </button>

@@ -10,6 +10,7 @@ import {
   CheckCircle2,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { authFetch } from "@/lib/auth-fetch"
 import type { IsoDocument } from "./iso-types"
 import { ModalShell } from "../../_components/modal-shell"
 
@@ -123,7 +124,7 @@ export function DistributionModal({
         docIds: selectedDocIds.join(","),
         itemType,
       })
-      const res = await fetch(`/api/iso/distribute?${params.toString()}`)
+      const res = await authFetch(`/api/iso/distribute?${params.toString()}`)
       const json = (await res.json()) as {
         recipients?: RecipientApiItem[]
         departments?: DepartmentItem[]
@@ -207,7 +208,7 @@ export function DistributionModal({
     setSaving(true)
     setSaveError(null)
     try {
-      const res = await fetch("/api/iso/distribute", {
+      const res = await authFetch("/api/iso/distribute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

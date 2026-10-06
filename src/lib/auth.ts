@@ -480,15 +480,18 @@ export const DEFAULT_PERMISSION_CODES = [
   "users.approve",
   "users.edit_permission",
   "suffixes.quick_add",
+  // Bộ quyền ISO sau GĐ2 chuẩn hoá (migration 20261006). Đã BỎ: iso.edit, iso.delete,
+  // iso.print, iso.soat_xet (→ iso.xem_xet), iso.signature (tab Chữ ký cá nhân mở cho mọi người),
+  // iso.forms.view/edit/delete (sửa/xoá hồ sơ của mình là quyền chủ sở hữu, không cần mã).
   "iso.view",
+  "iso.view_library",
   "iso.create",
-  "iso.edit",
-  "iso.delete",
   "iso.xem_xet",
-  "iso.soat_xet",
   "iso.phe_duyet",
-  "iso.print",
-  "iso.signature",
+  "iso.distribute",
+  "iso.forms.create",
+  "iso.forms.approve",
+  "iso.forms.view_all",
   // Gate nút mở/tải FILE của tài liệu đã hết hiệu lực (migration 20260915). Người chỉ có
   // iso.view vẫn xem được thông tin chi tiết, chỉ không mở được nội dung bản cũ.
   // Cố ý KHÔNG có trong ROLE_DEFAULTS.manager/user — chỉ admin, cấp tay cho từng người.
@@ -544,6 +547,10 @@ export const DEFAULT_PERMISSION_CODES = [
   "kpi.evaluate",
   "kpi.view_all",
   "kpi.manage_config",
+  // Đề nghị mua vật tư hàng hóa (migration 20261007)
+  "purchase.view",
+  "purchase.create",
+  "purchase.view_all",
 ]
 
 export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
@@ -581,11 +588,16 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "settings.master_data",
     "settings.maintenance_config",
     "users.view",
+    // Khớp role_permissions sau migration 20261006 (đã đối chiếu bằng audit-iso-permissions.mjs)
     "iso.view",
+    "iso.view_library",
     "iso.create",
-    "iso.edit",
-    "iso.soat_xet",
-    "iso.signature",
+    "iso.xem_xet",
+    "iso.phe_duyet",
+    "iso.distribute",
+    "iso.forms.create",
+    "iso.forms.approve",
+    "iso.forms.view_all",
     // Khớp đúng role_permissions trên DB: manager có đủ trừ documents.delete
     "documents.view",
     "documents.create",
@@ -620,6 +632,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "kpi.assign",
     "kpi.evaluate",
     "kpi.view_all",
+    "purchase.view",
+    "purchase.create",
   ],
   user: [
     "dashboard.view",
@@ -632,7 +646,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "quality.view",
     "export.view",
     "iso.view",
-    "iso.signature",
+    "iso.view_library",
+    "iso.forms.create",
     // Khớp đúng role_permissions trên DB: role `user` chỉ được xem văn bản
     "documents.view",
     // Khớp đúng role_permissions trên DB (đối chiếu 2026-09-07): user chỉ có 3 mã maintenance
@@ -646,6 +661,8 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "notes.edit",
     "notes.delete",
     "kpi.view",
+    "purchase.view",
+    "purchase.create",
   ],
   customer: ["export.view_own"],
 }

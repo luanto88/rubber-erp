@@ -16,6 +16,7 @@ import {
   Layers,
   Loader2,
   Lock,
+  QrCode,
   X,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -39,23 +40,34 @@ function toTitleCase(str: string | null | undefined): string {
     .replace(/(?:^|\s)\S/g, (char) => char.toUpperCase())
 }
 
-// Màu sắc nhận diện vai trò
+// Màu sắc nhận diện vai trò — Cùng 1 ngôn ngữ thiết kế Dark Header chuẩn ISO
 const ROLE_THEMES = {
+  soan_thao: {
+    name: "Người soạn thảo",
+    actionLabel: "Ký & Gửi xem xét",
+    headerBg: "linear-gradient(135deg, #0f172a, #1e293b)",
+    buttonBg: "linear-gradient(135deg, #d97706, #b45309)",
+    accentFg: "#d97706",
+    accentBg: "rgba(217,119,6,0.14)",
+    badgeBg: "bg-amber-500/20 text-amber-300 border border-amber-500/30",
+  },
   xem_xet: {
     name: "Người xem xét",
     actionLabel: "Ký xem xét & Gửi phê duyệt",
-    headerBg: "linear-gradient(135deg, #b45309, #78350f)",
-    accentFg: "#d97706",
-    accentBg: "rgba(217,119,6,0.14)",
-    badgeBg: "bg-amber-100 text-amber-800 border-amber-300",
+    headerBg: "linear-gradient(135deg, #0f172a, #1e293b)",
+    buttonBg: "linear-gradient(135deg, #0284c7, #0369a1)",
+    accentFg: "#0284c7",
+    accentBg: "rgba(2,132,199,0.14)",
+    badgeBg: "bg-sky-500/20 text-sky-300 border border-sky-500/30",
   },
   phe_duyet: {
     name: "Người phê duyệt",
     actionLabel: "Phê duyệt & Ban hành",
-    headerBg: "linear-gradient(135deg, #047857, #064e3b)",
+    headerBg: "linear-gradient(135deg, #0f172a, #1e293b)",
+    buttonBg: "linear-gradient(135deg, #059669, #047857)",
     accentFg: "#059669",
     accentBg: "rgba(5,150,105,0.14)",
-    badgeBg: "bg-emerald-100 text-emerald-800 border-emerald-300",
+    badgeBg: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30",
   },
 }
 
@@ -68,6 +80,8 @@ export type BatchBox = {
   hPct: number
   showName: boolean
   showChucVu: boolean
+  templateAllowChucVu?: boolean
+  templateAllowName?: boolean
   showPrefix?: boolean
   chucVuKey?: "chinh_quyen" | "kiem_nhiem" | string | null
   signAs?: SignAsType
@@ -297,177 +311,187 @@ function BatchInteractiveSignBox({
         </div>
       </Draggable>
 
-      {/* Chức vụ (TRÊN Họ tên) */}
-      <Draggable
-        nodeRef={cvNodeRef as RefObject<HTMLElement>}
-        position={{ x: cvInnerX, y: cvInnerY }}
-        bounds="parent"
-        cancel=".resize-handle"
-        onStop={(_, d) => onUpdate({ cvInnerX: d.x, cvInnerY: d.y, boxDomW: bw, boxDomH: bh })}
-      >
-        <div
-          ref={cvNodeRef}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: cvInnerW,
-            height: cvInnerH,
-            cursor: "move",
-            userSelect: "none",
-            fontFamily: "'Times New Roman', Times, serif",
-          }}
-          className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all touch-none ${
-            box.showChucVu
-              ? "border-violet-400 bg-violet-50/95 text-violet-950 text-xs hover:border-violet-600"
-              : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
-          }`}
-          title={box.showChucVu ? "Kéo để di chuyển vị trí chức vụ trong khung" : "Chức vụ đang ẩn — Bấm icon mắt để hiện lại"}
+      {/* Chức vụ (TRÊN Họ tên) — Chỉ hiển thị khi mẫu vị trí cho phép */}
+      {box.templateAllowChucVu !== false && (
+        <Draggable
+          nodeRef={cvNodeRef as RefObject<HTMLElement>}
+          position={{ x: cvInnerX, y: cvInnerY }}
+          bounds="parent"
+          cancel=".resize-handle"
+          onStop={(_, d) => onUpdate({ cvInnerX: d.x, cvInnerY: d.y, boxDomW: bw, boxDomH: bh })}
         >
-          <span className={`truncate w-full ${box.showChucVu ? "" : "line-through"}`}>
-            {effectiveCvText}
-          </span>
-          <button
-            type="button"
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onTouchEnd={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-              onUpdate({ showChucVu: !box.showChucVu })
-            }}
-            className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
-              box.showChucVu ? "text-violet-600 hover:text-violet-900" : "text-slate-400 hover:text-slate-700"
-            }`}
-            title={box.showChucVu ? "Ẩn chức vụ" : "Hiện lại chức vụ"}
-          >
-            {box.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
-          </button>
-
           <div
-            className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-violet-600 hover:bg-violet-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
-            title="Kéo để co giãn kích thước chức vụ"
-            onPointerDown={(e) => {
-              e.stopPropagation()
-              e.preventDefault()
-              const startX = e.clientX
-              const startY = e.clientY
-              const startW = cvInnerW
-              const startH = cvInnerH
-              const curX = cvInnerX
-              const curY = cvInnerY
-
-              const onMove = (ev: PointerEvent) => {
-                const dx = ev.clientX - startX
-                const dy = ev.clientY - startY
-                const newW = Math.max(30, Math.min(bw - curX, startW + dx))
-                const newH = Math.max(12, Math.min(bh - curY, startH + dy))
-                onUpdate({ cvInnerW: newW, cvInnerH: newH, boxDomW: bw, boxDomH: bh })
-              }
-              const onUp = () => {
-                window.removeEventListener("pointermove", onMove)
-                window.removeEventListener("pointerup", onUp)
-              }
-              window.addEventListener("pointermove", onMove)
-              window.addEventListener("pointerup", onUp)
+            ref={cvNodeRef}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: cvInnerW,
+              height: cvInnerH,
+              cursor: "move",
+              userSelect: "none",
+              fontFamily: "'Times New Roman', Times, serif",
             }}
+            className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all touch-none ${
+              box.showChucVu
+                ? "border-violet-400 bg-violet-50/95 text-violet-950 text-xs hover:border-violet-600"
+                : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
+            }`}
+            title={box.showChucVu ? "Kéo để di chuyển vị trí chức vụ trong khung" : "Chức vụ đang ẩn — Bấm icon mắt để hiện lại"}
           >
-            <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 3 3 3 3 9" />
-              <polyline points="15 21 21 21 21 15" />
-              <line x1="3" y1="3" x2="10" y2="10" />
-              <line x1="21" y1="21" x2="14" y2="14" />
-            </svg>
-          </div>
-        </div>
-      </Draggable>
+            <span className={`truncate w-full ${box.showChucVu ? "" : "line-through"}`}>
+              {effectiveCvText}
+            </span>
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                onUpdate({ showChucVu: !box.showChucVu })
+              }}
+              className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
+                box.showChucVu ? "text-violet-600 hover:text-violet-900" : "text-slate-400 hover:text-slate-700"
+              }`}
+              title={box.showChucVu ? "Ẩn chức vụ" : "Hiện lại chức vụ"}
+            >
+              {box.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
+            </button>
 
-      {/* Họ tên (DƯỚI Chức vụ) */}
-      <Draggable
-        nodeRef={nameNodeRef as RefObject<HTMLElement>}
-        position={{ x: nameInnerX, y: nameInnerY }}
-        bounds="parent"
-        cancel=".resize-handle"
-        onStop={(_, d) => onUpdate({ nameInnerX: d.x, nameInnerY: d.y, boxDomW: bw, boxDomH: bh })}
-      >
-        <div
-          ref={nameNodeRef}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: nameInnerW,
-            height: nameInnerH,
-            cursor: "move",
-            userSelect: "none",
-            fontFamily: "'Times New Roman', Times, serif",
-          }}
-          className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all touch-none ${
-            box.showName
-              ? "border-sky-400 bg-sky-50/95 text-sky-950 text-xs hover:border-sky-600"
-              : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
-          }`}
-          title={box.showName ? "Kéo để di chuyển vị trí tên trong khung" : "Tên đang ẩn — Bấm icon mắt để hiện lại"}
+            {/* Chỉ hiện mũi tên 2 chiều co giãn khi chức vụ đang bật */}
+            {box.showChucVu && (
+              <div
+                className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-violet-600 hover:bg-violet-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+                title="Kéo để co giãn kích thước chức vụ"
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  const startX = e.clientX
+                  const startY = e.clientY
+                  const startW = cvInnerW
+                  const startH = cvInnerH
+                  const curX = cvInnerX
+                  const curY = cvInnerY
+
+                  const onMove = (ev: PointerEvent) => {
+                    const dx = ev.clientX - startX
+                    const dy = ev.clientY - startY
+                    const newW = Math.max(30, Math.min(bw - curX, startW + dx))
+                    const newH = Math.max(12, Math.min(bh - curY, startH + dy))
+                    onUpdate({ cvInnerW: newW, cvInnerH: newH, boxDomW: bw, boxDomH: bh })
+                  }
+                  const onUp = () => {
+                    window.removeEventListener("pointermove", onMove)
+                    window.removeEventListener("pointerup", onUp)
+                  }
+                  window.addEventListener("pointermove", onMove)
+                  window.addEventListener("pointerup", onUp)
+                }}
+              >
+                <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 3 3 3 3 9" />
+                  <polyline points="15 21 21 21 21 15" />
+                  <line x1="3" y1="3" x2="10" y2="10" />
+                  <line x1="21" y1="21" x2="14" y2="14" />
+                </svg>
+              </div>
+            )}
+          </div>
+        </Draggable>
+      )}
+
+      {/* Họ tên (DƯỚI Chức vụ) — Chỉ hiển thị khi mẫu vị trí cho phép */}
+      {box.templateAllowName !== false && (
+        <Draggable
+          nodeRef={nameNodeRef as RefObject<HTMLElement>}
+          position={{ x: nameInnerX, y: nameInnerY }}
+          bounds="parent"
+          cancel=".resize-handle"
+          onStop={(_, d) => onUpdate({ nameInnerX: d.x, nameInnerY: d.y, boxDomW: bw, boxDomH: bh })}
         >
-          <span className={`truncate w-full ${box.showName ? "" : "line-through"}`}>
-            {toTitleCase(signerName || "Người ký")}
-          </span>
-          <button
-            type="button"
-            onMouseDown={(e) => e.stopPropagation()}
-            onTouchStart={(e) => e.stopPropagation()}
-            onTouchEnd={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-              onUpdate({ showName: !box.showName })
-            }}
-            className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
-              box.showName ? "text-sky-600 hover:text-sky-900" : "text-slate-400 hover:text-slate-700"
-            }`}
-            title={box.showName ? "Ẩn họ tên" : "Hiện lại họ tên"}
-          >
-            {box.showName ? <Eye size={12} /> : <EyeOff size={12} />}
-          </button>
-
           <div
-            className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-sky-600 hover:bg-sky-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
-            title="Kéo để co giãn kích thước họ tên"
-            onPointerDown={(e) => {
-              e.stopPropagation()
-              e.preventDefault()
-              const startX = e.clientX
-              const startY = e.clientY
-              const startW = nameInnerW
-              const startH = nameInnerH
-              const curX = nameInnerX
-              const curY = nameInnerY
-
-              const onMove = (ev: PointerEvent) => {
-                const dx = ev.clientX - startX
-                const dy = ev.clientY - startY
-                const newW = Math.max(30, Math.min(bw - curX, startW + dx))
-                const newH = Math.max(12, Math.min(bh - curY, startH + dy))
-                onUpdate({ nameInnerW: newW, nameInnerH: newH, boxDomW: bw, boxDomH: bh })
-              }
-              const onUp = () => {
-                window.removeEventListener("pointermove", onMove)
-                window.removeEventListener("pointerup", onUp)
-              }
-              window.addEventListener("pointermove", onMove)
-              window.addEventListener("pointerup", onUp)
+            ref={nameNodeRef}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: nameInnerW,
+              height: nameInnerH,
+              cursor: "move",
+              userSelect: "none",
+              fontFamily: "'Times New Roman', Times, serif",
             }}
+            className={`border py-0.5 rounded pl-1.5 pr-6 select-none shadow-xs text-center leading-none font-normal flex items-center justify-center relative transition-all touch-none ${
+              box.showName
+                ? "border-sky-400 bg-sky-50/95 text-sky-950 text-xs hover:border-sky-600"
+                : "border-dashed border-slate-300 bg-slate-100/85 text-slate-400 text-xs opacity-60"
+            }`}
+            title={box.showName ? "Kéo để di chuyển vị trí tên trong khung" : "Tên đang ẩn — Bấm icon mắt để hiện lại"}
           >
-            <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="9 3 3 3 3 9" />
-              <polyline points="15 21 21 21 21 15" />
-              <line x1="3" y1="3" x2="10" y2="10" />
-              <line x1="21" y1="21" x2="14" y2="14" />
-            </svg>
+            <span className={`truncate w-full ${box.showName ? "" : "line-through"}`}>
+              {toTitleCase(signerName || "Người ký")}
+            </span>
+            <button
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                onUpdate({ showName: !box.showName })
+              }}
+              className={`absolute -top-1 -right-1 p-2 rounded-full flex items-center justify-center transition-colors z-20 touch-manipulation hover:bg-black/5 ${
+                box.showName ? "text-sky-600 hover:text-sky-900" : "text-slate-400 hover:text-slate-700"
+              }`}
+              title={box.showName ? "Ẩn họ tên" : "Hiện lại họ tên"}
+            >
+              {box.showName ? <Eye size={12} /> : <EyeOff size={12} />}
+            </button>
+
+            {/* Chỉ hiện mũi tên 2 chiều co giãn khi họ tên đang bật */}
+            {box.showName && (
+              <div
+                className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-sky-600 hover:bg-sky-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+                title="Kéo để co giãn kích thước họ tên"
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  const startX = e.clientX
+                  const startY = e.clientY
+                  const startW = nameInnerW
+                  const startH = nameInnerH
+                  const curX = nameInnerX
+                  const curY = nameInnerY
+
+                  const onMove = (ev: PointerEvent) => {
+                    const dx = ev.clientX - startX
+                    const dy = ev.clientY - startY
+                    const newW = Math.max(30, Math.min(bw - curX, startW + dx))
+                    const newH = Math.max(12, Math.min(bh - curY, startH + dy))
+                    onUpdate({ nameInnerW: newW, nameInnerH: newH, boxDomW: bw, boxDomH: bh })
+                  }
+                  const onUp = () => {
+                    window.removeEventListener("pointermove", onMove)
+                    window.removeEventListener("pointerup", onUp)
+                  }
+                  window.addEventListener("pointermove", onMove)
+                  window.addEventListener("pointerup", onUp)
+                }}
+              >
+                <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 3 3 3 3 9" />
+                  <polyline points="15 21 21 21 21 15" />
+                  <line x1="3" y1="3" x2="10" y2="10" />
+                  <line x1="21" y1="21" x2="14" y2="14" />
+                </svg>
+              </div>
+            )}
           </div>
-        </div>
-      </Draggable>
+        </Draggable>
+      )}
     </div>
   )
 }
@@ -484,9 +508,20 @@ export type BatchSignDoc = {
   pageDims: Record<number, { w: number; h: number }>
   pageThumbs: Record<number, string>
   boxes: BatchBox[]
+  qrConfig?: {
+    page: number
+    allPages?: boolean
+    xPct: number
+    yPct: number
+    wPct: number
+    hPct: number
+    xPt: number
+    yPt: number
+    wPt: number
+    hPt: number
+  }
   requiresSign: boolean
 }
-
 
 type PreviewSig = {
   signerUserId: string
@@ -507,7 +542,7 @@ interface IsoBatchSignModalProps {
   onClose: () => void
   doc: IsoDocument
   childDocs: IsoDocument[]
-  action: "gui_phe_duyet" | "phe_duyet" | "gui_lai_phe_duyet"
+  action: "gui_xem_xet" | "gui_phe_duyet" | "phe_duyet" | "gui_lai_phe_duyet"
   factoryId: string
   currentUser: SessionUser
   initialSignAs?: SignAsType
@@ -529,9 +564,16 @@ export function IsoBatchSignModal({
   initialSignAs = "none",
   onTransitionSuccess,
 }: IsoBatchSignModalProps) {
+  const isSoanThao = action === "gui_xem_xet"
   const isPheDuyet = action === "phe_duyet"
-  const currentRole = isPheDuyet ? "phe_duyet" : "xem_xet"
-  const theme = isPheDuyet ? ROLE_THEMES.phe_duyet : ROLE_THEMES.xem_xet
+  const isXemXet = action === "gui_phe_duyet" || action === "gui_lai_phe_duyet"
+  const currentRole = isSoanThao ? "soan_thao" : isPheDuyet ? "phe_duyet" : "xem_xet"
+  const theme = {
+    ...ROLE_THEMES[currentRole],
+    actionLabel: isSoanThao
+      ? (doc.cap_tl === "Cấp 2" ? "Ký & Gửi phê duyệt" : "Ký & Gửi xem xét")
+      : ROLE_THEMES[currentRole].actionLabel,
+  }
 
   // Danh sách tài liệu trong bộ
   const [docItems, setDocItems] = useState<BatchSignDoc[]>([])
@@ -568,7 +610,57 @@ export function IsoBatchSignModal({
   const [pinLoading, setPinLoading] = useState(false)
   const [signingProgress, setSigningProgress] = useState<{ current: number; total: number; title: string } | null>(null)
 
+  // Theo dõi các khung chữ ký của người ký đã được lướt qua (xem)
+  const [viewedBoxIds, setViewedBoxIds] = useState<Set<string>>(new Set())
+
   const activeDoc = docItems[activeDocIndex] || null
+
+  // Danh sách toàn bộ các khung ký của người ký này trên tất cả các tài liệu cần ký
+  const allRequiredBoxes = useMemo(() => {
+    const list: {
+      docIndex: number
+      docLabel: string
+      page: number
+      box: BatchBox
+    }[] = []
+    docItems.forEach((d, dIdx) => {
+      if (d.requiresSign) {
+        d.boxes.forEach((b) => {
+          list.push({
+            docIndex: dIdx,
+            docLabel: d.label,
+            page: b.page,
+            box: b,
+          })
+        })
+      }
+    })
+    return list
+  }, [docItems])
+
+  const totalBoxesCount = allRequiredBoxes.length
+  const viewedBoxesCount = allRequiredBoxes.filter((item) => viewedBoxIds.has(item.box.id)).length
+  const allBoxesViewed = totalBoxesCount === 0 || viewedBoxesCount >= totalBoxesCount
+
+  // Tự động ghi nhận các khung chữ ký trên trang hiện tại đã được lướt qua
+  useEffect(() => {
+    const currentDoc = docItems[activeDocIndex]
+    if (!currentDoc || !currentDoc.requiresSign) return
+    const currentBoxesOnPage = currentDoc.boxes.filter((b) => b.page === activePage)
+    if (currentBoxesOnPage.length === 0) return
+
+    setViewedBoxIds((prev) => {
+      let changed = false
+      const next = new Set(prev)
+      currentBoxesOnPage.forEach((b) => {
+        if (!next.has(b.id)) {
+          next.add(b.id)
+          changed = true
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [activeDocIndex, activePage, docItems])
 
   // Tra cứu URL ảnh chữ ký cá nhân của người dùng — qua route mint Signed URL (bucket private)
   useEffect(() => {
@@ -642,6 +734,7 @@ export function IsoBatchSignModal({
     const initBatch = async () => {
       setLoading(true)
       setError("")
+      setViewedBoxIds(new Set())
 
       try {
         const rawDocs: Array<{
@@ -733,8 +826,18 @@ export function IsoBatchSignModal({
         // Tải toàn bộ mẫu vị trí liên quan từ bảng `mau_vi_tri`
         const tmplKeysToQuery = new Set<string>()
         rawDocs.forEach((d) => {
-          if (d.code) tmplKeysToQuery.add(`iso:code:${d.code}`)
-          if (d.typeCode) tmplKeysToQuery.add(`iso:loai:${d.typeCode}`)
+          if (d.code) {
+            tmplKeysToQuery.add(`iso:code:${d.code}`)
+            tmplKeysToQuery.add(`iso:loai:${d.code}`)
+            tmplKeysToQuery.add(`iso:${d.code}`)
+            tmplKeysToQuery.add(d.code)
+          }
+          if (d.typeCode) {
+            tmplKeysToQuery.add(`iso:loai:${d.typeCode}`)
+            tmplKeysToQuery.add(`iso:code:${d.typeCode}`)
+            tmplKeysToQuery.add(`iso:${d.typeCode}`)
+            tmplKeysToQuery.add(d.typeCode)
+          }
         })
 
         const { data: tmplRows } = await supabase
@@ -787,26 +890,80 @@ export function IsoBatchSignModal({
           }
 
           // Đối chiếu template: ưu tiên iso:code:..., fallback iso:loai:...
-          const tmpl = tmplMap[`iso:code:${rDoc.code}`] || tmplMap[`iso:loai:${rDoc.typeCode}`]
+          const tmpl = tmplMap[`iso:code:${rDoc.code}`]
+            || tmplMap[`iso:loai:${rDoc.code}`]
+            || tmplMap[rDoc.code]
+            || tmplMap[`iso:loai:${rDoc.typeCode}`]
+            || tmplMap[`iso:code:${rDoc.typeCode}`]
+            || tmplMap[rDoc.typeCode]
           const matchingBoxes: BatchBox[] = []
+          let docQrConfig: BatchSignDoc["qrConfig"] = undefined
 
           if (tmpl && Array.isArray(tmpl.khung)) {
-            const stepIdx = isPheDuyet ? (doc.cap_tl === "Cấp 2" ? 1 : 2) : 1
+            const stepIdx = isSoanThao ? 0 : isPheDuyet ? (doc.cap_tl === "Cấp 2" ? 1 : 2) : 1
             const totalSteps = doc.cap_tl === "Cấp 2" ? 2 : 3
+            const currentStepNum = stepIdx + 1
 
             // Dùng findRoleBoxForStep để xác định khung chuẩn
             const roleBox = findRoleBoxForStep(tmpl.khung, {
               stepIndex: stepIdx,
               totalSteps,
-              stepName: isPheDuyet ? "Người phê duyệt" : "Người xem xét",
+              stepName: isSoanThao ? "Người soạn thảo" : isPheDuyet ? "Người phê duyệt" : "Người xem xét",
               stepKey: currentRole,
               action,
             })
 
+            const roleBoxVt = roleBox ? String(roleBox.vai_tro || "") : ""
+            const roleBoxCloneOf = roleBox ? String(roleBox.clone_of || "") : ""
+
+            // Quét mã QR từ template nếu có
+            const qrBox = tmpl.khung.find((k) => k.vai_tro === "qr" || k.loai === "qr" || Boolean(k.la_qr))
+            if (qrBox) {
+              const isMoiTrang = qrBox.neo_trang === "moi_trang" || Number(qrBox.so_trang) === 0
+              const qrPage = isMoiTrang ? 1 : Math.min(Math.max(Number(qrBox.so_trang) || 1, 1), numPages)
+              const qrDim = dims[qrPage] || dims[1] || { w: 595.28, h: 841.89 }
+              const qrXPt = Number(qrBox.x_pt) || 30
+              const qrYPt = Number(qrBox.y_pt) || 30
+              const qrWPt = Number(qrBox.w_pt) || 40
+              const qrHPt = Number(qrBox.h_pt) || 40
+
+              docQrConfig = {
+                page: qrPage,
+                allPages: isMoiTrang,
+                xPct: (qrXPt / qrDim.w) * 100,
+                yPct: ((qrDim.h - qrYPt - qrHPt) / qrDim.h) * 100,
+                wPct: (qrWPt / qrDim.w) * 100,
+                hPct: (qrHPt / qrDim.h) * 100,
+                xPt: qrXPt,
+                yPt: qrYPt,
+                wPt: qrWPt,
+                hPt: qrHPt,
+              }
+            }
+
+            // Quét toàn bộ khung chữ ký của vai trò hiện tại (bao gồm khung chính và toàn bộ bản sao)
             tmpl.khung.forEach((k, idx) => {
-              const isMatch = roleBox
-                ? k === roleBox || k.vai_tro === currentRole || (currentRole === "phe_duyet" ? k.vai_tro === "buoc_cuoi" : k.vai_tro === "soat_xet")
-                : (k.vai_tro === currentRole || (currentRole === "phe_duyet" ? k.vai_tro === "buoc_cuoi" : k.vai_tro === "soat_xet"))
+              const vt = String(k.vai_tro || "")
+              const cloneOf = String(k.clone_of || "")
+              const isQr = vt === "qr" || k.loai === "qr" || Boolean(k.la_qr)
+              if (isQr) return
+
+              let isMatch = false
+              if (roleBox && (k === roleBox || vt === roleBoxVt)) {
+                isMatch = true
+              } else if (roleBox && (cloneOf === roleBoxVt || (roleBoxVt && vt.startsWith(`${roleBoxVt}__ban`)))) {
+                isMatch = true
+              } else if (roleBoxCloneOf && (cloneOf === roleBoxCloneOf || vt.startsWith(`${roleBoxCloneOf}__ban`))) {
+                isMatch = true
+              } else if (vt === currentRole || cloneOf === currentRole || vt.startsWith(`${currentRole}__ban`)) {
+                isMatch = true
+              } else if (vt === `buoc_${currentStepNum}` || cloneOf === `buoc_${currentStepNum}` || vt.startsWith(`buoc_${currentStepNum}__ban`)) {
+                isMatch = true
+              } else if (currentRole === "phe_duyet" && (vt === "buoc_cuoi" || cloneOf === "buoc_cuoi" || vt.startsWith("buoc_cuoi__ban"))) {
+                isMatch = true
+              } else if (currentRole === "xem_xet" && (vt === "soat_xet" || cloneOf === "soat_xet" || vt.startsWith("soat_xet__ban"))) {
+                isMatch = true
+              }
 
               if (isMatch) {
                 const pageNum = Math.min(Math.max(Number(k.so_trang) || 1, 1), numPages)
@@ -823,8 +980,10 @@ export function IsoBatchSignModal({
                   yPct: ((pageDim.h - yPt - hPt) / pageDim.h) * 100,
                   wPct: (wPt / pageDim.w) * 100,
                   hPct: (hPt / pageDim.h) * 100,
-                  showName: !!k.show_name,
-                  showChucVu: !!k.show_chuc_vu,
+                  showName: typeof k.show_name === "boolean" ? k.show_name : true,
+                  showChucVu: typeof k.show_chuc_vu === "boolean" ? k.show_chuc_vu : true,
+                  templateAllowChucVu: typeof k.show_chuc_vu === "boolean" ? k.show_chuc_vu : true,
+                  templateAllowName: typeof k.show_name === "boolean" ? k.show_name : true,
                   showPrefix: true,
                   chucVuKey: (k.chuc_vu_key as "chinh_quyen" | "kiem_nhiem") || "chinh_quyen",
                   signAs: (k.sign_as as SignAsType) || "none",
@@ -838,12 +997,14 @@ export function IsoBatchSignModal({
             matchingBoxes.push({
               id: `box-parent-default-${Date.now()}`,
               page: 1,
-              xPct: isPheDuyet ? 66 : 37,
+              xPct: isPheDuyet ? 66 : isSoanThao ? 8 : 37,
               yPct: 74,
               wPct: 26,
               hPct: 14,
               showName: false,
               showChucVu: false,
+              templateAllowChucVu: false,
+              templateAllowName: false,
               signAs: initialSignAs,
             })
           }
@@ -858,6 +1019,7 @@ export function IsoBatchSignModal({
             pageDims: dims,
             pageThumbs: {},
             boxes: matchingBoxes,
+            qrConfig: docQrConfig,
             requiresSign,
           })
         }
@@ -865,7 +1027,8 @@ export function IsoBatchSignModal({
         if (cancelled) return
         setDocItems(initializedDocs)
         setActiveDocIndex(0)
-        setActivePage(1)
+        const initialPage = initializedDocs[0]?.boxes[0]?.page || 1
+        setActivePage(initialPage)
         if (initializedDocs[0]?.boxes[0]) {
           setSelectedBoxId(initializedDocs[0].boxes[0].id)
         }
@@ -992,20 +1155,29 @@ export function IsoBatchSignModal({
     void renderCurrentPage()
   }, [renderCurrentPage])
 
-  // Chuyển trang hoặc chuyển tài liệu
-  const handleSelectDoc = (index: number, page = 1) => {
+  // Chuyển trang hoặc chuyển tài liệu (mặc định vào trang có khung ký của tài liệu đó)
+  const handleSelectDoc = (index: number, page?: number) => {
     setActiveDocIndex(index)
-    setActivePage(page)
     const targetDoc = docItems[index]
-    const boxOnPage = targetDoc?.boxes.find((b) => b.page === page) || targetDoc?.boxes[0]
+    const targetPage = page !== undefined ? page : (targetDoc?.boxes[0]?.page || 1)
+    setActivePage(targetPage)
+    const boxOnPage = targetDoc?.boxes.find((b) => b.page === targetPage) || targetDoc?.boxes[0]
     if (boxOnPage) {
       setSelectedBoxId(boxOnPage.id)
     }
   }
 
-  // Khung tiếp theo
+  // Khung tiếp theo (ưu tiên nhảy đến khung ký CHƯA ĐƯỢC LƯỚT QUA)
   const handleNextFrame = () => {
-    // Tìm khung ký tiếp theo sau vị trí hiện tại
+    // 1. Ưu tiên tìm khung ký chưa xem qua
+    const nextUnviewed = allRequiredBoxes.find((item) => !viewedBoxIds.has(item.box.id))
+    if (nextUnviewed) {
+      handleSelectDoc(nextUnviewed.docIndex, nextUnviewed.page)
+      setSelectedBoxId(nextUnviewed.box.id)
+      return
+    }
+
+    // 2. Nếu đã xem hết rồi, chuyển tuần tự giữa các khung
     for (let d = 0; d < docItems.length; d++) {
       const item = docItems[d]
       if (!item.requiresSign) continue
@@ -1029,7 +1201,6 @@ export function IsoBatchSignModal({
     }
   }
 
-
   // Cập nhật cấu hình khung (Hiện tên / Hiện chức vụ / Tiền tố)
   const updateBoxConfig = (boxId: string, updates: Partial<BatchBox>) => {
     setDocItems((prev) =>
@@ -1046,21 +1217,14 @@ export function IsoBatchSignModal({
 
   // 4. KIỂM TRA ĐIỀU KIỆN KÝ & QUY TẮC CHẶN LƯU
   const validationResult = useMemo(() => {
-    if (docItems.length === 0) return { valid: false, reason: "Không có tài liệu nào" }
+    if (docItems.length === 0) return { valid: false, reason: "Không có tài liệu nào", allBoxesViewed: false }
 
     const parent = docItems.find((d) => d.isParent)
     if (!parent || parent.boxes.length === 0) {
-      return { valid: false, reason: "Quy trình chính chưa được đặt vị trí chữ ký" }
+      return { valid: false, reason: "Quy trình chính chưa được đặt vị trí chữ ký", allBoxesViewed: false }
     }
 
     const childRequired = docItems.filter((d) => !d.isParent && d.requiresSign)
-
-    // QUY TẮC LINH HOẠT CHO LÃNH ĐẠO:
-    // Nếu trong toàn bộ các biểu mẫu con KHÔNG có khung ký nào của người này,
-    // người duyệt ký xong Quy trình chính là được phép hoàn tất ngay mà không bắt lướt qua 18 biểu mẫu con!
-    if (childRequired.length === 0) {
-      return { valid: true, count: parent.boxes.length, flexibleMode: true }
-    }
 
     // QUY TẮC RÀNG BUỘC KHI CÓ KHUNG Ở BIỂU MẪU CON:
     // Bắt buộc tất cả các biểu mẫu con cần ký phải có đủ khung!
@@ -1070,16 +1234,30 @@ export function IsoBatchSignModal({
         valid: false,
         reason: `Còn thiếu vị trí ký tại các biểu mẫu con: ${missingDocs.map((d) => d.label).join(", ")}`,
         missingDocs,
+        allBoxesViewed: false,
+      }
+    }
+
+    // BẮT BUỘC NGƯỜI KÝ PHẢI LƯỚT QUA ĐỦ TẤT CẢ KHUNG CHỮ KÝ CỦA MÌNH
+    if (!allBoxesViewed) {
+      return {
+        valid: false,
+        reason: `Vui lòng lướt qua đủ tất cả vị trí chữ ký của bạn trước khi ký (Đã xem ${viewedBoxesCount}/${totalBoxesCount} vị trí)`,
+        missingDocs: [],
+        allBoxesViewed: false,
       }
     }
 
     const totalBoxes = docItems.reduce((sum, d) => sum + (d.requiresSign ? d.boxes.length : 0), 0)
-    return { valid: true, count: totalBoxes, flexibleMode: false }
-  }, [docItems])
+    return { valid: true, count: totalBoxes, flexibleMode: false, allBoxesViewed: true }
+  }, [docItems, allBoxesViewed, viewedBoxesCount, totalBoxesCount])
 
   // 5. Thao tác Ký & Hoàn tất
   const handleStartSign = () => {
-    if (!validationResult.valid) {
+    if (!validationResult.valid || !allBoxesViewed) {
+      if (!allBoxesViewed) {
+        handleNextFrame()
+      }
       return
     }
     setPin("")
@@ -1246,6 +1424,12 @@ export function IsoBatchSignModal({
           prefixY: mainPl.y + 10,
           prefixWidth: 35,
           prefixHeight: 20,
+          qrPage: item.qrConfig?.page || 1,
+          qrAllPages: Boolean(item.qrConfig?.allPages),
+          qrX: item.qrConfig?.xPt,
+          qrY: item.qrConfig?.yPt,
+          qrWidth: item.qrConfig?.wPt,
+          qrHeight: item.qrConfig?.hPt,
           extraPlacements:
             cloneBoxes.length > 0
               ? cloneBoxes.map((c) => {
@@ -1317,6 +1501,21 @@ export function IsoBatchSignModal({
         nameX: p.nameX,
         nameY: p.nameY,
       })
+      if (Array.isArray(p.extraPlacements)) {
+        for (const ep of p.extraPlacements) {
+          list.push({
+            signerUserId: doc.soan_thao_user_id || "",
+            signerName: nameMap[doc.soan_thao_user_id || ""] || "Người soạn thảo",
+            page: ep.page || 1,
+            x: ep.x || 100,
+            y: ep.y || 100,
+            width: ep.width || 120,
+            height: ep.height || 60,
+            nameX: ep.nameX,
+            nameY: ep.nameY,
+          })
+        }
+      }
     }
 
     if (isPheDuyet && doc.ky_xem_xet_at && doc.xem_xet_placement && activeDoc.isParent) {
@@ -1332,6 +1531,21 @@ export function IsoBatchSignModal({
         nameX: p.nameX,
         nameY: p.nameY,
       })
+      if (Array.isArray(p.extraPlacements)) {
+        for (const ep of p.extraPlacements) {
+          list.push({
+            signerUserId: doc.xem_xet_user_id || "",
+            signerName: nameMap[doc.xem_xet_user_id || ""] || "Người xem xét",
+            page: ep.page || 1,
+            x: ep.x || 250,
+            y: ep.y || 100,
+            width: ep.width || 120,
+            height: ep.height || 60,
+            nameX: ep.nameX,
+            nameY: ep.nameY,
+          })
+        }
+      }
     }
 
     return list
@@ -1375,26 +1589,9 @@ export function IsoBatchSignModal({
 
         {/* Action bên phải Header */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          {isPheDuyet && (
-            <div className="flex items-center gap-1 text-[11px] sm:text-xs bg-black/20 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-white/10">
-              <span className="hidden sm:inline text-white/80">Ký thay:</span>
-              <select
-                value={signAs}
-                onChange={(e) => setSignAs(e.target.value as SignAsType)}
-                className="bg-transparent text-white font-bold outline-hidden cursor-pointer text-[11px] sm:text-xs"
-              >
-                <option value="none" className="bg-slate-800 text-white">Trực tiếp</option>
-                <option value="KT" className="bg-slate-800 text-white">{SIGN_AS_LABEL.KT}</option>
-                <option value="TM" className="bg-slate-800 text-white">{SIGN_AS_LABEL.TM}</option>
-                <option value="TL" className="bg-slate-800 text-white">{SIGN_AS_LABEL.TL}</option>
-                <option value="TUQ" className="bg-slate-800 text-white">{SIGN_AS_LABEL.TUQ}</option>
-              </select>
-            </div>
-          )}
-
           <button
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/20 text-white/90 transition-all"
+            className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/20 text-white/90 transition-all cursor-pointer"
             title="Đóng màn hình ký"
           >
             <X size={18} />
@@ -1444,7 +1641,7 @@ export function IsoBatchSignModal({
                     {/* Header tài liệu gọn gàng */}
                     <button
                       type="button"
-                      onClick={() => handleSelectDoc(dIdx, 1)}
+                      onClick={() => handleSelectDoc(dIdx)}
                       className="w-full text-left mb-1.5 focus:outline-hidden cursor-pointer"
                       title={item.label}
                     >
@@ -1472,6 +1669,8 @@ export function IsoBatchSignModal({
                         const isPageSelected = isItemActive && p === activePage
                         const boxesOnPage = item.boxes.filter((b) => b.page === p)
                         const hasRequiredBox = boxesOnPage.length > 0
+                        const isPageBoxesAllViewed = hasRequiredBox && boxesOnPage.every((b) => viewedBoxIds.has(b.id))
+                        const isQrOnThisThumb = Boolean(item.qrConfig && (item.qrConfig.allPages ? true : item.qrConfig.page === p))
 
                         return (
                           <button
@@ -1482,31 +1681,80 @@ export function IsoBatchSignModal({
                               isPageSelected
                                 ? "border-amber-500 shadow-sm ring-2 ring-amber-200"
                                 : hasRequiredBox
-                                  ? "border-amber-300 hover:border-amber-400"
+                                  ? (isPageBoxesAllViewed ? "border-emerald-300" : "border-amber-400 bg-amber-50/20")
                                   : "border-slate-200 hover:border-slate-300"
                             }`}
                           >
-                            {item.pageThumbs[p] ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={item.pageThumbs[p]}
-                                alt={`Trang ${p}`}
-                                className="w-full h-auto object-contain rounded-xs block select-none pointer-events-none"
-                              />
-                            ) : (
-                              <div className="w-full aspect-[1/1.4] bg-slate-50 rounded-xs flex items-center justify-center text-[10px] font-bold text-slate-400">
-                                {p}
-                              </div>
-                            )}
+                            <div className="relative w-full overflow-hidden rounded-xs bg-slate-50 flex items-center justify-center">
+                              {item.pageThumbs[p] ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={item.pageThumbs[p]}
+                                  alt={`Trang ${p}`}
+                                  className="w-full h-auto object-contain block select-none pointer-events-none"
+                                />
+                              ) : (
+                                <div className="w-full aspect-[1/1.4] flex items-center justify-center text-[10px] font-bold text-slate-400">
+                                  {p}
+                                </div>
+                              )}
 
-                            {/* Huy hiệu ký ở góc trên */}
-                            {hasRequiredBox && (
-                              <div className="absolute -top-1 -right-1 flex gap-0.5 z-10 pointer-events-none">
-                                <span className="bg-amber-500 text-white rounded-full px-1 py-0.2 text-[8px] font-bold shadow-xs">
-                                  ✍
+                              {/* Khung mini đánh dấu vị trí ký thực tế trên trang */}
+                              {boxesOnPage.map((b) => {
+                                const isBoxSelected = isPageSelected && b.id === selectedBoxId
+                                return (
+                                  <span
+                                    key={`thumb-box-${b.id}`}
+                                    className="absolute pointer-events-none rounded-[1.5px] transition-all"
+                                    style={{
+                                      left: `${Math.max(0, Math.min(100, b.xPct))}%`,
+                                      top: `${Math.max(0, Math.min(100, b.yPct))}%`,
+                                      width: `${Math.max(4, Math.min(100, b.wPct))}%`,
+                                      height: `${Math.max(3, Math.min(100, b.hPct))}%`,
+                                      border: `${isBoxSelected ? "2px" : "1.5px"} solid ${theme.accentFg}`,
+                                      backgroundColor: isBoxSelected ? `${theme.accentFg}55` : `${theme.accentFg}25`,
+                                      boxShadow: isBoxSelected ? `0 0 4px ${theme.accentFg}` : `0 0 2px ${theme.accentFg}88`,
+                                      zIndex: isBoxSelected ? 10 : 5,
+                                    }}
+                                    title={`Vị trí ký trang ${p}`}
+                                  />
+                                )
+                              })}
+
+                              {/* Khung mini mã QR */}
+                              {isQrOnThisThumb && item.qrConfig && (
+                                <span
+                                  className="absolute pointer-events-none rounded-[1px] border border-sky-500 bg-sky-200/50"
+                                  style={{
+                                    left: `${Math.max(0, Math.min(100, item.qrConfig.xPct))}%`,
+                                    top: `${Math.max(0, Math.min(100, item.qrConfig.yPct))}%`,
+                                    width: `${Math.max(4, Math.min(100, item.qrConfig.wPct))}%`,
+                                    height: `${Math.max(3, Math.min(100, item.qrConfig.hPct))}%`,
+                                    zIndex: 4,
+                                  }}
+                                  title="Mã QR"
+                                />
+                              )}
+                            </div>
+
+                            {/* Huy hiệu ký & QR ở góc trên */}
+                            <div className="absolute -top-1 -right-1 flex gap-0.5 z-10 pointer-events-none">
+                              {hasRequiredBox && (
+                                <span
+                                  className={`rounded-full px-1 py-0.2 text-[8px] font-bold shadow-xs text-white ${
+                                    isPageBoxesAllViewed ? "bg-emerald-600" : "bg-amber-500 animate-pulse"
+                                  }`}
+                                  title={isPageBoxesAllViewed ? "Đã xem vị trí ký" : "Chưa xem vị trí ký"}
+                                >
+                                  {isPageBoxesAllViewed ? "✓ ✍" : "✍"}
                                 </span>
-                              </div>
-                            )}
+                              )}
+                              {isQrOnThisThumb && (
+                                <span className="bg-sky-500 text-white rounded-full px-1 py-0.2 text-[8px] font-bold shadow-xs">
+                                  QR
+                                </span>
+                              )}
+                            </div>
 
                             <span className={`text-[10px] font-bold mt-0.5 ${isPageSelected ? "text-amber-700" : "text-slate-500"}`}>
                               Trang {p}
@@ -1544,10 +1792,17 @@ export function IsoBatchSignModal({
                   <button
                     type="button"
                     onClick={handleNextFrame}
-                    className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-all mr-0.5 sm:mr-1"
-                    title="Chuyển đến khung ký tiếp theo"
+                    className={`flex items-center gap-1 rounded-lg border px-2 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold transition-all mr-0.5 sm:mr-1 cursor-pointer ${
+                      !allBoxesViewed
+                        ? "border-amber-400 bg-amber-100 text-amber-900 shadow-xs animate-pulse hover:bg-amber-200"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                    }`}
+                    title={!allBoxesViewed ? `Chuyển đến vị trí ký chưa xem (${viewedBoxesCount}/${totalBoxesCount})` : "Chuyển đến khung ký tiếp theo"}
                   >
-                    <ArrowRight size={13} /> <span className="hidden sm:inline">Khung tiếp</span>
+                    <ArrowRight size={13} className={!allBoxesViewed ? "text-amber-800" : "text-slate-600"} />
+                    <span className="hidden sm:inline">
+                      {!allBoxesViewed ? `Xem tiếp (${viewedBoxesCount}/${totalBoxesCount})` : "Khung tiếp"}
+                    </span>
                   </button>
                   <button
                     onClick={() => setActivePage((p) => Math.max(1, p - 1))}
@@ -1608,6 +1863,23 @@ export function IsoBatchSignModal({
                       )
                     })}
 
+                  {/* Vùng QR code theo mẫu (nếu trang này có cấu hình QR hoặc chọn mọi trang) */}
+                  {activeDoc?.qrConfig && (activeDoc.qrConfig.allPages || activeDoc.qrConfig.page === activePage) && (
+                    <div
+                      className="absolute pointer-events-none rounded-lg border-2 border-dashed border-sky-400 bg-sky-50/80 p-1 flex flex-col items-center justify-center shadow-xs z-10"
+                      style={{
+                        left: `${activeDoc.qrConfig.xPct}%`,
+                        top: `${activeDoc.qrConfig.yPct}%`,
+                        width: `${activeDoc.qrConfig.wPct}%`,
+                        height: `${activeDoc.qrConfig.hPct}%`,
+                      }}
+                    >
+                      <QrCode size={18} className="text-sky-600 mb-0.5" />
+                      <span className="text-[9px] font-bold text-sky-700">Mã QR tra cứu</span>
+                      <span className="text-[7.5px] text-sky-600/70">(Tự động tạo)</span>
+                    </div>
+                  )}
+
                   {/* Khung chữ ký tương tác chuẩn của người duyệt (cố định theo mẫu, chữ ký & tên & chức vụ di chuyển độc lập) */}
                   {activeDoc?.boxes
                     .filter((b) => b.page === activePage)
@@ -1650,21 +1922,39 @@ export function IsoBatchSignModal({
             <span className="hidden sm:inline">Bộ hồ sơ:</span> {docItems.length} tài liệu ({docItems.reduce((acc, d) => acc + d.numPages, 0)} tr)
           </div>
           <span className="text-slate-300">|</span>
-          <div className="text-[11px] sm:text-xs">
-            <span className="hidden sm:inline">Số vị trí ký: </span>
-            <span className="font-extrabold text-amber-700">
-              {docItems.reduce((sum, d) => sum + (d.requiresSign ? d.boxes.length : 0), 0)} vị trí
+          <div className="text-[11px] sm:text-xs flex items-center gap-1.5">
+            <span className="hidden sm:inline">Vị trí ký: </span>
+            <span
+              className={`font-extrabold px-1.5 py-0.5 rounded text-[10px] sm:text-xs ${
+                allBoxesViewed
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800 animate-pulse"
+              }`}
+            >
+              {allBoxesViewed ? `✓ Đã xem đủ ${totalBoxesCount} vị trí` : `Đã xem ${viewedBoxesCount}/${totalBoxesCount} vị trí`}
             </span>
           </div>
           {!validationResult.valid && (
             <div className="flex items-center gap-1 text-red-600 font-semibold text-[11px] sm:text-xs ml-1 sm:ml-3">
               <AlertTriangle size={13} className="shrink-0" />
-              <span className="truncate max-w-[120px] sm:max-w-none">{validationResult.reason}</span>
+              <span className="truncate max-w-[150px] sm:max-w-none">{validationResult.reason}</span>
             </div>
           )}
         </div>
 
         <div className="flex items-center gap-2 justify-end">
+          {!allBoxesViewed && (
+            <button
+              type="button"
+              onClick={handleNextFrame}
+              className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-amber-900 transition-all shadow-2xs cursor-pointer animate-pulse"
+              title="Nhảy đến vị trí ký tiếp theo bạn chưa xem qua"
+            >
+              <span>Xem tiếp ({viewedBoxesCount}/${totalBoxesCount})</span>
+              <ArrowRight size={14} className="text-amber-700" />
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onClose}
@@ -1676,9 +1966,14 @@ export function IsoBatchSignModal({
           <button
             type="button"
             onClick={handleStartSign}
-            disabled={!validationResult.valid || loading}
+            disabled={!validationResult.valid || !allBoxesViewed || loading}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-extrabold text-white shadow-md transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: theme.headerBg }}
+            title={
+              !allBoxesViewed
+                ? `Vui lòng lướt qua đủ tất cả ${totalBoxesCount} vị trí ký trước khi ký (Hiện đã xem ${viewedBoxesCount}/${totalBoxesCount})`
+                : undefined
+            }
           >
             <CheckCircle2 size={15} /> {theme.actionLabel}
           </button>
@@ -1726,7 +2021,11 @@ export function IsoBatchSignModal({
                     <div className="grid grid-cols-4 gap-2">
                       {Array.from({ length: item.numPages }, (_, i) => i + 1).map((p) => {
                         const isPageSelected = isItemActive && p === activePage
-                        const hasRequiredBox = item.boxes.some((b) => b.page === p)
+                        const boxesOnPage = item.boxes.filter((b) => b.page === p)
+                        const hasRequiredBox = boxesOnPage.length > 0
+                        const isPageBoxesAllViewed = hasRequiredBox && boxesOnPage.every((b) => viewedBoxIds.has(b.id))
+                        const isQrOnThisThumb = Boolean(item.qrConfig && (item.qrConfig.allPages ? true : item.qrConfig.page === p))
+
                         return (
                           <button
                             key={p}
@@ -1739,23 +2038,73 @@ export function IsoBatchSignModal({
                               isPageSelected
                                 ? "border-amber-500 ring-2 ring-amber-200"
                                 : hasRequiredBox
-                                  ? "border-amber-300"
+                                  ? (isPageBoxesAllViewed ? "border-emerald-300" : "border-amber-300 bg-amber-50/20")
                                   : "border-slate-200"
                             }`}
                           >
-                            {item.pageThumbs[p] ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={item.pageThumbs[p]} alt={`Trang ${p}`} className="w-full aspect-[1/1.4] object-contain rounded-xs" />
-                            ) : (
-                              <div className="w-full aspect-[1/1.4] bg-slate-100 rounded-xs flex items-center justify-center text-[10px] text-slate-400 font-bold">
-                                {p}
-                              </div>
-                            )}
-                            {hasRequiredBox && (
-                              <span className="absolute -top-1 -right-1 bg-amber-500 text-white rounded-full px-1 text-[8px] font-bold">
-                                ✍
-                              </span>
-                            )}
+                            <div className="relative w-full aspect-[1/1.4] overflow-hidden rounded-xs bg-slate-100 flex items-center justify-center">
+                              {item.pageThumbs[p] ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={item.pageThumbs[p]} alt={`Trang ${p}`} className="w-full h-full object-contain rounded-xs" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400 font-bold">
+                                  {p}
+                                </div>
+                              )}
+
+                              {/* Khung mini đánh dấu vị trí ký thực tế trên trang */}
+                              {boxesOnPage.map((b) => {
+                                const isBoxSelected = isPageSelected && b.id === selectedBoxId
+                                return (
+                                  <span
+                                    key={`m-thumb-box-${b.id}`}
+                                    className="absolute pointer-events-none rounded-[1.5px] transition-all"
+                                    style={{
+                                      left: `${Math.max(0, Math.min(100, b.xPct))}%`,
+                                      top: `${Math.max(0, Math.min(100, b.yPct))}%`,
+                                      width: `${Math.max(4, Math.min(100, b.wPct))}%`,
+                                      height: `${Math.max(3, Math.min(100, b.hPct))}%`,
+                                      border: `${isBoxSelected ? "2px" : "1.5px"} solid ${theme.accentFg}`,
+                                      backgroundColor: isBoxSelected ? `${theme.accentFg}55` : `${theme.accentFg}25`,
+                                      boxShadow: isBoxSelected ? `0 0 4px ${theme.accentFg}` : `0 0 2px ${theme.accentFg}88`,
+                                      zIndex: isBoxSelected ? 10 : 5,
+                                    }}
+                                  />
+                                )
+                              })}
+
+                              {/* Khung mini mã QR */}
+                              {isQrOnThisThumb && item.qrConfig && (
+                                <span
+                                  className="absolute pointer-events-none rounded-[1px] border border-sky-500 bg-sky-200/50"
+                                  style={{
+                                    left: `${Math.max(0, Math.min(100, item.qrConfig.xPct))}%`,
+                                    top: `${Math.max(0, Math.min(100, item.qrConfig.yPct))}%`,
+                                    width: `${Math.max(4, Math.min(100, item.qrConfig.wPct))}%`,
+                                    height: `${Math.max(3, Math.min(100, item.qrConfig.hPct))}%`,
+                                    zIndex: 4,
+                                  }}
+                                />
+                              )}
+                            </div>
+
+                            <div className="absolute -top-1 -right-1 flex gap-0.5 z-10 pointer-events-none">
+                              {hasRequiredBox && (
+                                <span
+                                  className={`rounded-full px-1 text-[8px] font-bold text-white shadow-xs ${
+                                    isPageBoxesAllViewed ? "bg-emerald-600" : "bg-amber-500 animate-pulse"
+                                  }`}
+                                  title={isPageBoxesAllViewed ? "Đã xem vị trí ký" : "Chưa xem vị trí ký"}
+                                >
+                                  {isPageBoxesAllViewed ? "✓ ✍" : "✍"}
+                                </span>
+                              )}
+                              {isQrOnThisThumb && (
+                                <span className="bg-sky-500 text-white rounded-full px-1 text-[8px] font-bold">
+                                  QR
+                                </span>
+                              )}
+                            </div>
                             <span className={`text-[10px] font-bold mt-1 ${isPageSelected ? "text-amber-700" : "text-slate-600"}`}>
                               Trang {p}
                             </span>

@@ -375,3 +375,21 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
   2. **Panel duyệt hàng loạt**: phía trên bảng liệt kê từng GIÁ TRỊ ghi chú lạ khác nhau kèm số dòng bị ảnh hưởng, nút "Thêm vào danh mục" xử lý 1 lần cho tất cả dòng cùng giá trị đó (`handleBulkAddNote`).
   3. **Van an toàn**: nút phụ "Nhập N dòng hợp lệ, bỏ qua M dòng lỗi" (`handleConfirm({ skipInvalidNotes: true })`) — chỉ loại các dòng còn `UNKNOWN_NOTE`, không đụng logic `DUPLICATE_IN_FILE` (mã đó vẫn chặn toàn bộ file, không cho bỏ qua từng dòng vì là lỗi cấu trúc file). Kết quả Bước 3 hiện thêm dòng "N dòng đã bị bỏ qua do ghi chú không hợp lệ" nếu có (`importResult.skippedInvalidNote`).
 - Nút xác nhận chính bị `disabled` khi còn `DUPLICATE_IN_FILE` hoặc `UNKNOWN_NOTE` chưa xử lý; nút "Nhập phần hợp lệ" chỉ hiện khi có `UNKNOWN_NOTE` và KHÔNG có `DUPLICATE_IN_FILE` đồng thời.
+
+## Cập nhật 2026-10-04 — Đội lớn/Đội nhỏ, bộ lọc lưới, import mẫu SLRpt
+
+- **Bộ lọc** (`output/page.tsx`): `FilterBar layout="grid"` như Điều xe; ô tìm số xe đứng đầu; Đội lớn
+  chọn nhiều (`filterDoi: string[]`, `"0"` = Thu mua); Đội nhỏ (`filterDoiNho`) phụ thuộc Đội lớn
+  (đổi Đội lớn tự bỏ đội nhỏ không thuộc). Áp cho cả Danh sách lẫn Thống kê.
+- **Đội nhỏ của 1 bản ghi** suy lúc đọc (`doiNhoKeysByRecord`): tìm chuyến điều xe cùng ngày + xe +
+  chuyến (ưu tiên `dispatch_entry_id`), giữ các điểm GN thuộc đúng `record.doi`, rồi
+  `resolveTripDoiNhoFilterKeys`. Sản lượng nhập theo chuyến ⇒ chuyến đi qua 1.1 + 1.5 khớp CẢ HAI
+  (lọc 1.1 vẫn hiện nguyên KL gộp của chuyến). Không khớp chuyến / Thu mua ⇒ "Chưa gán đội nhỏ".
+- **Mẫu SLRpt** (`SLRpt_SanLuongNgay_TongHop.xlsx`): tự nhận diện qua header
+  `STT | Đội | Số xe | Ngày`. Cột: B "Đội N", C số xe, D ngày (text dd/mm/yyyy), E..S 5 bộ
+  Tươi/DRC/Khô, T tổng quy khô (bỏ), U ghi chú; bỏ dòng "Tổng cộng". Mẫu cũ (sl_mau) không đổi.
+- **Không có cột Chuyến** ⇒ `matchRows` ghép: ứng viên = chuyến điều xe của xe trong ngày có điểm GN
+  thuộc đội lớn của dòng, sắp `chuyen` tăng; dòng thứ k của cùng (ngày, xe, đội) → ứng viên thứ k.
+  Không có ứng viên mà xe chỉ có 1 chuyến ⇒ gán chuyến đó + `DOI_MISMATCH`; còn lại
+  `CHUYEN_NOT_FOUND` (không chặn, chuyến tạm = 1). Bảng xem trước ghi "tự ghép" dưới số chuyến.
+  Chỉ số chuyến được ghép xong mới tính khoá trùng (`getMatchedKey`).

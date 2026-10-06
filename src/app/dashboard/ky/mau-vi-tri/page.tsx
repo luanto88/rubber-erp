@@ -443,7 +443,18 @@ function reconcileForDoc(
     cloneSeqRef.current.ky_buoc = (cloneSeqRef.current.ky_buoc || 1) + 1
     kyBuocFamily.push(makeCloneRole("ky_buoc", cloneSeqRef.current.ky_buoc, sourceBox))
   }
-  const finalFamily = kyBuocFamily.map((r, idx) => ({ ...r, hiddenForDoc: idx >= N }))
+  const finalFamily = kyBuocFamily.map((r, idx) => {
+    if (idx < N && N > 1) {
+      const step = docSteps[idx]
+      const stepName = step ? (step.phong_ban_name || step.ten || step.phong_ban_code || "") : ""
+      return {
+        ...r,
+        label: `Bước ${idx + 1}${stepName ? `: ${stepName}` : ""}`,
+        hiddenForDoc: false,
+      }
+    }
+    return { ...r, hiddenForDoc: idx >= N }
+  })
   return [...finalFamily, ...others]
 }
 
@@ -507,9 +518,34 @@ export default function SignTemplateEditorPage() {
     thu_tu_ky_json?: Array<{ user_id?: string; ten?: string }> | null
   } | null>(null)
 
+  const formattedLoaiTitle = useMemo(() => {
+    if (!activeLoai) return ""
+    if (activeLoai.startsWith("iso:code:")) {
+      return `Biểu mẫu ${activeLoai.slice("iso:code:".length)}`
+    }
+    if (activeLoai.startsWith("iso:loai:")) {
+      return `Loại ${activeLoai.slice("iso:loai:".length)}`
+    }
+    return activeLoai
+  }, [activeLoai])
+
+  const formattedLoaiBadge = useMemo(() => {
+    if (!activeLoai) return ""
+    if (activeLoai.startsWith("iso:code:")) {
+      return activeLoai.slice("iso:code:".length)
+    }
+    if (activeLoai.startsWith("iso:loai:")) {
+      return activeLoai.slice("iso:loai:".length)
+    }
+    return activeLoai
+  }, [activeLoai])
+
   // Kiểm tra tài liệu hiện tại có được miễn trừ quy tắc ký đủ 3 khung (Biểu mẫu F, Phụ lục HD/PL, hồ sơ con)
   const isExemptIsoDoc = useMemo(() => {
     if (!isIso) return false
+    // ⚠️ Nếu mở từ một hồ sơ thực tế đang chạy quy trình N bước cụ thể (formInstanceId),
+    // thì N bước ký đó là bắt buộc, TUYỆT ĐỐI KHÔNG miễn trừ!
+    if (formInstanceId) return false
     // 1. Đang chọn tài liệu con trong bộ hồ sơ (activeDocId khác docId chính)
     if (activeDocId && docId && activeDocId !== docId) return true
     // 2. Hoặc activeDocId nằm trong danh sách hồ sơ con
@@ -528,7 +564,7 @@ export default function SignTemplateEditorPage() {
       if (currentChild.ma_tai_lieu && (/-F\d+/i.test(currentChild.ma_tai_lieu) || /-HD\d+/i.test(currentChild.ma_tai_lieu) || /-PL\d+/i.test(currentChild.ma_tai_lieu))) return true
     }
     return false
-  }, [isIso, activeDocId, docId, isoChildDocs, isoDocData, activeLoai])
+  }, [isIso, formInstanceId, activeDocId, docId, isoChildDocs, isoDocData, activeLoai])
 
   const [me, setMe] = useState<SessionUser | null>(null)
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -569,6 +605,12 @@ export default function SignTemplateEditorPage() {
 
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState("")
+  const [missingStepsAlert, setMissingStepsAlert] = useState<{
+    open: boolean
+    title: string
+    message: string
+    details?: string[]
+  } | null>(null)
 
   const cloneSeqRef = useRef<Record<string, number>>({})
   const pageWrapRef = useRef<HTMLDivElement | null>(null)
@@ -1051,7 +1093,7 @@ export default function SignTemplateEditorPage() {
         // Văn bản query
         const { data, error: fetchErr } = await supabase
           .from("van_ban_documents")
-          .select("thu_tu_ky_json, phe_duyet_user_id")
+          .select("thu_tu_ky_json, phe_duyet_user_id, loai_van_ban, phong_ban")
           .eq("id", docId)
           .eq("factory_id", factoryId)
           .single()
@@ -1061,8 +1103,17 @@ export default function SignTemplateEditorPage() {
           setDocLoaded(true)
           return
         }
-        setDocSteps(((data.thu_tu_ky_json as DocStepLite[] | null) || []))
-        setDocPheDuyetUserId((data.phe_duyet_user_id as string | null) || null)
+        const vbRow = data as {
+          thu_tu_ky_json: DocStepLite[] | null
+          phe_duyet_user_id: string | null
+          loai_van_ban: string | null
+          phong_ban: string | null
+        }
+        setDocSteps(vbRow.thu_tu_ky_json || [])
+        setDocPheDuyetUserId(vbRow.phe_duyet_user_id || null)
+        if (!activeLoai) {
+          setActiveLoai(vbRow.loai_van_ban || vbRow.phong_ban || "KHONG_MA")
+        }
         setDocFetchOk(true)
         setDocLoaded(true)
       } catch {
@@ -1469,10 +1520,24 @@ export default function SignTemplateEditorPage() {
   const isRequiredForConfirm = useCallback(
     (role: EditorRole) => {
       if (isExemptIsoDoc) return false
-      if (role.isClone || role.id.includes("__ban") || role.loai !== "chu_ky") return false
+      if (role.loai !== "chu_ky") return false
+      if (role.isClone || role.id.includes("__ban")) return false
+      if (isIso && formInstanceId) {
+        if (!role.hiddenForDoc && (role.baseId?.startsWith("buoc_") || role.id.startsWith("buoc_") || role.id === "soan_thao" || role.id === "phe_duyet" || role.id === "xem_xet")) {
+          return true
+        }
+      }
+      if ((!!docId || !!formInstanceId) && !role.hiddenForDoc) {
+        if (role.baseId === "ky_buoc" || role.id.startsWith("ky_buoc")) {
+          const cIdx = roleCloneIndex(role)
+          if (cIdx <= docSteps.length) return true
+        }
+        if (role.baseId === "phe_duyet" || role.id === "phe_duyet") return true
+        if (docSignerByRoleId[role.id]) return true
+      }
       return role.batBuoc || ((!!docId || !!formInstanceId) && !!docSignerByRoleId[role.id])
     },
-    [isExemptIsoDoc, docId, formInstanceId, docSignerByRoleId],
+    [isExemptIsoDoc, docId, formInstanceId, docSteps, docSignerByRoleId, isIso],
   )
   const missingRequired = useMemo(
     () => roles.filter((r) => isRequiredForConfirm(r) && !r.placed && !r.hiddenForDoc),
@@ -1482,6 +1547,20 @@ export default function SignTemplateEditorPage() {
     () => roles.filter((r) => r.placed && !r.hiddenForDoc && r.outOfBounds),
     [roles],
   )
+
+  const isCurrentDocFullyPlaced = useMemo(() => {
+    if (isExemptIsoDoc) {
+      return roles.some((r) => r.placed)
+    }
+    const hasPlaced = roles.some((r) => r.placed && !r.hiddenForDoc)
+    if (!hasPlaced) return false
+    return missingRequired.length === 0 && outOfBoundsRoles.length === 0
+  }, [isExemptIsoDoc, roles, missingRequired, outOfBoundsRoles])
+
+  const isCurrentDocPartiallyPlaced = useMemo(() => {
+    if (isCurrentDocFullyPlaced) return false
+    return roles.some((r) => r.placed && !r.hiddenForDoc)
+  }, [isCurrentDocFullyPlaced, roles])
 
   // ── Cập nhật trạng thái ngoài-khổ-giấy ──
   const recomputeBounds = useCallback((list: EditorRole[]) => {
@@ -1808,11 +1887,49 @@ export default function SignTemplateEditorPage() {
         makeBaseRole("ngay_ky", true, isExemptIsoDoc),
         makeBaseRole("ghi_chu", true, isExemptIsoDoc),
       )
+      cloneSeqRef.current = {}
     } else {
-      fresh = ROLE_ORDER.map((id) => makeBaseRole(id as BaseRoleId, false, false))
+      if (docSteps.length > 0) {
+        const N = docSteps.length
+        const kyBuocRoles: EditorRole[] = []
+        const baseKyBuoc = makeBaseRole("ky_buoc", false, false)
+        const step1Name = docSteps[0] ? (docSteps[0].phong_ban_name || docSteps[0].ten || docSteps[0].phong_ban_code || "") : ""
+        kyBuocRoles.push({
+          ...baseKyBuoc,
+          label: N > 1 ? `Bước 1${step1Name ? `: ${step1Name}` : ""}` : baseKyBuoc.label,
+          placed: false,
+          outOfBounds: false,
+          hiddenForDoc: false,
+        })
+        for (let idx = 1; idx < N; idx++) {
+          const stepNo = idx + 1
+          const step = docSteps[idx]
+          const stepName = step ? (step.phong_ban_name || step.ten || step.phong_ban_code || "") : ""
+          const cloneRole = makeCloneRole("ky_buoc", stepNo, baseKyBuoc.box, false)
+          kyBuocRoles.push({
+            ...cloneRole,
+            label: `Bước ${stepNo}${stepName ? `: ${stepName}` : ""}`,
+            placed: false,
+            outOfBounds: false,
+            hiddenForDoc: false,
+          })
+        }
+        cloneSeqRef.current = { ky_buoc: N }
+        fresh = [
+          ...kyBuocRoles,
+          makeBaseRole("phe_duyet", false, false),
+          makeBaseRole("qr", false, false),
+          makeBaseRole("ngay_ky", false, false),
+          makeBaseRole("ghi_chu", false, false),
+        ]
+        totalSteps = N
+      } else {
+        fresh = ROLE_ORDER.map((id) => makeBaseRole(id as BaseRoleId, false, false))
+        cloneSeqRef.current = {}
+        totalSteps = 2
+      }
     }
     fresh = fresh.map((r) => ({ ...r, placed: false, outOfBounds: false }))
-    cloneSeqRef.current = {}
     reconciledRef.current = true
     setRoles(fresh)
     setTemplateExisted(false)
@@ -1851,11 +1968,21 @@ export default function SignTemplateEditorPage() {
 
   const handleConfirmAndSend = async () => {
     if (missingRequired.length > 0) {
-      showToast(`Còn thiếu vai trò bắt buộc: ${missingRequired.map((r) => r.label).join(", ")}`)
+      setMissingStepsAlert({
+        open: true,
+        title: "Chưa đặt đủ các bước ký bắt buộc",
+        message: "Vui lòng kéo các vai trò bắt buộc còn thiếu vào tài liệu trước khi xác nhận lưu hoặc gửi đi.",
+        details: missingRequired.map((r) => r.label),
+      })
       return
     }
     if (outOfBoundsRoles.length > 0) {
-      showToast("Có khung nằm ngoài khổ giấy — vui lòng chỉnh lại trước khi xác nhận.")
+      setMissingStepsAlert({
+        open: true,
+        title: "Khung nằm ngoài khổ giấy",
+        message: "Có khung ký hoặc thông tin đang nằm ngoài phạm vi khổ giấy. Vui lòng căn chỉnh lại hoặc bấm 'Đưa về trong trang'.",
+        details: outOfBoundsRoles.map((r) => r.label),
+      })
       return
     }
     // Ràng buộc đối với ISO: tất cả tài liệu & biểu mẫu kèm theo phải được cài đặt vị trí trước khi gửi duyệt
@@ -1872,10 +1999,84 @@ export default function SignTemplateEditorPage() {
         })
       }
       if (missingDocs.length > 0) {
-        showToast(
-          `Chưa thể gửi đi: Còn ${missingDocs.length} tài liệu/biểu mẫu chưa cài đặt vị trí (${missingDocs.join(", ")}). Vui lòng chọn từng tài liệu trên thanh "Bộ hồ sơ" để đặt vị trí trước khi gửi đi.`,
-        )
+        setMissingStepsAlert({
+          open: true,
+          title: "Bộ hồ sơ chưa cài đặt đủ vị trí ký",
+          message: `Chưa thể gửi đi: Còn ${missingDocs.length} tài liệu/biểu mẫu chưa cài đặt vị trí. Vui lòng chọn từng tài liệu trên thanh "Bộ hồ sơ" để đặt vị trí trước khi gửi đi.`,
+          details: missingDocs,
+        })
         return
+      }
+    }
+    // Ràng buộc đối với Văn bản nội bộ: nếu văn bản có N bước ký, bắt buộc phải đặt đủ N bước
+    if (!isIso && docSteps.length > 0) {
+      const placedKyBuocIndices = new Set(
+        roles
+          .filter((r) => r.placed && !r.hiddenForDoc && (r.baseId === "ky_buoc" || r.id.startsWith("ky_buoc")))
+          .map((r) => roleCloneIndex(r)),
+      )
+      const missingStepNumbers: number[] = []
+      for (let s = 1; s <= docSteps.length; s++) {
+        if (!placedKyBuocIndices.has(s)) {
+          missingStepNumbers.push(s)
+        }
+      }
+      if (missingStepNumbers.length > 0) {
+        setMissingStepsAlert({
+          open: true,
+          title: "Chưa đặt đủ các bước ký của văn bản",
+          message: `Văn bản này có tổng cộng ${docSteps.length} bước ký. Hệ thống yêu cầu phải đặt đủ vị trí cho tất cả các bước trước khi gửi đi.`,
+          details: missingStepNumbers.map((n) => {
+            const step = docSteps[n - 1]
+            const name = step ? (step.phong_ban_name || step.ten || step.phong_ban_code || "") : ""
+            return `Bước ${n}${name ? `: ${name}` : ""}`
+          }),
+        })
+        return
+      }
+    }
+
+    // Ràng buộc đối với Hồ sơ Thực hiện ISO: bắt buộc phải đặt đủ tất cả các bước ký của quy trình
+    if (isIso && formInstanceId) {
+      const isoSteps = paramStepsJson
+        || (Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null)
+      const isoTotalSteps = isoSteps
+        ? isoSteps.length
+        : (paramSoBuocTong || (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 0)))
+
+      if (isoTotalSteps > 0) {
+        const placedStepIndices = new Set(
+          roles
+            .filter((r) => r.placed && !r.hiddenForDoc && !r.isClone && !r.id.includes("__ban"))
+            .map((r) => {
+              const m = /^buoc_(\d+)/.exec(r.id) || /^buoc_(\d+)/.exec(String(r.baseId))
+              if (m) return parseInt(m[1], 10)
+              if (r.id === "soan_thao" || r.baseId === "soan_thao") return 1
+              if (r.id === "phe_duyet" || r.baseId === "phe_duyet") return isoTotalSteps
+              if (r.id === "xem_xet" || r.baseId === "xem_xet") return 2
+              return 0
+            })
+            .filter((n) => n > 0)
+        )
+        const missingStepNumbers: number[] = []
+        for (let s = 1; s <= isoTotalSteps; s++) {
+          if (!placedStepIndices.has(s)) {
+            missingStepNumbers.push(s)
+          }
+        }
+        if (missingStepNumbers.length > 0) {
+          setMissingStepsAlert({
+            open: true,
+            title: "Chưa đặt đủ các bước ký của hồ sơ",
+            message: `Hồ sơ này có tổng cộng ${isoTotalSteps} bước ký. Hệ thống yêu cầu phải đặt đủ vị trí cho tất cả các bước trước khi gửi đi.`,
+            details: missingStepNumbers.map((n) => {
+              const step = isoSteps?.[n - 1]
+              const name = step ? (step.ten || "") : (n === 1 ? "Người lập" : n === isoTotalSteps ? "Phê duyệt" : `Bước ${n}`)
+              return `Bước ${n}${name ? `: ${name}` : ""}`
+            }),
+          })
+          return
+        }
       }
     }
     if (!factoryId || !me) return
@@ -1885,7 +2086,7 @@ export default function SignTemplateEditorPage() {
       if (dirty || !templateExisted) {
         const { data: sessionData } = await supabase.auth.getSession()
         const token = sessionData.session?.access_token || ""
-        const keyToSave = isIso ? formatIsoTemplateKey(activeLoai) : activeLoai
+        const keyToSave = isIso ? formatIsoTemplateKey(activeLoai) : (activeLoai || "KHONG_MA")
         const res = await fetch("/api/signing/templates", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -1903,6 +2104,64 @@ export default function SignTemplateEditorPage() {
       setInitialSnapshot(JSON.stringify(roles))
       setTemplateExisted(true)
       setDocTemplateStatus((prev) => ({ ...prev, [activeDocId]: true }))
+
+      // Khi cài đặt vị trí thành công cho tài liệu ISO cụ thể, gửi thông báo giao_soan_thao cho người soạn thảo
+      if (isIso && activeDocId) {
+        try {
+          const { data: docData } = await supabase
+            .from("iso_documents")
+            .select("id, soan_thao_user_id")
+            .eq("id", activeDocId)
+            .single()
+          const targetStId = docData?.soan_thao_user_id || isoDocData?.soan_thao_user_id
+          if (targetStId && targetStId !== me?.id) {
+            void fetch("/api/iso/notify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                docId: activeDocId,
+                factoryId,
+                action: "giao_soan_thao",
+                recipientUserIds: [targetStId],
+                actorUserId: me?.id,
+              }),
+            }).catch(console.error)
+          }
+        } catch (notifyErr) {
+          console.error("Lỗi gửi thông báo giao soạn thảo sau khi lưu mẫu vị trí:", notifyErr)
+        }
+      }
+
+      // Khi cài đặt vị trí thành công cho hồ sơ ISO (formInstanceId), gửi thông báo phân công cho người ký bước 1
+      if (formInstanceId) {
+        try {
+          const { data: fInst } = await supabase
+            .from("iso_form_instances")
+            .select("id, nguoi_tao, thu_tu_ky_json")
+            .eq("id", formInstanceId)
+            .single()
+          if (fInst) {
+            const steps = Array.isArray(fInst.thu_tu_ky_json) ? (fInst.thu_tu_ky_json as Array<{ user_id?: string }>) : []
+            const step1Signer = steps[0]?.user_id || fInst.nguoi_tao
+            if (step1Signer && step1Signer !== me?.id) {
+              void fetch("/api/iso/forms/notify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  instanceId: formInstanceId,
+                  factoryId,
+                  action: "phan_cong_soan_thao",
+                  recipientUserIds: [step1Signer],
+                  actorUserId: me?.id,
+                }),
+              }).catch(console.error)
+            }
+          }
+        } catch (notifyErr) {
+          console.error("Lỗi gửi thông báo phân công sau khi lưu mẫu vị trí hồ sơ ISO:", notifyErr)
+        }
+      }
+
       if (returnTo) {
         const sep = returnTo.includes("?") ? "&" : "?"
         router.push(`${returnTo}${sep}confirmedSignTemplate=1`)
@@ -1957,6 +2216,19 @@ export default function SignTemplateEditorPage() {
             Vai trò đã đặt có thể <strong>&quot;Nhân bản&quot;</strong> nếu tài liệu có thêm bước ký khác (vd nhiều phòng ban ký nối tiếp). Chỉ khung chữ ký mới có tuỳ chọn hiện tên/chức vụ.
           </p>
         )}
+        {missingRequired.length > 0 && roles.some((r) => r.placed) && !isExemptIsoDoc && (
+          <div className="mb-3 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] leading-snug">
+            <div className="font-bold flex items-center gap-1.5 text-amber-800 mb-1">
+              <AlertTriangle size={13} className="text-amber-600 shrink-0" />
+              Chưa đủ vị trí ký ({missingRequired.length} bước còn thiếu):
+            </div>
+            <ul className="list-disc list-inside space-y-0.5 text-amber-800/90 font-medium pl-1">
+              {missingRequired.map((r) => (
+                <li key={r.id}>{r.label}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="space-y-1.5">
           {roles.filter((r) => !r.hiddenForDoc).map((role) => {
             const color = getRoleColor(role, isIso)
@@ -2000,7 +2272,16 @@ export default function SignTemplateEditorPage() {
                       {role.label} {isRequiredForConfirm(role) && <span className="text-red-500 text-[10px]">• bắt buộc</span>}
                     </div>
                     <div className="text-[11px] text-slate-500">
-                      {role.placed ? <span className="text-teal-700 font-semibold">Đã đặt · {anchorLabel}</span> : <span className="italic text-slate-400">Chưa đặt</span>}
+                      {role.placed ? (
+                        <span className="text-teal-700 font-semibold">Đã đặt · {anchorLabel}</span>
+                      ) : isRequiredForConfirm(role) ? (
+                        <span className="text-red-600 font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+                          Chưa đặt vị trí (bắt buộc)
+                        </span>
+                      ) : (
+                        <span className="italic text-slate-400">Chưa đặt</span>
+                      )}
                     </div>
                     {signer && (
                       <div className="text-[10.5px] text-slate-500 mt-0.5 truncate">
@@ -2177,19 +2458,88 @@ export default function SignTemplateEditorPage() {
   )
 
   return (
-    <div className="flex flex-col h-screen bg-[#f2f8f5]">
+    <div className="flex flex-col h-[100dvh] min-h-[100dvh] bg-[#f2f8f5]">
       {/* Top bar */}
-      <div className="text-white px-3 sm:px-5 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3" style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}>
-        <div className="flex flex-col gap-0.5 sm:gap-1 min-w-0 max-w-[50%] sm:max-w-none">
+      <div className="text-white px-3 sm:px-5 py-2 sm:py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 shrink-0" style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}>
+        {/* Desktop view */}
+        <div className="hidden sm:flex flex-col gap-0.5 sm:gap-1 min-w-0">
           <div className="text-[10px] sm:text-[11px] opacity-75 truncate">
-            {isIso ? "Cài đặt vị trí ký ISO" : "Cài đặt vị trí ký"} · {activeLoai}
+            {isIso ? "Cài đặt vị trí ký ISO" : "Cài đặt vị trí ký"} · {formattedLoaiTitle}
           </div>
           <div className="text-sm sm:text-base font-bold flex items-center gap-1.5 sm:gap-2 truncate">
-            <span className="font-mono text-[11px] sm:text-xs bg-white/15 px-1.5 sm:px-2 py-0.5 rounded shrink-0">{activeLoai}</span>
+            <span className="font-mono text-[11px] sm:text-xs bg-white/15 px-1.5 sm:px-2 py-0.5 rounded shrink-0">{formattedLoaiBadge}</span>
             <span className="truncate">{activeDocLabel}</span>
+            {isCurrentDocFullyPlaced ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/25 text-emerald-200 border border-emerald-400/40 font-bold shrink-0 flex items-center gap-1">
+                ✓ Đã đặt đủ vị trí
+              </span>
+            ) : isCurrentDocPartiallyPlaced ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/30 text-amber-200 border border-amber-400/40 font-bold shrink-0 flex items-center gap-1">
+                ⚠ Chưa đủ bước ({missingRequired.length} bước thiếu)
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-white/10 text-white/70 border border-white/20 font-bold shrink-0">
+                • Chưa đặt vị trí
+              </span>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+
+        {/* Mobile view: Row 1 (Title + Action Buttons) */}
+        <div className="flex sm:hidden items-center justify-between gap-2 w-full">
+          <div className="text-xs font-bold truncate">
+            {isIso ? "Cài đặt vị trí ký ISO" : "Cài đặt vị trí"}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button onClick={handleCancel} className="px-2 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
+              Huỷ
+            </button>
+            <button
+              onClick={resetToBlankTemplate}
+              className="px-2 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-amber-200 hover:text-amber-100"
+              title="Xóa toàn bộ các khung đã đặt và tạo mẫu mới từ đầu"
+            >
+              Mới
+            </button>
+            {templateExisted && (
+              <button onClick={resetToSaved} className="px-2 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
+                Đặt lại
+              </button>
+            )}
+            <button
+              onClick={() => void handleConfirmAndSend()}
+              disabled={saving}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-white text-[#1c3a32] hover:bg-emerald-50 disabled:opacity-50 shadow-xs"
+            >
+              {saving ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+              <span>{returnTo ? "Gửi đi" : "Lưu"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile view: Row 2 (Badge + Doc Label + Status) */}
+        <div className="flex sm:hidden items-center justify-between gap-2 pt-1 border-t border-white/10 w-full text-xs">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
+            <span className="font-mono text-[10px] font-bold bg-white/20 px-1.5 py-0.5 rounded shrink-0">{formattedLoaiBadge}</span>
+            <span className="truncate text-white/90 text-[11px] font-medium">{activeDocLabel}</span>
+          </div>
+          {isCurrentDocFullyPlaced ? (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 font-bold shrink-0">
+              ✓ Đã đặt
+            </span>
+          ) : isCurrentDocPartiallyPlaced ? (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-amber-500/30 text-amber-200 border border-amber-400/40 font-bold shrink-0">
+              ⚠ Thiếu {missingRequired.length} bước
+            </span>
+          ) : (
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-white/10 text-white/70 border border-white/20 font-bold shrink-0">
+              • Chưa đặt
+            </span>
+          )}
+        </div>
+
+        {/* Desktop buttons */}
+        <div className="hidden sm:flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button onClick={handleCancel} className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30">
             Huỷ
           </button>
@@ -2239,7 +2589,15 @@ export default function SignTemplateEditorPage() {
             }`}
           >
             <span>📄 Quy trình chính ({isoDocData?.ma_tai_lieu || "Tài liệu"})</span>
-            {(docTemplateStatus[docId] || (activeDocId === docId && roles.some((r) => r.placed))) ? (
+            {activeDocId === docId ? (
+              isCurrentDocFullyPlaced ? (
+                <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
+              ) : isCurrentDocPartiallyPlaced ? (
+                <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">⚠ Chưa đủ bước</span>
+              ) : (
+                <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium">• Chưa đặt</span>
+              )
+            ) : docTemplateStatus[docId] ? (
               <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
             ) : (
               <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">• Chưa đặt</span>
@@ -2261,7 +2619,15 @@ export default function SignTemplateEditorPage() {
               }`}
             >
               <span>📑 Biểu mẫu: {child.ma_tai_lieu || child.ten_tai_lieu || `Hồ sơ ${idx + 1}`}</span>
-              {(docTemplateStatus[child.id] || (activeDocId === child.id && (roles.some((r) => r.placed) || isExemptIsoDoc))) ? (
+              {activeDocId === child.id ? (
+                isCurrentDocFullyPlaced ? (
+                  <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
+                ) : isCurrentDocPartiallyPlaced ? (
+                  <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">⚠ Chưa đủ bước</span>
+                ) : (
+                  <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium">• Chưa đặt</span>
+                )
+              ) : docTemplateStatus[child.id] ? (
                 <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
               ) : (
                 <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">• Chưa đặt</span>
@@ -2654,6 +3020,46 @@ export default function SignTemplateEditorPage() {
           <Check size={14} className="text-emerald-400" /> {toast}
         </div>
       )}
+
+      {/* Modal cảnh báo nổi bật giữa màn hình khi thiếu bước / chưa hoàn thiện vị trí */}
+      {missingStepsAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-red-100 flex flex-col items-center text-center">
+            <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mb-4 shrink-0 shadow-inner">
+              <AlertTriangle size={30} className="stroke-[2.5]" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">
+              {missingStepsAlert.title}
+            </h3>
+            <p className="text-sm text-slate-600 leading-relaxed mb-4">
+              {missingStepsAlert.message}
+            </p>
+            {missingStepsAlert.details && missingStepsAlert.details.length > 0 && (
+              <div className="w-full bg-red-50/70 border border-red-200/80 rounded-xl p-3 mb-5 text-left max-h-48 overflow-y-auto">
+                <div className="text-xs font-bold text-red-800 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-red-500 inline-block animate-pulse"></span>
+                  Chi tiết cần bổ sung:
+                </div>
+                <ul className="space-y-1.5 text-xs text-red-700 font-medium">
+                  {missingStepsAlert.details.map((item, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-red-500 font-bold shrink-0">•</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setMissingStepsAlert(null)}
+              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-bold text-sm shadow-md transition-all active:scale-[0.98]"
+            >
+              Đã hiểu, quay lại đặt vị trí
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -2812,11 +3218,11 @@ function PreviewContent({
   if (signer?.kind === "ca_nhan") {
     let chucVuText = ""
     if (role.chucVuKey === "kiem_nhiem") {
-      chucVuText = signer.chucVuByKey?.kiem_nhiem || signer.chucVu || CHUC_VU_LABELS.kiem_nhiem
-    } else if (role.chucVuKey === "chinh_quyen") {
-      chucVuText = signer.chucVuByKey?.chinh_quyen || signer.chucVu || CHUC_VU_LABELS.chinh_quyen
+      chucVuText = signer.chucVuByKey?.kiem_nhiem || CHUC_VU_LABELS.kiem_nhiem
+    } else if (role.chucVuKey === "doan_the") {
+      chucVuText = CHUC_VU_LABELS.doan_the
     } else {
-      chucVuText = signer.chucVu || (role.chucVuKey ? CHUC_VU_LABELS[role.chucVuKey] : "")
+      chucVuText = signer.chucVuByKey?.chinh_quyen || signer.chucVu || CHUC_VU_LABELS.chinh_quyen
     }
     return (
       <SignBoxPreviewLayout

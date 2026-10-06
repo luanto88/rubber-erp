@@ -2,6 +2,8 @@ import nodemailer from "nodemailer"
 import { after } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { escapeHtml } from "@/lib/html-escape"
+import { getFactoryTodayISO } from "@/lib/date-utils"
+import { purchaseUrgency } from "@/lib/purchase/types"
 import { signingDocLabel, isUuid, buildMaintenanceDocLabel, formatMaHoSoDisplay } from "./labels"
 
 // Thông báo 3 kênh cho hệ thống ký số dùng chung (Chất lượng / Điều xe / Bảo trì).
@@ -70,6 +72,41 @@ type NotifyContext = {
   recipientNames: string
   lyDo?: string | null
   buoc?: number | null
+  /** Dòng tóm tắt nghiệp vụ riêng theo module (chưa escape — escape lúc render). */
+  extraLines?: string[]
+}
+
+/** Tóm tắt phiếu đề nghị mua cho Telegram/email (số dòng, tổng tiền, cờ cảnh báo). */
+async function buildPurchaseSummary(requestId: string): Promise<string[]> {
+  const supabase = getSupabaseAdmin()
+  const [{ data: req }, { data: lines }] = await Promise.all([
+    supabase.from("purchase_requests").select("tong_tien, loai_tien, nguoi_de_nghi_ten, bo_phan, ngay_can_hang").eq("id", requestId).maybeSingle(),
+    supabase.from("purchase_request_lines").select("item_name, so_luong, unit, la_vat_tu_moi, lech_gia_pct").eq("request_id", requestId).order("sort_order"),
+  ])
+  if (!req) return []
+  const rows = (lines || []) as { item_name: string; so_luong: number; unit: string | null; la_vat_tu_moi: boolean; lech_gia_pct: number | null }[]
+  const loaiTien = (req.loai_tien as string) || "USD"
+  const tong = Number(req.tong_tien || 0).toLocaleString("vi-VN", { maximumFractionDigits: loaiTien === "USD" ? 2 : 0 })
+  const out = [
+    `Người đề nghị: ${req.nguoi_de_nghi_ten || ""}`,
+    ...(req.bo_phan ? [`Bộ phận: ${req.bo_phan}`] : []),
+    `Số dòng: ${rows.length} — Tổng tiền: ${tong} ${loaiTien}`,
+  ]
+  const canHang = req.ngay_can_hang as string | null
+  if (canHang) {
+    const urg = purchaseUrgency(canHang, getFactoryTodayISO())
+    const [y, m, d] = canHang.slice(0, 10).split("-")
+    const flag = urg && (urg.level === "qua_han" || urg.level === "gap") ? "🔥 " : ""
+    out.push(`${flag}Cần hàng: ${d}/${m}/${y}${urg ? ` (${urg.label})` : ""}`)
+  }
+  const preview = rows.slice(0, 5).map((r) => `• ${r.item_name}: ${Number(r.so_luong).toLocaleString("vi-VN")} ${r.unit || ""}`.trim())
+  out.push(...preview)
+  if (rows.length > 5) out.push(`… và ${rows.length - 5} vật tư khác`)
+  const moi = rows.filter((r) => r.la_vat_tu_moi).length
+  const lech = rows.filter((r) => r.lech_gia_pct !== null && Math.abs(Number(r.lech_gia_pct)) > 10).length
+  if (moi) out.push(`⚠️ ${moi} vật tư mới tạo từ đề nghị`)
+  if (lech) out.push(`⚠️ ${lech} dòng đơn giá lệch hơn 10% so với giá gợi ý`)
+  return out
 }
 
 /**
@@ -99,7 +136,10 @@ function signLink(yeuCauId: string): string {
  * nhóm riêng cho Chất lượng/Điều xe sau này thì chỉ cần thêm 1 entry vào map này (và 2 biến môi
  * trường tương ứng), không đụng chỗ nào khác.
  */
-const TELEGRAM_BY_MODUN: Record<string, { tokenEnv: string; chatEnv: string }> = {}
+const TELEGRAM_BY_MODUN: Record<string, { tokenEnv: string; chatEnv: string }> = {
+  // Đề nghị mua vật tư → nhóm "Quản lý chi phí" riêng.
+  purchase: { tokenEnv: "QL_CHI_PHI_TOKEN", chatEnv: "QL_CHI_PHI_ID" },
+}
 
 function resolveTelegram(modun: string): { token?: string; chat?: string } {
   const cfg = TELEGRAM_BY_MODUN[modun]
@@ -154,6 +194,7 @@ async function sendTelegram(ctx: NotifyContext): Promise<void> {
       ? `📨 Người nhận: ${escapeHtml(ctx.recipientNames)}`
       : null,
     ctx.event === "tra_ve" && ctx.lyDo ? `⚠️ Lý do: ${escapeHtml(ctx.lyDo)}` : null,
+    ...(ctx.extraLines?.length ? [``, ...ctx.extraLines.map((l) => escapeHtml(l))] : []),
     ``,
     `<a href="${APP_URL}${signLink(ctx.yeuCauId)}">📎 Mở hồ sơ ký</a>`,
   ].filter((l) => l !== null)
@@ -217,6 +258,7 @@ async function sendEmail(ctx: NotifyContext): Promise<void> {
       ${ctx.recipientNames ? `<tr><td style="padding:4px 0;color:#64748b">Người nhận:</td><td style="padding:4px 8px">${escapeHtml(ctx.recipientNames)}</td></tr>` : ""}
       ${lyDoRow}
     </table>
+    ${ctx.extraLines?.length ? `<div style="margin-top:12px;font-size:13px;line-height:1.6;color:#334155">${ctx.extraLines.map((l) => escapeHtml(l)).join("<br>")}</div>` : ""}
   </div>
   <div style="padding:16px 24px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;text-align:center">
     <a href="${APP_URL}${signLink(ctx.yeuCauId)}" style="display:inline-block;background:${color};color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:bold;font-size:14px">
@@ -333,6 +375,10 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
     recipientNames,
     lyDo: plan.lyDo,
     buoc: plan.buoc,
+    extraLines:
+      yeuCau.modun === "purchase" && yeuCau.ban_ghi_id
+        ? await buildPurchaseSummary(yeuCau.ban_ghi_id as string).catch(() => [])
+        : undefined,
   }
 
   // 3 kênh độc lập: lỗi 1 kênh không được chặn 2 kênh còn lại, và không kênh nào được ném ra
@@ -344,6 +390,105 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
 
   if (errors.length) {
     console.error(`[signing/notify] ${plan.event} ${plan.yeuCauId}: ${errors.join(" | ")}`)
+  }
+}
+
+/**
+ * Thông báo nghiệp vụ NGOÀI vòng ký (vd admin huỷ phiếu đề nghị mua): chuông + Telegram nhóm
+ * của module + email người nhận. Cùng kênh/env với thông báo ký, lỗi từng kênh không ném ra.
+ */
+export async function sendModuleBroadcast(params: {
+  modun: string
+  factoryId: string
+  title: string
+  docLabel: string
+  actorUserId: string
+  recipientUserIds: string[]
+  lines: string[]
+  link: string
+  notifType: string
+  docId: string
+  docType: string
+}): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const recipients = [...new Set(params.recipientUserIds)].filter((id) => !!id && id !== params.actorUserId)
+  const [{ data: actor }, { data: factory }] = await Promise.all([
+    supabase.from("profiles").select("full_name, username").eq("id", params.actorUserId).maybeSingle(),
+    supabase.from("factories").select("name").eq("id", params.factoryId).maybeSingle(),
+  ])
+  const actorName = (actor?.full_name || actor?.username || "Người dùng") as string
+  const factoryName = ((factory?.name as string) || "Nhà máy")
+  const errors: string[] = []
+
+  if (recipients.length) {
+    const { error } = await supabase.from("notifications").insert(
+      recipients.map((uid) => ({
+        factory_id: params.factoryId, user_id: uid, type: params.notifType, doc_id: params.docId,
+        doc_type: params.docType, title: params.title, body: `${params.docLabel} — ${actorName}`,
+        is_read: false, link: params.link,
+      })),
+    )
+    if (error) errors.push(`in-app: ${error.message}`)
+  }
+
+  const { token, chat } = resolveTelegram(params.modun)
+  if (token && chat) {
+    const text = [
+      `🔔 <b>${escapeHtml(params.title)}</b>`, ``,
+      `🏭 ${escapeHtml(factoryName)}`, `📄 ${escapeHtml(params.docLabel)}`, `👤 ${escapeHtml(actorName)}`,
+      ...(params.lines.length ? [``, ...params.lines.map((l) => escapeHtml(l))] : []),
+      ``, `<a href="${APP_URL}${params.link}">📎 Mở phiếu</a>`,
+    ].join("\n")
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chat, text, parse_mode: "HTML" }),
+    }).catch((e) => { errors.push(`telegram: ${errMsg(e)}`); return null })
+    if (res && !res.ok) errors.push(`telegram: HTTP ${res.status}`)
+  }
+
+  const gmailUser = process.env.GMAIL_USER
+  const gmailPass = process.env.GMAIL_APP_PASSWORD
+  if (gmailUser && gmailPass && recipients.length) {
+    try {
+      const { data: staffRows } = await supabase.from("maintenance_staff").select("email, profile_id").in("profile_id", recipients)
+      const to = ((staffRows || []) as { email: string | null }[]).map((r) => r.email).filter((e): e is string => !!e && e.includes("@"))
+      if (to.length) {
+        const html = `
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+  <div style="background:#dc2626;color:#fff;padding:16px 24px;border-radius:8px 8px 0 0">
+    <h2 style="margin:0;font-size:18px">${escapeHtml(params.title)}</h2>
+    <p style="margin:4px 0 0;opacity:.9;font-size:13px">${escapeHtml(factoryName)}</p>
+  </div>
+  <div style="background:#f8fafc;padding:20px 24px;border:1px solid #e2e8f0;border-top:none;font-size:14px;line-height:1.6">
+    <b>${escapeHtml(params.docLabel)}</b><br>Người thực hiện: ${escapeHtml(actorName)}<br>
+    ${params.lines.map((l) => escapeHtml(l)).join("<br>")}
+  </div>
+  <div style="padding:16px 24px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;text-align:center">
+    <a href="${APP_URL}${params.link}" style="display:inline-block;background:#dc2626;color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:bold">Mở phiếu</a>
+  </div>
+</div>`
+        const transporter = nodemailer.createTransport({ service: "gmail", auth: { user: gmailUser, pass: gmailPass } })
+        await transporter.sendMail({
+          from: `"Ký duyệt điện tử" <${gmailUser}>`, to: to.join(", "),
+          subject: `[${params.title}] ${params.docLabel}`, html,
+        })
+      }
+    } catch (e) {
+      errors.push(`email: ${errMsg(e)}`)
+    }
+  }
+
+  if (errors.length) console.error(`[module-broadcast] ${params.modun} ${params.docId}: ${errors.join(" | ")}`)
+}
+
+/** Lên lịch `sendModuleBroadcast` sau khi response đã trả về (cùng cơ chế `after()`). */
+export function scheduleModuleBroadcast(params: Parameters<typeof sendModuleBroadcast>[0]): void {
+  const task = () => sendModuleBroadcast(params).catch((e) => console.error("[module-broadcast]", errMsg(e)))
+  try {
+    after(task)
+  } catch {
+    void task()
   }
 }
 

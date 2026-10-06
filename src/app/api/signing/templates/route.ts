@@ -43,7 +43,9 @@ async function hasDocumentsCreatePermission(userId: string, role: string | null)
 }
 
 async function hasIsoTemplatePermission(userId: string, role: string | null): Promise<boolean> {
-  const codes = ["iso.create", "iso.edit", "iso.signature"]
+  // GĐ2 chuẩn hoá quyền ISO: `iso.edit`/`iso.signature` đã bỏ. Người lập hồ sơ thực hiện
+  // (`iso.forms.create`) cũng cần lưu mẫu vị trí ký cho biểu mẫu của mình.
+  const codes = ["iso.create", "iso.forms.create"]
   const { data: explicit } = await supabaseAdmin
     .from("user_permissions")
     .select("granted")

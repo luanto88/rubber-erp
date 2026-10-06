@@ -44,6 +44,10 @@ const ACTION_LABELS: Record<string, ActionLabel> = {
     title: "Tài liệu trả về Nháp",
     body: (maTl, tenTl, actor) => `Tài liệu ${maTl} — "${tenTl}" đã được ${actor} trả về trạng thái Nháp.`,
   },
+  thu_hoi: {
+    title: "Tài liệu đã bị thu hồi",
+    body: (maTl, tenTl, actor, lyDo) => `Tài liệu ${maTl} — "${tenTl}" đã được ${actor} thu hồi về bản nháp, bạn không cần ký nữa.${lyDo ? ` Lý do: ${lyDo}` : ""}`,
+  },
   giao_soan_thao: {
     title: "Phân công soạn thảo tài liệu",
     body: (maTl, tenTl, actor) => `Bạn đã được ${actor} chỉ định làm người soạn thảo tài liệu ${maTl} — "${tenTl}". Vui lòng kiểm tra và thực hiện ký gửi bước 1.`,
@@ -196,7 +200,7 @@ export async function POST(req: NextRequest) {
             .filter((e): e is string => !!e && e.includes("@"))
 
         if (emails.length > 0) {
-          const isWarning = action === "tra_ve" || action === "khong_xem_xet" || action === "tu_choi_phe_duyet" || action === "tra_ve_nhap"
+          const isWarning = action === "tra_ve" || action === "khong_xem_xet" || action === "tu_choi_phe_duyet" || action === "tra_ve_nhap" || action === "thu_hoi"
           const headerColor = isWarning ? "#e11d48" : "#7c3aed"
           const subject = `[ISO] ${labelInfo.title} — ${maTl}`
 

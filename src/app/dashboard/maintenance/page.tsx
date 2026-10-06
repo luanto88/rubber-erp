@@ -15,6 +15,7 @@ import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background
 import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "./records/_components/maintenance-sign-status"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
+import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
 
 type KpiData = {
   totalMonth: number
@@ -195,6 +196,8 @@ export default function MaintenanceDashboardPage() {
         }
       />
 
+      <KtShortageBanner />
+
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
@@ -235,7 +238,7 @@ export default function MaintenanceDashboardPage() {
           <span className="font-extrabold text-slate-700">Biên bản gần đây</span>
           <Link href="/dashboard/maintenance/records" className="text-xs font-bold text-emerald-600 hover:underline">Xem tất cả</Link>
         </div>
-        {loading ? (
+        {loading && recent.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
         ) : recent.length === 0 ? (
           <div className="p-12 text-center text-slate-400">

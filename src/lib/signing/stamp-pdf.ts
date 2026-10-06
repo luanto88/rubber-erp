@@ -31,7 +31,20 @@ export type SignatureBox = {
   nameHeight?: number
 }
 
-export type ExtraSignaturePlacement = SignatureBox & { page: number }
+export type ExtraSignaturePlacement = SignatureBox & {
+  page: number
+  showChucVu?: boolean
+  chucVuText?: string | null
+  chucVuKey?: string | null
+  cvX?: number
+  cvY?: number
+  cvWidth?: number
+  cvHeight?: number
+  chucVuX?: number
+  chucVuY?: number
+  chucVuWidth?: number
+  chucVuHeight?: number
+}
 
 export type NameStyle = {
   maxFontSize: number
@@ -503,7 +516,7 @@ export function drawTextWrapped(
   } catch { /* bỏ qua nếu vẽ text thất bại */ }
 }
 
-/** Nhân bản chữ ký/tên sang các trang/vị trí khác — tính năng "Nhân bản khung". */
+/** Nhân bản chữ ký/tên/chức vụ sang các trang/vị trí khác — tính năng "Nhân bản khung". */
 export async function drawExtraPlacements(
   pdfDoc: PDFDocument,
   extraPlacements: ExtraSignaturePlacement[] | undefined,
@@ -511,6 +524,7 @@ export async function drawExtraPlacements(
   signerName: string | undefined,
   font: PDFFont | null,
   style: NameStyle,
+  fallbackChucVuText?: string | null,
 ): Promise<void> {
   if (!extraPlacements?.length) return
   for (const extraP of extraPlacements) {
@@ -518,8 +532,26 @@ export async function drawExtraPlacements(
     if (extraPageIndex < 0 || extraPageIndex >= pdfDoc.getPageCount()) continue
     const targetPage = pdfDoc.getPage(extraPageIndex)
     try {
-      if (sigBytes) await drawSignatureImage(pdfDoc, targetPage, sigBytes, extraP)
-      drawSignerName(targetPage, signerName, extraP, font, style)
+      if (sigBytes && extraP.showSignature !== false) {
+        await drawSignatureImage(pdfDoc, targetPage, sigBytes, extraP)
+      }
+      if (extraP.showSignerName !== false) {
+        drawSignerName(targetPage, signerName, extraP, font, style)
+      }
+      if (extraP.showChucVu) {
+        const text = (extraP.chucVuText || fallbackChucVuText || "").trim()
+        if (text) {
+          const cvBox: ChucVuBox = {
+            showChucVu: true,
+            chucVuText: text,
+            cvX: typeof extraP.cvX === "number" ? extraP.cvX : extraP.chucVuX,
+            cvY: typeof extraP.cvY === "number" ? extraP.cvY : extraP.chucVuY,
+            cvWidth: typeof extraP.cvWidth === "number" ? extraP.cvWidth : extraP.chucVuWidth,
+            cvHeight: typeof extraP.cvHeight === "number" ? extraP.cvHeight : extraP.chucVuHeight,
+          }
+          drawChucVu(targetPage, cvBox, font, style)
+        }
+      }
     } catch { /* bỏ qua lỗi embed bản sao */ }
   }
 }

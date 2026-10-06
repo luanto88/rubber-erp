@@ -1,5 +1,5 @@
 import type { LegacyDispatchRow } from "@/lib/dispatch-entry-rows"
-import type { DiemGN } from "@/lib/dispatch-master"
+import { resolveTripDoiNhoFilterKeys, type DiemGN } from "@/lib/dispatch-master"
 import { matchesNoteFilterMulti } from "@/lib/note-filter"
 
 export type DispatchAnalyticsEntry = {
@@ -194,10 +194,11 @@ function addTrip(summary: DispatchGroupSummary, trip: DispatchFlatTrip) {
 export function buildDispatchAnalytics(
   entries: DispatchAnalyticsEntry[],
   deliveryPoints: DiemGN[],
-  filters?: { dois?: string[]; vehicles?: string[]; note?: string[]; materials?: string[] },
+  filters?: { dois?: string[]; doiNhos?: string[]; vehicles?: string[]; note?: string[]; materials?: string[] },
 ): DispatchAnalytics {
   const vehicleFilters = new Set((filters?.vehicles || []).map((v) => v.trim().toLowerCase()).filter(Boolean))
   const doiFilters = (filters?.dois || []).map(Number).filter((d) => Number.isFinite(d) && d > 0)
+  const doiNhoFilters = new Set((filters?.doiNhos || []).map((v) => v.trim()).filter(Boolean))
   const noteFilter = filters?.note || []
   const selectedMaterials = filters?.materials || []
   const trips: DispatchFlatTrip[] = []
@@ -219,6 +220,7 @@ export function buildDispatchAnalytics(
       const dois = getTripDois(row, deliveryPoints)
       if (!matchesNoteFilterMulti(row.ghi_chu, noteFilter)) continue
       if (doiFilters.length > 0 && !dois.some((d) => doiFilters.includes(d))) continue
+      if (doiNhoFilters.size > 0 && !resolveTripDoiNhoFilterKeys(row.diem_gn || [], deliveryPoints).some((k) => doiNhoFilters.has(k))) continue
       if (vehicleFilters.size > 0 && !vehicleFilters.has((row.so_xe || "").toLowerCase())) continue
       if (selectedMaterials.length > 0) {
         const flags = getTripMaterialFlags(row)
@@ -259,7 +261,7 @@ export function buildDispatchAnalytics(
     const dois = trip.dois.length > 0 ? trip.dois : [0]
     for (const doi of dois) {
       const key = String(doi || "Khác")
-      const summary = byDoiMap.get(key) || makeSummary(key, doi ? `Đội ${doi}` : "Chưa rõ đội")
+      const summary = byDoiMap.get(key) || makeSummary(key, doi ? `Đội lớn ${doi}` : "Chưa rõ đội")
       addTrip(summary, trip)
       byDoiMap.set(key, summary)
     }

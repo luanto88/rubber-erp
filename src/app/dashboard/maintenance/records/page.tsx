@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { AlertTriangle, Calendar, ChevronDown, Download, Eye, FileText, Filter, Loader2, Plus, Printer, Search, Wrench, X } from "lucide-react"
@@ -16,6 +16,7 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "./_components/maintenance-sign-status"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
+import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
 
 type RecordRow = {
   id: string
@@ -63,6 +64,7 @@ export default function MaintenanceRecordsPage() {
   // Lỗi tải trạng thái ký: GIỮ map cũ + nút thử lại, không coi như "chưa gửi ký" (bug 2026-09-26).
   const [signingStatusError, setSigningStatusError] = useState(false)
   const signingReqSeq = useRef(0)
+  const recordsRef = useRef<RecordRow[]>([])
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
   useEffect(() => {
@@ -213,7 +215,6 @@ export default function MaintenanceRecordsPage() {
       setSigningStatusLoaded(true)
       return
     }
-    setSigningStatusLoaded(false)
     try {
       // POST body — danh sách dài (bộ lọc ngày rộng) không còn vỡ giới hạn URL.
       const list = await fetchSigningStatusList<MaintenanceSigningStatus>(
@@ -233,9 +234,16 @@ export default function MaintenanceRecordsPage() {
     }
   }, [])
 
+  // Khoá ổn định theo tập id có luồng ký: loadRecords tạo mảng mới mỗi lần nhưng id thường không
+  // đổi → không gọi lại API, không chớp cột Ký duyệt (mirror dispatch/page.tsx).
+  useEffect(() => { recordsRef.current = records }, [records])
+  const signRecordIdsKey = useMemo(
+    () => records.filter((r) => resolveSignBundle(r)).map((r) => r.id).sort().join(","),
+    [records],
+  )
   useEffect(() => {
-    if (factoryId) void loadSigningStatuses(factoryId, records)
-  }, [factoryId, records, loadSigningStatuses])
+    if (factoryId) void loadSigningStatuses(factoryId, recordsRef.current)
+  }, [factoryId, signRecordIdsKey, loadSigningStatuses])
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -306,6 +314,7 @@ export default function MaintenanceRecordsPage() {
           {toast.msg}
         </div>
       )}
+      <div className="mb-3"><KtShortageBanner /></div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-2">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-800">Biên bản bảo trì</h1>
@@ -519,7 +528,7 @@ export default function MaintenanceRecordsPage() {
 
       {/* Table */}
       <ResponsiveTableWrapper>
-        {loading ? (
+        {loading && records.length === 0 ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : filtered.length === 0 ? (
           <div className="p-12 text-center text-slate-400">

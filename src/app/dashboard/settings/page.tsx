@@ -23,6 +23,7 @@ import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { prepareForestPlotGeometry, mergeGeometryPieces, computeGeometryHash } from "@/lib/eudr-write-gate"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
+import { CategoryNameClashWarning, findCategoryNameClashes, isClashConfirmed } from "../_components/category-name-clash"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import { ShiftNamesTab } from "./_components/shift-names-tab"
@@ -32,6 +33,7 @@ import { Kpi5sZonesTab } from "./_components/kpi-5s-zones-tab"
 import { KpiCriteriaTab } from "./_components/kpi-criteria-tab"
 import { KpiScoreWeightsTab } from "./_components/kpi-score-weights-tab"
 import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
+import { doiOfDoiNho } from "@/lib/dispatch-master"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
@@ -103,6 +105,7 @@ type FactoryInfo = {
   country_en: string
   ty_gia_usd_vnd: string
   ty_gia_usd_khr: string
+  ten_khmer: string
 }
 
 type FactoryOption = {
@@ -386,6 +389,7 @@ type DispatchDeliveryPointRow = {
   factory_id: string
   ma_lo: string
   doi: number
+  doi_nho: string | null
   lat: number
   lng: number
   phien_a: string[]
@@ -399,6 +403,7 @@ type DispatchDeliveryPointRow = {
 type DispatchDeliveryPointForm = {
   ma_lo: string
   doi: string
+  doi_nho: string
   lat: string
   lng: string
   phien_a: string
@@ -514,6 +519,7 @@ function emptyFactoryInfo(): FactoryInfo {
     country_en: "",
     ty_gia_usd_vnd: "",
     ty_gia_usd_khr: "",
+    ten_khmer: "",
   }
 }
 
@@ -521,6 +527,7 @@ function emptyDeliveryPointForm(sortOrder = "0"): DispatchDeliveryPointForm {
   return {
     ma_lo: "",
     doi: "",
+    doi_nho: "",
     lat: "",
     lng: "",
     phien_a: "",
@@ -594,6 +601,7 @@ const PERMISSION_MODULE_LABELS: Record<string, string> = {
   output: "Sản lượng",
   process: "Kiểm soát quá trình",
   product: "Thành phẩm",
+  purchase: "Đề nghị mua vật tư",
   quality: "Kiểm nghiệm",
   settings: "Cài đặt",
   storage: "Ngăn lưu",
@@ -672,8 +680,34 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "documents.print": "in văn bản",
   "documents.upload_signed": "tải lên bản đã ký tay",
   "documents.distribute": "phân phối văn bản",
+  // Bộ 9 quyền ISO sau chuẩn hoá (GĐ2, 2026-10-02) — xem .claude/rules/16-iso-vanban-module.md
+  "iso.view": "vào module ISO (Việc của tôi, Kho của tôi)",
+  "iso.view_library": "xem kho tài liệu ISO",
+  "iso.create": "tạo tài liệu hồ sơ (soạn mới + soát xét)",
+  "iso.xem_xet": "xem xét tài liệu hồ sơ",
+  "iso.phe_duyet": "phê duyệt tài liệu hồ sơ",
+  "iso.distribute": "phân phối tài liệu",
   "iso.view_het_hieu_luc": "xem file bản hết hiệu lực",
+  "iso.forms.create": "tạo hồ sơ thực hiện",
+  "iso.forms.approve": "phê duyệt hồ sơ thực hiện",
+  "iso.forms.view_all": "xem tất cả hồ sơ thực hiện",
+  "purchase.view": "vào module Đề nghị mua vật tư",
+  "purchase.create": "lập phiếu đề nghị mua",
+  "purchase.view_all": "xem tất cả phiếu đề nghị mua",
 }
+
+// Mã quyền đã bỏ nhưng bản ghi `permissions` còn giữ tạm (migration 20261006 chỉ gỡ khỏi
+// role_permissions/user_permissions). Ẩn khỏi danh sách tick để admin không tick nhầm ô chết.
+const DEPRECATED_PERMISSION_CODES = new Set([
+  "iso.edit",
+  "iso.delete",
+  "iso.print",
+  "iso.soat_xet",
+  "iso.signature",
+  "iso.forms.view",
+  "iso.forms.edit",
+  "iso.forms.delete",
+])
 
 function prettifyPermissionModule(moduleName: string) {
   return PERMISSION_MODULE_LABELS[moduleName] || moduleName.replaceAll("_", " ")
@@ -808,6 +842,8 @@ export default function SettingsPage() {
   const [factories, setFactories] = useState<FactoryOption[]>([])
 
   const [factoryInfo, setFactoryInfo] = useState<FactoryInfo>(emptyFactoryInfo())
+  // Cột factories.ten_khmer chỉ có sau migration 20261004 — chưa có thì không gửi lên để khỏi hỏng cả lần lưu.
+  const [factoryHasKhmerCol, setFactoryHasKhmerCol] = useState(false)
   const [savingFactory, setSavingFactory] = useState(false)
   const [factoryMsg, setFactoryMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -829,7 +865,9 @@ export default function SettingsPage() {
   const canEditPermissions = hasPermission(user, "users.edit_permission")
   const canViewMasterData = isAdmin || hasPermission(user, "settings.master_data")
   const canViewMaintenanceConfig = isAdmin || hasPermission(user, "settings.maintenance_config")
-  const canViewIsoSignature = isAdmin || hasPermission(user, "iso.signature")
+  // GĐ2 chuẩn hoá quyền ISO (2026-10-02): bỏ quyền `iso.signature`. Ai được chọn soạn/xem xét/
+  // phê duyệt thì bắt buộc phải ký, nên tab Chữ ký cá nhân luôn hiện cho mọi người đã đăng nhập.
+  const canViewIsoSignature = !!user
   const canManageKpiConfig = isAdmin || hasPermission(user, "kpi.manage_config")
   const isKpiDeptLeader = kpiLeaderDepartmentId != null
   // Dùng cho tab "KPI & 5S" (sidebar + CRUD Vị trí/Khu vực) — mở rộng thêm lãnh đạo phòng ban,
@@ -868,6 +906,8 @@ export default function SettingsPage() {
   const [configEditId, setConfigEditId] = useState<string | null>(null)
   const [invWarehouseForm, setInvWarehouseForm] = useState<InvWarehouseForm>({ code: "", name: "", keeper_name: "", warehouse_type: "", is_active: true })
   const [invCategoryForm, setInvCategoryForm] = useState<InvCategoryForm>({ code: "", name: "", sort_order: "0", is_active: true })
+  // Tên nhóm đã xác nhận dù trùng tên vật tư (chỉ khi tạo mới; đổi tên phải xác nhận lại).
+  const [categoryClashConfirmedName, setCategoryClashConfirmedName] = useState("")
   const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true, don_gia: "", loai_tien: "USD" })
   const [deliveryPointForm, setDeliveryPointForm] = useState<DispatchDeliveryPointForm>(emptyDeliveryPointForm())
   const [dispatchDriverForm, setDispatchDriverForm] = useState<DispatchDriverForm>(emptyDispatchDriverForm())
@@ -1076,7 +1116,7 @@ export default function SettingsPage() {
     }
 
     setPermissionOptions(
-      data.map((item) => ({
+      data.filter((item) => !DEPRECATED_PERMISSION_CODES.has(item.code)).map((item) => ({
         code: item.code,
         module_name: item.module_name,
         action_name: item.action_name,
@@ -1095,7 +1135,7 @@ export default function SettingsPage() {
         supabase.from("inventory_item_categories").select("id, factory_id, code, name, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
         supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, is_active, don_gia, loai_tien").eq("factory_id", fid).order("code"),
         supabase.from("inventory_items").select("category_id").eq("factory_id", fid),
-        supabase.from("dispatch_delivery_points").select("id, factory_id, ma_lo, doi, lat, lng, phien_a, phien_b, phien_c, phien_d, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("ma_lo"),
+        supabase.from("dispatch_delivery_points").select("*").eq("factory_id", fid).order("sort_order").order("ma_lo"),
       ])
 
       const nextWarehouses = (wRes.data || []) as InvWarehouseRow[]
@@ -1573,6 +1613,10 @@ export default function SettingsPage() {
     if (!factoryId) return
     if (!invCategoryForm.code.trim()) { setConfigError("Mã nhóm không được để trống"); return }
     if (!invCategoryForm.name.trim()) { setConfigError("Tên nhóm không được để trống"); return }
+    if (!configEditId && findCategoryNameClashes(invCategoryForm.name, invItems).length && !isClashConfirmed(categoryClashConfirmedName, invCategoryForm.name)) {
+      setConfigError("Tên nhóm trùng tên vật tư — tick xác nhận bên dưới nếu chắc chắn đây là nhóm vật tư.")
+      return
+    }
     setConfigSaving(true)
     setConfigError("")
     try {
@@ -1623,7 +1667,12 @@ export default function SettingsPage() {
   const saveDeliveryPoint = async () => {
     if (!factoryId) return
     if (!deliveryPointForm.ma_lo.trim()) { setConfigError("Mã điểm không được để trống"); return }
-    if (!deliveryPointForm.doi.trim()) { setConfigError("Đội không được để trống"); return }
+    if (!deliveryPointForm.doi.trim()) { setConfigError("Đội lớn không được để trống"); return }
+    const doiNhoInput = deliveryPointForm.doi_nho.trim()
+    if (doiNhoInput && doiOfDoiNho(doiNhoInput) !== Number(deliveryPointForm.doi)) {
+      setConfigError(`Đội nhỏ phải có dạng "${Number(deliveryPointForm.doi) || "<đội lớn>"}.<số>", ví dụ ${Number(deliveryPointForm.doi) || 1}.1`)
+      return
+    }
     if (!deliveryPointForm.lat.trim() || Number.isNaN(Number(deliveryPointForm.lat))) { setConfigError("Vĩ độ không hợp lệ"); return }
     if (!deliveryPointForm.lng.trim() || Number.isNaN(Number(deliveryPointForm.lng))) { setConfigError("Kinh độ không hợp lệ"); return }
     setConfigSaving(true)
@@ -1633,6 +1682,7 @@ export default function SettingsPage() {
         factory_id: factoryId,
         ma_lo: deliveryPointForm.ma_lo.trim().toUpperCase(),
         doi: Number(deliveryPointForm.doi),
+        doi_nho: doiNhoInput || null,
         lat: Number(deliveryPointForm.lat),
         lng: Number(deliveryPointForm.lng),
         phien_a: parsePointPhaseList(deliveryPointForm.phien_a),
@@ -2043,20 +2093,9 @@ export default function SettingsPage() {
     // chặn vào Cài đặt chỉ vì thiếu mọi quyền Cài đặt khác.
     const leaderDeptId = await resolveMyLeaderDepartmentId(sessionUser.id, fid)
     setKpiLeaderDepartmentId(leaderDeptId)
-    if (
-      !hasPermission(sessionUser, "settings.manage_config") &&
-      !hasPermission(sessionUser, "users.view") &&
-      !hasPermission(sessionUser, "users.approve") &&
-      !hasPermission(sessionUser, "settings.master_data") &&
-      !hasPermission(sessionUser, "settings.maintenance_config") &&
-      !hasPermission(sessionUser, "iso.signature") &&
-      !hasPermission(sessionUser, "kpi.manage_config") &&
-      leaderDeptId == null
-    ) {
-      setLoading(false)
-      window.location.replace("/dashboard")
-      return
-    }
+    // GĐ2 chuẩn hoá quyền ISO (2026-10-02): bỏ guard "phải có ít nhất 1 quyền Cài đặt". Tab
+    // "ISO & Văn bản" (Chữ ký cá nhân + PIN) nay mở cho MỌI người dùng đã đăng nhập, nên ai vào
+    // trang này cũng luôn có ít nhất 1 tab hợp lệ. Các tab còn lại vẫn tự ẩn theo quyền riêng.
 
     await Promise.all([
       loadSuffixes(fid),
@@ -2065,7 +2104,7 @@ export default function SettingsPage() {
       loadPermissions(),
       supabase
         .from("factories")
-        .select("id, name, full_name_en, address_en, contact_person, contact_email, website, country_en, ty_gia_usd_vnd, ty_gia_usd_khr")
+        .select("*")
         .order("name")
         .then(({ data }) => {
           const rows = data || []
@@ -2081,7 +2120,9 @@ export default function SettingsPage() {
               country_en: ownFactory.country_en || "",
               ty_gia_usd_vnd: ownFactory.ty_gia_usd_vnd != null ? String(ownFactory.ty_gia_usd_vnd) : "",
               ty_gia_usd_khr: ownFactory.ty_gia_usd_khr != null ? String(ownFactory.ty_gia_usd_khr) : "",
+              ten_khmer: typeof ownFactory.ten_khmer === "string" ? ownFactory.ten_khmer : "",
             })
+            setFactoryHasKhmerCol(Object.prototype.hasOwnProperty.call(ownFactory, "ten_khmer"))
           }
         }),
     ])
@@ -2184,6 +2225,23 @@ export default function SettingsPage() {
       void loadSignInfo()
     }
   }, [tab, user, factoryId])
+
+  // Tab mặc định là "system" — người dùng không có quyền Hệ thống (vd user thường chỉ vào để đặt
+  // chữ ký/PIN) phải tự chuyển sang tab hợp lệ đầu tiên, nếu không sẽ thấy nội dung tab bị ẩn.
+  useEffect(() => {
+    if (!user) return
+    const visibility: Record<SettingsTab, boolean> = {
+      system: canViewUsers || canEditPermissions,
+      "factory-config": canManageSettings,
+      "master-data": canViewMasterData,
+      maintenance: canViewMaintenanceConfig,
+      "iso-vanban": canViewIsoSignature,
+      "kpi-5s": canManageKpi5s,
+    }
+    if (visibility[tab]) return
+    const firstVisible = (Object.keys(visibility) as SettingsTab[]).find((key) => visibility[key])
+    if (firstVisible) setTab(firstVisible)
+  }, [user, tab, canViewUsers, canEditPermissions, canManageSettings, canViewMasterData, canViewMaintenanceConfig, canViewIsoSignature, canManageKpi5s])
 
   const selectedVehicleAssignmentHistory = useMemo(() => {
     if (!assignmentHistoryVehicleId) return []
@@ -2358,11 +2416,13 @@ export default function SettingsPage() {
       const n = Number(v)
       return v.trim() && Number.isFinite(n) && n > 0 ? n : null
     }
-    const payload = {
-      ...factoryInfo,
+    const { ten_khmer, ...restInfo } = factoryInfo
+    const payload: Record<string, unknown> = {
+      ...restInfo,
       ty_gia_usd_vnd: parseRate(factoryInfo.ty_gia_usd_vnd),
       ty_gia_usd_khr: parseRate(factoryInfo.ty_gia_usd_khr),
     }
+    if (factoryHasKhmerCol) payload.ten_khmer = ten_khmer.trim() || null
     const { error: err } = await supabase.from("factories").update(payload).eq("id", factoryId)
     setSavingFactory(false)
     setFactoryMsg(err ? { ok: false, text: err.message } : { ok: true, text: "Đã lưu thông tin công ty" })
@@ -3998,18 +4058,23 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Mã điểm", "Đội", "Tọa độ", "Phiên", "Thứ tự", "Trạng thái", ""].map((h) => (
+                      {["Mã điểm", "Đội lớn", "Đội nhỏ", "Tọa độ", "Phiên", "Thứ tự", "Trạng thái", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {deliveryPoints.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có điểm giao nhận nào</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">Chưa có điểm giao nhận nào</td></tr>
                     ) : deliveryPoints.map((row) => (
                       <tr key={row.id} className="row-hover">
                         <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.ma_lo}</td>
                         <td className="px-4 py-3 text-slate-700 font-semibold">Đội {row.doi}</td>
+                        <td className="px-4 py-3">
+                          {row.doi_nho
+                            ? <span className="font-semibold text-slate-700">{row.doi_nho}</span>
+                            : <span className="text-xs text-amber-600">Chưa gán</span>}
+                        </td>
                         <td className="px-4 py-3 text-xs text-slate-500">{row.lat}, {row.lng}</td>
                         <td className="px-4 py-3 text-xs text-slate-500">
                           A:{row.phien_a.length} · B:{row.phien_b.length} · C:{row.phien_c.length} · D:{row.phien_d.length}
@@ -4030,6 +4095,7 @@ export default function SettingsPage() {
                                   setDeliveryPointForm({
                                     ma_lo: row.ma_lo,
                                     doi: String(row.doi),
+                                    doi_nho: row.doi_nho || "",
                                     lat: String(row.lat),
                                     lng: String(row.lng),
                                     phien_a: row.phien_a.join(", "),
@@ -4300,6 +4366,7 @@ export default function SettingsPage() {
                   { label: "Email", field: "contact_email", colSpan: true },
                   { label: "Website", field: "website", colSpan: true },
                   { label: "Quốc gia", field: "country_en", colSpan: true },
+                  ...(factoryHasKhmerCol ? [{ label: "Tên nhà máy (tiếng Khmer) — dòng 2 tiêu đề ảnh phiếu điều xe", field: "ten_khmer", colSpan: true }] : []),
                 ].map(({ label, field, colSpan }) => (
                   <div key={field} className={colSpan ? "col-span-2" : ""}>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">{label}</label>
@@ -5779,6 +5846,14 @@ export default function SettingsPage() {
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên nhóm *</label>
                     <input value={invCategoryForm.name} onChange={(e) => setInvCategoryForm((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                   </div>
+                  {!configEditId && (
+                    <CategoryNameClashWarning
+                      name={invCategoryForm.name}
+                      clashes={findCategoryNameClashes(invCategoryForm.name, invItems)}
+                      confirmed={isClashConfirmed(categoryClashConfirmedName, invCategoryForm.name)}
+                      onConfirmChange={(checked) => setCategoryClashConfirmedName(checked ? invCategoryForm.name : "")}
+                    />
+                  )}
                   <label className="flex items-center gap-2 text-sm text-slate-700">
                     <input type="checkbox" checked={invCategoryForm.is_active} onChange={(e) => setInvCategoryForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang hoạt động
                   </label>
@@ -6006,8 +6081,18 @@ export default function SettingsPage() {
                       <input value={deliveryPointForm.ma_lo} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, ma_lo: e.target.value.toUpperCase() }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Đội *</label>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Đội lớn *</label>
                       <input value={deliveryPointForm.doi} onChange={(e) => setDeliveryPointForm((p) => ({ ...p, doi: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Đội nhỏ</label>
+                      <input
+                        value={deliveryPointForm.doi_nho}
+                        onChange={(e) => setDeliveryPointForm((p) => ({ ...p, doi_nho: e.target.value.replace(/,/g, ".").trim() }))}
+                        placeholder={deliveryPointForm.doi.trim() ? `${deliveryPointForm.doi.trim()}.1` : "Vd: 1.5"}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      />
+                      <p className="mt-1 text-[11px] text-slate-400">Dạng &quot;&lt;đội lớn&gt;.&lt;số&gt;&quot; (vd 1.5). Để trống nếu chưa gán. Đội nhỏ của điểm là quy ước quản lý, các lô trong phiên có thể thuộc đội nhỏ khác.</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

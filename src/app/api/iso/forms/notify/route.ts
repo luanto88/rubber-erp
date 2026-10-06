@@ -35,6 +35,11 @@ const ACTION_LABELS: Record<string, ActionLabel> = {
     body: (tieu_de, actor, lyDo) =>
       `Hồ sơ "${tieu_de}" đã bị ${actor} trả về.${lyDo ? ` Lý do: ${lyDo}` : ""}`,
   },
+  thu_hoi: {
+    title: "Hồ sơ đã bị thu hồi",
+    body: (tieu_de, actor, lyDo) =>
+      `Hồ sơ "${tieu_de}" đã được ${actor} thu hồi về bản nháp, bạn không cần ký nữa.${lyDo ? ` Lý do: ${lyDo}` : ""}`,
+  },
   ky_buoc: {
     title: "Hồ sơ ISO cần ký duyệt",
     body: (tieu_de, actor) =>
@@ -230,7 +235,7 @@ export async function POST(req: NextRequest) {
           .filter((e): e is string => !!e && e.includes("@"))
 
         if (emails.length > 0) {
-          const isWarning = action === "tra_ve"
+          const isWarning = action === "tra_ve" || action === "thu_hoi"
           const headerColor = isWarning ? "#e11d48" : "#7c3aed"
           const subject = `[ISO Forms] ${labelInfo.title} — ${tieu_de}`
 

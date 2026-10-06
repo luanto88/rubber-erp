@@ -17,6 +17,7 @@ import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import {
@@ -467,6 +468,9 @@ export default function QualityPage() {
   // đi khi phát hiện ngày đó đã "Đã ký duyệt" (trước khi có cờ này, isDateLocked mặc định false
   // trong lúc Map còn rỗng nên nút luôn hiện tạm thời — race condition đã báo 2026-08-31).
   const [signingStatusLoaded, setSigningStatusLoaded] = useState(false)
+  // Lỗi tải trạng thái ký: GIỮ map cũ + hiện "Thử lại", không coi như "chưa ký" (mirror Điều xe).
+  const [signingStatusError, setSigningStatusError] = useState(false)
+  const signingReqSeq = useRef(0)
 
   // ── Toast ────────────────────────────────────────────────────────────────────
   const [toast, setToast] = useState<{msg:string;ok:boolean}|null>(null)
@@ -1717,21 +1721,35 @@ export default function QualityPage() {
 
   // Trạng thái ký từng ngày (yeu_cau_ky) — cho danh sách biết ngày nào đã có yêu cầu ký đang
   // chờ/đã hoàn tất, tránh tạo trùng. Đặt SAU dateGroups vì phụ thuộc trực tiếp vào nó.
+  // Khoá ổn định theo tập ngày: dateGroups đổi identity mỗi lần lọc/tải lại nhưng tập ngày thường
+  // không đổi → không gọi lại API (trước đây gây nhấp nháy cột Ký duyệt). Không reset "loaded"
+  // khi tải lại; bỏ response về muộn (seq).
+  const datesKey = useMemo(() => dateGroups.map(([d]) => d).sort().join(","), [dateGroups])
   const loadSigningStatuses = useCallback(async () => {
-    if (!factoryId || !dateGroups.length) { setSigningStatusByDate(new Map()); setSigningStatusLoaded(true); return }
-    const { data: sessionData } = await supabase.auth.getSession()
-    const accessToken = sessionData.session?.access_token
-    if (!accessToken) { setSigningStatusLoaded(true); return }
+    if (!factoryId) return
+    const seq = ++signingReqSeq.current
+    const dates = datesKey ? datesKey.split(",") : []
+    if (!dates.length) {
+      setSigningStatusByDate(new Map())
+      setSigningStatusError(false)
+      setSigningStatusLoaded(true)
+      return
+    }
     try {
-      const dates = dateGroups.map(([d]) => d).join(",")
-      const res = await fetch(`/api/quality/signing-status?factoryId=${factoryId}&dates=${dates}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      })
-      const list: QualitySigningStatus[] = await res.json()
-      setSigningStatusByDate(new Map((Array.isArray(list) ? list : []).map((s) => [s.date, s])))
-    } catch { /* best-effort — không chặn UI nếu lỗi mạng */ }
-    finally { setSigningStatusLoaded(true) }
-  }, [factoryId, dateGroups])
+      const list = await fetchSigningStatusList<QualitySigningStatus>(
+        "/api/quality/signing-status",
+        { factoryId, dates },
+      )
+      if (seq !== signingReqSeq.current) return
+      setSigningStatusByDate(new Map(list.map((s) => [s.date, s])))
+      setSigningStatusError(false)
+    } catch {
+      if (seq !== signingReqSeq.current) return
+      setSigningStatusError(true)
+    } finally {
+      if (seq === signingReqSeq.current) setSigningStatusLoaded(true)
+    }
+  }, [factoryId, datesKey])
 
   useEffect(() => { void loadSigningStatuses() }, [loadSigningStatuses])
 
@@ -1843,14 +1861,29 @@ export default function QualityPage() {
     const deduped = Array.from(statsMap.values())
     const khongDatCount = deduped.filter(r=>r.dat_hang?.endsWith("RH")).length
     const datCount = deduped.length - khongDatCount
+    const rawDatPct = deduped.length ? (datCount / deduped.length) * 100 : 0
+    const rawKhongDatPct = deduped.length ? (khongDatCount / deduped.length) * 100 : 0
+    const tyLeStr = deduped.length === 0
+      ? "0%"
+      : khongDatCount > 0
+        ? `${Math.min(rawDatPct, 99.99).toFixed(2)}%`
+        : "100%"
+    const tyLeKhongDatStr = deduped.length === 0
+      ? "0%"
+      : khongDatCount > 0
+        ? `${Math.max(rawKhongDatPct, 0.01).toFixed(2)}%`
+        : "0%"
+
     return {
       latestPerLot: map,
       stats: {
         total: deduped.length,
         dat: datCount,
         khongDat: khongDatCount,
-        tyLe:      deduped.length ? Math.round(datCount/deduped.length*100) : 0,
-        tyLeKhongDat: deduped.length ? Math.round(khongDatCount/deduped.length*100) : 0,
+        tyLe: rawDatPct,
+        tyLeKhongDat: rawKhongDatPct,
+        tyLeStr,
+        tyLeKhongDatStr,
       }
     }
   }, [results, statsResults])
@@ -2295,8 +2328,8 @@ export default function QualityPage() {
                 {[
                   { label:"Tổng lô (mới nhất)", value:stats.total,                                            color:"text-slate-700",   Icon:ClipboardCheck, ic:"text-slate-400"   },
                   { label:"Đạt hạng",            value:`${stats.dat} lô`,                                     color:"text-emerald-600", Icon:Check,          ic:"text-emerald-400" },
-                  { label:"Rớt hạng",            value:`${stats.khongDat} lô (${stats.tyLeKhongDat}%)`,       color:"text-red-500",     Icon:XCircle,        ic:"text-red-400"     },
-                  { label:"Tỷ lệ đạt",           value:stats.tyLe+"%",                                        color:"text-blue-600",    Icon:BarChart2,      ic:"text-blue-400"    },
+                  { label:"Rớt hạng",            value:`${stats.khongDat} lô (${stats.tyLeKhongDatStr})`,       color:"text-red-500",     Icon:XCircle,        ic:"text-red-400"     },
+                  { label:"Tỷ lệ đạt",           value:stats.tyLeStr,                                         color:"text-blue-600",    Icon:BarChart2,      ic:"text-blue-400"    },
                 ].map(s=>(
                   <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
                     <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
@@ -2338,7 +2371,8 @@ export default function QualityPage() {
               </FilterBar>
 
               {/* Date-grouped list */}
-              {loading ? (
+              {/* Chỉ hiện "Đang tải" khi chưa có dữ liệu — tải lại không gỡ bảng (tránh nhấp nháy cột Ký duyệt). */}
+              {loading && results.length === 0 ? (
                 <div className="bg-white rounded-xl p-12 text-center text-slate-400">Đang tải...</div>
               ) : dateGroups.length === 0 ? (
                 <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
@@ -2414,21 +2448,21 @@ export default function QualityPage() {
                               </>
                             ) : (
                               <>
-                                {hasPermission(currentUser, "quality.create") && signingStatusLoaded && !isAddBlocked && (
+                                {hasPermission(currentUser, "quality.create") && signingStatusLoaded && !signingStatusError && !isAddBlocked && (
                                   <button onClick={e=>{e.stopPropagation();openCreate(date)}}
                                     title="Thêm phiếu"
                                     className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors">
                                     <Plus size={15}/>
                                   </button>
                                 )}
-                                {hasPermission(currentUser, "quality.edit") && canOwnerAct && signingStatusLoaded && !isDateLocked && (
+                                {hasPermission(currentUser, "quality.edit") && canOwnerAct && signingStatusLoaded && !signingStatusError && !isDateLocked && (
                                   <button onClick={e=>{e.stopPropagation();setEditDateModal(date);setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
                                     title="Sửa"
                                     className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors">
                                     <Edit2 size={15}/>
                                   </button>
                                 )}
-                                {hasPermission(currentUser, "quality.delete") && canOwnerAct && signingStatusLoaded && !isDateLocked && (
+                                {hasPermission(currentUser, "quality.delete") && canOwnerAct && signingStatusLoaded && !signingStatusError && !isDateLocked && (
                                   <button onClick={e=>{e.stopPropagation();setDeleteMode(date);setSelectedDeleteIds(new Set());setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
                                     title="Xóa"
                                     className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors">
@@ -2441,6 +2475,12 @@ export default function QualityPage() {
                                   <span className="p-1.5 rounded-lg text-slate-300">
                                     <Loader2 size={15} className="animate-spin"/>
                                   </span>
+                                ) : signingStatusError && !signingStatusByDate.get(date) ? (
+                                  <button onClick={e=>{e.stopPropagation(); void loadSigningStatuses()}}
+                                    title="Không tải được trạng thái ký — bấm để thử lại"
+                                    className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-50">
+                                    <AlertTriangle size={14}/> Thử lại
+                                  </button>
                                 ) : (
                                 <>
                                 {/* PDF: chưa ký → render bản in nháp; đã có yêu cầu ký → mở đúng file hiện
@@ -2799,17 +2839,7 @@ export default function QualityPage() {
           )}
 
           {mainTab === "thong_ke" && (
-            <>
-              <div className="flex justify-end mb-3">
-                <Link
-                  href="/dashboard/quality/reports"
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow-md transition-all"
-                >
-                  <Printer size={15} /> In báo cáo thống kê chất lượng
-                </Link>
-              </div>
-              <QualityAnalyticsPage embedded factoryId={factoryId} />
-            </>
+            <QualityAnalyticsPage embedded factoryId={factoryId} />
           )}
         </div>
       )}
@@ -2838,13 +2868,13 @@ export default function QualityPage() {
                   <span className={`px-2 py-0.5 rounded-full text-xs font-bold ml-auto ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
                     {r.dat_hang}
                   </span>
-                  {hasPermission(currentUser, "quality.edit") && canOwnerRow && signingStatusLoaded && !rowsDateLocked && (
+                  {hasPermission(currentUser, "quality.edit") && canOwnerRow && signingStatusLoaded && !signingStatusError && !rowsDateLocked && (
                     <button onClick={()=>openEditResult(r)}
                       className="flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-100">
                       <Edit2 size={11}/> Sửa
                     </button>
                   )}
-                  {hasPermission(currentUser, "quality.delete") && canOwnerRow && signingStatusLoaded && !rowsDateLocked && (
+                  {hasPermission(currentUser, "quality.delete") && canOwnerRow && signingStatusLoaded && !signingStatusError && !rowsDateLocked && (
                     <button onClick={()=>setDelConfirm(r.id)}
                       className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors">
                       <Trash2 size={13}/>

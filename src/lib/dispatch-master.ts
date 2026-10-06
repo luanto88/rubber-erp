@@ -3,6 +3,8 @@ export type DiemGN = {
   lat: number
   lng: number
   doi: number
+  /** Đội nhỏ dạng '<đội lớn>.<số>' (vd '1.5'); null/undefined = chưa gán */
+  doi_nho?: string | null
   phien_a: string[]
   phien_b: string[]
   phien_c: string[]
@@ -16,6 +18,7 @@ export type DispatchDeliveryPointRow = {
   lat: number
   lng: number
   doi: number
+  doi_nho?: string | null
   phien_a?: string[] | null
   phien_b?: string[] | null
   phien_c?: string[] | null
@@ -68,6 +71,7 @@ export function normalizeDeliveryPoints(rows?: DispatchDeliveryPointRow[] | null
       lat: Number(row.lat) || 0,
       lng: Number(row.lng) || 0,
       doi: Number(row.doi) || 0,
+      doi_nho: typeof row.doi_nho === "string" && row.doi_nho.trim() ? row.doi_nho.trim() : null,
       phien_a: Array.isArray(row.phien_a) ? row.phien_a : [],
       phien_b: Array.isArray(row.phien_b) ? row.phien_b : [],
       phien_c: Array.isArray(row.phien_c) ? row.phien_c : [],
@@ -79,6 +83,44 @@ export function normalizeDeliveryPoints(rows?: DispatchDeliveryPointRow[] | null
 
 export function getAllowedDoi(points: DiemGN[], diemGn: string[]): number[] {
   return [...new Set(diemGn.map(d => points.find(g => g.ma_lo === d)?.doi ?? 0).filter(x => x > 0))]
+}
+
+/** Giá trị lọc đại diện cho điểm chưa gán đội nhỏ. */
+export const DOI_NHO_UNASSIGNED = "__chua_gan__"
+
+/** "1.5" → 1; giá trị không hợp lệ → null. */
+export function doiOfDoiNho(doiNho: string | null | undefined): number | null {
+  const m = /^(\d+)\.\d+$/.exec(String(doiNho ?? "").trim())
+  return m ? Number(m[1]) : null
+}
+
+/** Sắp đội nhỏ theo số: 1.1 < 1.5 < 2.2 < 10.3. */
+export function compareDoiNho(a: string, b: string): number {
+  const [a1, a2] = a.split(".").map(Number)
+  const [b1, b2] = b.split(".").map(Number)
+  return (a1 || 0) - (b1 || 0) || (a2 || 0) - (b2 || 0)
+}
+
+/** Đội nhỏ (đã sắp, không trùng) của các điểm GN; `onlyDoi` giữ điểm thuộc đúng đội lớn. */
+export function resolveTripDoiNhos(diemGn: string[], points: DiemGN[], onlyDoi?: number): string[] {
+  const out = new Set<string>()
+  for (const code of diemGn) {
+    const point = points.find(p => p.ma_lo === code)
+    if (!point || !point.doi_nho) continue
+    if (onlyDoi !== undefined && point.doi !== onlyDoi) continue
+    out.add(point.doi_nho)
+  }
+  return [...out].sort(compareDoiNho)
+}
+
+/** Khóa lọc đội nhỏ của 1 chuyến; điểm chưa gán ⇒ DOI_NHO_UNASSIGNED. */
+export function resolveTripDoiNhoFilterKeys(diemGn: string[], points: DiemGN[]): string[] {
+  const out = new Set<string>()
+  for (const code of diemGn) {
+    const point = points.find(p => p.ma_lo === code)
+    out.add(point?.doi_nho || DOI_NHO_UNASSIGNED)
+  }
+  return [...out]
 }
 
 export function calcManhattanKm(

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
 import nodemailer from "nodemailer"
+import { isoActorHasPermission, isoAuthErrorStatus, resolveIsoActor } from "../../_lib/iso-actor"
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,13 +12,33 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://qlsxkpt.vercel.app"
 
 export async function POST(req: NextRequest) {
   try {
-    const { obsoleteDocId, newDocId, factoryId } = (await req.json()) as {
+    const body = (await req.json()) as {
       obsoleteDocId: string
       newDocId: string
-      factoryId: string
+      factoryId?: string
+    }
+    const { obsoleteDocId, newDocId } = body
+
+    // Xác thực: chỉ người phê duyệt (hoặc admin) — đây là bước ngay sau khi phê duyệt soát xét.
+    // Nhà máy lấy từ phiên, không tin giá trị client gửi.
+    let factoryId: string
+    try {
+      const actor = await resolveIsoActor(req)
+      if (body.factoryId && body.factoryId !== actor.factoryId) {
+        return NextResponse.json({ error: "Không đúng nhà máy của bạn" }, { status: 403 })
+      }
+      if (!(await isoActorHasPermission(actor, ["iso.phe_duyet"]))) {
+        return NextResponse.json({ error: "Bạn không có quyền gửi thông báo này" }, { status: 403 })
+      }
+      factoryId = actor.factoryId
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Phiên đăng nhập không hợp lệ" },
+        { status: isoAuthErrorStatus(err) },
+      )
     }
 
-    if (!obsoleteDocId || !factoryId) {
+    if (!obsoleteDocId) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 

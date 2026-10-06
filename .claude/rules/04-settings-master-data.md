@@ -71,6 +71,7 @@ Các file module đơn lẻ chỉ nên tham chiếu tới file này, không lặ
 - Dữ liệu phải tách theo `factory_id`
 - `ma_lo` là mã điểm giao nhận duy nhất trong phạm vi từng nhà máy
 - `is_active = false` nghĩa là tạm ngưng sử dụng trên UI nhưng không xóa lịch sử
+- `doi` = **Đội lớn**; `doi_nho` (2026-10-04) = **Đội nhỏ** dạng `'<đội lớn>.<số>'` (vd `1.5`), tùy chọn, form chặn nếu phần trước dấu chấm khác đội lớn. Nguồn chính thức `cung_cap_dl/doi.xlsx`. Đội nhỏ gán theo điểm là quy ước quản lý (các lô trong phiên A–D có thể thuộc đội nhỏ khác)
 
 ### 4.2. Tài xế
 

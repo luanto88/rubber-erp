@@ -8,12 +8,16 @@ import type { ReactNode } from "react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { stepSignerUserId, type ThuTuKyStep } from "@/app/dashboard/iso/_components/iso-types"
+import { canSeeIsoOverview, canViewIsoLibrary, readCachedIsoUser } from "@/app/dashboard/iso/_components/iso-access"
+import type { SessionUser } from "@/lib/auth"
 
 type NavTab = {
   href: string
   label: string
   icon: LucideIcon
   matchPrefixes?: string[]
+  /** GĐ3: điều kiện hiện tab (bảng B). Không khai báo = luôn hiện (layout đã đảm bảo iso.view). */
+  visible?: (user: SessionUser | null) => boolean
 }
 
 const tabs: NavTab[] = [
@@ -22,12 +26,14 @@ const tabs: NavTab[] = [
     label: "Tổng quan",
     icon: LayoutDashboard,
     matchPrefixes: [],
+    visible: canSeeIsoOverview,
   },
   {
     href: "/dashboard/iso/documents",
     label: "Tài liệu ISO",
     icon: FileText,
     matchPrefixes: ["/dashboard/iso/documents"],
+    visible: canViewIsoLibrary,
   },
   {
     href: "/dashboard/iso/my-tasks",
@@ -63,6 +69,22 @@ type IsoShellProps = {
 export function IsoShell({ children }: IsoShellProps) {
   const pathname = usePathname()
   const [pendingTaskCount, setPendingTaskCount] = useState(0)
+  // Đọc quyền sau khi mount (localStorage không có ở SSR). Trước đó chỉ hiện các tab cơ bản.
+  const [user, setUser] = useState<SessionUser | null>(null)
+  const [userLoaded, setUserLoaded] = useState(false)
+
+  useEffect(() => {
+    // Đọc trong microtask (không setState đồng bộ trong effect — rule react-hooks).
+    let alive = true
+    void Promise.resolve().then(() => {
+      if (!alive) return
+      setUser(readCachedIsoUser())
+      setUserLoaded(true)
+    })
+    return () => { alive = false }
+  }, [])
+
+  const visibleTabs = tabs.filter((tab) => !tab.visible || (userLoaded && tab.visible(user)))
 
   useEffect(() => {
     let alive = true
@@ -153,7 +175,7 @@ export function IsoShell({ children }: IsoShellProps) {
     <div className="space-y-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="flex gap-1 p-2 overflow-x-auto">
-          {tabs.map((tab) => {
+          {visibleTabs.map((tab) => {
             const active = isActive(pathname, tab)
             const Icon = tab.icon
             return (

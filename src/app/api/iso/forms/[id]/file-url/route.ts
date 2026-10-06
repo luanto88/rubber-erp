@@ -59,13 +59,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const { data, error } = await admin
       .from("iso_form_instances")
-      .select("id, factory_id, trang_thai, tieu_de, draft_file_url, draft_file_type, final_pdf_url, final_office_url, soan_thao_signed_url")
+      .select("id, factory_id, trang_thai, tieu_de, template_doc_id, draft_file_url, draft_file_type, final_pdf_url, final_office_url, soan_thao_signed_url")
       .eq("id", id)
       .maybeSingle()
     if (error) {
       return NextResponse.json({ error: "Không đọc được hồ sơ" }, { status: 500 })
     }
-    const inst = data as InstanceRow | null
+    const inst = data as (InstanceRow & { template_doc_id?: string | null }) | null
     if (!inst) {
       return NextResponse.json({ error: "Không tìm thấy hồ sơ này" }, { status: 404 })
     }
@@ -78,7 +78,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: "Hồ sơ chưa có file" }, { status: 404 })
     }
 
-    const downloadName = req.nextUrl.searchParams.get("download") === "1" ? inst.tieu_de || "ho_so" : undefined
+    let docCode: string | null = null
+    if (inst.template_doc_id) {
+      const { data: docData } = await admin
+        .from("iso_documents")
+        .select("ma_tai_lieu")
+        .eq("id", inst.template_doc_id)
+        .maybeSingle()
+      docCode = docData?.ma_tai_lieu ?? null
+    }
+
+    const fileTitle = (inst.tieu_de || "ho_so").trim()
+    const fullBaseName = docCode ? `${docCode} - ${fileTitle}` : fileTitle
+    const isDownload = req.nextUrl.searchParams.get("download") === "1"
+    const downloadName = isDownload ? fullBaseName : undefined
 
     const url = await mintSignedFileUrl(sourceUrl, { bucket: BUCKET, downloadName })
     if (!url) {

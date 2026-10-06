@@ -199,6 +199,11 @@ Các trang sau dùng `hydrateActiveSession()` trong bootstrap và phải check q
 
 ### Settings page — guard đặc biệt
 
+> ⚠️ **Đã thay đổi 2026-10-02 (GĐ2 chuẩn hoá quyền ISO)**: guard dưới đây đã BỎ. Tab "ISO & Văn
+> bản" (Chữ ký cá nhân + PIN) mở cho mọi người đã đăng nhập nên ai cũng vào được trang Cài đặt;
+> menu Cài đặt chỉ ẩn với customer. `iso.signature` không còn tồn tại. Đoạn code bên dưới chỉ là
+> lịch sử. Chi tiết: `.claude/rules/16-iso-vanban-module.md` mục "GĐ2".
+
 `settings/page.tsx` kiểm tra **BẤT KỲ** quyền nào trong danh sách sau (redirect nếu không có quyền nào):
 
 ```typescript

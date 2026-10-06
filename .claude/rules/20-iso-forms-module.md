@@ -960,3 +960,50 @@ trí tự hiện, không phải sửa `ky/mau-vi-tri/page.tsx`.
 **Đã kiểm chứng bằng code thật** (trích PDF bằng pdfjs): ngày ký nằm trong khung; ghi chú xuống
 dòng, không tràn ngang/dọc; vẽ được đồng thời cả 2; và 6 guard (rỗng / null / toàn khoảng trắng /
 thiếu toạ độ / placement cũ) đều không vẽ gì.
+
+---
+
+## Cập nhật 2026-10-03 — GĐ3 phân quyền: ẩn/hiện + phạm vi xem hồ sơ thực hiện
+
+Không có migration. Chi tiết chung GĐ3 ở rule 16 mục "GĐ3".
+
+- **Phạm vi xem**: không có mã quyền "chỉ xem của mình" — đó là MẶC ĐỊNH. Không tick
+  `iso.forms.view_all` ⇒ chỉ thấy hồ sơ mình liên quan (người lập, người xem xét/phê duyệt, hoặc có
+  tên ở bất kỳ bước nào của `thu_tu_ky_json`). Tick `iso.forms.view_all` (hoặc admin) mới thấy toàn
+  nhà máy. Helper: `isFormInstanceRelated()` trong `iso/_components/iso-access.ts`.
+- `forms/page.tsx` `loadInstances(fid, uid, seeAll)`: khi không có view_all chạy **2 truy vấn**
+  (`.or()` theo 3 cột người ký + `.contains("thu_tu_ky_json", [{ user_id }])`), gộp theo id, sắp
+  `created_at` giảm dần, lấy 100. Không nhét JSON vào chuỗi `.or()` (ký tự `:`/`"` dễ vỡ cú pháp
+  PostgREST), không lọc sau `.limit(100)` (mất dòng).
+- `forms/[id]`: không liên quan + không view_all → màn "Bạn không có quyền xem hồ sơ này".
+- Nút "Lập hồ sơ" + khối "Tìm kiếm biểu mẫu bằng AI" gate `iso.forms.create`; "Cập nhật chỉ mục
+  AI" gate `iso.create`/admin.
+- `api/iso/forms/clone` trước đây **không xác thực**, tin `factoryId/userId` client gửi. Nay
+  `resolveIsoActor` + `isoActorHasPermission(["iso.forms.create"])`, lấy người lập/nhà máy từ phiên;
+  client gọi qua `authFetch`. Client + server phải deploy cùng lúc.
+- ⚠️ RLS SELECT `iso_form_instances` vẫn mở toàn nhà máy (migration 20260908 cố ý) ⇒ GĐ3 chỉ chặn
+  ở giao diện. Đề xuất đợt sau: SELECT = người liên quan (`nguoi_tao`, `xem_xet_user_id`,
+  `phe_duyet_user_id`, `iso_steps_include_user(thu_tu_ky_json, auth.uid())`) ∪
+  `current_profile_has_permission('iso.forms.view_all')` ∪ admin. Việc của tôi / chuông chỉ đọc hồ
+  sơ liên quan nên không bị ảnh hưởng; kiểm thêm `kho/page.tsx` (đọc hồ sơ đã phê duyệt) trước khi siết.
+- Kho của tôi (2026-10-03, sau test GĐ3): gồm hồ sơ `da_phe_duyet` mình lập, là người xem xét/phê
+  duyệt, hoặc có tên ở bất kỳ bước `thu_tu_ky_json` (2 truy vấn gộp như danh sách) + hồ sơ được
+  phân phối. Hồ sơ chưa phê duyệt không vào Kho.
+- 🐛 Sau test GĐ3 (2026-10-03): `.contains("thu_tu_ky_json", [{ user_id }])` truyền mảng object bị
+  supabase-js mã hoá thành mảng Postgres `{...}` → lỗi `22P02`, `data = null` âm thầm ⇒ người chỉ có tên
+  ở bước ký (vd admin lập hộ, bước 1 = người lập thật) không thấy hồ sơ ở Thực hiện hồ sơ lẫn Kho. Bắt buộc
+  truyền **chuỗi** `JSON.stringify([{ user_id: uid }])` (đã sửa `forms/page.tsx`, `kho/page.tsx`, có log lỗi).
+- Kho của tôi: bộ lọc "Loại" và cột "Phân loại" hiện nhãn `LOAI_TAI_LIEU_LABEL` ("Quy trình") thay mã (QT).
+
+## Cập nhật 2026-10-03 — GĐ4 "Thu hồi" hồ sơ thực hiện
+
+- Route `POST /api/iso/forms/[id]/recall` `{ lyDo? }`. Được thu hồi: `nguoi_tao`, **người ký bước 1**
+  (admin có thể lập hộ — đã chốt với người dùng), admin. Điều kiện: N bước `buoc_hien_tai = 1` và đang
+  `cho_xem_xet`/`cho_phe_duyet`; legacy: đã ký soạn thảo, chưa ký xem xét/phê duyệt. Khác → 409.
+- Về nháp: `trang_thai=draft`, `buoc_hien_tai=0`, `nguoi_ky={}`, `placement_ky={}`,
+  `soan_thao_signed_url/final_pdf_url/final_office_url/ly_do_tra_ve = null` (legacy thêm `soan_thao`,
+  `soan_thao_placement`, `ky_soan_thao_at`). GIỮ `draft_file_url` — finalize dựng lại từ đó.
+  Update kèm `eq buoc_hien_tai 1` chống đua với người ký bước 2.
+- Log `iso_form_instance_logs` action `thu_hoi` (`ISO_LOG_ACTION_CONFIG.thu_hoi` = "Đã thu hồi về
+  nháp"); báo người ký bước 2 qua `/api/iso/forms/notify`.
+- UI: nút "Thu hồi" sau "Trả về", `canRecall` = trạng thái chờ + (người tạo/người ký bước 1/admin).

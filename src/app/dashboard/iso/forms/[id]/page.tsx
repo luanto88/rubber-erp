@@ -9,13 +9,13 @@ import {
   RotateCcw, Settings, Clock, User, RefreshCcw, Info,
   ChevronLeft, ChevronRight, ChevronDown, Plus, LayoutTemplate,
   ArrowUp, ArrowDown, Trash2, Save, UserCheck, Share2,
-  ShieldCheck, Bell,
+  ShieldCheck, Bell, Undo2,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession, hasPermission, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, hydrateActiveSession } from "@/lib/auth"
 import { fetchSecureUrl, openSecureFile } from "../../../_components/secure-file-open"
 import { formatFactoryDateVN, formatFactoryDateTimeVN } from "@/lib/date-utils"
 import {
@@ -36,8 +36,10 @@ import {
 } from "@/lib/signing/template-layout"
 import { computeSnugBoxSize } from "@/lib/signing/text-fit"
 import { IsoShell } from "../../_components/iso-shell"
+import { canSeeAllIsoForms, isFormInstanceRelated, readCachedIsoUser } from "../../_components/iso-access"
 import { DistributionModal } from "../../_components/distribution-modal"
 import { ModalShell } from "../../../_components/modal-shell"
+import { authFetch } from "@/lib/auth-fetch"
 import {
   fmtDate,
   fmtDateTime,
@@ -74,6 +76,7 @@ type FullPlacement = {
   showChucVu?: boolean
   chucVuText?: string | null
   cvX?: number; cvY?: number; cvWidth?: number; cvHeight?: number
+  chucVuX?: number; chucVuY?: number; chucVuWidth?: number; chucVuHeight?: number
   // Ngày ký / Ghi chú — nội dung tự điền theo mẫu, mỗi thứ CHỈ gắn vào placement của ĐÚNG một
   // bước (ngày ký: phê duyệt; ghi chú: soạn thảo) để bước phê duyệt vẽ lại không chồng 3 lớp.
   ngayKyText?: string | null
@@ -82,7 +85,7 @@ type FullPlacement = {
   ghiChuText?: string | null
   ghiChuX?: number; ghiChuY?: number; ghiChuWidth?: number; ghiChuHeight?: number
   kyNhayX?: number; kyNhayY?: number; kyNhayWidth?: number; kyNhayHeight?: number
-  qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number
+  qrX?: number; qrY?: number; qrWidth?: number; qrHeight?: number; qrPage?: number; qrAllPages?: boolean
   // Hộp tiền tố ký thay (KT./TM./TL./TUQ.) — chỉ dùng ở bước Phê duyệt, chỉ áp
   // dụng cho PDF (không có khái niệm tương đương cho DOCX/XLSX).
   showPrefix?: boolean
@@ -92,6 +95,10 @@ type FullPlacement = {
     x: number; y: number; width: number; height: number
     showSignature: boolean; showSignerName: boolean
     nameX: number; nameY: number; nameWidth: number; nameHeight: number
+    showChucVu?: boolean
+    chucVuText?: string | null
+    cvX?: number; cvY?: number; cvWidth?: number; cvHeight?: number
+    chucVuX?: number; chucVuY?: number; chucVuWidth?: number; chucVuHeight?: number
   }>
 }
 
@@ -650,6 +657,7 @@ type ExtraBoxItem = {
   sigX: number; sigY: number; sigW: number; sigH: number
   nameX: number; nameY: number; nameW: number; nameH: number
   cvX: number; cvY: number; cvW: number; cvH: number
+  chucVuText?: string
   showSignature: boolean
   showSignerName: boolean
   showChucVu: boolean
@@ -669,6 +677,7 @@ function SignPlacementModal({
   signatureUrl,
   userName,
   userChucVu,
+  userStaffTitles,
   ghiChuText,
   factoryId,
   templateMa,
@@ -691,6 +700,7 @@ function SignPlacementModal({
   signatureUrl: string | null
   userName: string
   userChucVu: string
+  userStaffTitles?: { kiem_nhiem: string; chinh_quyen: string }
   ghiChuText: string
   factoryId: string | null
   templateMa: string | null
@@ -710,6 +720,12 @@ function SignPlacementModal({
   const isFinalStep = typeof totalSteps === "number" && typeof stepIndex === "number"
     ? stepIndex + 1 >= totalSteps
     : action === "phe_duyet"
+
+  // Chức vụ thực tế hiển thị (có thể thay đổi linh hoạt theo cờ kiem_nhiem vs chinh_quyen của mẫu)
+  const [currentChucVuText, setCurrentChucVuText] = useState(userChucVu)
+  useEffect(() => {
+    setCurrentChucVuText(userChucVu)
+  }, [userChucVu])
 
   // Màu sắc nhận diện chuẩn của người ký theo bước (đồng bộ 100% với bảng màu cài đặt trong mau-vi-tri)
   const activeStepColor = useMemo(() => {
@@ -801,23 +817,39 @@ function SignPlacementModal({
   const [ngayKyPreview] = useState(() => `Hồ sơ được ký ${formatFactoryDateTimeVN(new Date())}`)
   const [mainBoxPage, setMainBoxPage] = useState<number>(1)
   const [extraSigBoxes, setExtraSigBoxes] = useState<ExtraBoxItem[]>([])
-  // Theo dõi các trang có khung ký đã được người ký duyệt qua (Reviewed Pages)
-  const [reviewedPages, setReviewedPages] = useState<Set<number>>(() => new Set([1]))
+  // Theo dõi các trang có khung ký đã được người ký duyệt qua (Reviewed Pages) — KHÔNG khởi tạo trước trang 1
+  const [reviewedPages, setReviewedPages] = useState<Set<number>>(() => new Set<number>())
+
+  // Toàn bộ danh sách khung ký người ký này cần xem qua
+  const allBoxes = useMemo(() => {
+    const list: Array<{ id: string | number; page: number; name: string }> = [
+      { id: "main", page: mainBoxPage, name: "Khung chính" },
+    ]
+    extraSigBoxes.forEach((b, idx) => {
+      list.push({ id: b.id, page: b.page || 1, name: `Khung nhân bản ${idx + 1}` })
+    })
+    return list
+  }, [mainBoxPage, extraSigBoxes])
 
   const signingPages: number[] = useMemo(() => {
-    return Array.from(new Set([mainBoxPage, ...extraSigBoxes.map((b) => b.page || 1)])).sort((a, b) => a - b)
-  }, [mainBoxPage, extraSigBoxes])
-  const totalSigs = 1 + extraSigBoxes.length
+    return Array.from(new Set(allBoxes.map((b) => b.page || 1))).sort((a, b) => a - b)
+  }, [allBoxes])
+  const totalSigs = allBoxes.length
   const unreviewedPages: number[] = useMemo(() => {
     return signingPages.filter((p: number) => !reviewedPages.has(p))
   }, [signingPages, reviewedPages])
   const allPagesReviewed = unreviewedPages.length === 0
 
   useEffect(() => {
-    if (step === "placement") {
-      setReviewedPages((prev) => new Set([...prev, currentPage]))
+    if (step === "placement" && canvasReady) {
+      setReviewedPages((prev) => {
+        if (prev.has(currentPage)) return prev
+        const next = new Set(prev)
+        next.add(currentPage)
+        return next
+      })
     }
-  }, [currentPage, step])
+  }, [currentPage, step, canvasReady])
 
   // Cập nhật toạ độ và kích thước 2 khối con bên trong khung Ghi chú (ô text và chữ ký nháy)
   const setNoteRect = (which: "text" | "ky_nhay", x: number, y: number, w: number, h: number) => {
@@ -982,12 +1014,18 @@ function SignPlacementModal({
             : null
           const withPrefix = isFinalStep && !!tmplSignAs
 
+          const selectedCvKey = (roleBox.chuc_vu_key as string) || "chinh_quyen"
+          const resolvedCv = selectedCvKey === "kiem_nhiem"
+            ? (userStaffTitles?.kiem_nhiem || userStaffTitles?.chinh_quyen || userChucVu)
+            : (userStaffTitles?.chinh_quyen || userStaffTitles?.kiem_nhiem || userChucVu)
+          setCurrentChucVuText(resolvedCv)
+
           // Tầng 1: Mẫu quyết định CHO PHÉP hiển thị
           setTmplAllowName(tmplShowName)
           setTmplAllowChucVu(tmplShowCv)
           // Tầng 2: Trạng thái bật/tắt ban đầu của người ký
           setShowName(tmplShowName)
-          setShowChucVu(tmplShowCv && !!userChucVu)
+          setShowChucVu(tmplShowCv && !!resolvedCv)
           if (isFinalStep) {
             setSignAs(tmplSignAs ?? "none")
           }
@@ -1021,26 +1059,38 @@ function SignPlacementModal({
           const cvCanvas = toCanvas(cvPt)
 
           const snugName = computeSnugBoxSize(userName, "name", 1.0)
-          const snugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.0)
+          const snugCv = computeSnugBoxSize(resolvedCv, "chuc_vu", 1.0)
 
-          const snugNameW = Math.min(roleCanvas.w, snugName.w)
-          const snugCvW = Math.min(roleCanvas.w, snugCv.w)
+          const snugNameW = Math.min(roleCanvas.w - 8, snugName.w)
+          const snugCvW = Math.min(roleCanvas.w - 8, snugCv.w)
 
-          const snugNameX = Math.max(roleCanvas.x, roleCanvas.x + Math.round((roleCanvas.w - snugNameW) / 2))
-          const snugCvX = Math.max(roleCanvas.x, roleCanvas.x + Math.round((roleCanvas.w - snugCvW) / 2))
+          const snugNameX = Math.max(roleCanvas.x + 4, roleCanvas.x + Math.round((roleCanvas.w - snugNameW) / 2))
+          const snugCvX = Math.max(roleCanvas.x + 4, roleCanvas.x + Math.round((roleCanvas.w - snugCvW) / 2))
 
-          setSigState(toCanvas(sigPt))
+          const mainNameH = snugName.h
+          const mainNameY = roleCanvas.y + roleCanvas.h - mainNameH - 4
+
+          const mainCvH = snugCv.h
+          const mainCvY = tmplShowName ? (mainNameY - mainCvH - 4) : (roleCanvas.y + roleCanvas.h - mainCvH - 4)
+
+          const mainSigBottom = (tmplShowName || tmplShowCv) ? (tmplShowCv ? mainCvY : mainNameY) - 4 : (roleCanvas.y + roleCanvas.h - 4)
+          const mainSigY = roleCanvas.y + 4
+          const mainSigH = Math.max(20, mainSigBottom - mainSigY)
+          const mainSigW = Math.max(40, roleCanvas.w - 8)
+          const mainSigX = roleCanvas.x + 4
+
+          setSigState({ x: mainSigX, y: mainSigY, w: mainSigW, h: mainSigH })
           setNameState({
             x: snugNameX,
-            y: nameCanvas.y,
+            y: mainNameY,
             w: snugNameW,
-            h: snugName.h,
+            h: mainNameH,
           })
           setCvState({
             x: snugCvX,
-            y: cvCanvas.y,
+            y: mainCvY,
             w: snugCvW,
-            h: snugCv.h,
+            h: mainCvH,
           })
 
           if (withPrefix && (activeSub.prefix || fullSub.prefix)) {
@@ -1081,13 +1131,14 @@ function SignPlacementModal({
                 width: num(cBox.w_pt, 160),
                 height: num(cBox.h_pt, 75),
               }
-              const cShowName = typeof cBox.show_name === "boolean" ? cBox.show_name : true
-              const cShowCv = typeof cBox.show_chuc_vu === "boolean" ? cBox.show_chuc_vu : cShowName
-              const cSub = computeDefaultSubLayout(cBoxPt, { withName: cShowName, withChucVu: cShowCv })
-              const cFull = computeDefaultSubLayout(cBoxPt, { withName: true, withChucVu: true })
-              const cSigPt = clampRectToBox(cSub.sig, cBoxPt)
-              const cNamePt = clampRectToBox(cSub.name ?? cFull.name ?? cSub.sig, cBoxPt)
-              const cCvPt = clampRectToBox(cSub.chuc_vu ?? cFull.chuc_vu ?? cSub.sig, cBoxPt)
+              const cShowName = typeof cBox.show_name === "boolean" ? cBox.show_name : false
+              const cShowCv = typeof cBox.show_chuc_vu === "boolean" ? cBox.show_chuc_vu : false
+
+              // Phân giải chức vụ riêng biệt theo chuc_vu_key của bản sao này
+              const cCvKey = (cBox.chuc_vu_key as string) || "chinh_quyen"
+              const cResolvedCv = cCvKey === "kiem_nhiem"
+                ? (userStaffTitles?.kiem_nhiem || userStaffTitles?.chinh_quyen || userChucVu)
+                : (userStaffTitles?.chinh_quyen || userStaffTitles?.kiem_nhiem || userChucVu)
 
               const cPage = num(cBox.so_trang, 0) || (cBox.neo_trang === "cuoi" ? (pdf.numPages || 1) : 1)
               const cDim = pageDims[cPage] || pageDims[1] || { w: 595.28, h: curPageH }
@@ -1100,36 +1151,47 @@ function SignPlacementModal({
                 h: r.height * curScale,
               })
 
-              const cSigCanvas = cToCanvas(cSigPt)
-              const cNameCanvas = cToCanvas(cNamePt)
-              const cCvCanvas = cToCanvas(cCvPt)
               const cRoleCanvas = cToCanvas(cBoxPt)
               const cSnugName = computeSnugBoxSize(userName, "name", 1.0)
-              const cSnugCv = computeSnugBoxSize(userChucVu, "chuc_vu", 1.0)
-              const cSnugNameW = Math.min(cRoleCanvas.w, cSnugName.w)
-              const cSnugNameX = Math.max(cRoleCanvas.x, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugNameW) / 2))
-              const cSnugCvW = Math.min(cRoleCanvas.w, cSnugCv.w)
-              const cSnugCvX = Math.max(cRoleCanvas.x, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugCvW) / 2))
+              const cSnugCv = computeSnugBoxSize(cResolvedCv, "chuc_vu", 1.0)
+
+              const cSnugNameW = Math.min(cRoleCanvas.w - 8, cSnugName.w)
+              const cSnugNameX = Math.max(cRoleCanvas.x + 4, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugNameW) / 2))
+              const cSnugCvW = Math.min(cRoleCanvas.w - 8, cSnugCv.w)
+              const cSnugCvX = Math.max(cRoleCanvas.x + 4, cRoleCanvas.x + Math.round((cRoleCanvas.w - cSnugCvW) / 2))
+
+              const cNameH = cSnugName.h
+              const cNameY = cRoleCanvas.y + cRoleCanvas.h - cNameH - 4
+
+              const cCvH = cSnugCv.h
+              const cCvY = cShowName ? (cNameY - cCvH - 4) : (cRoleCanvas.y + cRoleCanvas.h - cCvH - 4)
+
+              const cSigBottom = (cShowName || cShowCv) ? (cShowCv ? cCvY : cNameY) - 4 : (cRoleCanvas.y + cRoleCanvas.h - 4)
+              const cSigY = cRoleCanvas.y + 4
+              const cSigH = Math.max(20, cSigBottom - cSigY)
+              const cSigW = Math.max(40, cRoleCanvas.w - 8)
+              const cSigX = cRoleCanvas.x + 4
 
               return {
                 id: Date.now() + Math.random() + idx,
                 page: cPage,
                 templateBox: cRoleCanvas,
-                sigX: cSigCanvas.x,
-                sigY: cSigCanvas.y,
-                sigW: cSigCanvas.w,
-                sigH: cSigCanvas.h,
+                sigX: cSigX,
+                sigY: cSigY,
+                sigW: cSigW,
+                sigH: cSigH,
                 nameX: cSnugNameX,
-                nameY: cNameCanvas.y,
+                nameY: cNameY,
                 nameW: cSnugNameW,
-                nameH: cNameCanvas.h,
+                nameH: cNameH,
                 cvX: cSnugCvX,
-                cvY: cCvCanvas.y,
+                cvY: cCvY,
                 cvW: cSnugCvW,
-                cvH: cCvCanvas.h,
+                cvH: cCvH,
+                chucVuText: cResolvedCv,
                 showSignature: true,
                 showSignerName: cShowName,
-                showChucVu: cShowCv && !!userChucVu,
+                showChucVu: cShowCv && !!cResolvedCv,
                 tmplAllowName: cShowName,
                 tmplAllowChucVu: cShowCv,
               }
@@ -1417,7 +1479,8 @@ function SignPlacementModal({
       const sigPdf = fit(toPdf(sigState.x, sigState.y, sigState.w, sigState.h))
       const namePdf = fit(toPdf(nameState.x, nameState.y, nameState.w, nameState.h))
       const cvPdf = fit(toPdf(cvState.x, cvState.y, cvState.w, cvState.h))
-      const cvOn = tmplAllowChucVu && showChucVu && !!userChucVu
+      const activeCv = currentChucVuText || userChucVu
+      const cvOn = tmplAllowChucVu && showChucVu && !!activeCv
 
       placement = {
         page: mainBoxPage,
@@ -1427,8 +1490,9 @@ function SignPlacementModal({
         nameX: namePdf.x, nameY: namePdf.y, nameWidth: namePdf.width, nameHeight: namePdf.height,
         // Chỉ gửi khối chức vụ khi mẫu cho phép, người ký bật VÀ có nội dung
         showChucVu: cvOn,
-        chucVuText: cvOn ? userChucVu : null,
+        chucVuText: cvOn ? activeCv : null,
         cvX: cvPdf.x, cvY: cvPdf.y, cvWidth: cvPdf.width, cvHeight: cvPdf.height,
+        chucVuX: cvPdf.x, chucVuY: cvPdf.y, chucVuWidth: cvPdf.width, chucVuHeight: cvPdf.height,
         ...(ngayKyPdf ? {
           ngayKyText: ngayKyPreview,
           ngayKyX: ngayKyPdf.x, ngayKyY: ngayKyPdf.y,
@@ -1474,10 +1538,12 @@ function SignPlacementModal({
             page: bPage,
             x: sX, y: sY, width: sW, height: sH,
             showSignature: true,
-            showSignerName: box.tmplAllowName && box.showSignerName,
+            showSignerName: !!(box.tmplAllowName && box.showSignerName),
             nameX: nX, nameY: nY, nameWidth: nW, nameHeight: nH,
-            showChucVu: box.tmplAllowChucVu && box.showChucVu && !!userChucVu,
+            showChucVu: !!(box.tmplAllowChucVu && box.showChucVu && (box.chucVuText || activeCv)),
             chucVuX: cX, chucVuY: cY, chucVuWidth: cW, chucVuHeight: cH,
+            cvX: cX, cvY: cY, cvWidth: cW, cvHeight: cH,
+            chucVuText: box.chucVuText || activeCv,
           }
         })
       }
@@ -1488,6 +1554,8 @@ function SignPlacementModal({
         placement.qrY = qrPdf.y
         placement.qrWidth = qrPdf.width
         placement.qrHeight = qrPdf.height
+        placement.qrPage = 1
+        placement.qrAllPages = false
       }
 
       if (isFinalStep && signAs !== "none") {
@@ -1685,7 +1753,12 @@ function SignPlacementModal({
               const hasMainSig = pageNum === mainBoxPage
               const extraCountOnPage = extraSigBoxes.filter((b) => (b.page || 1) === pageNum).length
               const totalSigsOnPage = (hasMainSig ? 1 : 0) + extraCountOnPage
-              const hasSigningOnPage = totalSigsOnPage > 0
+              const hasQrOnPage = isFirstStep && pageNum === 1
+              const hasSigningOnPage = totalSigsOnPage > 0 || hasQrOnPage
+              const mainBox = templateBox || (hasMainSig ? sigState : null)
+              const qrBoxToRender = hasQrOnPage ? (templateQrBox || qrState) : null
+              const cW = canvasRef.current?.width || 800
+              const cH = canvasRef.current?.height || 1100
               return (
                 <button
                   key={`thumb-${pageNum}`}
@@ -1709,21 +1782,42 @@ function SignPlacementModal({
                       </div>
                     )}
                     {hasSigningOnPage && (
-                      <span className="absolute top-1 right-1 px-1 py-0.5 bg-emerald-600 text-white text-[9px] font-extrabold rounded shadow flex items-center gap-0.5 z-10">
-                        ✍️ {totalSigsOnPage}
+                      <span className="absolute top-1 left-1/2 -translate-x-1/2 px-1.5 py-0.5 bg-emerald-600 text-white text-[9px] font-extrabold rounded shadow flex items-center gap-0.5 z-10 pointer-events-none whitespace-nowrap">
+                        {totalSigsOnPage > 0 && hasQrOnPage
+                          ? `✍️ ${totalSigsOnPage} · QR`
+                          : totalSigsOnPage > 0
+                            ? `✍️ ${totalSigsOnPage}`
+                            : "📱 QR"}
                       </span>
                     )}
-                    {/* Vẽ mini-rectangles mô phỏng tất cả vị trí khung ký trên trang này - cùng màu với bước ký đang thực hiện */}
+                    {/* Vẽ mini-rectangles mô phỏng tất cả vị trí khung ký & QR trên trang này */}
                     {hasSigningOnPage && (
                       <>
-                        {hasMainSig && templateBox && (
+                        {/* Khung QR mini — trang 1 bước đầu tiên (z-20 hiển thị trên badge nếu có chạm) */}
+                        {hasQrOnPage && qrBoxToRender && (
+                          <span
+                            className="absolute pointer-events-none rounded-[1px] z-20 shadow-xs flex items-center justify-center font-mono font-bold text-[7px] text-blue-700 bg-blue-100/70 select-none"
+                            style={{
+                              left: `${Math.max(0, Math.min(92, (qrBoxToRender.x / cW) * 100))}%`,
+                              top: `${Math.max(0, Math.min(92, (qrBoxToRender.y / cH) * 100))}%`,
+                              width: `${Math.max(8, Math.min(100, (qrBoxToRender.w / cW) * 100))}%`,
+                              height: `${Math.max(6, Math.min(100, (qrBoxToRender.h / cH) * 100))}%`,
+                              border: "1.5px dashed #2563eb",
+                              backgroundColor: "rgba(37, 99, 235, 0.35)",
+                            }}
+                            title="Mã QR liên kết hồ sơ"
+                          >
+                            QR
+                          </span>
+                        )}
+                        {hasMainSig && mainBox && (
                           <span
                             className="absolute pointer-events-none rounded-[1px] z-5 shadow-xs"
                             style={{
-                              left: `${Math.max(0, Math.min(92, (templateBox.x / (canvasRef.current?.width || 800)) * 100))}%`,
-                              top: `${Math.max(0, Math.min(92, (templateBox.y / (canvasRef.current?.height || 1100)) * 100))}%`,
-                              width: `${Math.max(8, Math.min(100, (templateBox.w / (canvasRef.current?.width || 800)) * 100))}%`,
-                              height: `${Math.max(6, Math.min(100, (templateBox.h / (canvasRef.current?.height || 1100)) * 100))}%`,
+                              left: `${Math.max(0, Math.min(92, (mainBox.x / cW) * 100))}%`,
+                              top: `${Math.max(0, Math.min(92, (mainBox.y / cH) * 100))}%`,
+                              width: `${Math.max(8, Math.min(100, (mainBox.w / cW) * 100))}%`,
+                              height: `${Math.max(6, Math.min(100, (mainBox.h / cH) * 100))}%`,
                               border: `1.5px solid ${activeStepColor.fg}`,
                               backgroundColor: activeStepColor.bg,
                             }}
@@ -1737,10 +1831,10 @@ function SignPlacementModal({
                               key={`mini-extra-${pageNum}-${bIdx}`}
                               className="absolute pointer-events-none rounded-[1px] z-5 shadow-xs"
                               style={{
-                                left: `${Math.max(0, Math.min(92, (b.templateBox.x / (canvasRef.current?.width || 800)) * 100))}%`,
-                                top: `${Math.max(0, Math.min(92, (b.templateBox.y / (canvasRef.current?.height || 1100)) * 100))}%`,
-                                width: `${Math.max(8, Math.min(100, (b.templateBox.w / (canvasRef.current?.width || 800)) * 100))}%`,
-                                height: `${Math.max(6, Math.min(100, (b.templateBox.h / (canvasRef.current?.height || 1100)) * 100))}%`,
+                                left: `${Math.max(0, Math.min(92, (b.templateBox.x / cW) * 100))}%`,
+                                top: `${Math.max(0, Math.min(92, (b.templateBox.y / cH) * 100))}%`,
+                                width: `${Math.max(8, Math.min(100, (b.templateBox.w / cW) * 100))}%`,
+                                height: `${Math.max(6, Math.min(100, (b.templateBox.h / cH) * 100))}%`,
                                 border: `1.5px solid ${activeStepColor.fg}`,
                                 backgroundColor: activeStepColor.bg,
                               }}
@@ -1994,12 +2088,12 @@ function SignPlacementModal({
                         size={{ width: nameState.w, height: nameState.h }}
                         onResizeStop={(_, __, ___, delta) =>
                           setNameState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        enable={showName ? { right: true, bottom: true, bottomRight: true } : false}
                         minWidth={50} minHeight={16}
                         {...maxSizeIn(templateBox, nameState)}
-                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên" /> }}
-                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                        handleComponent={showName ? { bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên" /> } : undefined}
+                        handleClasses={showName ? { bottomRight: RESIZE_HANDLE_CLASS } : {}}
+                        handleStyles={showName ? { bottomRight: RESIZE_HANDLE_STYLE } : {}}
                       >
                         <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/60 rounded relative select-none flex items-center justify-center">
                           {showName ? (
@@ -2033,7 +2127,7 @@ function SignPlacementModal({
 
                 {/* Chức vụ — khối kéo-thả thứ 3, ĐỘC LẬP với chữ ký và tên (vị trí riêng, công
                     tắc riêng). Chỉ dựng khi mẫu CHO PHÉP và người ký đã khai chức vụ trong Nhân sự bảo trì. */}
-                {currentPage === mainBoxPage && tmplAllowChucVu && !!userChucVu && (
+                {currentPage === mainBoxPage && tmplAllowChucVu && !!(currentChucVuText || userChucVu) && (
                   <Draggable
                     nodeRef={cvNodeRef as RefObject<HTMLElement>}
                     position={{ x: cvState.x, y: cvState.y }}
@@ -2050,20 +2144,20 @@ function SignPlacementModal({
                         size={{ width: cvState.w, height: cvState.h }}
                         onResizeStop={(_, __, ___, delta) =>
                           setCvState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                        enable={{ right: true, bottom: true, bottomRight: true }}
+                        enable={showChucVu ? { right: true, bottom: true, bottomRight: true } : false}
                         minWidth={45} minHeight={14}
                         {...maxSizeIn(templateBox, cvState)}
-                        handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ" /> }}
-                        handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                        handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                        handleComponent={showChucVu ? { bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ" /> } : undefined}
+                        handleClasses={showChucVu ? { bottomRight: RESIZE_HANDLE_CLASS } : {}}
+                        handleStyles={showChucVu ? { bottomRight: RESIZE_HANDLE_STYLE } : {}}
                       >
                         <div className="w-full h-full border border-dashed border-sky-400 bg-sky-50/60 rounded relative select-none flex items-center justify-center">
                           {showChucVu ? (
                             <span
                               className="text-sky-700 truncate px-1"
-                              style={previewTextStyle(userChucVu, cvState.w)}
+                              style={previewTextStyle(currentChucVuText || userChucVu, cvState.w)}
                             >
-                              {userChucVu}
+                              {currentChucVuText || userChucVu}
                             </span>
                           ) : (
                             <span className="text-[10px] text-slate-400">Ẩn chức vụ</span>
@@ -2182,12 +2276,12 @@ function SignPlacementModal({
                           size={{ width: box.nameW, height: box.nameH }}
                           onResizeStop={(_, __, ___, delta) =>
                             setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, nameW: b.nameW + delta.width, nameH: b.nameH + delta.height } : b))}
-                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          enable={box.showSignerName ? { right: true, bottom: true, bottomRight: true } : false}
                           minWidth={50} minHeight={16}
                           {...(box.templateBox ? maxSizeIn(box.templateBox, { w: box.nameW, h: box.nameH, x: box.nameX, y: box.nameY }) : {})}
-                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên bản sao" /> }}
-                          handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                          handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                          handleComponent={box.showSignerName ? { bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn khung họ tên bản sao" /> } : undefined}
+                          handleClasses={box.showSignerName ? { bottomRight: RESIZE_HANDLE_CLASS } : {}}
+                          handleStyles={box.showSignerName ? { bottomRight: RESIZE_HANDLE_STYLE } : {}}
                         >
                           <div className="w-full h-full border border-dashed border-violet-400 bg-violet-50/70 rounded relative select-none flex items-center justify-center">
                             {box.showSignerName ? (
@@ -2219,7 +2313,7 @@ function SignPlacementModal({
                     )}
 
                     {/* 4. Khối Chức vụ bản sao — kẹp trong templateBox, có Eye/EyeOff */}
-                    {box.tmplAllowChucVu && !!userChucVu && (
+                    {box.tmplAllowChucVu && !!(box.chucVuText || currentChucVuText || userChucVu) && (
                       <ExtraDraggableBox
                         position={{ x: box.cvX, y: box.cvY }}
                         onStop={(_, d) => setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, cvX: d.x, cvY: d.y } : b))}
@@ -2230,20 +2324,20 @@ function SignPlacementModal({
                           size={{ width: box.cvW, height: box.cvH }}
                           onResizeStop={(_, __, ___, delta) =>
                             setExtraSigBoxes((prev) => prev.map((b) => b.id === box.id ? { ...b, cvW: b.cvW + delta.width, cvH: b.cvH + delta.height } : b))}
-                          enable={{ right: true, bottom: true, bottomRight: true }}
+                          enable={box.showChucVu ? { right: true, bottom: true, bottomRight: true } : false}
                           minWidth={45} minHeight={14}
                           {...(box.templateBox ? maxSizeIn(box.templateBox, { w: box.cvW, h: box.cvH, x: box.cvX, y: box.cvY }) : {})}
-                          handleComponent={{ bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ bản sao" /> }}
-                          handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
-                          handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
+                          handleComponent={box.showChucVu ? { bottomRight: <ResizeHandleIcon color="#0284c7" title="Kéo để co giãn khung chức vụ bản sao" /> } : undefined}
+                          handleClasses={box.showChucVu ? { bottomRight: RESIZE_HANDLE_CLASS } : {}}
+                          handleStyles={box.showChucVu ? { bottomRight: RESIZE_HANDLE_STYLE } : {}}
                         >
                           <div className="w-full h-full border border-dashed border-sky-400 bg-sky-50/70 rounded relative select-none flex items-center justify-center">
                             {box.showChucVu ? (
                               <span
                                 className="text-sky-700 truncate px-1"
-                                style={previewTextStyle(userChucVu, box.cvW)}
+                                style={previewTextStyle(box.chucVuText || currentChucVuText || userChucVu, box.cvW)}
                               >
-                                {userChucVu}
+                                {box.chucVuText || currentChucVuText || userChucVu}
                               </span>
                             ) : (
                               <span className="text-[10px] text-slate-400">Ẩn chức vụ</span>
@@ -2399,19 +2493,23 @@ export default function IsoFormInstancePage() {
 
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
   const [userName, setUserName] = useState("")
   const [userRole, setUserRole] = useState<string | null>(null)
+  // GĐ3: không có iso.forms.view_all thì chỉ mở được hồ sơ mình liên quan.
+  const [seeAllForms, setSeeAllForms] = useState(false)
   const [userChucVu, setUserChucVu] = useState("")
+  const [userStaffTitles, setUserStaffTitles] = useState<{ kiem_nhiem: string; chinh_quyen: string }>({ kiem_nhiem: "", chinh_quyen: "" })
   // Biểu mẫu này đã có mẫu vị trí ký chưa — nguồn sự thật là bảng `mau_vi_tri`, KHÔNG dùng cờ
   // tạm trong state hay query param: người ký có thể vào trang từ link trực tiếp, F5 giữa
   // chừng, hoặc mẫu do người khác vẽ từ hồ sơ khác của cùng biểu mẫu.
   // `null` = đang kiểm tra (chưa biết) → chưa chặn vội, tránh nháy nút.
   const [templateExists, setTemplateExists] = useState<boolean | null>(null)
+  const [templateConfirmed, setTemplateConfirmed] = useState<boolean>(false)
 
   useEffect(() => {
     if (searchParams?.get("confirmedSignTemplate") === "1") {
       setTemplateExists(true)
+      setTemplateConfirmed(true)
     }
   }, [searchParams])
   const [loading, setLoading] = useState(true)
@@ -2455,6 +2553,10 @@ export default function IsoFormInstancePage() {
   // Action states
   const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  // GĐ4: thu hồi hồ sơ đã gửi về nháp
+  const [recallOpen, setRecallOpen] = useState(false)
+  const [recallReason, setRecallReason] = useState("")
+  const [recalling, setRecalling] = useState(false)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [signModal, setSignModal] = useState<{
     action: "soan_thao" | "xem_xet" | "phe_duyet" | "ky_buoc"
@@ -2472,12 +2574,12 @@ export default function IsoFormInstancePage() {
       try {
         const fid = await getActiveFactoryId()
         if (!fid) { setLoading(false); return }
-        const { session, user: authUser } = await hydrateActiveSession()
+        const { session } = await hydrateActiveSession()
         const uid = session?.user?.id
         if (!uid) { setLoading(false); return }
+        setSeeAllForms(canSeeAllIsoForms(readCachedIsoUser()))
         setFactoryId(fid)
         setUserId(uid)
-        setCurrentUser(authUser)
         // Load user profile for full name & role
         const { data: profile } = await supabase
           .from("profiles")
@@ -2493,15 +2595,17 @@ export default function IsoFormInstancePage() {
         // đúng thứ tự đang dùng ở module Văn bản và Soạn thảo ISO.
         const { data: staff } = await supabase
           .from("maintenance_staff")
-          .select("chuc_vu, chuc_vu_chinh_quyen")
+          .select("chuc_vu, chuc_vu_chinh_quyen, chuc_vu_kim_nhiem")
           .eq("factory_id", fid)
           .eq("profile_id", uid)
           .eq("active", true)
           .maybeSingle()
         if (staff) {
-          setUserChucVu(
-            (staff.chuc_vu_chinh_quyen as string) || (staff.chuc_vu as string) || "",
-          )
+          const s = staff as { chuc_vu?: string | null; chuc_vu_chinh_quyen?: string | null; chuc_vu_kim_nhiem?: string | null }
+          const kn = s.chuc_vu_kim_nhiem || s.chuc_vu || ""
+          const cq = s.chuc_vu_chinh_quyen || s.chuc_vu || ""
+          setUserStaffTitles({ kiem_nhiem: kn, chinh_quyen: cq })
+          setUserChucVu(cq || kn || "")
         }
         // Load user's signature URL — vá bảo mật 2026-09-20: mint Signed URL thay vì
         // getPublicUrl() trực tiếp (bucket iso-documents sẽ chuyển private).
@@ -2630,14 +2734,21 @@ export default function IsoFormInstancePage() {
   }, [instanceId, userId, loadDeptUsers])
 
   const loadProfiles = useCallback(async (fid: string) => {
+    // GĐ2 chuẩn hoá quyền ISO: người phê duyệt hồ sơ thực hiện lọc theo `iso.forms.approve`;
+    // người xem xét = có `iso.xem_xet` HOẶC `iso.forms.approve` (hợp 2 tập, để không ai đang có
+    // tên trong danh sách cũ — vốn chỉ lọc `iso.forms.approve` — bị mất khỏi danh sách).
     const [resX, resP] = await Promise.all([
-      fetch(`/api/iso/profiles-by-permission?factoryId=${fid}&permCode=iso.forms.approve`),
+      fetch(`/api/iso/profiles-by-permission?factoryId=${fid}&permCode=iso.xem_xet`),
       fetch(`/api/iso/profiles-by-permission?factoryId=${fid}&permCode=iso.forms.approve`),
     ])
     const dataX = resX.ok ? (await resX.json() as { profiles?: ProfileOption[] }) : {}
     const dataP = resP.ok ? (await resP.json() as { profiles?: ProfileOption[] }) : {}
-    const px = Array.isArray(dataX.profiles) ? dataX.profiles : []
+    const xemXetOnly = Array.isArray(dataX.profiles) ? dataX.profiles : []
     const pp = Array.isArray(dataP.profiles) ? dataP.profiles : []
+    const xemXetMap = new Map<string, ProfileOption>()
+    xemXetOnly.forEach((p) => xemXetMap.set(p.id, p))
+    pp.forEach((p) => xemXetMap.set(p.id, p))
+    const px = Array.from(xemXetMap.values())
     setProfilesXemXet(px)
     setProfilesPheDuyet(pp)
 
@@ -2991,16 +3102,6 @@ export default function IsoFormInstancePage() {
       const { error } = await supabase.from("iso_form_instances").update(updates).eq("id", instanceId)
       if (error) { setActionError(error.message); return null }
 
-      // Gửi thông báo phân công cho Người soạn thảo (bước 1) nếu được gán cho người khác
-      if (instance.trang_thai === "draft" && isNStep && Array.isArray(updates.thu_tu_ky_json)) {
-        const fSteps = updates.thu_tu_ky_json as ThuTuKyStep[]
-        const newStep1Uid = fSteps[0]?.user_id
-        const prevStep1Uid = (instance.thu_tu_ky_json as ThuTuKyStep[])?.[0]?.user_id
-        if (newStep1Uid && newStep1Uid !== userId && (newStep1Uid !== prevStep1Uid || !prevStep1Uid)) {
-          sendNotify("phan_cong_soan_thao", [newStep1Uid])
-        }
-      }
-
       return await loadInstance(factoryId)
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Lỗi lưu cài đặt")
@@ -3105,21 +3206,24 @@ export default function IsoFormInstancePage() {
 
   const openSendModal = async () => {
     if (!instance || !factoryId) return
+    if (needsSignTemplate && templateExists === true && !templateConfirmed) {
+      setActionError("Vui lòng bấm 'Xem mẫu vị trí ký' để kiểm tra mẫu trước khi thực hiện ký & gửi hồ sơ.")
+      return
+    }
     const reloaded = await persistApprovalConfig()
     if (!reloaded) return
     const fileSrc = await mintInstanceFileUrl()
     if (!fileSrc) return
 
-    if ((reloaded.so_buoc_tong ?? 0) > 0) {
-      setSignModal({
-        action: (reloaded.so_buoc_tong ?? 1) === 1 ? "phe_duyet" : "ky_buoc",
-        stepIndex: 0,
-        totalSteps: reloaded.so_buoc_tong ?? 1,
-        sourceFileUrl: fileSrc,
-      })
-    } else {
-      setSignModal({ action: "soan_thao", sourceFileUrl: fileSrc })
-    }
+    const total = (reloaded.so_buoc_tong ?? 0) > 0
+      ? (reloaded.so_buoc_tong ?? 1)
+      : (reloaded.cap_tl === "Cấp 2" ? 2 : 3)
+    setSignModal({
+      action: total === 1 ? "phe_duyet" : "soan_thao",
+      stepIndex: 0,
+      totalSteps: total,
+      sourceFileUrl: fileSrc,
+    })
   }
 
   /** Lưu cấu hình TRƯỚC rồi mới sang màn cài đặt vị trí ký — xem cảnh báo ở `persistApprovalConfig`. */
@@ -3152,7 +3256,7 @@ export default function IsoFormInstancePage() {
   const openSignStepModal = async () => {
     if (!instance) return
     const curIdx = instance.buoc_hien_tai ?? 0
-    const total = instance.so_buoc_tong ?? 1
+    const total = instance.so_buoc_tong ?? (Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0 ? instance.thu_tu_ky_json.length : 1)
     const isFinalStep = curIdx + 1 >= total
     const src = await mintInstanceFileUrl()
     setSignModal({
@@ -3165,14 +3269,32 @@ export default function IsoFormInstancePage() {
 
   const openXemXetModal = async () => {
     if (!instance) return
+    const total = (Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0)
+      ? instance.thu_tu_ky_json.length
+      : 3
+    const stepIdx = 1
     const src = await mintInstanceFileUrl()
-    setSignModal({ action: "xem_xet", sourceFileUrl: src })
+    setSignModal({
+      action: "xem_xet",
+      stepIndex: stepIdx,
+      totalSteps: total,
+      sourceFileUrl: src,
+    })
   }
 
   const openPheDuyetModal = async () => {
     if (!instance) return
+    const total = (Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0)
+      ? instance.thu_tu_ky_json.length
+      : (instance.cap_tl === "Cấp 2" ? 2 : 3)
+    const stepIdx = total - 1
     const src = await mintInstanceFileUrl()
-    setSignModal({ action: "phe_duyet", sourceFileUrl: src })
+    setSignModal({
+      action: "phe_duyet",
+      stepIndex: stepIdx,
+      totalSteps: total,
+      sourceFileUrl: src,
+    })
   }
 
   // ── Return ───────────────────────────────────────────────────────────────
@@ -3216,6 +3338,31 @@ export default function IsoFormInstancePage() {
       void loadInstance(factoryId)
     } finally {
       setSaving(false)
+    }
+  }
+
+  // GĐ4: Thu hồi về nháp — server (/api/iso/forms/[id]/recall) kiểm lại quyền + trạng thái.
+  const handleRecall = async () => {
+    if (!factoryId) return
+    setRecalling(true)
+    setActionError(null)
+    try {
+      const res = await authFetch(`/api/iso/forms/${instanceId}/recall`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lyDo: recallReason.trim() || undefined }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) { setActionError(json.error || "Không thu hồi được hồ sơ"); return }
+      setRecallOpen(false)
+      setRecallReason("")
+      setActionSuccess("Đã thu hồi hồ sơ về bản nháp")
+      setTimeout(() => setActionSuccess(null), 3000)
+      void loadInstance(factoryId)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Không thu hồi được hồ sơ")
+    } finally {
+      setRecalling(false)
     }
   }
 
@@ -3356,6 +3503,23 @@ export default function IsoFormInstancePage() {
     )
   }
 
+  if (!seeAllForms && !isFormInstanceRelated(instance, userId)) {
+    return (
+      <IsoShell>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center space-y-3">
+          <AlertTriangle size={32} className="mx-auto text-amber-500" />
+          <p className="text-base font-bold text-slate-700">Bạn không có quyền xem hồ sơ này</p>
+          <p className="text-sm text-slate-500">
+            Chỉ người lập, người có tên trong luồng ký, hoặc người có quyền &quot;Xem tất cả hồ sơ thực hiện&quot; mới mở được.
+          </p>
+          <button onClick={() => router.push("/dashboard/iso/forms")} className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold">
+            Về Thực hiện hồ sơ
+          </button>
+        </div>
+      </IsoShell>
+    )
+  }
+
   const isEditable = instance.trang_thai === "draft" || instance.trang_thai === "tra_ve"
   const isNStepRecord = (instance.so_buoc_tong ?? 0) > 0
   const isNStep = isNStepRecord || (isEditable && steps.length > 0)
@@ -3387,9 +3551,19 @@ export default function IsoFormInstancePage() {
   const firstStepSignerId = firstStep ? stepSignerUserId(firstStep) : null
   const isDrafter = firstStepSignerId === userId
   const isStep1Signer = isDrafter || isNguoiTao
-  const hasSignPerm = hasPermission(currentUser, "iso.sign") || hasPermission(currentUser, "iso.create") || hasPermission(currentUser, "iso.signature") || userRole === "admin"
-  const canManageDraft = isEditable && (isNguoiTao || isDrafter || hasPermission(currentUser, "iso.create") || userRole === "admin")
-  const canSignStep1 = isEditable && hasSignPerm && (isStep1Signer || userRole === "admin")
+  // Chỉ chính người tạo / người ký bước 1 / admin — quyền `iso.create` KHÔNG cho sửa nháp của
+  // người khác (trước đây có, nhưng RLS chặn nên bấm xong lưu thất bại âm thầm).
+  const canManageDraft = isEditable && (isNguoiTao || isDrafter || userRole === "admin")
+  // GĐ2 chuẩn hoá quyền ISO: bỏ quyền "ký số" (`iso.sign` chưa từng tồn tại, `iso.signature` đã
+  // gỡ). Người tạo / người được chọn ký bước 1 thì bắt buộc phải ký được — không cần thêm quyền.
+  const canSignStep1 = isEditable && (isStep1Signer || userRole === "admin")
+  // GĐ4: bước 1 đã ký, bước 2 chưa ký; chỉ người tạo / người ký bước 1 / admin.
+  const isWaitingState = instance.trang_thai === "cho_xem_xet" || instance.trang_thai === "cho_phe_duyet"
+  const canRecall = isWaitingState && (isStep1Signer || userRole === "admin") && (
+    isNStepRecord
+      ? buocHienTai === 1
+      : (!!instance.ky_soan_thao_at && !instance.ky_xem_xet_at && !instance.ky_phe_duyet_at)
+  )
   const canChangeSigner = !isEditable && !isDone && instance.trang_thai !== "tra_ve" && (
     isStep1Signer
   )
@@ -3480,8 +3654,9 @@ export default function IsoFormInstancePage() {
             {canSignStep1 && (!needsSignTemplate || templateExists === true) && (
               <button
                 onClick={openSendModal}
-                disabled={saving || !instance.draft_file_url}
+                disabled={saving || !instance.draft_file_url || (needsSignTemplate && templateExists === true && !templateConfirmed)}
                 className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-md transition-all"
+                title={needsSignTemplate && templateExists === true && !templateConfirmed ? "Vui lòng xem qua mẫu vị trí ký trước khi ký & gửi" : undefined}
               >
                 {saving ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
                 {isNStepRecord || steps.length > 0
@@ -3538,6 +3713,16 @@ export default function IsoFormInstancePage() {
               </button>
             )}
 
+            {canRecall && (
+              <button
+                onClick={() => { setRecallReason(""); setRecallOpen(true) }}
+                className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-amber-50 text-amber-700 text-sm font-bold rounded-xl border border-amber-300 transition-all"
+                title="Đưa hồ sơ đã gửi về bản nháp để sửa hoặc xoá"
+              >
+                <Undo2 size={15} /> Thu hồi
+              </button>
+            )}
+
             {canChangeSigner && (
               <button
                 onClick={() => setDoiNguoiKyOpen(true)}
@@ -3548,7 +3733,7 @@ export default function IsoFormInstancePage() {
               </button>
             )}
 
-            {/* Nút Cài đặt vị trí ký: nổi bật rực rỡ khi hồ sơ chưa có mẫu vị trí ký */}
+            {/* Nút Cài đặt / Xem mẫu vị trí ký */}
             {isEditable && canManageDraft && templateSignSetupUrl && (
               <button
                 onClick={() => void goToTemplateSetup()}
@@ -3556,13 +3741,15 @@ export default function IsoFormInstancePage() {
                 className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-xl transition-all ${
                   mustSetupTemplate
                     ? "bg-violet-600 hover:bg-violet-700 text-white border border-violet-600 shadow-md ring-2 ring-violet-300 animate-pulse"
-                    : "bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 border border-sky-200"
+                    : !templateConfirmed
+                      ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 shadow-xs ring-1 ring-amber-200"
+                      : "bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 border border-sky-200"
                 }`}
                 title={signStepsReady
-                  ? (mustSetupTemplate ? "Cần cài đặt vị trí ký trước khi ký & gửi hồ sơ" : "Vẽ sẵn vị trí chữ ký cho biểu mẫu này — các hồ sơ sau tự áp dụng")
+                  ? (mustSetupTemplate ? "Cần cài đặt vị trí ký trước khi ký & gửi hồ sơ" : "Xem / kiểm tra vị trí chữ ký của biểu mẫu này")
                   : "Chọn đủ người ký ở 'Cấu hình phê duyệt' trước khi cài đặt vị trí ký"}
               >
-                <LayoutTemplate size={15} /> Cài đặt vị trí ký
+                <LayoutTemplate size={15} /> {templateExists ? "Xem mẫu vị trí ký" : "Cài đặt vị trí ký"}
               </button>
             )}
 
@@ -3629,52 +3816,20 @@ export default function IsoFormInstancePage() {
                 <h2 className="text-sm font-extrabold text-slate-800">Thông tin hồ sơ</h2>
               </div>
 
-              <div className="p-5 flex-1 flex flex-col justify-between">
-                <div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <InfoRow label="Biểu mẫu gốc" value={template?.ten_tai_lieu || "—"} />
-                    <InfoRow label="Mã biểu mẫu" value={template?.ma_tai_lieu || "—"} />
-                    <InfoRow
-                      label="Loại hồ sơ"
-                      value={template?.loai_tai_lieu ? (LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu] || template.loai_tai_lieu) : "Biểu mẫu"}
-                    />
-                    <InfoRow label="Phòng ban" value={template?.phong_ban || "—"} />
-                    <InfoRow
-                      label="Người lập hồ sơ"
-                      value={instance.soan_thao || (instance.nguoi_tao ? (allApproverProfiles.find((p) => p.id === instance.nguoi_tao)?.full_name || instance.nguoi_tao) : "—")}
-                    />
-                    <InfoRow label="Ngày lập hồ sơ" value={fmtDate(instance.created_at)} />
-                    <InfoRow
-                      label="Cấp hồ sơ"
-                      value={
-                        isNStepRecord
-                          ? `${instance.so_buoc_tong || steps.length} bước ký`
-                          : instance.cap_tl || "—"
-                      }
-                    />
-                    <InfoRow
-                      label="Ngày phê duyệt"
-                      value={instance.ky_phe_duyet_at ? fmtDate(instance.ky_phe_duyet_at) : (isDone ? fmtDate(instance.updated_at) : "Chưa duyệt")}
-                    />
-                    {template?.mo_ta_tim_kiem && (
-                      <div className="sm:col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
-                        <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Mô tả biểu mẫu</dt>
-                        <dd className="text-sm text-slate-700 italic">{template.mo_ta_tim_kiem}</dd>
-                      </div>
+              <div className="p-5 flex-1 flex flex-col">
+                {/* ── Phân vùng File hồ sơ nổi bật (Được đưa lên đầu theo yêu cầu) ── */}
+                <div className="mb-5 p-4 rounded-2xl bg-gradient-to-br from-emerald-50/70 via-slate-50 to-teal-50/50 border border-emerald-200/80 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between pb-1 border-b border-emerald-100/60">
+                    <dt className="text-xs font-extrabold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                      <FileText size={15} className="text-emerald-600" />
+                      Tệp hồ sơ
+                    </dt>
+                    {instance.draft_file_url && (
+                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                        {isDone ? "✓ Hoàn thành" : "Đang xử lý"}
+                      </span>
                     )}
                   </div>
-
-                  {instance.ghi_chu && (
-                    <div className="mt-4 pt-4 border-t border-slate-100">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
-                      <p className="text-sm text-slate-700">{instance.ghi_chu}</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Phân vùng File hồ sơ nằm gọn gàng bên trong thẻ Thông tin hồ sơ */}
-                <div className="mt-5 pt-4 border-t border-slate-100 space-y-3">
-                  <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tệp hồ sơ</dt>
 
                   {/* Banner hướng dẫn khi biểu mẫu gốc chỉ có PDF */}
                   {!instance.draft_file_url && (template?.file_signed_pdf_url || template?.file_goc_url) && (
@@ -3686,7 +3841,7 @@ export default function IsoFormInstancePage() {
                         <button
                           type="button"
                           onClick={() => void openSecureFile(`/api/iso/documents/${template.id}/file-url?variant=main&download=1`)}
-                          className="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg"
+                          className="inline-flex items-center gap-1 mt-1.5 px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 text-xs font-bold rounded-lg transition-colors"
                         >
                           <Download size={12} /> Tải PDF mẫu
                         </button>
@@ -3696,27 +3851,31 @@ export default function IsoFormInstancePage() {
 
                   {/* File đã ký duyệt (khi hoàn thành) */}
                   {isDone && (instance.final_pdf_url || instance.final_office_url) && (
-                    <div className="flex items-center gap-2.5 p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl">
-                      <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-emerald-900 truncate">
-                          {instance.tieu_de || "File đã ký duyệt"}
-                        </p>
-                        <p className="text-[10px] text-emerald-600 font-semibold uppercase">
-                          {instance.final_pdf_url ? "PDF ĐÃ KÝ DUYỆT" : instance.draft_file_type?.toUpperCase()}
-                        </p>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white border border-emerald-300 rounded-xl shadow-xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <CheckCircle2 size={22} className="text-emerald-600 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-xs font-bold text-emerald-950 truncate max-w-full">
+                              {instance.tieu_de || "File đã ký duyệt"}
+                            </p>
+                            <span className="text-[10px] text-emerald-700 bg-emerald-100 font-extrabold px-1.5 py-0.5 rounded uppercase shrink-0">
+                              {instance.final_pdf_url ? "PDF ĐÃ KÝ DUYỆT" : instance.draft_file_type?.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
                         <button
                           type="button"
                           onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-white hover:bg-emerald-100 border border-emerald-200 rounded-lg shadow-2xs transition-all"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg shadow-2xs transition-all"
                         >
                           <Eye size={13} /> Xem
                         </button>
                         <button
                           onClick={handleDownload}
-                          className="p-1.5 text-emerald-700 hover:bg-emerald-100 rounded-lg transition-colors"
+                          className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-200"
                           title="Tải về"
                         >
                           <Download size={14} />
@@ -3727,38 +3886,42 @@ export default function IsoFormInstancePage() {
 
                   {/* File nháp / file đang xử lý */}
                   {instance.draft_file_url && !uploading && !isDone && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                        <FileText size={20} className="text-violet-600 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-slate-800 truncate">
-                            {instance.tieu_de || "File hồ sơ"}
-                          </p>
-                          <span className="text-[10px] font-bold uppercase text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded">
-                            {instance.draft_file_type ?? "file"}
-                          </span>
+                    <div className="space-y-2.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white border border-slate-200 hover:border-violet-300 rounded-xl shadow-xs transition-colors">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <FileText size={22} className="text-violet-600 shrink-0" />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-xs font-bold text-slate-900 truncate max-w-full">
+                                {instance.tieu_de || "File hồ sơ"}
+                              </p>
+                              <span className="text-[10px] font-extrabold uppercase text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded shrink-0">
+                                {instance.draft_file_type ?? "file"}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap self-end sm:self-auto">
                           <button
                             type="button"
                             onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                            className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
                             title="Xem file"
                           >
-                            <Eye size={15} />
+                            <Eye size={13} /> Xem
                           </button>
                           <button
                             onClick={handleDownload}
-                            className="p-1.5 rounded-lg hover:bg-slate-200 text-slate-600 transition-colors"
+                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors border border-slate-200"
                             title="Tải về"
                           >
-                            <Download size={15} />
+                            <Download size={13} />
                           </button>
                           {canManageDraft && (
                             <button
                               onClick={() => fileInputRef.current?.click()}
                               disabled={uploading}
-                              className="flex items-center gap-1 px-2 py-1 text-xs font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-50 rounded-lg transition-colors"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 rounded-lg transition-colors border border-violet-200"
                               title="Thay file"
                             >
                               <RotateCcw size={12} /> Thay file
@@ -3770,7 +3933,7 @@ export default function IsoFormInstancePage() {
                       {/* Công tắc / checkbox Tự động chuyển sang PDF sau phê duyệt cho file DOCX/XLSX */}
                       {instance.draft_file_type !== "pdf" && (
                         <label
-                          className={`flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-white transition-all ${
+                          className={`flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-white shadow-2xs transition-all ${
                             canManageDraft ? "cursor-pointer hover:bg-slate-50 hover:border-violet-300" : "cursor-default opacity-80"
                           }`}
                         >
@@ -3833,9 +3996,9 @@ export default function IsoFormInstancePage() {
                     <div>
                       <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="w-full py-3 border-2 border-dashed border-slate-300 hover:border-violet-300 hover:bg-violet-50 rounded-xl text-xs text-slate-500 hover:text-violet-600 transition-colors flex items-center justify-center gap-2 font-medium"
+                        className="w-full py-3.5 border-2 border-dashed border-emerald-300 hover:border-emerald-500 bg-white hover:bg-emerald-50/60 rounded-xl text-xs text-emerald-800 hover:text-emerald-900 shadow-2xs transition-all flex items-center justify-center gap-2 font-bold"
                       >
-                        <Upload size={14} />
+                        <Upload size={15} className="text-emerald-600" />
                         Tải lên file hồ sơ (.docx, .xlsx, .pdf)
                       </button>
                     </div>
@@ -3861,6 +4024,49 @@ export default function IsoFormInstancePage() {
                           dangerouslySetInnerHTML={{ __html: docxPreviewHtml }}
                         />
                       )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Bảng thông tin hồ sơ chi tiết ── */}
+                <div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <InfoRow label="Biểu mẫu gốc" value={template?.ten_tai_lieu || "—"} />
+                    <InfoRow label="Mã biểu mẫu" value={template?.ma_tai_lieu || "—"} />
+                    <InfoRow
+                      label="Loại hồ sơ"
+                      value={template?.loai_tai_lieu ? (LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu] || template.loai_tai_lieu) : "Biểu mẫu"}
+                    />
+                    <InfoRow label="Phòng ban" value={template?.phong_ban || "—"} />
+                    <InfoRow
+                      label="Người lập hồ sơ"
+                      value={instance.soan_thao || (instance.nguoi_tao ? (allApproverProfiles.find((p) => p.id === instance.nguoi_tao)?.full_name || instance.nguoi_tao) : "—")}
+                    />
+                    <InfoRow label="Ngày lập hồ sơ" value={fmtDate(instance.created_at)} />
+                    <InfoRow
+                      label="Cấp hồ sơ"
+                      value={
+                        isNStepRecord
+                          ? `${instance.so_buoc_tong || steps.length} bước ký`
+                          : instance.cap_tl || "—"
+                      }
+                    />
+                    <InfoRow
+                      label="Ngày phê duyệt"
+                      value={instance.ky_phe_duyet_at ? fmtDate(instance.ky_phe_duyet_at) : (isDone ? fmtDate(instance.updated_at) : "Chưa duyệt")}
+                    />
+                    {template?.mo_ta_tim_kiem && (
+                      <div className="sm:col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
+                        <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Mô tả biểu mẫu</dt>
+                        <dd className="text-sm text-slate-700 italic">{template.mo_ta_tim_kiem}</dd>
+                      </div>
+                    )}
+                  </div>
+
+                  {instance.ghi_chu && (
+                    <div className="mt-4 pt-4 border-t border-slate-100">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
+                      <p className="text-sm text-slate-700">{instance.ghi_chu}</p>
                     </div>
                   )}
                 </div>
@@ -4256,7 +4462,7 @@ export default function IsoFormInstancePage() {
           stepName={
             typeof signModal.stepIndex === "number" && Array.isArray(instance.thu_tu_ky_json)
               ? instance.thu_tu_ky_json[signModal.stepIndex]?.ten
-              : undefined
+              : (signModal.action === "xem_xet" ? "Xem xét" : signModal.action === "phe_duyet" ? "Phê duyệt" : undefined)
           }
           sourceFileUrl={signModal.sourceFileUrl}
           fileType={instance.draft_file_type}
@@ -4264,6 +4470,7 @@ export default function IsoFormInstancePage() {
           signatureUrl={signatureUrl}
           userName={userName}
           userChucVu={userChucVu}
+          userStaffTitles={userStaffTitles}
           ghiChuText={instance.ghi_chu ?? ""}
           factoryId={factoryId}
           templateMa={template?.ma_tai_lieu ?? null}
@@ -4276,6 +4483,54 @@ export default function IsoFormInstancePage() {
           onConfirm={handleSignConfirm}
           onClose={() => setSignModal(null)}
         />
+      )}
+
+      {/* GĐ4: Thu hồi về nháp */}
+      {recallOpen && (
+        <ModalShell
+          title="Thu hồi hồ sơ về bản nháp"
+          onClose={() => { if (!recalling) setRecallOpen(false) }}
+          maxWidth="md"
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => setRecallOpen(false)}
+                disabled={recalling}
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Huỷ
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRecall()}
+                disabled={recalling}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-60"
+              >
+                {recalling ? <Loader2 size={14} className="animate-spin" /> : <Undo2 size={14} />}
+                {recalling ? "Đang thu hồi..." : "Thu hồi"}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-3 text-sm text-slate-700">
+            <p>
+              Hồ sơ sẽ quay về <strong>Nháp</strong>, chữ ký bước 1 bị huỷ. Người đang được chờ ký bước tiếp
+              theo sẽ nhận thông báo và không cần ký nữa.
+            </p>
+            <p className="text-xs text-slate-500">Sau khi thu hồi bạn có thể sửa, thay file hoặc xoá như bản nháp bình thường.</p>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do (không bắt buộc)</label>
+              <textarea
+                value={recallReason}
+                onChange={(e) => setRecallReason(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500"
+                placeholder="VD: Cần sửa lại số liệu"
+              />
+            </div>
+          </div>
+        </ModalShell>
       )}
 
       {/* Return Modal */}

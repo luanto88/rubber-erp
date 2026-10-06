@@ -4,17 +4,8 @@ import { convertCurrency, currencySymbol as sharedCurrencySymbol } from "@/lib/c
 // Re-export để không phải sửa các import cũ trong module Bảo trì đang dùng currencySymbol từ đây.
 export const currencySymbol = sharedCurrencySymbol
 
-export const BO_PHAN_LIST = [
-  "Mủ tạp",
-  "Mủ nước",
-  "Nước thải",
-  "Biomass",
-  "Đội xe",
-  "Văn phòng",
-  "Khác",
-] as const
-
-export type BoPhan = (typeof BO_PHAN_LIST)[number]
+// Danh sách Bộ phận chuyển sang file thuần `@/lib/bo-phan` (dùng được ở API route); re-export giữ import cũ.
+export { BO_PHAN_LIST, type BoPhan } from "@/lib/bo-phan"
 
 export const HANG_MUC_LIST = ["Sửa chữa", "Bảo dưỡng"] as const
 export type HangMuc = (typeof HANG_MUC_LIST)[number]
