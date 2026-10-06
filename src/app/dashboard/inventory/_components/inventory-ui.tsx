@@ -1,7 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { Check, ChevronDown, Plus } from "lucide-react"
+import Link from "next/link"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Check, ChevronDown, Plus, type LucideIcon } from "lucide-react"
 
 type MultiSelectOption = {
   value: string
@@ -241,4 +242,103 @@ export function AddItemButton({
       <span className="hidden sm:inline">Thêm mới</span>
     </button>
   )
+}
+
+// ─── Nút thao tác thống nhất toàn module Kho (kiểu "viên thuốc" nền nhạt + viền + icon) ───
+// Bảng màu viết LITERAL (không ghép chuỗi `bg-${tone}-50`) để Tailwind JIT nhận diện được class.
+export type InventoryActionTone = "emerald" | "amber" | "sky" | "violet" | "rose" | "slate" | "indigo" | "teal"
+
+const ACTION_TONE_CLASS: Record<InventoryActionTone, string> = {
+  emerald: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300",
+  amber: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300",
+  sky: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 hover:border-sky-300",
+  violet: "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 hover:border-violet-300",
+  rose: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300",
+  slate: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 hover:border-slate-300",
+  indigo: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300",
+  teal: "border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 hover:border-teal-300",
+}
+
+type ActionBaseProps = {
+  icon: LucideIcon
+  label: string
+  tone?: InventoryActionTone
+  /** "md" = nút header (icon + chữ); "sm" = nút có chữ trong dòng bảng; "icon" = nút tròn chỉ icon. */
+  size?: "md" | "sm" | "icon"
+  disabled?: boolean
+  title?: string
+  className?: string
+}
+
+function actionClassName(tone: InventoryActionTone, size: "md" | "sm" | "icon", className?: string) {
+  const base =
+    "inline-flex min-w-0 shrink-0 items-center justify-center rounded-full border font-bold transition-colors " +
+    "disabled:pointer-events-none disabled:opacity-45 " +
+    ACTION_TONE_CLASS[tone]
+  const sizing = size === "icon" ? "h-8 w-8" : size === "sm" ? "h-8 gap-1 px-3 text-xs" : "h-9 gap-1.5 px-4 text-sm"
+  return `${base} ${sizing}${className ? ` ${className}` : ""}`
+}
+
+export function InventoryActionButton({
+  icon: Icon,
+  label,
+  tone = "slate",
+  size = "md",
+  disabled,
+  title,
+  className,
+  onClick,
+  type = "button",
+}: ActionBaseProps & { onClick?: () => void; type?: "button" | "submit" }) {
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      aria-label={label}
+      className={actionClassName(tone, size, className)}
+    >
+      <Icon size={size === "md" ? 16 : size === "sm" ? 13 : 15} strokeWidth={2.4} />
+      {size === "icon" ? null : <span className="min-w-0 truncate">{label}</span>}
+    </button>
+  )
+}
+
+export function InventoryActionLink({
+  icon: Icon,
+  label,
+  tone = "slate",
+  size = "md",
+  title,
+  className,
+  href,
+  target,
+}: ActionBaseProps & { href: string; target?: "_blank" }) {
+  return (
+    <Link
+      href={href}
+      target={target}
+      title={title ?? label}
+      aria-label={label}
+      className={actionClassName(tone, size, className)}
+    >
+      <Icon size={size === "md" ? 16 : size === "sm" ? 13 : 15} strokeWidth={2.4} />
+      {size === "icon" ? null : <span className="min-w-0 truncate">{label}</span>}
+    </Link>
+  )
+}
+
+/**
+ * Cụm nút hành động cân đối trên mọi màn hình — mọi nút trong cụm luôn RỘNG BẰNG NHAU và không xuống dòng:
+ * - Mobile: lưới 2 cột, mỗi nút chiếm trọn ô; số nút lẻ thì nút cuối trải 2 cột.
+ * - Từ md: 1 hàng duy nhất, các cột bằng nhau (rộng theo nút dài nhất), canh phải.
+ * Chữ quá dài bị cắt "…" (tooltip vẫn đủ nội dung) thay vì đẩy nút xuống dòng.
+ */
+export const INVENTORY_ACTION_BAR_CLASS =
+  "grid w-full grid-cols-2 gap-2 [&>*]:w-full [&>*:last-child:nth-child(odd)]:col-span-2 " +
+  "md:w-auto md:grid-flow-col md:auto-cols-fr md:grid-cols-none md:[&>*:last-child:nth-child(odd)]:col-span-1"
+
+export function InventoryActionBar({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={`${INVENTORY_ACTION_BAR_CLASS}${className ? ` ${className}` : ""}`}>{children}</div>
 }

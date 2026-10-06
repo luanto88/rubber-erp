@@ -1,12 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { AlertTriangle, ArrowRightLeft, Ban, Check, CopyPlus, Printer, Save, Trash2 } from "lucide-react"
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, Ban, BookCheck, Check, CopyPlus, Printer, RotateCcw, Save, Trash2 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { InventoryPageShell } from "../_components/inventory-shell"
+import { InventoryDocumentList } from "../_components/inventory-document-list"
+import { INVENTORY_ACTION_BAR_CLASS, InventoryActionButton, InventoryActionLink } from "../_components/inventory-ui"
 import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
@@ -273,7 +274,7 @@ function AlertPill({ children, tone = "amber" }: { children: React.ReactNode; to
   return <span className={`rounded-full px-3 py-1 text-xs font-bold ${styles}`}>{children}</span>
 }
 
-export default function InventoryTransfersPage() {
+function InventoryTransfersPageForm() {
   const searchParams = useSearchParams()
   const requestedDocumentId = searchParams.get("documentId")
   const requestedCode = searchParams.get("code")
@@ -1053,49 +1054,37 @@ export default function InventoryTransfersPage() {
             </p>
           </div>
           <div className="flex flex-col gap-3 lg:items-end">
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+            <div className={INVENTORY_ACTION_BAR_CLASS}>
+              <InventoryActionLink href="/dashboard/inventory/transfers" icon={ArrowLeft} label="Danh sách" tone="slate" />
               {draft.documentId ? (
-                <Link
+                <InventoryActionLink
                   href={`/dashboard/inventory/print?type=transfer&documentId=${encodeURIComponent(draft.documentId)}`}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700 sm:px-5 sm:py-2"
-                >
-                  <Printer size={16} />
-                  In phiếu
-                </Link>
+                  icon={Printer}
+                  label="In phiếu"
+                  tone="slate"
+                />
               ) : null}
-              <button
-                onClick={resetDraft}
-                className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 sm:px-5 sm:py-2"
-              >
-                Làm mới
-              </button>
+              <InventoryActionButton icon={RotateCcw} label="Làm mới" tone="slate" onClick={resetDraft} />
               {documentStatus !== "posted" && documentStatus !== "cancelled" ? (
                 <>
-                  <button
+                  <InventoryActionButton
+                    icon={Save}
+                    label={saving ? "Đang lưu..." : draft.documentId ? "Lưu" : "Lưu nháp"}
+                    tone="sky"
                     onClick={() => void saveTransferDraft()}
                     disabled={!canSave || saving || posting || loading}
-                    className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-40 sm:px-5 sm:py-2"
-                  >
-                    <Save size={14} />
-                    {saving ? "Đang lưu..." : draft.documentId ? "Sửa phiếu" : "Lưu nháp"}
-                  </button>
-                  <button
+                  />
+                  <InventoryActionButton
+                    icon={BookCheck}
+                    label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
+                    tone="emerald"
                     onClick={() => void postTransferDraft()}
                     disabled={saving || posting || loading}
-                    className="col-span-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50 sm:col-span-1 sm:px-5 sm:py-2"
-                  >
-                    {posting ? "Đang ghi sổ..." : "Ghi sổ chuyển kho"}
-                  </button>
+                  />
                 </>
               ) : null}
               {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
-                <button
-                  onClick={() => setCancelModal(true)}
-                  className="col-span-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-bold text-red-600 transition-colors hover:bg-red-100 sm:col-span-1 sm:px-5 sm:py-2"
-                >
-                  <Ban size={14} className="mr-1.5 inline" />
-                  Hủy phiếu
-                </button>
+                <InventoryActionButton icon={Ban} label="Hủy phiếu" tone="rose" onClick={() => setCancelModal(true)} />
               ) : null}
             </div>
             {postedInfo ? (
@@ -1496,4 +1485,12 @@ export default function InventoryTransfersPage() {
     ) : null}
     </>
   )
+}
+
+// Không có ?documentId / ?code / ?mode=new → hiện DANH SÁCH phiếu; ngược lại mở form như cũ.
+// Giữ nguyên dạng link ?documentId= vì QR in trên phiếu, Sổ chi tiết và chuông thông báo đang dùng.
+export default function InventoryTransfersPage() {
+  const searchParams = useSearchParams()
+  const showForm = !!(searchParams.get("documentId") || searchParams.get("code") || searchParams.get("mode") === "new")
+  return showForm ? <InventoryTransfersPageForm /> : <InventoryDocumentList kind="transfer" />
 }

@@ -1,7 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { Check, Droplet, Printer, Tag } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "next/navigation"
+import { ArrowLeft, Check, CheckCheck, Droplet, Printer, Tag, X } from "lucide-react"
+import { InventoryActionBar, InventoryActionButton, InventoryActionLink } from "../_components/inventory-ui"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { loadInventoryAdminData, type InventoryItemOption, type InventoryWarehouseOption, type InventoryWarehouseRule } from "../_components/inventory-data"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -154,6 +156,34 @@ export default function InventoryCardsPage() {
 
   const entries = useMemo(() => buildEntries(items, warehouses, warehouseRules), [items, warehouses, warehouseRules])
 
+  // Mở từ tab Tồn ("In nhãn QR") kèm ?items=&warehouses= (id) → chọn sẵn đúng các nhãn khớp bộ lọc.
+  // Chỉ áp dụng 1 lần sau khi dữ liệu tải xong, không ghi đè lựa chọn người dùng tự đổi sau đó.
+  const searchParams = useSearchParams()
+  const prefillDoneRef = useRef(false)
+  useEffect(() => {
+    if (prefillDoneRef.current || loading || entries.length === 0) return
+    prefillDoneRef.current = true
+    const itemIds = new Set((searchParams.get("items") || "").split(",").filter(Boolean))
+    const warehouseIds = new Set((searchParams.get("warehouses") || "").split(",").filter(Boolean))
+    if (itemIds.size === 0 && warehouseIds.size === 0) return
+    const itemCodes = new Set(items.filter((item) => itemIds.has(item.id)).map((item) => item.code))
+    const oilWarehouseIds = new Set(
+      items.filter((item) => item.uses_shared_oil_stock && itemIds.has(item.id)).flatMap((item) => item.default_warehouse_ids),
+    )
+    const next = new Set<string>()
+    for (const entry of entries) {
+      // key dạng "item:{itemId}:{warehouseId}" hoặc "oil:{warehouseId}"
+      const parts = entry.key.split(":")
+      const warehouseId = parts[parts.length - 1]
+      const warehouseOk = warehouseIds.size === 0 || warehouseIds.has(warehouseId)
+      const itemOk =
+        itemIds.size === 0 ||
+        (entry.kind === "item" ? itemCodes.has(entry.code) : oilWarehouseIds.has(warehouseId))
+      if (warehouseOk && itemOk) next.add(entry.key)
+    }
+    setSelectedKeys(next)
+  }, [entries, items, loading, searchParams])
+
   const toggleEntry = (key: string) => {
     setSelectedKeys((prev) => {
       const next = new Set(prev)
@@ -185,6 +215,7 @@ export default function InventoryCardsPage() {
       eyebrow="Nhập xuất tồn"
       title="Thẻ kho"
       description="In nhãn QR dán tại vị trí lưu vật tư — quét lại ngoài hiện trường để mở Thẻ kho điện tử."
+      action={<InventoryActionLink icon={ArrowLeft} label="Tồn kho" tone="slate" href="/dashboard/inventory/on-hand" />}
     >
       {warning ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -201,32 +232,20 @@ export default function InventoryCardsPage() {
         ref={revealRef}
         className="scroll-reveal flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
       >
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={selectAll}
-            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700 transition hover:border-violet-300 hover:text-violet-700"
-          >
-            Chọn tất cả ({entries.length})
-          </button>
-          <button
-            type="button"
-            onClick={clearAll}
-            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700 transition hover:border-slate-300"
-          >
-            Bỏ chọn tất cả
-          </button>
-          <span className="text-sm text-slate-500">Đã chọn: {selectedKeys.size}</span>
-        </div>
-        <button
-          type="button"
-          onClick={() => void handlePrint()}
-          disabled={selectedKeys.size === 0 || printing}
-          className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Printer size={16} />
-          {printing ? "Đang tạo file..." : `In Thẻ kho đã chọn (${selectedKeys.size})`}
-        </button>
+        <span className="text-sm text-slate-500">
+          Đã chọn: <b className="text-slate-700">{selectedKeys.size}</b> / {entries.length} nhãn
+        </span>
+        <InventoryActionBar>
+          <InventoryActionButton icon={CheckCheck} label="Chọn tất cả" tone="slate" onClick={selectAll} />
+          <InventoryActionButton icon={X} label="Bỏ chọn" tone="slate" onClick={clearAll} disabled={selectedKeys.size === 0} />
+          <InventoryActionButton
+            icon={Printer}
+            tone="violet"
+            onClick={() => void handlePrint()}
+            disabled={selectedKeys.size === 0 || printing}
+            label={printing ? "Đang tạo file..." : `In nhãn (${selectedKeys.size})`}
+          />
+        </InventoryActionBar>
       </section>
 
       {loading ? (

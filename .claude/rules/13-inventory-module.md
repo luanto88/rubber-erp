@@ -337,3 +337,31 @@ dùng chung bồn (`uses_shared_oil_stock`) gộp **1 nhãn/kho** (không phải
   đăng nhập → bị đá `/login` → đăng nhập xong vào đúng trang, đúng Vị trí kho theo đúng kho đã in);
   bấm đủ 4 nút thao tác nhanh, đặc biệt "Tiếp tục quét QR" mở camera đúng; xác nhận tab "Tra cứu"
   hoạt động y hệt "Thẻ kho" cũ; xác nhận "Thống kê" bảng giao dịch gần đây gọn lại và link hoạt động.
+
+## Cập nhật 2026-10-03 — Sắp xếp lại tab + danh sách phiếu + kiểu action thống nhất
+
+**Cấu trúc tab mới** (`_components/inventory-shell.tsx`, `TAB_GROUPS`):
+
+| Nhóm | Thẻ con | Route |
+|---|---|---|
+| Nhập xuất tồn | Nhập · Xuất · Chuyển · Tồn | receipts · issues · transfers · on-hand (+ cards là trang con của Tồn) |
+| Báo cáo | Tổng quan · Sổ chi tiết | analytics · lookup |
+
+- `/dashboard/inventory` chuyển hướng về `receipts`. Không đổi route nào — QR/link cũ `?documentId=`/`?code=` vẫn chạy.
+- `action` của `InventoryPageShell` nay nằm cùng hàng thẻ con (bên phải), không còn ở trên.
+
+**Nhập / Xuất / Chuyển có DANH SÁCH phiếu** (`_components/inventory-document-list.tsx`):
+- Trang `receipts|issues|transfers/page.tsx` là wrapper: có `documentId`/`code`/`mode=new` → mở form cũ; ngược lại → danh sách. Form cũ giữ nguyên logic (đổi tên thành `Inventory…PageForm`).
+- Bộ lọc: Từ ngày/Đến ngày (mặc định đầu tháng → hôm nay theo múi giờ nhà máy), Kho (Chuyển: khớp kho đi HOẶC kho đến), Phân loại → Mã vật tư, Trạng thái, Phê duyệt (chỉ Nhập/Xuất).
+- Thao tác trên dòng: Xem, In, **Duyệt** (Nhập/Xuất, phiếu đã ghi sổ chưa duyệt, theo `resolveCanApproveInventory`), **Hủy phiếu** (`inventory.cancel`, qua RPC `inventory_cancel_document`, bắt buộc lý do).
+- Nút "Thêm" → `?mode=new`, gate `inventory.create`/`inventory.edit`/admin.
+
+**Tồn**: nút "In nhãn QR" (mở `cards?warehouses=&items=` — trang Thẻ kho tự chọn sẵn nhãn khớp bộ lọc, chỉ áp 1 lần) + "In tồn kho". Thẻ kho có nút quay lại "Tồn kho".
+
+**Báo cáo**: `analytics` đổi tên hiển thị "Tổng quan kho", `lookup` thành "Sổ chi tiết" (xuất Excel / in thẻ kho theo bộ lọc). Nút "Duyệt" ở Sổ chi tiết vẫn giữ (trùng với danh sách Nhập/Xuất, vô hại).
+
+**Kiểu action thống nhất** — `InventoryActionButton` / `InventoryActionLink` trong `inventory-ui.tsx`: viên thuốc `rounded-full`, nền nhạt + viền cùng tông, chữ đậm. `size`: `md` (header) · `sm` (nút có chữ trong dòng bảng) · `icon`. Quy ước màu: emerald = ghi sổ/duyệt/Excel/thêm nhập · amber = thêm xuất · sky = thêm chuyển/lưu/xem · violet = nhãn QR · rose = hủy · slate = in/làm mới/quay lại. Code mới trong module kho dùng 2 component này, không tự viết class nút riêng.
+
+Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng chung bộ lọc giữa 2 thẻ Báo cáo qua URL; `inventory/settings/page.tsx` (không có link nào trỏ tới) vẫn GIỮ — chỉ xóa khi người dùng xác nhận.
+
+**Cụm nút cân đối (2026-10-03, tiếp)** — mọi cụm nút đặt trong `InventoryActionBar` (hoặc class `INVENTORY_ACTION_BAR_CLASS`): mobile lưới 2 cột (số nút lẻ thì nút cuối trải 2 cột), từ `md` 1 hàng các cột bằng nhau; chữ dài bị cắt "…" chứ không xuống dòng. `InventoryPageShell` tự bọc `action` bằng cụm này. Giữ nhãn nút ngắn (≤ ~14 ký tự): "Lưu", "Ghi sổ", "Ghi sổ N kho", "In nhãn (N)".

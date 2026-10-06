@@ -8,6 +8,7 @@ import {
   Clock3,
   PackageSearch,
   Printer,
+  QrCode,
   ShieldAlert,
   Warehouse,
 } from "lucide-react"
@@ -21,7 +22,7 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
-import { MultiSelectField } from "../_components/inventory-ui"
+import { InventoryActionLink, MultiSelectField } from "../_components/inventory-ui"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 const INPUT_CLASS =
@@ -314,13 +315,21 @@ export default function InventoryOnHandPage() {
       title="Tồn kho"
       description="Theo dõi tồn hiện tại theo kho, vật tư, số lô và hạn sử dụng để phục vụ xuất kho, chuyển kho và cảnh báo tồn an toàn."
       action={
-        <Link
-          href={`/dashboard/inventory/print-report?kind=on-hand&warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&categories=${encodeURIComponent(selectedCategoryIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}&search=${encodeURIComponent(search)}`}
-          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
-        >
-          <Printer size={16} />
-          In tồn kho
-        </Link>
+        <>
+          <InventoryActionLink
+            icon={QrCode}
+            label="In nhãn QR"
+            tone="violet"
+            title="In nhãn QR dán tại vị trí lưu vật tư (Thẻ kho) — chọn sẵn theo bộ lọc hiện tại"
+            href={`/dashboard/inventory/cards?warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}`}
+          />
+          <InventoryActionLink
+            icon={Printer}
+            label="In tồn kho"
+            tone="slate"
+            href={`/dashboard/inventory/print-report?kind=on-hand&warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&categories=${encodeURIComponent(selectedCategoryIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}&search=${encodeURIComponent(search)}`}
+          />
+        </>
       }
     >
       {warning ? (
