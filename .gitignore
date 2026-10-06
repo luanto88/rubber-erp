@@ -54,3 +54,22 @@ key-mapping.json
 
 # Google Drive sync cache (khong thuoc du an)
 .tmp.driveupload/
+.tmp.drivedownload/
+
+# Office & editor temporary lock files
+~$*
+*.tmp
+
+# Files khong can thiet trong cung_cap_dl (tai lieu tham khao, anh preview, bao cao)
+cung_cap_dl/preview_*
+cung_cap_dl/BAO_CAO_*
+cung_cap_dl/*.docx
+cung_cap_dl/*.xlsx
+cung_cap_dl/*.pdf
+cung_cap_dl/*.txt
+cung_cap_dl/tab_ton_ls.png
+cung_cap_dl/dieu_xe.jpg
+cung_cap_dl/man_ky.png
+cung_cap_dl/tieu_de.png
+
+
