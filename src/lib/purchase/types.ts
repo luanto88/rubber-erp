@@ -267,6 +267,8 @@ export type PurchaseUrgency = {
   level: "qua_han" | "gap" | "sap" | "binh_thuong"
   days: number
   label: string
+  /** Nhãn ngắn hiển thị trong ô ngày ở form ("Quá hạn"/"Gấp"/"Sắp tới"); null khi bình thường. */
+  shortLabel: string | null
   className: string
 }
 
@@ -278,12 +280,12 @@ export function purchaseUrgency(ngayCanHang: string | null | undefined, todayIso
   const d = normalizeIsoDate(ngayCanHang)
   if (!d) return null
   const days = daysBetweenIso(todayIso, d)
-  if (days < 0) return { level: "qua_han", days, label: `Quá hạn ${-days} ngày`, className: "bg-red-600 text-white" }
+  if (days < 0) return { level: "qua_han", days, label: `Quá hạn ${-days} ngày`, shortLabel: "Quá hạn", className: "bg-red-600 text-white" }
   if (days <= PURCHASE_URGENT_DAYS) {
-    return { level: "gap", days, label: days === 0 ? "Gấp · cần hôm nay" : `Gấp · còn ${days} ngày`, className: "bg-red-100 text-red-700" }
+    return { level: "gap", days, label: days === 0 ? "Gấp · cần hôm nay" : `Gấp · còn ${days} ngày`, shortLabel: "Gấp", className: "bg-red-100 text-red-700" }
   }
-  if (days <= PURCHASE_SOON_DAYS) return { level: "sap", days, label: `Còn ${days} ngày`, className: "bg-amber-100 text-amber-700" }
-  return { level: "binh_thuong", days, label: `Còn ${days} ngày`, className: "bg-slate-100 text-slate-600" }
+  if (days <= PURCHASE_SOON_DAYS) return { level: "sap", days, label: `Còn ${days} ngày`, shortLabel: "Sắp tới", className: "bg-amber-100 text-amber-700" }
+  return { level: "binh_thuong", days, label: `Còn ${days} ngày`, shortLabel: null, className: "bg-slate-100 text-slate-600" }
 }
 
 /** Phiếu còn đang trong luồng xử lý (đáng hiện nhãn gấp). */
@@ -309,7 +311,7 @@ export type PurchaseItemInsight = {
   recentImports?: { ngay: string; soLuong: number }[]
   recentExports?: { ngay: string; soLuong: number }[]
   export90: number
-  categorySamples?: { donGia: number; loaiTien: string }[]
+  categorySamples?: { donGia: number; loaiTien: string; requestId?: string }[]
 }
 
 /** Bản chụp lưu vào purchase_request_lines.insight_snapshot lúc gửi ký. */

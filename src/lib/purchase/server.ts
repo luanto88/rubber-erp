@@ -277,20 +277,20 @@ export async function loadPurchaseItemInsight(
   }
 
   // ── Giá mẫu cùng nhóm (đề nghị đã duyệt 365 ngày gần nhất) ──
-  const categorySamples: { donGia: number; loaiTien: string }[] = []
+  const categorySamples: { donGia: number; loaiTien: string; requestId: string }[] = []
   if (categoryId && opts.includeCategorySamples !== false) {
     const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10)
     const { data: catLines } = await supabase
       .from("purchase_request_lines")
-      .select("don_gia, item_id, inventory_items!inner(category_id), purchase_requests!inner(loai_tien, trang_thai, ngay)")
+      .select("don_gia, item_id, request_id, inventory_items!inner(category_id), purchase_requests!inner(loai_tien, trang_thai, ngay)")
       .eq("factory_id", factoryId)
       .eq("inventory_items.category_id", categoryId)
       .in("purchase_requests.trang_thai", INSIGHT_APPROVED)
       .gte("purchase_requests.ngay", since)
       .limit(200)
-    for (const l of (catLines || []) as unknown as { don_gia: number; item_id: string; purchase_requests: { loai_tien: string } | null }[]) {
+    for (const l of (catLines || []) as unknown as { don_gia: number; item_id: string; request_id: string; purchase_requests: { loai_tien: string } | null }[]) {
       if (l.item_id === itemId || !l.purchase_requests || !(Number(l.don_gia) > 0)) continue
-      categorySamples.push({ donGia: Number(l.don_gia), loaiTien: l.purchase_requests.loai_tien })
+      categorySamples.push({ donGia: Number(l.don_gia), loaiTien: l.purchase_requests.loai_tien, requestId: l.request_id })
     }
   }
 

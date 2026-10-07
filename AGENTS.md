@@ -50,4 +50,15 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Khi tạo hoặc khai báo 1 điều kiện / mã phân quyền mới (`permission_code`), BẮT BUỘC phải dịch nhãn sang tiếng Việt rõ nghĩa và ngắn gọn trong hệ thống (ví dụ: `quality.import` dịch thành `tải lên phiếu KN`, `quality.create` dịch thành `tạo phiếu KN`, không dùng tên tiếng Anh thô hay nhãn không rõ nghĩa trong giao diện Cài đặt phân quyền người dùng).
 - Việc kiểm tra phân quyền trên giao diện người dùng phải sử dụng hàm chuẩn `hasPermission(currentUser, "module.action")` thay vì hardcode so sánh vai trò `userRole === "admin"`, để đảm bảo các tài khoản không phải admin được cấp quyền tương ứng vẫn thao tác được bình thường.
 
+## Quy ước UI/UX Detail View chuẩn cho các module (Mắt xem chi tiết)
+
+- **File-First (Tệp luôn ở trên cùng)**: Tất cả các màn hình chi tiết có tệp đính kèm (PDF, Office .docx/.xlsx, hình ảnh) BẮT BUỘC phải đưa khối hiển thị Tệp tài liệu lên đầu trang (Top Card) với icon định dạng, tên file, dung lượng, nút Xem file và Tải về trực quan.
+- **Card Container**: Sử dụng thẻ nền trắng `bg-white`, bo góc mềm `rounded-2xl`, viền mỏng `border-slate-200/90`, đổ bóng êm `shadow-sm`. Header mỗi card có khối vuông bo góc màu pastel (`w-8 h-8 rounded-xl`) chứa icon đại diện + Tiêu đề nhóm in đậm (`text-base font-extrabold text-slate-800`) + Phụ đề mô tả (`text-xs text-slate-500 font-medium`).
+- **Icon màu & Nhãn trường (Field Item)**:
+  - Cấu trúc: Icon pastel tượng trưng bên trái + (Label phía trên + Giá trị in đậm phía dưới).
+  - Phân màu icon theo ngữ nghĩa: Mã hiệu/Tag (Đỏ `rose-50`), Nhân sự/Người (Hồng/Xanh `pink-50` / `blue-50`), Ngày/Giờ (Xanh lá `emerald-50` / Cam `amber-50`), Đơn vị/Phòng ban (Xanh lam `blue-50`), Cấp bậc/Phân loại (Hổ phách `amber-50`), Đã duyệt/Hoàn thành (Xanh lục `emerald-50`).
+- **Responsive 50-50 trên Mobile**: Các trường ngắn trên mobile bắt buộc chia 2 cột đều nhau (Grid `grid-cols-2` 50%-50%), cân đối lề trên-dưới và trái-phải. Các trường dài (ghi chú, trích yếu, URL tra cứu, mã QR) chiếm trọn 1 dòng (`col-span-2`).
+- **Tái sử dụng**: Khuyến khích sử dụng bộ component chuẩn trong `src/app/dashboard/_components/detail-view-ui.tsx` để đồng bộ toàn bộ hệ thống (ISO, Văn bản nội bộ, Bảo trì, Điều xe, Mua sắm, Kho...).
+
+
 

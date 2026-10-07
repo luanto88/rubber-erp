@@ -180,3 +180,32 @@ Migration `20261012_purchase_maintenance_link.sql` (**chạy tay TRƯỚC deploy
 - Ghi nhận mua của phiếu liên kết biên bản **bắt buộc kho KT** (UI khoá ô kho, `receive` trả 400 nếu kho khác).
 - Trang chi tiết có banner "Lập từ biên bản bảo trì" + link; banner `KtShortageBanner` ở đầu danh sách.
 - Phiếu `00/ĐNMVT` = dữ liệu lịch sử do script backfill tạo (không ký số).
+
+## GĐ2h (2026-10-07) — bố cục dòng vật tư, lọc phân loại, sửa gợi ý giá, backfill KT
+Không migration. tsc + eslint sạch, CHƯA test tay, CHƯA commit.
+- **Bố cục mỗi dòng** (`purchase-form.tsx`): hàng đầu GIỮ NHƯ CŨ [Vật tư (5/12) | ĐVT | SL | Đơn giá | Thành
+  tiền] → giá gợi ý → Dòng 1 [Mục đích * | Mua tại | Ghi chú] → Dòng 2 [Có hàng | Cần hàng * | Ảnh] — 2 dòng
+  sau `grid-cols-1 md:grid-cols-3`, mobile 1 cột. Field/payload/kiểm tra KHÔNG đổi.
+- Chip mức gấp nằm TRONG ô "Cần hàng" (`absolute right-9`, chừa icon lịch): `PurchaseUrgency.shortLabel`
+  mới ("Quá hạn"/"Gấp"/"Sắp tới"/null). `label` và ngưỡng KHÔNG đổi — danh sách/chi tiết/Telegram vẫn dùng `label`.
+- `PurchaseImagePicker` thêm `variant: "default"|"compact"|"inline"` + `title`; `compact` boolean cũ vẫn chạy.
+  `inline` = 2 nút nền màu (sky "Chọn ảnh" có badge số ảnh, violet "Chụp ảnh") cao bằng ô nhập, ảnh hiện dưới.
+- **Lọc phân loại** nằm TRONG dropdown `ItemPicker` (prop optional `categories`, state nội bộ `cat`, không lưu
+  DB): `<select>` cạnh ô tìm (mobile xếp dọc); mở dropdown → mặc định nhóm của vật tư đang chọn; đổi nhóm chỉ
+  lọc danh sách; `onCreateNew(name, categoryId)` điền sẵn nhóm cho "tạo vật tư mới". `purchase-fulfillment.tsx`
+  (modal điều chỉnh) không truyền `categories` ⇒ không có ô này.
+- **Gợi ý giá — thứ tự mới**: lần mua gần nhất của CHÍNH vật tư ("theo phiếu NN/ĐNMVT (ngày)") → giá danh mục
+  của CHÍNH vật tư (`don_gia > 0`) → trung vị nhóm chỉ khi ≥3 mẫu từ ≥2 phiếu (`categorySamples[].requestId`
+  mới trong `loadPurchaseItemInsight`; bản chụp cũ thiếu requestId thì chỉ xét ≥3 mẫu).
+- **Nguyên nhân "luôn 3$"** (điều tra DB 2026-10-07): nhóm "Thiết bị phụ tùng thay thế" chỉ có 2 phiếu đã duyệt
+  — 03/ĐNMVT (12.000 KHR ≈ 2,93$) và 04/ĐNMVT (2 × 3$), đều là phiếu test; trung vị nhóm đứng trước giá danh
+  mục nên cả nhóm ra ≈3$. Phiếu 05 ("Test app", 7 × 3$) là hệ quả. Người dùng chốt huỷ 03, 04, 05 (tự huỷ trên
+  UI bằng admin). 350/390 vật tư có `don_gia = 0` (đã lọc, không phải nguyên nhân).
+- **Backfill KT đã `--apply`** (actor Administrator `21d59cc2-…`, kho KT = "Kho xưởng cơ khí" — người dùng xác
+  nhận đúng): 23/23 biên bản, phiếu `00/ĐNMVT` (2026) `hoan_tat` id `3e1f53b0-6afe-4226-a375-8dac8d64e5f8`,
+  13 dòng; tồn KT ròng 13 vật tư = 0; chạy lại = 0 việc mới. Bỏ qua: Lọc nhớt 6505510.5020B (quản lý lô).
+- **Vật tư mua ngoài chưa gắn mã**: 481 dòng (424 trên biên bản đã duyệt, 57 chờ duyệt), 384 nhóm tên. Đã xuất
+  CSV đề xuất (chỉ đọc) `C:\Users\Software\rubber-erp-backups\doi-chieu-vat-tu-mua-ngoai-2026-10-06.csv`: Chắc 27
+  · Gần — cần xem 188 · Không khớp 169; cột "Mã CHỐT" để người dùng điền. CHƯA ghi `inventory_item_id` — phiên
+  sau: script gán theo CSV đã duyệt rồi chạy lại backfill (biên bản đã duyệt) cho các dòng mới có mã. Cẩn thận
+  cặp gần giống khác hàng thật (UC 208 ≠ UCP 208, B45 ≠ B46).

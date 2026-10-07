@@ -10,7 +10,14 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, Plus, LayoutTemplate,
   ArrowUp, ArrowDown, Trash2, Save, UserCheck, Share2,
   ShieldCheck, Bell, Undo2,
+  Tag, Layers, Building, Calendar, MessageSquare, Award,
 } from "lucide-react"
+import {
+  DetailCard,
+  DetailFieldItem,
+  DetailFileCard,
+  DetailQrBox,
+} from "@/app/dashboard/_components/detail-view-ui"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
@@ -3851,115 +3858,61 @@ export default function IsoFormInstancePage() {
 
                   {/* File đã ký duyệt (khi hoàn thành) */}
                   {isDone && (instance.final_pdf_url || instance.final_office_url) && (
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white border border-emerald-300 rounded-xl shadow-xs">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <CheckCircle2 size={22} className="text-emerald-600 shrink-0" />
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-xs font-bold text-emerald-950 truncate max-w-full">
-                              {instance.tieu_de || "File đã ký duyệt"}
-                            </p>
-                            <span className="text-[10px] text-emerald-700 bg-emerald-100 font-extrabold px-1.5 py-0.5 rounded uppercase shrink-0">
-                              {instance.final_pdf_url ? "PDF ĐÃ KÝ DUYỆT" : instance.draft_file_type?.toUpperCase()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                        <button
-                          type="button"
-                          onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg shadow-2xs transition-all"
-                        >
-                          <Eye size={13} /> Xem
-                        </button>
-                        <button
-                          onClick={handleDownload}
-                          className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-200"
-                          title="Tải về"
-                        >
-                          <Download size={14} />
-                        </button>
-                      </div>
-                    </div>
+                    <DetailFileCard
+                      fileName={instance.tieu_de || "File đã ký duyệt"}
+                      fileType={instance.final_pdf_url ? "PDF" : instance.draft_file_type?.toUpperCase()}
+                      statusLabel="✓ Đã ký duyệt"
+                      statusTone="emerald"
+                      onView={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
+                      onDownload={handleDownload}
+                    />
                   )}
 
                   {/* File nháp / file đang xử lý */}
                   {instance.draft_file_url && !uploading && !isDone && (
                     <div className="space-y-2.5">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-white border border-slate-200 hover:border-violet-300 rounded-xl shadow-xs transition-colors">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <FileText size={22} className="text-violet-600 shrink-0" />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="text-xs font-bold text-slate-900 truncate max-w-full">
-                                {instance.tieu_de || "File hồ sơ"}
-                              </p>
-                              <span className="text-[10px] font-extrabold uppercase text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded shrink-0">
-                                {instance.draft_file_type ?? "file"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap self-end sm:self-auto">
-                          <button
-                            type="button"
-                            onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
-                            title="Xem file"
-                          >
-                            <Eye size={13} /> Xem
-                          </button>
-                          <button
-                            onClick={handleDownload}
-                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 transition-colors border border-slate-200"
-                            title="Tải về"
-                          >
-                            <Download size={13} />
-                          </button>
-                          {canManageDraft && (
-                            <button
-                              onClick={() => fileInputRef.current?.click()}
-                              disabled={uploading}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 disabled:opacity-50 rounded-lg transition-colors border border-violet-200"
-                              title="Thay file"
+                      <DetailFileCard
+                        fileName={instance.tieu_de || "File hồ sơ"}
+                        fileType={instance.draft_file_type ?? "file"}
+                        statusLabel="Đang xử lý"
+                        statusTone="blue"
+                        onView={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
+                        onDownload={handleDownload}
+                        onReplace={() => fileInputRef.current?.click()}
+                        canReplace={canManageDraft}
+                        replacing={uploading}
+                        extra={
+                          instance.draft_file_type !== "pdf" ? (
+                            <label
+                              className={`flex items-start gap-2.5 p-2 rounded-xl border border-slate-200 bg-white shadow-2xs transition-all ${
+                                canManageDraft ? "cursor-pointer hover:bg-slate-50 hover:border-violet-300" : "cursor-default opacity-80"
+                              }`}
                             >
-                              <RotateCcw size={12} /> Thay file
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Công tắc / checkbox Tự động chuyển sang PDF sau phê duyệt cho file DOCX/XLSX */}
-                      {instance.draft_file_type !== "pdf" && (
-                        <label
-                          className={`flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-white shadow-2xs transition-all ${
-                            canManageDraft ? "cursor-pointer hover:bg-slate-50 hover:border-violet-300" : "cursor-default opacity-80"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={autoConvertPdf}
-                            disabled={!canManageDraft}
-                            onChange={async (e) => {
-                              if (!canManageDraft) return
-                              const val = e.target.checked
-                              setAutoConvertPdf(val)
-                              setInstance((prev) => prev ? { ...prev, auto_convert_pdf: val } : prev)
-                              await supabase.from("iso_form_instances").update({ auto_convert_pdf: val }).eq("id", instanceId)
-                            }}
-                            className="mt-0.5 rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-default"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <span className="text-xs font-bold text-slate-700">Tự động chuyển sang PDF sau khi phê duyệt</span>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              {autoConvertPdf
-                                ? "Đang bật — hồ sơ DOCX/XLSX sẽ tự động chuyển sang file PDF hoàn chỉnh sau khi ký duyệt."
-                                : "Đang tắt — giữ nguyên định dạng file Office gốc sau khi ký duyệt."}
-                            </p>
-                          </div>
-                        </label>
-                      )}
+                              <input
+                                type="checkbox"
+                                checked={autoConvertPdf}
+                                disabled={!canManageDraft}
+                                onChange={async (e) => {
+                                  if (!canManageDraft) return
+                                  const val = e.target.checked
+                                  setAutoConvertPdf(val)
+                                  setInstance((prev) => prev ? { ...prev, auto_convert_pdf: val } : prev)
+                                  await supabase.from("iso_form_instances").update({ auto_convert_pdf: val }).eq("id", instanceId)
+                                }}
+                                className="mt-0.5 rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-default"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs font-bold text-slate-700">Tự động chuyển sang PDF sau khi phê duyệt</span>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  {autoConvertPdf
+                                    ? "Đang bật — hồ sơ DOCX/XLSX sẽ tự động chuyển sang file PDF hoàn chỉnh sau khi ký duyệt."
+                                    : "Đang tắt — giữ nguyên định dạng file Office gốc sau khi ký duyệt."}
+                                </p>
+                              </div>
+                            </label>
+                          ) : undefined
+                        }
+                      />
                     </div>
                   )}
 
@@ -4028,45 +3981,90 @@ export default function IsoFormInstancePage() {
                   )}
                 </div>
 
-                {/* ── Bảng thông tin hồ sơ chi tiết ── */}
-                <div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <InfoRow label="Biểu mẫu gốc" value={template?.ten_tai_lieu || "—"} />
-                    <InfoRow label="Mã biểu mẫu" value={template?.ma_tai_lieu || "—"} />
-                    <InfoRow
-                      label="Loại hồ sơ"
-                      value={template?.loai_tai_lieu ? (LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu] || template.loai_tai_lieu) : "Biểu mẫu"}
+                {/* ── Bảng thông tin hồ sơ chi tiết (Chuẩn UI/UX 2 cột cân đối) ── */}
+                <div className="pt-2">
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
+                    <DetailFieldItem
+                      icon={<Tag size={15} />}
+                      iconTone="rose"
+                      label="Mã biểu mẫu"
+                      value={template?.ma_tai_lieu || "—"}
+                      mono
+                      highlight="rose"
                     />
-                    <InfoRow label="Phòng ban" value={template?.phong_ban || "—"} />
-                    <InfoRow
+                    <DetailFieldItem
+                      icon={<Layers size={15} />}
+                      iconTone="amber"
+                      label="Biểu mẫu gốc"
+                      value={template?.ten_tai_lieu || "—"}
+                    />
+                    <DetailFieldItem
+                      icon={<Building size={15} />}
+                      iconTone="blue"
+                      label="Phòng ban"
+                      value={template?.phong_ban || "—"}
+                    />
+                    <DetailFieldItem
+                      icon={<Award size={15} />}
+                      iconTone="teal"
+                      label="Cấp hồ sơ"
+                      value={
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200">
+                          {isNStepRecord
+                            ? `${instance.so_buoc_tong || steps.length} bước ký`
+                            : instance.cap_tl || "—"}
+                        </span>
+                      }
+                    />
+                    <DetailFieldItem
+                      icon={<User size={15} />}
+                      iconTone="pink"
                       label="Người lập hồ sơ"
                       value={instance.soan_thao || (instance.nguoi_tao ? (allApproverProfiles.find((p) => p.id === instance.nguoi_tao)?.full_name || instance.nguoi_tao) : "—")}
                     />
-                    <InfoRow label="Ngày lập hồ sơ" value={fmtDate(instance.created_at)} />
-                    <InfoRow
-                      label="Cấp hồ sơ"
-                      value={
-                        isNStepRecord
-                          ? `${instance.so_buoc_tong || steps.length} bước ký`
-                          : instance.cap_tl || "—"
-                      }
+                    <DetailFieldItem
+                      icon={<Calendar size={15} />}
+                      iconTone="emerald"
+                      label="Ngày lập hồ sơ"
+                      value={fmtDate(instance.created_at)}
                     />
-                    <InfoRow
+                    <DetailFieldItem
+                      icon={<ShieldCheck size={15} />}
+                      iconTone="emerald"
                       label="Ngày phê duyệt"
                       value={instance.ky_phe_duyet_at ? fmtDate(instance.ky_phe_duyet_at) : (isDone ? fmtDate(instance.updated_at) : "Chưa duyệt")}
+                      extra={
+                        instance.ky_phe_duyet_at || isDone ? (
+                          <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">✓ Đã duyệt</span>
+                        ) : undefined
+                      }
+                    />
+                    <DetailFieldItem
+                      icon={<Layers size={15} />}
+                      iconTone="violet"
+                      label="Loại hồ sơ"
+                      value={template?.loai_tai_lieu ? (LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu] || template.loai_tai_lieu) : "Biểu mẫu"}
                     />
                     {template?.mo_ta_tim_kiem && (
-                      <div className="sm:col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
-                        <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">Mô tả biểu mẫu</dt>
-                        <dd className="text-sm text-slate-700 italic">{template.mo_ta_tim_kiem}</dd>
-                      </div>
+                      <DetailFieldItem
+                        icon={<FileText size={15} />}
+                        iconTone="blue"
+                        label="Mô tả biểu mẫu"
+                        value={<span className="italic text-slate-700">{template.mo_ta_tim_kiem}</span>}
+                        colSpan={2}
+                      />
                     )}
                   </div>
 
                   {instance.ghi_chu && (
                     <div className="mt-4 pt-4 border-t border-slate-100">
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
-                      <p className="text-sm text-slate-700">{instance.ghi_chu}</p>
+                      <DetailFieldItem
+                        icon={<MessageSquare size={15} />}
+                        iconTone="teal"
+                        label="Ghi chú hồ sơ"
+                        value={<span className="text-slate-800">{instance.ghi_chu}</span>}
+                        colSpan={2}
+                      />
                     </div>
                   )}
                 </div>

@@ -52,7 +52,19 @@ import {
   Loader2,
   Upload,
   Plus,
+  Tag,
+  Layers,
+  Building,
+  Calendar,
+  User,
+  MessageSquare,
 } from "lucide-react"
+import {
+  DetailCard,
+  DetailFieldItem,
+  DetailFileCard,
+  DetailQrBox,
+} from "@/app/dashboard/_components/detail-view-ui"
 import type { SessionUser } from "@/lib/auth"
 import { ResizeHandleIcon, RESIZE_HANDLE_CLASS, RESIZE_HANDLE_STYLE } from "@/app/dashboard/_components/resize-handle-icon"
 import {
@@ -2672,20 +2684,95 @@ export default function DocumentDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-stretch">
         {/* Thông tin văn bản */}
         <div className="lg:col-span-3 flex flex-col gap-5">
-          <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2.5 px-5 py-3.5 bg-mint-50 border-b border-mint-100">
-              <span className="w-8 h-8 rounded-full bg-mint-100 grid place-items-center text-[#1f6a58] shrink-0">
-                <FileText size={16} />
+          {/* 1. TOP CARD - Tệp văn bản đưa lên đầu view */}
+          {fileUrl && (
+            <DetailFileCard
+              fileName={doc.ten_van_ban}
+              fileType={docExt ? docExt.toUpperCase() : "PDF"}
+              statusLabel={TRANG_THAI_LABEL[doc.trang_thai]}
+              statusTone={doc.trang_thai === "da_phe_duyet" ? "emerald" : doc.trang_thai === "tra_ve" ? "amber" : "blue"}
+              onView={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
+              onDownload={() => void openSecureFile(`/api/documents/${doc.id}/file-url?download=1`)}
+              onReplace={canGuiKy ? () => fileReplaceInputRef.current?.click() : undefined}
+              canReplace={canGuiKy}
+              replacing={replacingFile}
+            />
+          )}
+
+          {/* 2. CARD - Thông tin văn bản chuẩn 2 cột cân đối */}
+          <DetailCard
+            icon={<FileText size={18} />}
+            iconTone="violet"
+            title="Thông tin văn bản"
+            subtitle="Số hiệu, phòng ban và phạm vi ban hành"
+            badge={
+              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai]}`}>
+                {TRANG_THAI_LABEL[doc.trang_thai]}
               </span>
-              <h2 className="text-sm font-extrabold text-slate-800">Thông tin văn bản</h2>
-            </div>
-            <div className="p-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <InfoRow label="Loại văn bản" value={doc.loai_van_ban ? (LOAI_VAN_BAN_LABEL[doc.loai_van_ban] || doc.loai_van_ban) : "—"} />
-              <InfoRow label="Phòng ban" value={doc.phong_ban || "—"} />
+            }
+          >
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
+              <DetailFieldItem
+                icon={<Tag size={15} />}
+                iconTone="rose"
+                label="Số hiệu văn bản"
+                value={doc.ma_van_ban || "Chưa có số"}
+                mono
+                highlight="rose"
+              />
+              <DetailFieldItem
+                icon={<Layers size={15} />}
+                iconTone="amber"
+                label="Loại văn bản"
+                value={doc.loai_van_ban ? (LOAI_VAN_BAN_LABEL[doc.loai_van_ban] || doc.loai_van_ban) : "—"}
+              />
+              <DetailFieldItem
+                icon={<Building size={15} />}
+                iconTone="blue"
+                label="Phòng ban"
+                value={doc.phong_ban || "—"}
+              />
+              <DetailFieldItem
+                icon={<Lock size={15} />}
+                iconTone={doc.che_do_xem === "gioi_han" ? "amber" : "teal"}
+                label="Phạm vi hiển thị"
+                value={CHE_DO_XEM_LABEL[doc.che_do_xem] || CHE_DO_XEM_LABEL.cong_khai}
+              />
+              <DetailFieldItem
+                icon={<User size={15} />}
+                iconTone="pink"
+                label="Người soạn thảo"
+                value={doc.nguoi_soan_thao_display || "—"}
+              />
+              <DetailFieldItem
+                icon={<ShieldCheck size={15} />}
+                iconTone="emerald"
+                label="Người phê duyệt"
+                value={doc.phe_duyet || "—"}
+                extra={
+                  doc.trang_thai === "da_phe_duyet" ? (
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">✓ Đã duyệt</span>
+                  ) : undefined
+                }
+              />
+              <DetailFieldItem
+                icon={<Calendar size={15} />}
+                iconTone="emerald"
+                label="Ngày tạo"
+                value={fmtDate(doc.created_at)}
+              />
+              <DetailFieldItem
+                icon={<Clock size={15} />}
+                iconTone="blue"
+                label="Ngày phê duyệt"
+                value={fmtDate(doc.ngay_phe_duyet) || "—"}
+              />
+
               {!!doc.phong_ban_ky_display?.length && (
-                <div className="sm:col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
-                  <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1.5">Phòng ban đã ký</dt>
+                <div className="col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 p-2.5">
+                  <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5 flex items-center gap-1">
+                    <Building size={12} className="text-blue-500" /> Phòng ban đã ký
+                  </dt>
                   <dd className="flex flex-wrap gap-1.5">
                     {doc.phong_ban_ky_display.map((pb) => (
                       <span key={pb} className="px-2 py-0.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-lg">
@@ -2695,56 +2782,51 @@ export default function DocumentDetailPage() {
                   </dd>
                 </div>
               )}
-              <InfoRow
-                label="Phạm vi hiển thị"
-                value={CHE_DO_XEM_LABEL[doc.che_do_xem] || CHE_DO_XEM_LABEL.cong_khai}
-              />
-              <InfoRow label="Người soạn thảo" value={doc.nguoi_soan_thao_display || "—"} />
-              <InfoRow label="Người phê duyệt" value={doc.phe_duyet || "—"} />
-              <InfoRow label="Ngày phê duyệt" value={fmtDate(doc.ngay_phe_duyet)} />
-            </div>
-            {doc.che_do_xem === "gioi_han" && (
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1.5 flex items-center gap-1.5">
-                  <Lock size={11} /> Ai xem được văn bản này
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    doc.nguoi_soan_thao_display,
-                    ...(doc.thu_tu_ky_json || []).map((s) => s.ten),
-                    doc.phe_duyet,
-                  ]
-                    .map((n) => (n || "").trim())
-                    .filter((n, i, arr) => n && arr.indexOf(n) === i)
-                    .map((n) => (
-                      <span
-                        key={n}
-                        className="px-2 py-0.5 text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 rounded-lg"
-                      >
-                        {n}
-                      </span>
-                    ))}
-                  <span className="px-2 py-0.5 text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200 rounded-lg">
-                    Quản trị viên
-                  </span>
-                  <span className="px-2 py-0.5 text-xs font-bold bg-slate-50 text-slate-500 border border-slate-200 rounded-lg">
-                    Người được Phân phối
-                  </span>
+
+              {doc.che_do_xem === "gioi_han" && (
+                <div className="col-span-2 rounded-xl bg-amber-50/60 border border-amber-200 p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800 mb-1.5 flex items-center gap-1.5">
+                    <Lock size={12} /> Ai xem được văn bản này
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      doc.nguoi_soan_thao_display,
+                      ...(doc.thu_tu_ky_json || []).map((s) => s.ten),
+                      doc.phe_duyet,
+                    ]
+                      .map((n) => (n || "").trim())
+                      .filter((n, i, arr) => n && arr.indexOf(n) === i)
+                      .map((n) => (
+                        <span
+                          key={n}
+                          className="px-2 py-0.5 text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 rounded-lg"
+                        >
+                          {n}
+                        </span>
+                      ))}
+                    <span className="px-2 py-0.5 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg">
+                      Quản trị viên
+                    </span>
+                    <span className="px-2 py-0.5 text-xs font-bold bg-white text-slate-600 border border-slate-200 rounded-lg">
+                      Người được Phân phối
+                    </span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
-                  Giới hạn áp dụng cho danh sách, trang chi tiết và tìm kiếm. Người đang giữ sẵn
-                  đường dẫn tệp PDF vẫn tải được tệp đó.
-                </p>
-              </div>
-            )}
-            {doc.ghi_chu && (
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">Ghi chú</p>
-                <p className="text-sm text-slate-700">{doc.ghi_chu}</p>
-              </div>
-            )}
+              )}
+
+              {doc.ghi_chu && (
+                <div className="col-span-2 pt-2 border-t border-slate-100">
+                  <DetailFieldItem
+                    icon={<MessageSquare size={15} />}
+                    iconTone="teal"
+                    label="Ghi chú văn bản"
+                    value={<p className="text-slate-800 whitespace-pre-wrap">{doc.ghi_chu}</p>}
+                    colSpan={2}
+                  />
+                </div>
+              )}
             </div>
-          </div>
+          </DetailCard>
 
           {/* Trả về info */}
           {doc.trang_thai === "tra_ve" && doc.tra_ve_ly_do && (

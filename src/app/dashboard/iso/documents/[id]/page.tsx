@@ -59,7 +59,25 @@ import {
   FileSignature,
   Edit3,
   Undo2,
+  Tag,
+  Layers,
+  Building,
+  Calendar,
+  Clock,
+  User,
+  Users,
+  UserCheck,
+  ShieldCheck,
+  MessageSquare,
+  Award,
+  GitBranch,
 } from "lucide-react"
+import {
+  DetailCard,
+  DetailFieldItem,
+  DetailFileCard,
+  DetailQrBox,
+} from "@/app/dashboard/_components/detail-view-ui"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
@@ -3479,213 +3497,268 @@ export default function IsoDocumentDetailPage() {
       .filter((s) => form.standard_ids.includes(s.id))
       .map((s) => s.tieu_chuan)
     const standardDisplay = selectedStandardsList.length > 0 ? selectedStandardsList.join(", ") : "—"
+    const isPdf = mainFileUrl ? mainFileUrl.split("?")[0].toLowerCase().endsWith(".pdf") : true
 
     return (
       <div className="flex flex-col gap-5">
-        {/* Card 1 - Thông tin cơ bản */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
-            <h2 className="text-base font-extrabold text-slate-800">Thông tin cơ bản</h2>
+        {/* 1. TOP CARD - Tệp tài liệu đưa lên đầu view */}
+        {mainFileUrl && canOpenThisFile && (
+          <DetailFileCard
+            fileName={doc?.ten_tai_lieu || form.ten_tai_lieu || "Tài liệu ISO"}
+            fileType={isPdf ? "PDF" : "WORD/OFFICE"}
+            fileSize={doc?.lan_ban_hanh ? `Lần ban hành: ${doc.lan_ban_hanh}` : undefined}
+            statusLabel={TRANG_THAI_LABEL[trangThai]}
+            statusTone={trangThai === "co_hieu_luc" ? "emerald" : trangThai === "tra_ve" || trangThai === "bi_tu_choi_phe_duyet" ? "amber" : "blue"}
+            onView={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main`)}
+            onDownload={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main&download=1`)}
+          />
+        )}
+
+        {/* 2. CARD - Thông tin văn bản */}
+        <DetailCard
+          icon={<FileText size={18} />}
+          iconTone="violet"
+          title="Thông tin văn bản"
+          subtitle="Mã số, phân loại và hiệu lực"
+          badge={
             <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
               Chế độ xem
             </span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-            <div>
-              <p className="text-sm font-medium text-slate-500">Mã tài liệu</p>
-              <p className="text-base font-bold text-violet-700 font-mono mt-1 break-all">
-                {doc?.ma_tai_lieu || form.ma_tai_lieu || "—"}
-              </p>
-            </div>
-            <div className="sm:col-span-2">
-              <p className="text-sm font-medium text-slate-500">Tên tài liệu</p>
-              <p className="text-base font-bold text-slate-900 mt-1">
-                {doc?.ten_tai_lieu || form.ten_tai_lieu || "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Tiêu chuẩn áp dụng</p>
-              <p className="text-base font-semibold text-slate-800 mt-1">{standardDisplay}</p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Loại tài liệu</p>
-              <p className="text-base font-semibold text-slate-800 mt-1">
-                {form.loai_tai_lieu ? `${form.loai_tai_lieu} — ${docTypeLabelMap[form.loai_tai_lieu] || form.loai_tai_lieu}` : "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Phân loại</p>
-              <p className="text-base font-semibold text-slate-800 mt-1">
-                {isCon ? "Hồ sơ (Con)" : "Tài liệu (Cha)"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Quy trình</p>
-              <p className="text-base font-semibold text-slate-800 mt-1">
-                {form.chon_quy_trinh || "Soạn thảo mới"}
-              </p>
-            </div>
+          }
+        >
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
+            <DetailFieldItem
+              icon={<Tag size={15} />}
+              iconTone="rose"
+              label="Mã tài liệu"
+              value={doc?.ma_tai_lieu || form.ma_tai_lieu || "—"}
+              mono
+              highlight="rose"
+            />
+            <DetailFieldItem
+              icon={<Layers size={15} />}
+              iconTone="amber"
+              label="Cấp tài liệu"
+              value={
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                  {form.cap_tl || "Cấp 1"}
+                </span>
+              }
+            />
+            <DetailFieldItem
+              icon={<Building size={15} />}
+              iconTone="blue"
+              label="Phòng ban"
+              value={doc?.phong_ban || form.phong_ban || "—"}
+            />
+            <DetailFieldItem
+              icon={<Layers size={15} />}
+              iconTone="teal"
+              label="Loại tài liệu"
+              value={form.loai_tai_lieu ? `${form.loai_tai_lieu} — ${docTypeLabelMap[form.loai_tai_lieu] || form.loai_tai_lieu}` : "—"}
+            />
+            <DetailFieldItem
+              icon={<Award size={15} />}
+              iconTone="emerald"
+              label="Tiêu chuẩn"
+              value={standardDisplay}
+            />
+            <DetailFieldItem
+              icon={<Clock size={15} />}
+              iconTone="indigo"
+              label="Lần ban hành"
+              value={doc?.lan_ban_hanh || form.lan_ban_hanh || "00"}
+              mono
+            />
+            <DetailFieldItem
+              icon={<Calendar size={15} />}
+              iconTone="emerald"
+              label="Ngày hiệu lực"
+              value={fmtDate(doc?.ngay_hieu_luc) || "—"}
+            />
+            <DetailFieldItem
+              icon={<Clock size={15} />}
+              iconTone="amber"
+              label="Ngày hết hiệu lực"
+              value={fmtDate(doc?.ngay_het_hieu_luc) || "—"}
+            />
+            <DetailFieldItem
+              icon={<GitBranch size={15} />}
+              iconTone="violet"
+              label="Quy trình"
+              value={form.chon_quy_trinh || "Soạn thảo mới"}
+            />
+            <DetailFieldItem
+              icon={<Layers size={15} />}
+              iconTone="slate"
+              label="Phân loại"
+              value={isCon ? "Hồ sơ (Con)" : "Tài liệu (Cha)"}
+            />
             {isCon && form.ma_tai_lieu_cha && (
-              <div>
-                <p className="text-sm font-medium text-slate-500">Mã tài liệu</p>
-                <p className="text-base font-bold font-mono text-slate-900 mt-1">{form.ma_tai_lieu_cha}</p>
-              </div>
+              <DetailFieldItem
+                icon={<Tag size={15} />}
+                iconTone="rose"
+                label="Mã tài liệu cha"
+                value={form.ma_tai_lieu_cha}
+                colSpan={2}
+                mono
+              />
             )}
             {form.ma_tai_lieu_cu && (
-              <div>
-                <p className="text-sm font-medium text-slate-500">Mã tài liệu cũ (trước soát xét)</p>
-                <p className="text-base font-mono text-slate-800 mt-1">{form.ma_tai_lieu_cu}</p>
-              </div>
+              <DetailFieldItem
+                icon={<Tag size={15} />}
+                iconTone="slate"
+                label="Mã tài liệu cũ (trước soát xét)"
+                value={form.ma_tai_lieu_cu}
+                colSpan={2}
+                mono
+              />
             )}
           </div>
-        </div>
+        </DetailCard>
 
-        {/* Card 2 - Ban hành & Phê duyệt */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
-            <h2 className="text-base font-extrabold text-slate-800">Ban hành & Phê duyệt</h2>
+        {/* 3. CARD - Ban hành & Phê duyệt */}
+        <DetailCard
+          icon={<Users size={18} />}
+          iconTone="blue"
+          title="Thông tin Phê duyệt & Nhân sự"
+          subtitle="Người phụ trách và trạng thái ký duyệt"
+          badge={
             <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-violet-50 text-violet-700">
-              {form.cap_tl || "Cấp 1"}
+              {form.cap_tl === "Cấp 2" ? "2 bước" : "3 bước"}
             </span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-            <div>
-              <p className="text-sm font-medium text-slate-500">Lần ban hành</p>
-              <p className="text-base font-bold font-mono text-slate-900 mt-1">
-                {doc?.lan_ban_hanh || form.lan_ban_hanh || "00"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Số hiệu</p>
-              <p className="text-base font-bold text-slate-900 mt-1">
-                {form.so_hieu || "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Phòng ban ban hành</p>
-              <p className="text-base font-semibold text-slate-800 mt-1">
-                {doc?.phong_ban || form.phong_ban || "—"}
-              </p>
-            </div>
-            <div className="sm:col-span-3">
-              <p className="text-sm font-medium text-slate-500">Cấp tài liệu</p>
-              <p className="text-base font-semibold text-slate-800 mt-1">
-                {form.cap_tl === "Cấp 2"
-                  ? "Cấp 2 (2 bước: Gửi phê duyệt → Phê duyệt)"
-                  : "Cấp 1 (3 bước: Soạn thảo → Xem xét → Phê duyệt)"}
-              </p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Người soạn thảo</p>
-              <p className="text-base font-semibold text-slate-900 mt-1">
-                {profileName(form.soan_thao_user_id) || doc?.soan_thao || "—"}
-              </p>
-              {doc?.ky_soan_thao_at && (
-                <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1 font-medium">
-                  <CheckCircle2 size={13} /> Đã ký {fmtDate(doc.ky_soan_thao_at)}
-                </p>
-              )}
-            </div>
-            {form.cap_tl === "Cấp 1" && (
-              <div>
-                <p className="text-sm font-medium text-slate-500">Người xem xét</p>
-                <p className="text-base font-semibold text-slate-900 mt-1">
-                  {profileName(form.xem_xet_user_id) || doc?.xem_xet || "—"}
-                </p>
-                {doc?.ky_xem_xet_at && (
-                  <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1 font-medium">
-                    <CheckCircle2 size={13} /> Đã ký {fmtDate(doc.ky_xem_xet_at)}
-                  </p>
-                )}
-              </div>
-            )}
-            <div>
-              <p className="text-sm font-medium text-slate-500 flex items-center gap-1.5">
-                Người phê duyệt
-                {signAsPrefixLabel(doc?.phe_duyet_sign_as) && (
-                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
-                    {signAsPrefixLabel(doc?.phe_duyet_sign_as)}
+          }
+        >
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
+            <DetailFieldItem
+              icon={<User size={15} />}
+              iconTone="pink"
+              label="Người soạn thảo"
+              value={profileName(form.soan_thao_user_id) || doc?.soan_thao || "—"}
+              extra={
+                doc?.ky_soan_thao_at ? (
+                  <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                    <CheckCircle2 size={11} /> {fmtDate(doc.ky_soan_thao_at)}
                   </span>
-                )}
-              </p>
-              <p className="text-base font-semibold text-slate-900 mt-1">
-                {profileName(form.phe_duyet_user_id) || doc?.phe_duyet || "—"}
-              </p>
-              {doc?.ky_phe_duyet_at && (
-                <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1 font-medium">
-                  <CheckCircle2 size={13} /> Đã duyệt {fmtDate(doc.ky_phe_duyet_at)}
-                </p>
-              )}
-            </div>
+                ) : undefined
+              }
+            />
+            {form.cap_tl === "Cấp 1" && (
+              <DetailFieldItem
+                icon={<UserCheck size={15} />}
+                iconTone="teal"
+                label="Người xem xét"
+                value={profileName(form.xem_xet_user_id) || doc?.xem_xet || "—"}
+                extra={
+                  doc?.ky_xem_xet_at ? (
+                    <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                      <CheckCircle2 size={11} /> {fmtDate(doc.ky_xem_xet_at)}
+                    </span>
+                  ) : undefined
+                }
+              />
+            )}
+            <DetailFieldItem
+              icon={<ShieldCheck size={15} />}
+              iconTone="emerald"
+              label="Người phê duyệt"
+              colSpan={form.cap_tl === "Cấp 2" ? 1 : 2}
+              value={profileName(form.phe_duyet_user_id) || doc?.phe_duyet || "—"}
+              extra={
+                doc?.ky_phe_duyet_at ? (
+                  <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                    <CheckCircle2 size={11} /> {fmtDate(doc.ky_phe_duyet_at)}
+                  </span>
+                ) : undefined
+              }
+            />
           </div>
-        </div>
-
+        </DetailCard>
       </div>
     )
   }
 
   const renderAdditionalDetailsCard = () => (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 h-full flex flex-col justify-between">
-      <div>
-        <div className="border-b border-slate-100 pb-3 mb-4">
-          <h2 className="text-base font-extrabold text-slate-800">Chi tiết bổ sung</h2>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <p className="text-sm font-medium text-slate-500">Ghi chú</p>
-            <p className="text-sm text-slate-800 mt-1 whitespace-pre-wrap leading-relaxed">
-              {form.ghi_chu || doc?.ghi_chu || "Không có ghi chú"}
-            </p>
-          </div>
-          {(form.mo_ta_tim_kiem || doc?.mo_ta_tim_kiem) && (
-            <div>
-              <p className="text-sm font-medium text-slate-500">Mô tả tìm kiếm AI</p>
-              <p className="text-sm text-slate-700 mt-1 whitespace-pre-wrap leading-relaxed">
-                {form.mo_ta_tim_kiem || doc?.mo_ta_tim_kiem}
-              </p>
-            </div>
-          )}
-        </div>
+    <DetailCard
+      icon={<MessageSquare size={18} />}
+      iconTone="teal"
+      title="Ghi chú & Chi tiết bổ sung"
+      subtitle="Nội dung ghi chú và mô tả tài liệu"
+      className="h-full flex flex-col justify-between"
+    >
+      <div className="space-y-4">
+        <DetailFieldItem
+          icon={<MessageSquare size={15} />}
+          iconTone="teal"
+          label="Nội dung ghi chú"
+          value={<p className="text-sm font-semibold text-slate-800 whitespace-pre-wrap leading-relaxed">{form.ghi_chu || doc?.ghi_chu || "(Không có ghi chú thêm)"}</p>}
+          colSpan={2}
+        />
+        {(form.mo_ta_tim_kiem || doc?.mo_ta_tim_kiem) && (
+          <DetailFieldItem
+            icon={<FileText size={15} />}
+            iconTone="blue"
+            label="Mô tả tìm kiếm AI"
+            value={<p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{form.mo_ta_tim_kiem || doc?.mo_ta_tim_kiem}</p>}
+            colSpan={2}
+          />
+        )}
       </div>
-    </div>
+    </DetailCard>
   )
 
   const renderValidityInfoCard = () => {
     if (isNew || !doc) return null
     return (
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 h-full flex flex-col justify-between">
-        <div>
-          <div className="border-b border-slate-100 pb-3 mb-4">
-            <h2 className="text-base font-extrabold text-slate-800">Thông tin hiệu lực</h2>
-          </div>
-          <div className="space-y-2.5 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500">Ngày hiệu lực</span>
-              <span className="text-sm font-semibold text-slate-800">{fmtDate(doc.ngay_hieu_luc) || "—"}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500">Ngày hết hiệu lực</span>
-              <span className="text-sm font-medium text-slate-700">{fmtDate(doc.ngay_het_hieu_luc) || "—"}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500">Cấp tài liệu</span>
-              <span className="text-sm font-semibold text-slate-800">{doc.cap_tl || "—"}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500">Lần ban hành</span>
-              <span className="font-mono text-sm font-bold text-slate-900">{doc.lan_ban_hanh || "00"}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500">Phân loại</span>
-              <span className="text-sm font-semibold text-slate-800">{doc.phan_loai_tl === "con" ? "Hồ sơ (Con)" : "Tài liệu (Cha)"}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-500">Tạo lúc</span>
-              <span className="text-sm font-medium text-slate-700">{fmtDate(doc.created_at)}</span>
-            </div>
-          </div>
+      <DetailCard
+        icon={<Clock size={18} />}
+        iconTone="emerald"
+        title="Thông tin hiệu lực"
+        subtitle="Hiệu lực và trạng thái ban hành"
+        className="h-full flex flex-col justify-between"
+      >
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <DetailFieldItem
+            icon={<Calendar size={14} />}
+            iconTone="emerald"
+            label="Ngày hiệu lực"
+            value={fmtDate(doc.ngay_hieu_luc) || "—"}
+          />
+          <DetailFieldItem
+            icon={<Clock size={14} />}
+            iconTone="amber"
+            label="Hết hiệu lực"
+            value={fmtDate(doc.ngay_het_hieu_luc) || "—"}
+          />
+          <DetailFieldItem
+            icon={<Layers size={14} />}
+            iconTone="amber"
+            label="Cấp tài liệu"
+            value={doc.cap_tl || "—"}
+          />
+          <DetailFieldItem
+            icon={<Tag size={14} />}
+            iconTone="indigo"
+            label="Lần ban hành"
+            value={doc.lan_ban_hanh || "00"}
+            mono
+          />
+          <DetailFieldItem
+            icon={<Layers size={14} />}
+            iconTone="slate"
+            label="Phân loại"
+            value={doc.phan_loai_tl === "con" ? "Hồ sơ (Con)" : "Tài liệu (Cha)"}
+            colSpan={2}
+          />
+          <DetailFieldItem
+            icon={<Clock size={14} />}
+            iconTone="slate"
+            label="Tạo lúc"
+            value={fmtDate(doc.created_at)}
+            colSpan={2}
+          />
         </div>
-      </div>
+      </DetailCard>
     )
   }
 

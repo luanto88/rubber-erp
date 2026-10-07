@@ -94,7 +94,15 @@ function roundPrice(v: number, currency: string): number {
   return currency === "USD" ? Math.round(v * 100) / 100 : Math.round(v)
 }
 
-/** Giá gợi ý: lần mua gần nhất → trung vị cùng nhóm → đơn giá danh mục. Quy đổi về tiền của phiếu. */
+/** Trung vị cùng nhóm chỉ đáng tin khi đủ mẫu: ≥3 lần mua và (nếu biết phiếu) từ ≥2 phiếu khác nhau. */
+const CATEGORY_MIN_SAMPLES = 3
+const CATEGORY_MIN_REQUESTS = 2
+
+/**
+ * Giá gợi ý (GĐ2h): lần mua gần nhất của CHÍNH vật tư → giá danh mục của CHÍNH vật tư → trung vị cùng
+ * nhóm (khi đủ mẫu). Quy đổi về tiền của phiếu. Trước đây trung vị nhóm đứng trước giá danh mục nên
+ * 1-2 phiếu lẻ trong nhóm kéo giá gợi ý của cả nhóm về cùng một con số.
+ */
 function computeSuggestion(line: DraftLine, item: ItemOpt | undefined, currency: string): Suggestion | null {
   const ins = line.insight
   const last = ins?.recentPurchases[0]
@@ -102,20 +110,23 @@ function computeSuggestion(line: DraftLine, item: ItemOpt | undefined, currency:
     return {
       value: roundPrice(convertCurrency(last.donGia, last.loaiTien, currency), currency),
       source: "lan_mua_truoc",
-      label: `lần mua ${fmtDate(last.ngay)} (phiếu ${formatSoPhieuFull(last.so, last.nam)})`,
+      label: `theo phiếu ${formatSoPhieuFull(last.so, last.nam)} (${fmtDate(last.ngay)})`,
     }
-  }
-  const samples = (ins?.categorySamples || []).map((s) => convertCurrency(s.donGia, s.loaiTien, currency)).filter((v) => v > 0)
-  const med = median(samples)
-  if (med) {
-    return { value: roundPrice(med, currency), source: "cung_nhom", label: `trung vị ${samples.length} lần mua vật tư cùng nhóm` }
   }
   if (item && Number(item.don_gia) > 0) {
     return {
       value: roundPrice(convertCurrency(Number(item.don_gia), item.loai_tien || "USD", currency), currency),
       source: "danh_muc",
-      label: "đơn giá trong danh mục kho",
+      label: "giá danh mục kho",
     }
+  }
+  const raw = (ins?.categorySamples || []).filter((s) => convertCurrency(s.donGia, s.loaiTien, currency) > 0)
+  const reqIds = new Set(raw.map((s) => s.requestId).filter(Boolean))
+  // Bản chụp cũ không có requestId → chỉ xét số mẫu.
+  const enoughRequests = reqIds.size === 0 || reqIds.size >= CATEGORY_MIN_REQUESTS
+  if (raw.length >= CATEGORY_MIN_SAMPLES && enoughRequests) {
+    const med = median(raw.map((s) => convertCurrency(s.donGia, s.loaiTien, currency)))
+    if (med) return { value: roundPrice(med, currency), source: "cung_nhom", label: `trung vị ${raw.length} lần mua vật tư cùng nhóm` }
   }
   return null
 }
@@ -123,16 +134,20 @@ function computeSuggestion(line: DraftLine, item: ItemOpt | undefined, currency:
 // ── Chọn vật tư có tìm nhanh ────────────────────────────────────────────────
 
 export function ItemPicker({
-  items, value, onSelect, onCreateNew, disabledIds,
+  items, value, onSelect, onCreateNew, disabledIds, categories,
 }: {
   items: ItemOpt[]
   value: ItemOpt | null
   onSelect: (item: ItemOpt) => void
-  onCreateNew?: (name: string) => void
+  /** categoryId = phân loại đang lọc trong dropdown ("" nếu Tất cả) — để điền sẵn khi tạo vật tư mới. */
+  onCreateNew?: (name: string, categoryId: string) => void
   disabledIds: Set<string>
+  /** Có truyền → hiện ô "Phân loại vật tư" trong dropdown để lọc nhanh (chỉ UI, không lưu). */
+  categories?: { id: string; name: string }[]
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState("")
+  const [cat, setCat] = useState("")
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -149,17 +164,22 @@ export function ItemPicker({
 
   const filtered = useMemo(() => {
     const nq = normalizeName(q)
+    const byCat = cat ? items.filter((it) => it.category_id === cat) : items
     const list = nq
-      ? items.filter((it) => normalizeName(`${it.code} ${it.name}`).includes(nq))
-      : items
+      ? byCat.filter((it) => normalizeName(`${it.code} ${it.name}`).includes(nq))
+      : byCat
     return list.slice(0, 80)
-  }, [items, q])
+  }, [items, q, cat])
 
   return (
     <div className="relative" ref={boxRef}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          // Mở dropdown: phân loại mặc định = nhóm của vật tư đang chọn (nếu có).
+          if (!open) setCat(value?.category_id || "")
+          setOpen((o) => !o)
+        }}
         className="w-full flex items-center gap-2 px-3 py-2 border border-slate-300 rounded-xl text-sm text-left bg-white hover:border-emerald-500"
       >
         {value ? (
@@ -174,8 +194,19 @@ export function ItemPicker({
       </button>
       {open && (
         <div className="absolute z-40 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl">
-          <div className="p-2 border-b border-slate-100">
-            <div className="flex items-center gap-2 px-2 py-1.5 border border-slate-200 rounded-lg">
+          <div className="p-2 border-b border-slate-100 flex flex-col sm:flex-row gap-2">
+            {categories && categories.length > 0 && (
+              <select
+                value={cat}
+                onChange={(e) => setCat(e.target.value)}
+                title="Lọc nhanh theo phân loại vật tư — không lưu vào phiếu"
+                className="sm:w-48 shrink-0 px-2 py-1.5 border border-slate-200 rounded-lg text-sm outline-none focus:border-emerald-500 bg-white"
+              >
+                <option value="">Tất cả phân loại</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+            <div className="flex-1 flex items-center gap-2 px-2 py-1.5 border border-slate-200 rounded-lg">
               <Search size={13} className="text-slate-400" />
               <input
                 autoFocus
@@ -211,7 +242,7 @@ export function ItemPicker({
           {onCreateNew && <div className="p-2 border-t border-slate-100">
             <button
               type="button"
-              onClick={() => { setOpen(false); onCreateNew(q) }}
+              onClick={() => { setOpen(false); onCreateNew(q, cat) }}
               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg"
             >
               <Plus size={13} /> Không có trong kho — tạo vật tư mới{q ? ` "${q}"` : ""}
@@ -368,9 +399,9 @@ export function PurchaseForm({
     [newItemFor, newItem.name, items],
   )
 
-  const openNewItem = (key: string, name: string) => {
+  const openNewItem = (key: string, name: string, categoryId = "") => {
     setNewItemFor(key)
-    setNewItem({ name, unit: "", categoryId: "", warehouseId: warehouses[0]?.id || "", specification: "" })
+    setNewItem({ name, unit: "", categoryId, warehouseId: warehouses[0]?.id || "", specification: "" })
     setNewItemConfirmed(false)
     setNewItemError(null)
   }
@@ -556,9 +587,10 @@ export function PurchaseForm({
                   <label className={labelCls}>Vật tư hàng hóa *</label>
                   <ItemPicker
                     items={items}
+                    categories={categories}
                     value={item || null}
                     onSelect={(it) => selectItem(l.key, it)}
-                    onCreateNew={(name) => openNewItem(l.key, name)}
+                    onCreateNew={(name, cat) => openNewItem(l.key, name, cat)}
                     disabledIds={new Set([...usedIds].filter((id) => id !== l.item_id))}
                   />
                 </div>
@@ -612,23 +644,18 @@ export function PurchaseForm({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                <div>
-                  <label className={labelCls}>Mục đích sử dụng *</label>
-                  <input className={inputCls} value={l.muc_dich} onChange={(e) => patchLine(l.key, { muc_dich: e.target.value })} />
-                </div>
-                <div>
-                  <label className={labelCls}>Ghi chú</label>
-                  <input className={inputCls} value={l.ghi_chu} onChange={(e) => patchLine(l.key, { ghi_chu: e.target.value })} />
-                </div>
-              </div>
-
               {(() => {
                 const urg = purchaseUrgency(l.ngay_can_hang, today)
+                const urgTitle = urg ? `${urg.label}${urg.level === "gap" || urg.level === "qua_han" ? " — nên ưu tiên duyệt" : ""}` : undefined
                 const lateSupply = !!l.ngay_co_hang && !!l.ngay_can_hang && l.ngay_co_hang > l.ngay_can_hang
                 return (
-                  <div className="mt-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="mt-3 space-y-3">
+                    {/* Dòng 1: Mục đích | Mua tại | Ghi chú — 3 ô bằng nhau */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className={labelCls}>Mục đích sử dụng *</label>
+                        <input className={inputCls} value={l.muc_dich} onChange={(e) => patchLine(l.key, { muc_dich: e.target.value })} />
+                      </div>
                       <div>
                         <label className={labelCls}>Vật tư mua tại</label>
                         <input
@@ -640,47 +667,64 @@ export function PurchaseForm({
                         />
                       </div>
                       <div>
+                        <label className={labelCls}>Ghi chú</label>
+                        <input className={inputCls} value={l.ghi_chu} onChange={(e) => patchLine(l.key, { ghi_chu: e.target.value })} />
+                      </div>
+                    </div>
+                    {/* Dòng 2: Có hàng | Cần hàng (chip mức gấp nằm trong ô) | Ảnh đính kèm */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
                         <label className={labelCls}>Thời gian có hàng</label>
                         <input type="date" className={inputCls} value={l.ngay_co_hang} onChange={(e) => patchLine(l.key, { ngay_co_hang: e.target.value })} />
                       </div>
                       <div>
                         <label className={labelCls}>Thời gian cần hàng *</label>
-                        <input
-                          type="date" min={today}
-                          className={`${inputCls} ${urg && (urg.level === "gap" || urg.level === "qua_han") ? "border-red-400 bg-red-50" : ""}`}
-                          value={l.ngay_can_hang}
-                          onChange={(e) => patchLine(l.key, { ngay_can_hang: e.target.value })}
-                        />
+                        <div className="relative" title={urgTitle}>
+                          <input
+                            type="date" min={today}
+                            className={`${inputCls} ${urg?.shortLabel ? "pr-24" : ""} ${urg && (urg.level === "gap" || urg.level === "qua_han") ? "border-red-400 bg-red-50" : ""}`}
+                            value={l.ngay_can_hang}
+                            onChange={(e) => patchLine(l.key, { ngay_can_hang: e.target.value })}
+                          />
+                          {urg?.shortLabel && (
+                            <span className={`pointer-events-none absolute right-9 top-1/2 -translate-y-1/2 whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-bold ${urg.className}`}>
+                              {urg.shortLabel}
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      <PurchaseImagePicker
+                        variant="inline"
+                        factoryId={factoryId}
+                        documentType="purchase-requests"
+                        label="Ảnh đính kèm"
+                        title="Ảnh hiện trạng, báo giá… — chỉ lưu kèm phiếu, không in lên phiếu"
+                        images={l.image_urls}
+                        onChange={(urls) => patchLine(l.key, { image_urls: urls })}
+                        onPreview={setLightbox}
+                      />
                     </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
-                      {urg && <span className={`px-2 py-0.5 rounded-full font-bold ${urg.className}`}>{urg.label}</span>}
-                      {lateSupply && (
-                        <span className="flex items-center gap-1 font-semibold text-amber-700">
-                          <AlertTriangle size={12} /> Hàng có sau ngày cần — kiểm tra lại hoặc ghi rõ trong ghi chú
-                        </span>
-                      )}
-                      {lines.length > 1 && (l.mua_tai || l.ngay_co_hang || l.ngay_can_hang) && (
-                        <button type="button" onClick={() => applySupplyToAll(l)} className="ml-auto font-bold text-emerald-700 underline">
-                          Áp dụng 3 thông tin này cho mọi dòng
-                        </button>
-                      )}
-                    </div>
+                    {(lateSupply || (lines.length > 1 && (l.mua_tai || l.ngay_co_hang || l.ngay_can_hang))) && (
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        {lateSupply && (
+                          <span className="flex items-center gap-1 font-semibold text-amber-700" title="Kiểm tra lại ngày có hàng hoặc ghi rõ trong ghi chú">
+                            <AlertTriangle size={12} /> Có hàng sau ngày cần
+                          </span>
+                        )}
+                        {lines.length > 1 && (l.mua_tai || l.ngay_co_hang || l.ngay_can_hang) && (
+                          <button
+                            type="button" onClick={() => applySupplyToAll(l)}
+                            title="Chép Mua tại, Thời gian có hàng, Thời gian cần hàng sang mọi dòng"
+                            className="ml-auto font-bold text-emerald-700 underline"
+                          >
+                            Áp dụng cho mọi dòng
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })()}
-
-              <div className="mt-3">
-                <PurchaseImagePicker
-                  compact
-                  factoryId={factoryId}
-                  documentType="purchase-requests"
-                  label="Ảnh đính kèm (hiện trạng, báo giá…) — không in lên phiếu"
-                  images={l.image_urls}
-                  onChange={(urls) => patchLine(l.key, { image_urls: urls })}
-                  onPreview={setLightbox}
-                />
-              </div>
 
               {l.item_id && (
                 <div className="mt-3">
