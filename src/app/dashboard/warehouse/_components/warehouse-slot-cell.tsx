@@ -6,10 +6,12 @@ import {
   type WarehouseSlot,
   type WarehousePlacement,
   type DragKienData,
+  type LotInfo,
   getCsrColor,
   getMaxBanh,
   findNextStackLevel,
 } from "./warehouse-types"
+import { LotDetailModal } from "./lot-detail-modal"
 
 type Props = {
   slot: WarehouseSlot
@@ -35,6 +37,7 @@ export default function WarehouseSlotCell({
   const [isDragOver, setIsDragOver] = useState(false)
   const [showPopup, setShowPopup] = useState(false)
   const [hovering, setHovering] = useState(false)
+  const [detailLot, setDetailLot] = useState<LotInfo | null>(null)
 
   const activePlacements = placements.filter(p => !p.removed_at)
   const isFull = activePlacements.length >= slot.max_stack
@@ -231,12 +234,19 @@ export default function WarehouseSlotCell({
                         >
                           <Trash2 size={10} /> Di chuyển
                         </button>
-                        <a
-                          href="/dashboard/product"
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (item.lots) {
+                              setDetailLot(item.lots)
+                              setShowPopup(false)
+                            }
+                          }}
                           className="flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-emerald-700 font-bold text-[10px] transition-colors"
+                          title="Xem chi tiết lô"
                         >
                           <Eye size={10} /> Lô
-                        </a>
+                        </button>
                       </>
                     ) : (
                       <>
@@ -262,6 +272,14 @@ export default function WarehouseSlotCell({
             })}
           </div>
         </>
+      )}
+
+      {/* Modal xem chi tiết lô */}
+      {detailLot && (
+        <LotDetailModal
+          lot={detailLot}
+          onClose={() => setDetailLot(null)}
+        />
       )}
     </div>
   )

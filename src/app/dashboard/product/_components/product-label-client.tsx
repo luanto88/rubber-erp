@@ -2,12 +2,33 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowLeftRight, ClipboardCheck, ExternalLink, Package, RotateCcw, ShieldCheck, Warehouse } from "lucide-react"
+import {
+  AlertTriangle,
+  ArrowLeftRight,
+  ClipboardCheck,
+  ExternalLink,
+  Package,
+  RotateCcw,
+  ShieldCheck,
+  Warehouse,
+  Tag,
+  Layers,
+  Scale,
+  Calendar,
+  Clock,
+  Activity,
+  Boxes,
+  CheckCircle2,
+  Eye,
+} from "lucide-react"
 import { buildNganLookupPath, fetchProductLabelLookupPublic, type KienLetter, type ProductLabelLookupResult } from "@/lib/product-label"
 import { formatStorageDate } from "@/lib/storage-detail"
 import { ProductLabelSkeletonCard } from "@/app/dashboard/product/_components/product-label-skeleton"
 import { loadStoredLang, storeLang, t, palletLabel, LANG_OPTIONS, type Lang } from "@/app/dashboard/product/confirm/i18n"
 import { KienSwapNganModal } from "@/app/dashboard/product/_components/kien-swap-ngan-modal"
+import { StoragePreviewModal } from "@/app/dashboard/storage/_components/storage-preview-modal"
+import { DetailCard, DetailFieldItem, DetailFileCard, DetailQrBox } from "@/app/dashboard/_components/detail-view-ui"
+import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { getFreshAuthSession, hasPermission, hydrateActiveSession } from "@/lib/auth"
 
 type ProductLabelClientProps = {
@@ -94,11 +115,13 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
   const [error, setError] = useState<string | null>(null)
   // Tải lại lookup sau khi đổi ngăn để dòng "ngăn nguồn gốc" phản ánh ngay ngăn mới.
   const [reloadKey, setReloadKey] = useState(0)
-  // Icon "Đổi ngăn" chỉ hiện với người ĐÃ đăng nhập, đúng nhà máy, có quyền quét xác nhận. Đây chỉ
-  // là giao diện — server (loadKienSwapContext/swapKienNgan) tự xác thực lại bằng access token.
+  // Icon "Đổi ngăn" chỉ hiện với người ĐÃ đăng nhập, đúng nhà máy, có quyền quét xác nhận.
   const [canSwapNgan, setCanSwapNgan] = useState(false)
   const [swapOpen, setSwapOpen] = useState(false)
   const [swapNotice, setSwapNotice] = useState<string | null>(null)
+
+  // Preview nhanh ngăn nguồn gốc
+  const [previewNganOpen, setPreviewNganOpen] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -152,14 +175,37 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
     not_found: "plStatusNotFound",
   }
 
+  const hasSxInfo = data && (data.status === "produced" || data.status === "partial_kien" || data.status === "exported")
+
+  const currentUrl = typeof window !== "undefined" ? window.location.href : ""
+
+  const handleViewKqkn = () => {
+    if (!data) return
+    if (data.kqknFileUrl) {
+      window.open(data.kqknFileUrl, "_blank")
+    } else {
+      window.open(`/dashboard/quality`, "_blank")
+    }
+  }
+
+  const handleDownloadKqkn = () => {
+    if (!data?.kqknFileUrl) return
+    const downloadUrl = buildStorageDownloadUrl(
+      data.kqknFileUrl,
+      data.kqknFileName || `KQKN_${data.maLo}.pdf`,
+    )
+    window.open(downloadUrl, "_blank")
+  }
+
   return (
-    <div>
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="space-y-4">
+      {/* Top Header & Ngôn ngữ */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-extrabold text-slate-900">{tt("plPageTitle")}</h1>
-          <p className="mt-1 text-sm text-slate-500">{tt("plPageSubtitle")}</p>
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">{tt("plPageTitle")}</h1>
+          <p className="mt-1 text-xs sm:text-sm text-slate-500">{tt("plPageSubtitle")}</p>
         </div>
-        <div className="shrink-0">
+        <div className="shrink-0 self-end sm:self-auto">
           <LangToggle lang={lang} onChange={switchLang} />
         </div>
       </div>
@@ -182,161 +228,215 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
           </button>
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-md">
-          <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-              <Package size={24} />
-            </div>
-            <div>
-              <div className="text-lg font-extrabold text-slate-800">
-                {data.maLo} — {tt("kienLabel")} {data.kien}
-              </div>
+        <div className="space-y-4">
+          {/* 1. NGUYÊN TẮC FILE-FIRST: Khối hiển thị KQKN / Chứng nhận chất lượng đưa lên đầu */}
+          {(data.kqknFileName || data.kqknFileUrl || (data.datHang && data.status !== "predicted" && data.status !== "not_found")) && (
+            <DetailFileCard
+              fileName={data.kqknFileName || `Phiếu kiểm nghiệm chất lượng — Lô ${data.maLo}.pdf`}
+              fileType="pdf"
+              fileSize={data.kqknNgay ? `Ngày KN: ${formatStorageDate(data.kqknNgay)}` : undefined}
+              statusLabel={data.kqknStatus || (data.datHang ? `Đạt hạng ${data.datHang}` : undefined)}
+              statusTone={data.datHang?.endsWith("RH") ? "amber" : "emerald"}
+              onView={data.kqknFileUrl ? handleViewKqkn : undefined}
+              onDownload={data.kqknFileUrl ? handleDownloadKqkn : undefined}
+            />
+          )}
+
+          {/* 2. HEADER & TỔNG QUAN KIỆN: Dùng DetailCard chuẩn Pastel */}
+          <DetailCard
+            icon={<Package size={20} />}
+            iconTone="teal"
+            title={`${data.maLo} — ${tt("kienLabel")} ${data.kien}`}
+            subtitle={`${tt("plLoaiCsr")}: ${data.loaiCsr || "—"} · ${tt("loaiPallet")}: ${formatPalletDisplay(data.pallet, lang)}`}
+            badge={
               <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${STATUS_STYLE[data.status]}`}>
                 {tt(statusLabelKey[data.status], { existingBanh: data.existingBanh })}
               </span>
-            </div>
-          </div>
+            }
+          >
+            {/* Cảnh báo mảng bành dở dang (partial_kien) làm nổi bật thanh lịch */}
+            {data.status === "partial_kien" && (
+              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm font-bold text-amber-800 flex items-center gap-2">
+                <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                <span>{tt("plDaSanXuatBanhCa", { existingBanh: data.existingBanh, ca: data.ca || "—" })}</span>
+              </div>
+            )}
 
-          {data.status === "partial_kien" && (
-            <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm font-bold text-amber-800">
-              {tt("plDaSanXuatBanhCa", { existingBanh: data.existingBanh, ca: data.ca || "—" })}
-            </div>
-          )}
+            {/* Lưới thông tin đặc tính kiện — Chuẩn 2 cột 50-50 trên Mobile, 4 cột desktop */}
+            {data.status !== "not_found" && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                <DetailFieldItem
+                  icon={<Tag size={15} />}
+                  iconTone="rose"
+                  label="Mã lô & Kiện"
+                  value={`${data.maLo} (K${data.kien})`}
+                  mono
+                  highlight="rose"
+                />
+                <DetailFieldItem
+                  icon={<Layers size={15} />}
+                  iconTone="blue"
+                  label={tt("plLoaiCsr")}
+                  value={data.loaiCsr || "—"}
+                />
+                <DetailFieldItem
+                  icon={<Scale size={15} />}
+                  iconTone="amber"
+                  label={tt("plLoaiBanh")}
+                  value={data.loaiBanh ? `${data.loaiBanh} kg/bành` : "—"}
+                  mono
+                />
+                <DetailFieldItem
+                  icon={<ShieldCheck size={15} />}
+                  iconTone="violet"
+                  label={tt("plLoaiBoc")}
+                  value={data.boc || "—"}
+                />
+                <DetailFieldItem
+                  icon={<Calendar size={15} />}
+                  iconTone="emerald"
+                  label={tt("ngaySanXuat")}
+                  value={hasSxInfo && data.ngaySx ? formatStorageDate(data.ngaySx) : tt("plChoNhapLieu")}
+                  highlight={hasSxInfo && data.ngaySx ? undefined : "amber"}
+                />
+                <DetailFieldItem
+                  icon={<Clock size={15} />}
+                  iconTone="blue"
+                  label={tt("gioSanXuat")}
+                  value={hasSxInfo && formatStorageTime(data.gioSx) ? formatStorageTime(data.gioSx) : tt("plChoNhapLieu")}
+                />
+                <DetailFieldItem
+                  icon={<Activity size={15} />}
+                  iconTone="teal"
+                  label={tt("caSanXuat")}
+                  value={hasSxInfo && data.ca ? `${tt("caSanXuat")} ${data.ca}` : tt("plChoNhapLieu")}
+                />
+                <DetailFieldItem
+                  icon={<Boxes size={15} />}
+                  iconTone="slate"
+                  label={tt("loaiPallet")}
+                  value={formatPalletDisplay(data.pallet, lang)}
+                />
+                <DetailFieldItem
+                  icon={<CheckCircle2 size={15} />}
+                  iconTone={data.datHang?.endsWith("RH") ? "rose" : "emerald"}
+                  label={tt("plDatHangLabel")}
+                  value={data.datHang || tt("plDangChoKiemNghiem")}
+                  highlight={!data.datHang ? "amber" : data.datHang.endsWith("RH") ? "rose" : "emerald"}
+                />
+                {data.eudrOrderUrl && (
+                  <DetailFieldItem
+                    icon={<ShieldCheck size={15} />}
+                    iconTone="blue"
+                    label="Truy xuất EUDR"
+                    value={
+                      <a
+                        href={data.eudrOrderUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800"
+                      >
+                        <span>{data.eudrOrderCode || "Mở đơn EUDR"}</span>
+                        <ExternalLink size={12} />
+                      </a>
+                    }
+                  />
+                )}
+              </div>
+            )}
 
-          {data.status !== "not_found" && (
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <div className="text-xs font-bold text-slate-500">{tt("plLoaiCsr")}</div>
-                <div className="font-semibold text-slate-800">{data.loaiCsr || "—"}</div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">{tt("plLoaiBanh")}</div>
-                <div className="font-semibold text-slate-800">{data.loaiBanh || "—"}</div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">{tt("plLoaiBoc")}</div>
-                <div className="font-semibold text-slate-800">{data.boc || "—"}</div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">{tt("ngaySanXuat")}</div>
-                <div
-                  className={`font-semibold ${
-                    (data.status === "produced" || data.status === "partial_kien" || data.status === "exported") && data.ngaySx
-                      ? "text-slate-800"
-                      : "text-amber-600"
-                  }`}
-                >
-                  {(data.status === "produced" || data.status === "partial_kien" || data.status === "exported") && data.ngaySx
-                    ? formatStorageDate(data.ngaySx)
-                    : tt("plChoNhapLieu")}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">{tt("loaiPallet")}</div>
-                <div className="font-semibold text-slate-800">
-                  {formatPalletDisplay(data.pallet, lang)}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">{tt("gioSanXuat")}</div>
-                <div
-                  className={`font-semibold ${
-                    (data.status === "produced" || data.status === "partial_kien" || data.status === "exported") &&
-                    formatStorageTime(data.gioSx)
-                      ? "text-slate-800"
-                      : "text-amber-600"
-                  }`}
-                >
-                  {(data.status === "produced" || data.status === "partial_kien" || data.status === "exported") &&
-                  formatStorageTime(data.gioSx)
-                    ? formatStorageTime(data.gioSx)
-                    : tt("plChoNhapLieu")}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">{tt("caSanXuat")}</div>
-                <div
-                  className={`font-semibold ${
-                    data.status === "produced" || data.status === "partial_kien" || data.status === "exported"
-                      ? "text-slate-800"
-                      : "text-amber-600"
-                  }`}
-                >
-                  {data.status === "produced" || data.status === "partial_kien" || data.status === "exported"
-                    ? data.ca
-                      ? `${tt("caSanXuat")} ${data.ca}`
-                      : "—"
-                    : tt("plChoNhapLieu")}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs font-bold text-slate-500">{tt("plDatHangLabel")}</div>
-                <div
-                  className={`font-semibold ${
-                    !data.datHang ? "text-amber-600" : data.datHang.endsWith("RH") ? "text-red-600" : "text-emerald-700"
-                  }`}
-                >
-                  {data.datHang || tt("plDangChoKiemNghiem")}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {(data.status === "predicted" || data.status === "partial" || data.status === "partial_kien") && (
-            <Link
-              href={`/dashboard/product/confirm?f=${encodeURIComponent(factoryId)}&lo=${encodeURIComponent(maLo)}&kien=${kien}`}
-              className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white shadow-md transition-all hover:bg-emerald-700"
-            >
-              <ClipboardCheck size={18} />
-              {tt("plXacNhanSanXuat")}
-            </Link>
-          )}
-
-          {data.eudrOrderUrl && (
-            <a
-              href={data.eudrOrderUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 flex items-center justify-between rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-bold text-blue-700 hover:bg-blue-100 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={18} />
-                <span>{tt("plTruyXuatEudr", { maDon: data.eudrOrderCode || "" })}</span>
-              </div>
-              <ExternalLink size={16} />
-            </a>
-          )}
-
-          {data.nganId && (
-            <div className="mt-3 flex items-stretch gap-2">
-              <a
-                href={buildNganLookupPath(data.nganId, data.nganMa)}
-                className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-emerald-700 hover:bg-emerald-50"
+            {/* Nút xác nhận sản xuất nếu kiện chưa xong */}
+            {(data.status === "predicted" || data.status === "partial" || data.status === "partial_kien") && (
+              <Link
+                href={`/dashboard/product/confirm?f=${encodeURIComponent(factoryId)}&lo=${encodeURIComponent(maLo)}&kien=${kien}`}
+                className="mt-5 flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white shadow-md transition-all hover:bg-emerald-700"
               >
-                <Warehouse size={16} className="shrink-0" />
-                <span className="min-w-0">{tt("plXemChiTietNgan", { nganTen: data.nganTen || data.nganMa || "—" })}</span>
-              </a>
-              {canSwapNgan && (data.status === "predicted" || data.status === "partial") && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSwapNotice(null)
-                    setSwapOpen(true)
-                  }}
-                  title={tt("doiNgan")}
-                  aria-label={tt("doiNgan")}
-                  className="flex shrink-0 items-center justify-center rounded-xl border border-emerald-300 bg-white px-3 text-emerald-700 hover:bg-emerald-50"
-                >
-                  <ArrowLeftRight size={16} />
-                </button>
+                <ClipboardCheck size={18} />
+                {tt("plXacNhanSanXuat")}
+              </Link>
+            )}
+          </DetailCard>
+
+          {/* 3. KHỐI NGĂN NGUỒN GỐC (TRACEABILITY CARD): Liên kết truy xuất nguồn gốc 2 chiều */}
+          {data.nganId && (
+            <DetailCard
+              icon={<Warehouse size={18} />}
+              iconTone="blue"
+              title={tt("plNganNguonGoc") || "Ngăn nguyên liệu nguồn gốc"}
+              subtitle="Truy xuất nguồn gốc nguyên liệu mủ đầu vào của kiện này"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 grid place-items-center shrink-0">
+                    <Tag size={15} />
+                  </span>
+                  <div>
+                    <div className="text-xs text-slate-400 font-medium">Vị trí & Mã ngăn</div>
+                    <div className="text-sm font-extrabold text-slate-800 font-mono">
+                      {data.nganTen || data.nganMa || "—"}
+                      {data.nganMa && data.nganTen && data.nganMa !== data.nganTen ? (
+                        <span className="text-xs text-slate-400 font-normal ml-1.5">({data.nganMa})</span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {/* Nút Xem trước (Chiều 2: Kiện sang Ngăn nguyên liệu) */}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewNganOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all"
+                  >
+                    <Eye size={14} className="text-slate-500" />
+                    <span>{tt("plXemNhanhNgan") || "Xem nhanh"}</span>
+                  </button>
+
+                  {/* Nút Xem chi tiết toàn trang */}
+                  <a
+                    href={buildNganLookupPath(data.nganId, data.nganMa)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all"
+                  >
+                    <Warehouse size={14} />
+                    <span>{tt("plXemChiTietNgan", { nganTen: data.nganTen || data.nganMa || "" })}</span>
+                  </a>
+
+                  {/* Nút Đổi ngăn nguồn gốc nếu có quyền */}
+                  {canSwapNgan && (data.status === "predicted" || data.status === "partial") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSwapNotice(null)
+                        setSwapOpen(true)
+                      }}
+                      title={tt("doiNgan")}
+                      aria-label={tt("doiNgan")}
+                      className="inline-flex items-center gap-1 px-3 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all"
+                    >
+                      <ArrowLeftRight size={14} />
+                      <span>{tt("doiNgan")}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {swapNotice && (
+                <div className="mt-3 rounded-xl bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-800">
+                  {swapNotice}
+                </div>
               )}
-            </div>
+            </DetailCard>
           )}
 
-          {swapNotice && (
-            <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{swapNotice}</div>
-          )}
+          {/* 4. KHỐI MÃ QR TRA CỨU: Đồng bộ DetailQrBox */}
+          <DetailQrBox
+            label={tt("plLienKetTraCuu") || "Liên kết tra cứu trực tuyến kiện mủ"}
+            qrUrl={currentUrl}
+          />
 
+          {/* Modal Đổi ngăn nguồn */}
           {swapOpen && (
             <KienSwapNganModal
               lang={lang}
@@ -349,6 +449,16 @@ export function ProductLabelClient({ factoryId, maLo, kien }: ProductLabelClient
                 setSwapNotice(message)
                 setReloadKey((k) => k + 1)
               }}
+            />
+          )}
+
+          {/* Modal Preview nhanh Ngăn lưu nguồn gốc (Chiều 2) */}
+          {previewNganOpen && data.nganId && (
+            <StoragePreviewModal
+              nganId={data.nganId}
+              nganCode={data.nganMa}
+              isOpen={previewNganOpen}
+              onClose={() => setPreviewNganOpen(false)}
             />
           )}
         </div>

@@ -25,7 +25,8 @@ import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-se
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye, Loader2, AlertTriangle, ImageIcon, ArrowUp, ArrowDown } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye, Loader2, AlertTriangle, ImageIcon, ArrowUp, ArrowDown, Building, CheckCircle2, Layers, MapPin, Navigation, Percent, ShieldCheck, Tag, User, Users } from "lucide-react"
+import { DetailCard, DetailFieldItem, DetailFileCard } from "@/app/dashboard/_components/detail-view-ui"
 
 // Types
 type DxRow = {
@@ -728,6 +729,7 @@ export default function DispatchPage() {
   // Views: list | detail | add | edit
   const [view, setView]           = useState<"list"|"detail"|"add"|"edit">("list")
   const [selected, setSelected]   = useState<DispatchEntry|null>(null)
+  const [selectedTripRow, setSelectedTripRow] = useState<DxRow|null>(null)
 
   // Add/Edit form
   const [formNgay, setFormNgay]         = useState(getTodayISODate())
@@ -2166,14 +2168,26 @@ export default function DispatchPage() {
       signingStatusLoaded &&
       !signingStatusError &&
       !(currentUser.role !== "admin" && signingStatusByEntry.get(selected.id)?.trangThai === "hoan_tat")
+
+    const signStatus = signingStatusByEntry.get(selected.id)
+    const fileHienTai = signStatus?.fileHienTai
+    const totalKlTuoi = (selected.rows || []).reduce(
+      (s, r) => s + (parseFloat(r.kl_dct || r.kl_ct || r.kl_mn) || 0),
+      0
+    )
+    const totalKlKho = (selected.rows || []).reduce(
+      (s, r) => s + (parseFloat(r.kl_dck || r.kl_ck || r.kl_mnk) || 0),
+      0
+    )
+
     return (
-    <div>
+    <div className="space-y-4">
       <ToastNotification/>
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3">
         <button onClick={() => setView("list")} className="p-2 hover:bg-slate-100 rounded-xl transition-colors"><X size={18}/></button>
         <div className="flex-1">
-          <h1 className="text-2xl font-extrabold text-slate-800">{selected.ma_dx || "Bảng phân xe"} — {selected.ngay}</h1>
-          <p className="text-sm text-slate-500 flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800">{selected.ma_dx || "Bảng phân xe"} — {formatDateDisplay(selected.ngay)}</h1>
+          <p className="text-xs sm:text-sm text-slate-500 flex items-center gap-2 mt-0.5">
             {selected.rows?.length} xe · {selected.chung_nhan}
             <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
               selected.day_chuyen === "Mủ nước" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
@@ -2188,11 +2202,118 @@ export default function DispatchPage() {
         )}
       </div>
 
+      {/* File-First: Đưa phiếu điều xe đã ký duyệt lên trên cùng */}
+      {fileHienTai ? (
+        <DetailFileCard
+          fileName={`Phiếu điều xe ${selected.ma_dx || selected.ngay}.pdf`}
+          fileType="pdf"
+          fileSize="Bản điện tử ký duyệt"
+          statusLabel={signStatus?.trangThai === "hoan_tat" ? "Đã ký duyệt" : "Đang chờ ký"}
+          statusTone={signStatus?.trangThai === "hoan_tat" ? "emerald" : "amber"}
+          onView={() => window.open(fileHienTai, "_blank")}
+          onDownload={() => {
+            window.location.href = buildStorageDownloadUrl(
+              fileHienTai,
+              `Phiếu điều xe ${selected.ma_dx || selected.ngay}`
+            )
+          }}
+        />
+      ) : (
+        <DetailFileCard
+          fileName={`Phiếu điều xe ${selected.ma_dx || selected.ngay} (Bản nháp).pdf`}
+          fileType="pdf"
+          fileSize="Bản in PDF"
+          statusLabel="Chưa ký duyệt"
+          statusTone="blue"
+          onView={() => exportEntryPdf(selected)}
+          onDownload={() => exportEntryPdf(selected)}
+        />
+      )}
+
+      {/* Thẻ thông tin chung bảng điều xe: Lưới 2 cột 50-50 mobile */}
+      <DetailCard
+        title={`Bảng điều xe ${selected.ma_dx || selected.ngay}`}
+        subtitle={`Ngày điều xe ${formatDateDisplay(selected.ngay)} · Dây chuyền ${selected.day_chuyen || "Mủ tạp"}`}
+        icon={<Truck size={18} />}
+        iconTone="orange"
+        badge={
+          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+            signStatus?.trangThai === "hoan_tat"
+              ? "bg-emerald-100 text-emerald-700"
+              : signStatus?.trangThai === "dang_luan_chuyen"
+                ? "bg-amber-100 text-amber-700"
+                : "bg-slate-100 text-slate-600"
+          }`}>
+            {signStatus?.trangThai === "hoan_tat"
+              ? "Đã ký duyệt"
+              : signStatus?.trangThai === "dang_luan_chuyen"
+                ? "Đang chờ ký"
+                : "Chưa ký"}
+          </span>
+        }
+      >
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+          <DetailFieldItem
+            icon={<Tag size={15} />}
+            iconTone="rose"
+            label="Mã điều xe"
+            value={selected.ma_dx || "—"}
+            mono
+          />
+          <DetailFieldItem
+            icon={<Calendar size={15} />}
+            iconTone="emerald"
+            label="Ngày điều xe"
+            value={formatDateDisplay(selected.ngay)}
+          />
+          <DetailFieldItem
+            icon={<Layers size={15} />}
+            iconTone="blue"
+            label="Dây chuyền"
+            value={selected.day_chuyen || "Mủ tạp"}
+          />
+          <DetailFieldItem
+            icon={<ShieldCheck size={15} />}
+            iconTone="violet"
+            label="Chứng nhận"
+            value={selected.chung_nhan || "—"}
+          />
+          <DetailFieldItem
+            icon={<Truck size={15} />}
+            iconTone="orange"
+            label="Tổng số chuyến"
+            value={`${selected.rows?.length || 0} chuyến`}
+          />
+          <DetailFieldItem
+            icon={<Weight size={15} />}
+            iconTone="amber"
+            label="Tổng KL tươi (giao)"
+            value={`${totalKlTuoi.toLocaleString()} kg`}
+            mono
+            highlight="amber"
+          />
+          <DetailFieldItem
+            icon={<Weight size={15} />}
+            iconTone="emerald"
+            label="Tổng KL khô (nhận)"
+            value={`${totalKlKho.toLocaleString()} kg`}
+            mono
+            highlight="emerald"
+          />
+          <DetailFieldItem
+            icon={<CheckCircle2 size={15} />}
+            iconTone="teal"
+            label="Trạng thái duyệt"
+            value={signStatus?.trangThai === "hoan_tat" ? "Đã ký duyệt" : signStatus?.trangThai === "dang_luan_chuyen" ? "Đang chờ ký" : "Chưa gửi ký"}
+          />
+        </div>
+      </DetailCard>
+
       <ResponsiveTableWrapper>
         <table className="w-full text-xs">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">PDF</th>
+              <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Thao tác</th>
               {["Xe","Chuyến","Tài xế","Điểm GN","Đội lớn","Đội nhỏ","Phiên","Lô thu hoạch","KM","KL tươi","DRC%","KL khô"].map(h => (
                 <th key={h} className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
               ))}
@@ -2202,18 +2323,31 @@ export default function DispatchPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {(selected.rows||[]).map((row, i) => (
-              <tr key={row.uid||i} className="hover:bg-slate-50">
-                <td className="px-3 py-2.5">
-                  <button onClick={() => exportTripPdf(selected, row)}
-                    className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF chuyến">
-                    <FileText size={14}/>
-                  </button>
+              <tr
+                key={row.uid||i}
+                className="hover:bg-slate-50 cursor-pointer"
+                onClick={() => setSelectedTripRow(row)}
+              >
+                <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setSelectedTripRow(row)}
+                      className="p-1.5 hover:bg-orange-50 text-orange-600 rounded-lg transition-colors"
+                      title="Xem chi tiết chuyến xe"
+                    >
+                      <Eye size={14}/>
+                    </button>
+                    <button onClick={() => exportTripPdf(selected, row)}
+                      className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF chuyến">
+                      <FileText size={14}/>
+                    </button>
+                  </div>
                 </td>
                 <td className="px-3 py-2.5 font-bold text-emerald-700">{row.so_xe}</td>
                 <td className="px-3 py-2.5 text-center">
                   <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-bold">{row.chuyen}</span>
                 </td>
-                <td className="px-3 py-2.5 text-slate-700">{row.tai_xe}</td>
+                <td className="px-3 py-2.5 text-slate-700 font-medium">{row.tai_xe}</td>
                 <td className="px-3 py-2.5">
                   <div className="flex flex-wrap gap-1">
                     {(row.diem_gn||[]).map(d => (
@@ -2226,9 +2360,9 @@ export default function DispatchPage() {
                 <td className="px-3 py-2.5 text-slate-500">{(row.phien||[]).join(", ")}</td>
                 <td className="px-3 py-2.5 text-slate-500 text-[10px] max-w-48 truncate">{Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.join(", ") : row.lo_thu_hoach}</td>
                 <td className="px-3 py-2.5 text-slate-600">{row.so_km} km</td>
-                <td className="px-3 py-2.5 font-semibold text-slate-700">{row.kl_dct}</td>
-                <td className="px-3 py-2.5 text-slate-600">{row.drc_dc}%</td>
-                <td className="px-3 py-2.5 font-semibold text-emerald-700">{row.kl_dck}</td>
+                <td className="px-3 py-2.5 font-semibold text-slate-700">{row.kl_dct || row.kl_ct || row.kl_mn || "—"}</td>
+                <td className="px-3 py-2.5 text-slate-600">{row.drc_dc || row.drc_c || row.drc_mn || "—"}%</td>
+                <td className="px-3 py-2.5 font-semibold text-emerald-700">{row.kl_dck || row.kl_ck || row.kl_mnk || "—"}</td>
                 <td className="px-3 py-2.5 font-medium">
                   {row.ghi_chu ? (
                     <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold font-mono text-[11px]">
@@ -2244,11 +2378,11 @@ export default function DispatchPage() {
             <tr>
               <td colSpan={10} className="px-3 py-2.5 font-bold text-slate-600">TỔNG</td>
               <td className="px-3 py-2.5 font-bold text-slate-700">
-                {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dct)||0),0).toLocaleString()}
+                {totalKlTuoi.toLocaleString()}
               </td>
               <td/>
               <td className="px-3 py-2.5 font-bold text-emerald-700">
-                {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dck)||0),0).toLocaleString()}
+                {totalKlKho.toLocaleString()}
               </td>
               <td/>
               <td/>
@@ -2256,6 +2390,121 @@ export default function DispatchPage() {
           </tfoot>
         </table>
       </ResponsiveTableWrapper>
+
+      {/* Modal xem chi tiết chuyến xe: Lưới 2 cột 50-50 mobile */}
+      {selectedTripRow && (
+        <ModalShell
+          title={`Chi tiết chuyến xe ${selectedTripRow.so_xe} — Chuyến ${selectedTripRow.chuyen}`}
+          onClose={() => setSelectedTripRow(null)}
+          maxWidth="2xl"
+        >
+          <div className="space-y-4">
+            {/* File-First: Nút tải/xuất PDF chuyến xe */}
+            <DetailFileCard
+              fileName={`Phiếu vận chuyển ${selectedTripRow.so_xe} - Chuyến ${selectedTripRow.chuyen} (${selected.ngay}).pdf`}
+              fileType="pdf"
+              fileSize="Phiếu chuyến xe"
+              statusLabel="Bản in chuyến"
+              statusTone="emerald"
+              onView={() => exportTripPdf(selected, selectedTripRow)}
+              onDownload={() => exportTripPdf(selected, selectedTripRow)}
+            />
+
+            {/* Thẻ thông tin chuyến điều xe */}
+            <DetailCard
+              title={`Thông tin chuyến xe ${selectedTripRow.so_xe}`}
+              subtitle={`Tài xế: ${selectedTripRow.tai_xe} · Ngày ${formatDateDisplay(selected.ngay)}`}
+              icon={<Truck size={18} />}
+              iconTone="orange"
+            >
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                <DetailFieldItem
+                  icon={<Tag size={15} />}
+                  iconTone="rose"
+                  label="Mã điều xe"
+                  value={selected.ma_dx || "—"}
+                  mono
+                />
+                <DetailFieldItem
+                  icon={<Calendar size={15} />}
+                  iconTone="emerald"
+                  label="Ngày điều xe"
+                  value={formatDateDisplay(selected.ngay)}
+                />
+                <DetailFieldItem
+                  icon={<Truck size={15} />}
+                  iconTone="orange"
+                  label="Biển số xe"
+                  value={selectedTripRow.so_xe || "—"}
+                  highlight="amber"
+                />
+                <DetailFieldItem
+                  icon={<User size={15} />}
+                  iconTone="pink"
+                  label="Tài xế"
+                  value={selectedTripRow.tai_xe || "—"}
+                />
+                <DetailFieldItem
+                  icon={<MapPin size={15} />}
+                  iconTone="emerald"
+                  label="Điểm bốc hàng"
+                  value={(selectedTripRow.diem_gn || []).join(", ") || "—"}
+                  colSpan={2}
+                />
+                <DetailFieldItem
+                  icon={<Building size={15} />}
+                  iconTone="blue"
+                  label="Điểm dỡ hàng"
+                  value={`Nhà máy chế biến (${selected.day_chuyen || "Mủ tạp"})`}
+                  colSpan={2}
+                />
+                <DetailFieldItem
+                  icon={<Weight size={15} />}
+                  iconTone="amber"
+                  label="Khối lượng giao (tươi)"
+                  value={`${selectedTripRow.kl_dct || selectedTripRow.kl_ct || selectedTripRow.kl_mn || "0"} kg`}
+                  mono
+                  highlight="amber"
+                />
+                <DetailFieldItem
+                  icon={<Weight size={15} />}
+                  iconTone="emerald"
+                  label="Khối lượng nhận (khô)"
+                  value={`${selectedTripRow.kl_dck || selectedTripRow.kl_ck || selectedTripRow.kl_mnk || "0"} kg`}
+                  mono
+                  highlight="emerald"
+                />
+                <DetailFieldItem
+                  icon={<Percent size={15} />}
+                  iconTone="blue"
+                  label="Chỉ số DRC %"
+                  value={`${selectedTripRow.drc_dc || selectedTripRow.drc_c || selectedTripRow.drc_mn || "—"}%`}
+                />
+                <DetailFieldItem
+                  icon={<Navigation size={15} />}
+                  iconTone="slate"
+                  label="Cự ly di chuyển"
+                  value={`${selectedTripRow.so_km || 0} km`}
+                />
+                <DetailFieldItem
+                  icon={<Users size={15} />}
+                  iconTone="indigo"
+                  label="Đội lớn & Nhỏ"
+                  value={`${formatDoiLabel(getTripDois(selectedTripRow, deliveryPoints))} (${resolveTripDoiNhos(selectedTripRow.diem_gn || [], deliveryPoints).join(", ") || "—"})`}
+                  colSpan={2}
+                />
+                <DetailFieldItem
+                  icon={<FileText size={15} />}
+                  iconTone="slate"
+                  label="Ký hiệu KT & Ghi chú"
+                  value={`${selectedTripRow.ghi_chu || ""} ${selectedTripRow.ghi_chu_tu_do ? `· ${selectedTripRow.ghi_chu_tu_do}` : ""}`.trim() || "Không có ghi chú"}
+                  colSpan={2}
+                />
+              </div>
+            </DetailCard>
+          </div>
+        </ModalShell>
+      )}
     </div>
     )
   }
