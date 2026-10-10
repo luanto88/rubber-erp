@@ -90,9 +90,7 @@ import {
   Loader2,
   ScanLine,
   ShieldCheck,
-  Eye,
 } from "lucide-react";
-import { LotDetailModal } from "@/app/dashboard/warehouse/_components/lot-detail-modal";
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif";
 
@@ -1355,7 +1353,6 @@ function LotNumberStepper({
 // Main Component
 export default function ProductPage() {
   const [lots, setLots] = useState<Lot[]>([]);
-  const [detailLotModal, setDetailLotModal] = useState<Lot | null>(null);
   const [skHistory, setSkHistory] = useState<SkHistoryRow[]>([]);
   const [ngans, setNgans] = useState<Ngan[]>([]);
   // "Khóa ca sản xuất" — key `${ngay_sx}|${ca}` -> thông tin khóa (chỉ chứa ca đang active).
@@ -4242,16 +4239,12 @@ export default function ProductPage() {
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {createDorDangLots.map((l) => (
-                    <button
+                    <span
                       key={l.id}
-                      type="button"
-                      onClick={() => setDetailLotModal(l)}
-                      className="rounded-lg bg-amber-100 hover:bg-amber-200 px-2 py-1 text-[11px] font-bold text-amber-700 flex items-center gap-1 transition-colors cursor-pointer"
-                      title={`Xem chi tiết lô ${l.ma_lo}`}
+                      className="rounded-lg bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-700"
                     >
-                      <span>{l.ma_lo} · {l.tong_banh} bành</span>
-                      <Eye size={11} className="opacity-70" />
-                    </button>
+                      {l.ma_lo} · {l.tong_banh} bành
+                    </span>
                   ))}
                 </div>
               </div>
@@ -5635,23 +5628,7 @@ export default function ProductPage() {
                                         </td>
                                       )}
                                       <td className="px-4 py-2.5 font-bold text-slate-700">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="font-mono">{g.maLo}</span>
-                                          {(() => {
-                                            const targetLot = lots.find((l) => l.ma_lo === g.maLo);
-                                            if (!targetLot) return null;
-                                            return (
-                                              <button
-                                                type="button"
-                                                onClick={() => setDetailLotModal(targetLot)}
-                                                className="p-1 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                                                title={`Xem chi tiết lô ${g.maLo}`}
-                                              >
-                                                <Eye size={13} />
-                                              </button>
-                                            );
-                                          })()}
-                                        </div>
+                                        {g.maLo}
                                       </td>
                                       <td className="px-4 py-2.5 text-xs">
                                         {g.nganList.map((n, idx) => (
@@ -7117,14 +7094,6 @@ export default function ProductPage() {
           isAdmin={currentUser?.role === "admin"}
           onClose={() => setShiftLockModalDate(null)}
           onChanged={() => void refreshShiftLocks()}
-        />
-      )}
-
-      {/* Modal xem chi tiết lô thành phẩm */}
-      {detailLotModal && (
-        <LotDetailModal
-          lot={detailLotModal as any}
-          onClose={() => setDetailLotModal(null)}
         />
       )}
     </div>

@@ -3,23 +3,8 @@
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
-import {
-  ArrowLeft,
-  Calendar,
-  Clock,
-  Download,
-  Eye,
-  FileText,
-  Layers,
-  Map,
-  MapPin,
-  Percent,
-  Scale,
-  ShieldCheck,
-  Tag,
-  Truck,
-  Warehouse,
-} from "lucide-react"
+import { Activity, ArrowLeft, Download, FileText, Layers, Map, QrCode, Truck, Warehouse, Weight } from "lucide-react"
+import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
 import {
   buildStorageLookupPath,
   formatStorageDate,
@@ -29,17 +14,9 @@ import {
   summarizeStorageLots,
   type StorageDetailData,
   type StorageGeoJsonCollection,
-  type StorageProducedLot,
 } from "@/lib/storage-detail"
 import { downloadStorageDetailPdf } from "@/lib/storage-pdf"
-import {
-  getStorageAgingDays,
-  getStorageStatusLabelEn,
-  getStorageStatusTheme,
-  normalizeStorageStatus,
-} from "@/lib/storage-status"
-import { DetailCard, DetailFieldItem, DetailFileCard, DetailQrBox } from "@/app/dashboard/_components/detail-view-ui"
-import { StorageLotDetailModal } from "@/app/dashboard/storage/_components/storage-lot-detail-modal"
+import { getStorageStatusLabelEn, getStorageStatusTheme, normalizeStorageStatus } from "@/lib/storage-status"
 
 // leaflet đọc `window` ngay khi module được load — phải tắt SSR, nếu không trang public
 // /storage (server-rendered) sẽ crash với "ReferenceError: window is not defined".
@@ -81,9 +58,6 @@ export function StorageDetailClient({
   const [geoLoading, setGeoLoading] = useState(false)
   const [geoError, setGeoError] = useState<string | null>(null)
   const [exportingGeoJson, setExportingGeoJson] = useState(false)
-
-  // Traceability: Chiều 1 - Xem chi tiết lô thành phẩm bằng LotDetailModal
-  const [selectedLotForModal, setSelectedLotForModal] = useState<StorageProducedLot | null>(null)
 
   useEffect(() => {
     const run = async () => {
@@ -154,7 +128,6 @@ export function StorageDetailClient({
 
   const summary = useMemo(() => (detail ? summarizeStorageLots(detail.lots) : null), [detail])
   const ratio = detail && summary && detail.ngan.tong_kho > 0 ? (summary.thanhPhamKg / detail.ngan.tong_kho) * 100 : null
-  const agingDays = detail ? getStorageAgingDays(detail.ngan.ngay_bd) : null
 
   const statusLabelVi = detail ? normalizeStorageStatus(detail.ngan.trang_thai) || "—" : "—"
   const statusLabelEn = detail ? getStorageStatusLabelEn(detail.ngan.trang_thai) : ""
@@ -194,11 +167,7 @@ export function StorageDetailClient({
   }
 
   if (loading) {
-    return (
-      <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400 font-medium">
-        Đang tải chi tiết ngăn lưu...
-      </div>
-    )
+    return <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center text-slate-400">Đang tải chi tiết ngăn lưu...</div>
   }
 
   if (error || !detail) {
@@ -210,221 +179,124 @@ export function StorageDetailClient({
     )
   }
 
-  const lookupUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}${buildStorageLookupPath(detail.ngan.id, detail.ngan.ma_ngan)}`
-      : buildStorageLookupPath(detail.ngan.id, detail.ngan.ma_ngan)
-
   return (
-    <div className="space-y-5">
-      {/* Header bar */}
+    <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          {showDashboardBackLink && (
-            <Link
-              href="/dashboard/storage"
-              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-emerald-700 hover:text-emerald-800 transition-colors"
-            >
+          {showDashboardBackLink ? (
+            <Link href="/dashboard/storage" className="inline-flex items-center gap-2 text-sm font-bold text-emerald-700 hover:text-emerald-800">
               <ArrowLeft size={15} />
               Quay lại danh sách ngăn lưu
             </Link>
-          )}
-          <h1 className="mt-2 text-2xl sm:text-3xl font-extrabold text-slate-900 break-words">
-            {detail.ngan.ten_ngan}
-          </h1>
-          <p className="mt-0.5 text-xs sm:text-sm text-slate-500 font-mono">{detail.ngan.ma_ngan || "—"}</p>
+          ) : null}
+          <h1 className="mt-3 text-3xl font-extrabold text-slate-900 break-words">{detail.ngan.ten_ngan}</h1>
+          <p className="mt-1 text-sm text-slate-500">{detail.ngan.ma_ngan || "—"}</p>
         </div>
+        <button
+          type="button"
+          onClick={() => void handleExportPdf()}
+          disabled={exportingPdf}
+          className="inline-flex shrink-0 items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+        >
+          <FileText size={15} />
+          {exportingPdf ? "Đang xuất PDF..." : "Xuất PDF chi tiết"}
+        </button>
       </div>
 
-      {/* 1. NGUYÊN TẮC FILE-FIRST: Khối tệp tài liệu đặt trên cùng */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <DetailFileCard
-          fileName={`Lý lịch ngăn lưu — ${detail.ngan.ten_ngan || detail.ngan.ma_ngan}.pdf`}
-          fileType="pdf"
-          fileSize="Báo cáo chi tiết"
-          statusLabel={exportingPdf ? "Đang xuất..." : "Sẵn sàng tải"}
-          statusTone="emerald"
-          onDownload={() => void handleExportPdf()}
-        />
-        <DetailFileCard
-          fileName={`Bản đồ vùng trồng EUDR — ${detail.ngan.ten_ngan || detail.ngan.ma_ngan}.geojson`}
-          fileType="geojson"
-          fileSize={
-            geoJson
-              ? `${geoJson.metadata.total_plot_codes} mã lô · ${geoJson.features.length} polygons`
-              : "Đang nạp tọa độ..."
-          }
-          statusLabel={geoJson && geoJson.metadata.total_plot_codes > 0 ? "Bản đồ EUDR" : "Chưa có polygon"}
-          statusTone={geoJson && geoJson.metadata.total_plot_codes > 0 ? "blue" : "amber"}
-          onDownload={geoJson && geoJson.metadata.total_plot_codes > 0 ? handleExportGeoJson : undefined}
-        />
-      </div>
-
-      {/* 2. THẺ THÔNG TIN NGĂN (DetailCard Pastel, 2 cột 50-50 mobile) */}
-      <DetailCard
-        icon={<Warehouse size={20} />}
-        iconTone="teal"
-        title={detail.ngan.ten_ngan}
-        subtitle={detail.ngan.ma_ngan || "Ngăn lưu trữ nguyên liệu mủ cao su"}
-        badge={
-          <span className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-full ${statusTheme.badge}`}>
-            <span className={`h-2 w-2 rounded-full ${statusTheme.dot}`} />
-            {statusLabelVi}
-            <span className="font-semibold opacity-70">· {statusLabelEn}</span>
-          </span>
-        }
+      <div
+        className={`inline-flex w-full flex-wrap items-center gap-2 rounded-2xl border border-white/60 bg-gradient-to-br ${statusTheme.gradient} px-4 py-3 shadow-sm sm:w-auto`}
       >
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-          <DetailFieldItem
-            icon={<Tag size={15} />}
-            iconTone="rose"
-            label="Mã ngăn"
-            value={detail.ngan.ma_ngan}
-            mono
-            highlight="rose"
-          />
-          <DetailFieldItem
-            icon={<Layers size={15} />}
-            iconTone="amber"
-            label="Loại nguyên liệu"
-            value={detail.ngan.loai_nl}
-          />
-          <DetailFieldItem
-            icon={<MapPin size={15} />}
-            iconTone="emerald"
-            label="Nguồn gốc / Đơn vị"
-            value={detail.ngan.nguon_goc || "—"}
-          />
-          <DetailFieldItem
-            icon={<ShieldCheck size={15} />}
-            iconTone="violet"
-            label="Chứng nhận"
-            value={detail.ngan.chung_nhan || "Không"}
-          />
-          <DetailFieldItem
-            icon={<Calendar size={15} />}
-            iconTone="emerald"
-            label="Ngày BĐ nhận"
-            value={formatStorageDate(detail.ngan.ngay_bd)}
-          />
-          <DetailFieldItem
-            icon={<Calendar size={15} />}
-            iconTone="rose"
-            label="Ngày KT nhận"
-            value={formatStorageDate(detail.ngan.ngay_kt)}
-          />
-          <DetailFieldItem
-            icon={<Clock size={15} />}
-            iconTone="amber"
-            label="Ngày xé nguyên liệu"
-            value={`${formatStorageDate(detail.ngan.xe_tu_ngay)} - ${formatStorageDate(detail.ngan.xe_den_ngay)}`}
-          />
-          <DetailFieldItem
-            icon={<Clock size={15} />}
-            iconTone="blue"
-            label="Số ngày lưu"
-            value={agingDays !== null ? `${agingDays} ngày` : "—"}
-            highlight={
-              agingDays !== null && agingDays >= 21
-                ? "rose"
-                : agingDays !== null && agingDays >= 6
-                  ? "amber"
-                  : undefined
-            }
-          />
-          <DetailFieldItem
-            icon={<Scale size={15} />}
-            iconTone="emerald"
-            label="KL mủ tươi"
-            value={`${(detail.ngan.tong_tuoi || 0).toLocaleString("vi-VN")} kg`}
-            mono
-          />
-          <DetailFieldItem
-            icon={<Scale size={15} />}
-            iconTone="blue"
-            label="KL mủ khô"
-            value={`${(detail.ngan.tong_kho || 0).toLocaleString("vi-VN")} kg`}
-            mono
-            highlight="blue"
-          />
-          <DetailFieldItem
-            icon={<Percent size={15} />}
-            iconTone="teal"
-            label="Tỷ lệ TP / QK"
-            value={
-              ratio === null
-                ? "—"
-                : `${ratio.toFixed(1)}% (${(summary?.thanhPhamKg || 0).toLocaleString("vi-VN")} kg)`
-            }
-            highlight="emerald"
-          />
-          <DetailFieldItem
-            icon={<Truck size={15} />}
-            iconTone="orange"
-            label="Số chuyến xe"
-            value={`${detail.trips.length} chuyến`}
-          />
-          {(detail.ngan.ghi_chu || detail.ngan.ghi_chu_tu_do) && (
-            <DetailFieldItem
-              icon={<FileText size={15} />}
-              iconTone="slate"
-              label="Ghi chú kỹ thuật & ghi chú khác"
-              value={[detail.ngan.ghi_chu, detail.ngan.ghi_chu_tu_do].filter(Boolean).join(" · ")}
-              colSpan={2}
-            />
-          )}
+        <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${statusTheme.badge}`}>
+          <Activity size={16} />
+        </span>
+        <span className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+          Trạng thái ngăn / Bin status
+        </span>
+        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-extrabold ${statusTheme.badge}`}>
+          <span className={`h-2 w-2 rounded-full ${statusTheme.dot}`} />
+          {statusLabelVi}
+          <span className="font-semibold opacity-70">· {statusLabelEn}</span>
+        </span>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_0.8fr]">
+        <div className={`rounded-3xl border border-slate-200 bg-gradient-to-br ${statusTheme.gradient} p-6`}>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {[
+              { label: "Loại nguyên liệu", value: detail.ngan.loai_nl, icon: <Layers size={16} className="text-emerald-600" /> },
+              { label: "Ngày nguyên liệu", value: `${formatStorageDate(detail.ngan.ngay_bd)} - ${formatStorageDate(detail.ngan.ngay_kt)}`, icon: <Warehouse size={16} className="text-emerald-600" /> },
+              { label: "Ngày xé", value: `${formatStorageDate(detail.ngan.xe_tu_ngay)} - ${formatStorageDate(detail.ngan.xe_den_ngay)}`, icon: <QrCode size={16} className="text-emerald-600" /> },
+              { label: "Khối lượng nguyên liệu khô", value: `${(detail.ngan.tong_kho || 0).toLocaleString("vi-VN")} kg`, icon: <Weight size={16} className="text-emerald-600" /> },
+              { label: "Khối lượng thành phẩm", value: `${(summary?.thanhPhamKg || 0).toLocaleString("vi-VN")} kg`, icon: <Weight size={16} className="text-emerald-600" /> },
+              { label: "Tỷ lệ TP/QK", value: ratio === null ? "—" : `${ratio.toFixed(1)}%`, icon: <Weight size={16} className="text-emerald-600" /> },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border border-white/80 bg-white/90 p-4 shadow-sm">
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+                  {item.icon}
+                  {item.label}
+                </div>
+                <div className="mt-3 text-base font-bold text-slate-800">{item.value || "—"}</div>
+              </div>
+            ))}
+          </div>
+          {detail.ngan.ghi_chu ? (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <span className="font-bold">Ghi chú:</span> {detail.ngan.ghi_chu}
+            </div>
+          ) : null}
         </div>
-      </DetailCard>
 
-      {/* 3. KHỐI QR NGĂN: Thay bằng DetailQrBox đồng bộ */}
-      <DetailQrBox
-        label="Mã QR tra cứu trực tuyến ngăn lưu"
-        qrUrl={lookupUrl}
-      />
+        <InventoryQrCard
+          title="QR ngăn"
+          caption="Quét mã để mở lại đúng trang chi tiết này trên web."
+          hrefPath={buildStorageLookupPath(detail.ngan.id, detail.ngan.ma_ngan)}
+          valueText={detail.ngan.ma_ngan || detail.ngan.ten_ngan}
+          downloadFileName={`QR-${detail.ngan.ma_ngan || detail.ngan.ten_ngan}`}
+        />
+      </div>
 
-      {/* 4. BẢN ĐỒ LÔ THU HOẠCH EUDR */}
-      <section className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-base sm:text-lg font-extrabold text-slate-900">Bản đồ lô thu hoạch EUDR</h2>
-            <p className="text-xs text-slate-400">Xem nhanh vùng lô vườn của ngăn và tải file GeoJSON trực tiếp.</p>
+            <h2 className="text-lg font-extrabold text-slate-900">Bản đồ lô thu hoạch</h2>
+            <p className="text-sm text-slate-400">Xem nhanh vùng lô vườn của ngăn và tải file GeoJSON trực tiếp.</p>
           </div>
           <button
             type="button"
             onClick={handleExportGeoJson}
             disabled={geoLoading || exportingGeoJson || !geoJson || geoJson.metadata.total_plot_codes === 0}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-sky-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-sky-700 disabled:opacity-50 transition-all shadow-xs"
+            className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-sky-700 disabled:opacity-50"
           >
-            <Download size={14} />
+            <Download size={15} />
             {exportingGeoJson ? "Đang xuất GeoJSON..." : "Tải GeoJSON"}
           </button>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          <div className="rounded-xl bg-slate-50 px-3.5 py-2.5 border border-slate-100">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              <Map size={13} className="text-sky-600" />
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl bg-slate-50 px-4 py-3">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+              <Map size={14} className="text-sky-600" />
               Mã lô thu hoạch
             </div>
-            <div className="mt-1 text-lg sm:text-xl font-extrabold text-slate-900 font-mono">
+            <div className="mt-2 text-2xl font-extrabold text-slate-900">
               {geoJson?.metadata.total_plot_codes.toLocaleString("vi-VN") ?? 0}
             </div>
           </div>
-          <div className="rounded-xl bg-slate-50 px-3.5 py-2.5 border border-slate-100">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              <Truck size={13} className="text-sky-600" />
-              Chuyến xe
+          <div className="rounded-2xl bg-slate-50 px-4 py-3">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+              <Truck size={14} className="text-sky-600" />
+              Chuyến điều xe
             </div>
-            <div className="mt-1 text-lg sm:text-xl font-extrabold text-slate-900 font-mono">
+            <div className="mt-2 text-2xl font-extrabold text-slate-900">
               {geoJson?.metadata.trip_count.toLocaleString("vi-VN") ?? detail.trips.length}
             </div>
           </div>
-          <div className="rounded-xl bg-slate-50 px-3.5 py-2.5 border border-slate-100">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              <Layers size={13} className="text-sky-600" />
-              Polygons
+          <div className="rounded-2xl bg-slate-50 px-4 py-3">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+              <Layers size={14} className="text-sky-600" />
+              Polygon hiển thị
             </div>
-            <div className="mt-1 text-lg sm:text-xl font-extrabold text-slate-900 font-mono">
+            <div className="mt-2 text-2xl font-extrabold text-slate-900">
               {geoJson?.features.length.toLocaleString("vi-VN") ?? 0}
             </div>
           </div>
@@ -432,19 +304,19 @@ export function StorageDetailClient({
 
         <div className="mt-4">
           {geoLoading ? (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-10 text-center text-sm text-slate-400 font-medium">
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-10 text-center text-slate-400">
               Đang tải bản đồ lô thu hoạch...
             </div>
           ) : geoError ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold text-amber-900">
+            <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
               {geoError}
             </div>
           ) : !geoJson || geoJson.metadata.total_plot_codes === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-xs text-slate-400">
+            <div className="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center text-sm text-slate-400">
               Ngăn này chưa có lô thu hoạch để hiển thị bản đồ hoặc xuất GeoJSON.
             </div>
           ) : geoJson.features.length === 0 ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs font-semibold text-amber-900">
+            <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
               Đã tìm thấy mã lô thu hoạch nhưng chưa khớp được polygon GeoJSON.
             </div>
           ) : (
@@ -453,42 +325,38 @@ export function StorageDetailClient({
         </div>
       </section>
 
-      {/* 5. HAI CỘT: CHUYẾN XE NGUYÊN LIỆU & LÔ THÀNH PHẨM */}
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* Chuyến xe nguyên liệu */}
-        <section className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-extrabold text-slate-900">Chuyến xe nguyên liệu</h2>
-              <p className="text-xs text-slate-400">{detail.trips.length} chuyến đã liên kết với ngăn này</p>
+              <h2 className="text-lg font-extrabold text-slate-900">Chuyến xe nguyên liệu</h2>
+              <p className="text-sm text-slate-400">{detail.trips.length} chuyến đã liên kết với ngăn này</p>
             </div>
-            <div className="rounded-xl bg-orange-50 px-2.5 py-1 text-xs font-bold text-orange-700">
-              <Truck size={13} className="mr-1.5 inline-block" />
-              {detail.trips.length} chuyến
+            <div className="rounded-2xl bg-slate-100 px-3 py-2 text-sm font-bold text-slate-700">
+              <Truck size={15} className="mr-2 inline-block" />
+              {detail.trips.length}
             </div>
           </div>
-          <div className="mt-3.5 space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+          <div className="mt-4 space-y-3">
             {detail.trips.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-xs text-slate-400">
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
                 Chưa có chuyến xe nào trong ngăn này.
               </div>
             ) : (
               detail.trips.map((trip) => {
                 const kl = getKLFromTrip(trip, detail.ngan.loai_nl)
                 return (
-                  <div key={trip.ref || trip.uid} className="rounded-xl border border-slate-200/80 p-3 bg-white hover:bg-slate-50/50 transition-colors">
+                  <div key={trip.ref || trip.uid} className="rounded-2xl border border-slate-200 px-4 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className="text-xs sm:text-sm font-bold text-slate-800">
-                          {trip.so_xe || "—"} · C{trip.chuyen || 1}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-slate-400">
+                        <div className="font-bold text-slate-800">{trip.so_xe || "—"} · C{trip.chuyen || 1}</div>
+                        <div className="mt-1 text-xs text-slate-500">
                           {formatStorageDate(trip._date)} · {trip.tai_xe || "Chưa có tài xế"}
                         </div>
                       </div>
-                      <div className="text-right text-xs font-semibold text-slate-700">
+                      <div className="text-right text-sm font-semibold text-slate-700">
                         <div>{kl.tuoi.toLocaleString("vi-VN")} kg tươi</div>
-                        <div className="text-emerald-700 font-bold">{kl.kho.toLocaleString("vi-VN")} kg khô</div>
+                        <div className="text-emerald-700">{kl.kho.toLocaleString("vi-VN")} kg khô</div>
                       </div>
                     </div>
                   </div>
@@ -498,12 +366,11 @@ export function StorageDetailClient({
           </div>
         </section>
 
-        {/* Lô thành phẩm đã dùng nguyên liệu (Chiều 1: Có icon mắt 👁️ xem chi tiết lô) */}
-        <section className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-extrabold text-slate-900">Lô thành phẩm đã sử dụng</h2>
-              <p className="text-xs text-slate-400">
+              <h2 className="text-lg font-extrabold text-slate-900">Lô thành phẩm</h2>
+              <p className="text-sm text-slate-400">
                 {summary
                   ? summary.doDangCount > 0
                     ? `${summary.totalLots} lô (${summary.tronLoCount} tròn, ${summary.doDangCount} dở dang)`
@@ -511,67 +378,35 @@ export function StorageDetailClient({
                   : "0 lô"}
               </p>
             </div>
-            <div className="rounded-xl bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+            <div className="rounded-2xl bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700">
               {(summary?.thanhPhamKg || 0).toLocaleString("vi-VN")} kg
             </div>
           </div>
-          <div className="mt-3.5 space-y-3.5 max-h-[460px] overflow-y-auto pr-1">
+          <div className="mt-4 space-y-4">
             {groupedLots.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-xs text-slate-400">
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
                 Chưa có lô thành phẩm nào sử dụng nguyên liệu từ ngăn này.
               </div>
             ) : (
               groupedLots.map((group) => (
-                <div key={group.key} className="overflow-hidden rounded-xl border border-slate-200">
-                  <div className="bg-slate-50 px-3.5 py-2.5 border-b border-slate-200 flex items-center justify-between">
-                    <div>
-                      <div className="text-xs sm:text-sm font-bold text-slate-800">{group.label}</div>
-                      <div className="text-[11px] text-slate-400">
-                        {group.items.length} lô thành phẩm
-                      </div>
-                    </div>
-                    <div className="text-xs font-extrabold text-blue-700 font-mono">
-                      {group.totalKg.toLocaleString("vi-VN")} kg
+                <div key={group.key} className="overflow-hidden rounded-2xl border border-slate-200">
+                  <div className="bg-slate-50 px-4 py-3">
+                    <div className="font-bold text-slate-800">{group.label}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {group.items.length} lô · {group.totalKg.toLocaleString("vi-VN")} kg
                     </div>
                   </div>
-                  <div className="divide-y divide-slate-100 bg-white">
+                  <div className="divide-y divide-slate-100">
                     {group.items.map((lot) => (
-                      <div
-                        key={lot.id}
-                        className="flex items-center justify-between gap-3 px-3.5 py-2.5 hover:bg-slate-50 transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          {/* Nút bấm / icon mắt xem chi tiết lô thành phẩm (Chiều 1) */}
-                          <button
-                            type="button"
-                            onClick={() => setSelectedLotForModal(lot)}
-                            title="Xem chi tiết lô thành phẩm"
-                            aria-label={`Xem chi tiết lô ${lot.ma_lo}`}
-                            className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 grid place-items-center shrink-0 transition-colors"
-                          >
-                            <Eye size={14} />
-                          </button>
-                          <div className="min-w-0">
-                            <div className="text-xs sm:text-sm font-bold text-slate-800 font-mono truncate">
-                              {lot.ma_lo}
-                            </div>
-                            <div className="text-[11px] text-slate-400 truncate">
-                              {formatStorageDate(lot.ngay_sx)} · Ca {lot.ca || "—"} · {lot.tong_banh || 0} bành · {lot.trang_thai}
-                            </div>
+                      <div key={lot.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                        <div>
+                          <div className="font-semibold text-slate-800">{lot.ma_lo}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {formatStorageDate(lot.ngay_sx)} · Ca {lot.ca || "—"} · {lot.tong_banh || 0} bành · {lot.trang_thai}
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <div className="text-xs sm:text-sm font-bold font-mono text-slate-700">
-                            {(lot.tong_kg || 0).toLocaleString("vi-VN")} kg
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedLotForModal(lot)}
-                            className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline mt-0.5 inline-flex items-center gap-0.5"
-                          >
-                            <span>Xem chi tiết</span>
-                            <Eye size={11} />
-                          </button>
+                        <div className="text-right text-sm font-bold text-slate-700">
+                          {(lot.tong_kg || 0).toLocaleString("vi-VN")} kg
                         </div>
                       </div>
                     ))}
@@ -582,14 +417,6 @@ export function StorageDetailClient({
           </div>
         </section>
       </div>
-
-      {/* Modal xem chi tiết Lô thành phẩm (Chiều 1: Từ Ngăn sang Lô thành phẩm) */}
-      {selectedLotForModal && (
-        <StorageLotDetailModal
-          lot={selectedLotForModal}
-          onClose={() => setSelectedLotForModal(null)}
-        />
-      )}
     </div>
   )
 }

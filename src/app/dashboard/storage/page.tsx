@@ -52,11 +52,8 @@ import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
   Warehouse, Plus, X, Search, Eye, Edit2, Minus, History,
   Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
-  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw, Trash2,
-  Calendar, Clock, Percent, Scale, Wrench
+  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw, Trash2
 } from "lucide-react"
-import { DetailCard, DetailFieldItem, DetailFileCard, DetailQrBox } from "@/app/dashboard/_components/detail-view-ui"
-import { StorageLotDetailModal } from "@/app/dashboard/storage/_components/storage-lot-detail-modal"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
@@ -234,7 +231,6 @@ export default function StoragePage() {
   const [viewNgan, setViewNgan]   = useState<Ngan | null>(null)
   const [viewLots, setViewLots]   = useState<ProducedLot[]>([])
   const [viewLotsLoading, setViewLotsLoading] = useState(false)
-  const [selectedLotForDetailModal, setSelectedLotForDetailModal] = useState<ProducedLot | null>(null)
   const [expandedProductKeys, setExpandedProductKeys] = useState<Set<string>>(new Set())
   const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set())
   const [collapsedCardIds, setCollapsedCardIds] = useState<Set<string>>(new Set())
@@ -2225,359 +2221,176 @@ export default function StoragePage() {
 
       {/* ── View detail modal ──────────────────────────────────────────────── */}
       {modal === "view" && viewNgan && (
-        <ModalShell
-          title={`Chi tiết ${subTerm.toLowerCase()} ${viewNgan.ten_ngan}`}
-          onClose={() => {
-            setModal(null)
-            setViewLots([])
-            setExpandedProductKeys(new Set())
-            setExpandedDateKeys(new Set())
-          }}
-          maxWidth="3xl"
-          footer={
-            <div className="flex justify-end w-full">
-              <button
-                type="button"
-                onClick={() => {
-                  setModal(null)
-                  setViewLots([])
-                  setExpandedProductKeys(new Set())
-                  setExpandedDateKeys(new Set())
-                }}
-                className="px-5 py-2 text-xs sm:text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                Đóng
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className={`bg-gradient-to-r ${headerStyle(viewNgan.trang_thai).grad} border-b border-slate-200 px-6 py-4 flex items-center justify-between`}>
+              <div className="flex items-center gap-2">
+                <Warehouse size={18} className={headerStyle(viewNgan.trang_thai).icon} />
+                <h2 className="text-lg font-extrabold text-slate-800">{viewNgan.ten_ngan}</h2>
+              </div>
+              <button onClick={() => {
+                setModal(null)
+                setViewLots([])
+                setExpandedProductKeys(new Set())
+                setExpandedDateKeys(new Set())
+              }} className="p-2 hover:bg-white/60 rounded-xl">
+                <X size={18} />
               </button>
             </div>
-          }
-        >
-          <div className="space-y-4 text-sm">
-            {/* 1. NGUYÊN TẮC FILE-FIRST: Khối tệp tài liệu đặt trên cùng */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <DetailFileCard
-                fileName={`Lý lịch ${subTerm.toLowerCase()} — ${viewNgan.ten_ngan || viewNgan.ma_ngan}.pdf`}
-                fileType="pdf"
-                fileSize="Hồ sơ ngăn lưu"
-                statusLabel={exportingDetailId === viewNgan.id ? "Đang xuất..." : "Sẵn sàng"}
-                statusTone="emerald"
-                onDownload={() => void handleExportDetailPdf(viewNgan.id)}
-              />
-              <DetailFileCard
-                fileName={`Vùng trồng EUDR — ${viewNgan.ten_ngan || viewNgan.ma_ngan}.geojson`}
-                fileType="geojson"
-                fileSize="Dữ liệu GIS lô vườn"
-                statusLabel={exportingGeoId === viewNgan.id ? "Đang xuất..." : "Bản đồ EUDR"}
-                statusTone="blue"
-                onDownload={() => void handleExportGeoJson(viewNgan)}
-              />
-            </div>
-
-            {/* 2. THẺ THÔNG TIN NGĂN: DetailCard pastel, 2 cột 50-50 mobile, 4 cột desktop */}
-            <DetailCard
-              icon={<Warehouse size={20} />}
-              iconTone="teal"
-              title={viewNgan.ten_ngan}
-              subtitle={viewNgan.ma_ngan || `Mã ${subTerm.toLowerCase()}`}
-              badge={
-                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${badgeClass(viewNgan.trang_thai)}`}>
-                  {viewNgan.trang_thai}
-                </span>
-              }
-            >
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-                <DetailFieldItem
-                  icon={<Tag size={15} />}
-                  iconTone="rose"
-                  label={`Mã ${subTerm.toLowerCase()}`}
-                  value={viewNgan.ma_ngan}
-                  mono
-                  highlight="rose"
-                />
-                <DetailFieldItem
-                  icon={<Layers size={15} />}
-                  iconTone="amber"
-                  label="Loại nguyên liệu"
-                  value={viewNgan.loai_nl}
-                />
-                <DetailFieldItem
-                  icon={<MapPin size={15} />}
-                  iconTone="emerald"
-                  label="Nguồn gốc"
-                  value={viewNgan.nguon_goc}
-                />
-                <DetailFieldItem
-                  icon={<Wrench size={15} />}
-                  iconTone="blue"
-                  label="Xử lý"
-                  value={viewNgan.xu_ly}
-                />
-                <DetailFieldItem
-                  icon={<ShieldCheck size={15} />}
-                  iconTone="violet"
-                  label="Chứng nhận"
-                  value={viewNgan.chung_nhan}
-                />
-                <DetailFieldItem
-                  icon={<Calendar size={15} />}
-                  iconTone="emerald"
-                  label="Ngày BĐ nhận"
-                  value={fmtDate(viewNgan.ngay_bd)}
-                />
-                <DetailFieldItem
-                  icon={<Calendar size={15} />}
-                  iconTone="rose"
-                  label="Ngày KT nhận"
-                  value={fmtDate(viewNgan.ngay_kt)}
-                />
-                <DetailFieldItem
-                  icon={<Clock size={15} />}
-                  iconTone="amber"
-                  label="Xé từ ngày"
-                  value={fmtDate(viewNgan.xe_tu_ngay)}
-                />
-                <DetailFieldItem
-                  icon={<Clock size={15} />}
-                  iconTone="amber"
-                  label="Xé đến ngày"
-                  value={fmtDate(viewNgan.xe_den_ngay)}
-                />
-                {(() => {
-                  const agingDays = getStorageAgingDays(viewNgan.ngay_bd, todayMs)
-                  return (
-                    <DetailFieldItem
-                      icon={<Clock size={15} />}
-                      iconTone="blue"
-                      label="Số ngày lưu"
-                      value={agingDays !== null ? `${agingDays} ngày` : "—"}
-                      highlight={
-                        agingDays !== null && agingDays >= 21
-                          ? "rose"
-                          : agingDays !== null && agingDays >= 6
-                            ? "amber"
-                            : undefined
-                      }
-                    />
-                  )
-                })()}
-                <DetailFieldItem
-                  icon={<Scale size={15} />}
-                  iconTone="emerald"
-                  label="KL mủ tươi"
-                  value={(viewNgan.tong_tuoi || 0).toLocaleString("vi-VN") + " kg"}
-                  mono
-                />
-                <DetailFieldItem
-                  icon={<Scale size={15} />}
-                  iconTone="blue"
-                  label="KL mủ khô"
-                  value={(viewNgan.tong_kho || 0).toLocaleString("vi-VN") + " kg"}
-                  mono
-                  highlight="blue"
-                />
-                <DetailFieldItem
-                  icon={<Percent size={15} />}
-                  iconTone="indigo"
-                  label="Tỷ lệ TP / QK"
-                  value={
-                    viewNgan.tong_kho > 0
-                      ? `${(((lotStats[viewNgan.id] || 0) / viewNgan.tong_kho) * 100).toFixed(1)}% (${(lotStats[viewNgan.id] || 0).toLocaleString("vi-VN")} kg)`
-                      : "—"
-                  }
-                  highlight="emerald"
-                />
-                <DetailFieldItem
-                  icon={<Truck size={15} />}
-                  iconTone="orange"
-                  label="Số chuyến"
-                  value={(viewNgan.trips || []).length + " chuyến"}
-                />
-                {viewNgan.ghi_chu && (
-                  <DetailFieldItem
-                    icon={<FileText size={15} />}
-                    iconTone="slate"
-                    label="Ký hiệu KT"
-                    value={viewNgan.ghi_chu}
-                    colSpan={viewNgan.ghi_chu_tu_do ? 1 : 2}
-                  />
-                )}
-                {viewNgan.ghi_chu_tu_do && (
-                  <DetailFieldItem
-                    icon={<FileText size={15} />}
-                    iconTone="slate"
-                    label="Ghi chú tự do"
-                    value={viewNgan.ghi_chu_tu_do}
-                    colSpan={2}
-                  />
-                )}
-              </div>
-            </DetailCard>
-
-            {/* 3. KHỐI QR NGĂN: DetailQrBox đồng bộ */}
-            <DetailQrBox
-              label={`Mã QR tra cứu trực tuyến ${subTerm.toLowerCase()}`}
-              qrUrl={
-                typeof window !== "undefined"
-                  ? `${window.location.origin}${buildStorageLookupPath(viewNgan.id, viewNgan.ma_ngan)}`
-                  : buildStorageLookupPath(viewNgan.id, viewNgan.ma_ngan)
-              }
-            />
-
-            {/* 4. KHỐI THÀNH PHẨM ĐÃ DÙNG NGUYÊN LIỆU (Chiều 1: Có icon mắt 👁️ xem chi tiết lô) */}
-            <div className="pt-4 border-t border-slate-200">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <div>
-                  <h3 className="text-sm font-extrabold text-slate-800">Thành phẩm đã dùng nguyên liệu</h3>
-                  <p className="text-xs text-slate-400">
-                    Bấm từng nhóm để mở ngày sản xuất, rồi xem chi tiết từng lô thành phẩm
-                  </p>
+            <div className="flex-1 overflow-y-auto p-6 space-y-0 text-sm">
+              {([
+                [`Mã ${subTerm.toLowerCase()}`, viewNgan.ma_ngan],
+                ["Loại NL",    viewNgan.loai_nl],
+                ["Nguồn gốc",  viewNgan.nguon_goc],
+                ["Xử lý",      viewNgan.xu_ly],
+                ["Chứng nhận", viewNgan.chung_nhan],
+                ["Ngày BD",    fmtDate(viewNgan.ngay_bd)],
+                ["Ngày KT",    fmtDate(viewNgan.ngay_kt)],
+                ["Xé từ ngày", fmtDate(viewNgan.xe_tu_ngay)],
+                ["Xé đến ngày", fmtDate(viewNgan.xe_den_ngay)],
+                ["KL tươi",    (viewNgan.tong_tuoi || 0).toLocaleString() + " kg"],
+                ["KL khô",     (viewNgan.tong_kho  || 0).toLocaleString() + " kg"],
+                ["TP / QK",    viewNgan.tong_kho > 0
+                  ? `${((lotStats[viewNgan.id] || 0) / viewNgan.tong_kho * 100).toFixed(1)}% (${(lotStats[viewNgan.id] || 0).toLocaleString()} kg)`
+                  : "—"],
+                ["Số chuyến",  (viewNgan.trips || []).length + " chuyến"],
+                ["Trạng thái", viewNgan.trang_thai],
+                ...(viewNgan.ghi_chu ? [["Ký hiệu KT", viewNgan.ghi_chu]] : []),
+                ...(viewNgan.ghi_chu_tu_do ? [["Ghi chú", viewNgan.ghi_chu_tu_do]] : []),
+              ] as [string, string][]).map(([k, v]) => (
+                <div key={k} className="flex justify-between py-2 border-b border-dashed border-slate-200 last:border-0">
+                  <span className="text-slate-500">{k}</span>
+                  <span className="font-semibold text-slate-700 text-right max-w-[60%]">{v}</span>
                 </div>
-                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-full">
-                  {viewLots.length} lô
-                </span>
+              ))}
+
+              <div className="pt-4">
+                <InventoryQrCard
+                  compact
+                  title="QR ngăn"
+                  caption="Quét để mở trang chi tiết ngăn lưu trên web."
+                  hrefPath={buildStorageLookupPath(viewNgan.id, viewNgan.ma_ngan)}
+                  valueText={viewNgan.ma_ngan || viewNgan.ten_ngan}
+                  downloadFileName={`QR-${viewNgan.ma_ngan || viewNgan.ten_ngan}`}
+                />
               </div>
 
-              {viewLotsLoading ? (
-                <div className="py-6 text-center text-slate-400 text-sm">Đang tải danh sách thành phẩm...</div>
-              ) : groupedViewLots.length === 0 ? (
-                <div className="py-6 text-center text-slate-400 text-sm">
-                  Chưa có lô thành phẩm nào sử dụng nguyên liệu từ {viewNgan.ten_ngan}
+              <div className="pt-5 mt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-800">Thành phẩm đã dùng nguyên liệu</h3>
+                    <p className="text-xs text-slate-400">Bấm từng nhóm để mở ngày sản xuất, rồi mở tiếp để xem chi tiết từng lô</p>
+                  </div>
+                  <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-full">
+                    {viewLots.length} lô
+                  </span>
                 </div>
-              ) : (
-                <div className="max-h-[42vh] overflow-y-auto pr-1 space-y-4 overscroll-contain">
-                  {groupedViewLots.map((group) => {
-                    const productExpanded = expandedProductKeys.has(group.key)
-                    return (
-                      <div key={group.key} className="border border-slate-200 rounded-xl overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => toggleProductKey(group.key)}
-                          className="w-full px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 text-left hover:bg-slate-100 transition-colors"
-                        >
-                          <div className="flex items-start gap-2 min-w-0">
-                            {productExpanded ? (
-                              <ChevronDown size={16} className="text-slate-400 shrink-0 mt-0.5" />
-                            ) : (
-                              <ChevronRight size={16} className="text-slate-400 shrink-0 mt-0.5" />
-                            )}
-                            <div className="min-w-0">
-                              <div className="text-sm font-bold text-slate-800 break-words">
-                                {group.loai_csr} / Bành {group.loai_banh} / {group.boc}
-                              </div>
-                              <div className="text-xs text-slate-500 mt-1">
-                                {group.dates.length} ngày sản xuất · {group.totalLots} lô
+
+                {viewLotsLoading ? (
+                  <div className="py-6 text-center text-slate-400 text-sm">Đang tải danh sách thành phẩm...</div>
+                ) : groupedViewLots.length === 0 ? (
+                  <div className="py-6 text-center text-slate-400 text-sm">
+                    Chưa có lô thành phẩm nào sử dụng nguyên liệu từ {viewNgan.ten_ngan}
+                  </div>
+                ) : (
+                  <div className="max-h-[42vh] overflow-y-auto pr-1 space-y-4 overscroll-contain">
+                    {groupedViewLots.map(group => {
+                      const productExpanded = expandedProductKeys.has(group.key)
+                      return (
+                        <div key={group.key} className="border border-slate-200 rounded-xl overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => toggleProductKey(group.key)}
+                            className="w-full px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 text-left hover:bg-slate-100 transition-colors"
+                          >
+                            <div className="flex items-start gap-2 min-w-0">
+                              {productExpanded ? (
+                                <ChevronDown size={16} className="text-slate-400 shrink-0 mt-0.5" />
+                              ) : (
+                                <ChevronRight size={16} className="text-slate-400 shrink-0 mt-0.5" />
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-sm font-bold text-slate-800 break-words">
+                                  {group.loai_csr} / Bành {group.loai_banh} / {group.boc}
+                                </div>
+                                <div className="text-xs text-slate-500 mt-1">
+                                  {group.dates.length} ngày sản xuất · {group.totalLots} lô
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <div className="text-sm font-extrabold text-blue-700">{fmtKg(group.totalKg)}</div>
-                          </div>
-                        </button>
+                            <div className="text-right shrink-0">
+                              <div className="text-sm font-extrabold text-blue-700">{fmtKg(group.totalKg)}</div>
+                            </div>
+                          </button>
 
-                        {productExpanded && (
-                          <div className="bg-white divide-y divide-slate-100">
-                            {group.dates.map((dateGroup) => {
-                              const dateKey = `${group.key}|${dateGroup.date}`
-                              const dateExpanded = expandedDateKeys.has(dateKey)
-                              return (
-                                <div key={dateKey}>
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleDateKey(dateKey)}
-                                    className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-slate-50 transition-colors"
-                                  >
-                                    <div className="flex items-start gap-2 min-w-0">
-                                      {dateExpanded ? (
-                                        <ChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />
-                                      ) : (
-                                        <ChevronRight size={15} className="text-slate-400 shrink-0 mt-0.5" />
-                                      )}
-                                      <div className="min-w-0">
-                                        <div className="text-sm font-semibold text-slate-700">
-                                          {fmtDate(dateGroup.date)}
-                                        </div>
-                                        <div className="text-xs text-slate-500 mt-1 break-words">
-                                          {group.loai_csr} / Bành {group.loai_banh} / {group.boc}
+                          {productExpanded && (
+                            <div className="bg-white divide-y divide-slate-100">
+                              {group.dates.map(dateGroup => {
+                                const dateKey = `${group.key}|${dateGroup.date}`
+                                const dateExpanded = expandedDateKeys.has(dateKey)
+                                return (
+                                  <div key={dateKey}>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleDateKey(dateKey)}
+                                      className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-slate-50 transition-colors"
+                                    >
+                                      <div className="flex items-start gap-2 min-w-0">
+                                        {dateExpanded ? (
+                                          <ChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />
+                                        ) : (
+                                          <ChevronRight size={15} className="text-slate-400 shrink-0 mt-0.5" />
+                                        )}
+                                        <div className="min-w-0">
+                                          <div className="text-sm font-semibold text-slate-700">
+                                            {fmtDate(dateGroup.date)}
+                                          </div>
+                                          <div className="text-xs text-slate-500 mt-1 break-words">
+                                            {group.loai_csr} / Bành {group.loai_banh} / {group.boc}
+                                          </div>
                                         </div>
                                       </div>
-                                    </div>
-                                    <div className="text-right shrink-0">
-                                      <div className="text-sm font-bold text-slate-700">{fmtKg(dateGroup.totalKg)}</div>
-                                      <div className="text-xs text-slate-500">{dateGroup.lots.length} lô</div>
-                                    </div>
-                                  </button>
+                                      <div className="text-right shrink-0">
+                                        <div className="text-sm font-bold text-slate-700">{fmtKg(dateGroup.totalKg)}</div>
+                                        <div className="text-xs text-slate-500">{dateGroup.lots.length} lô</div>
+                                      </div>
+                                    </button>
 
-                                  {dateExpanded && (
-                                    <div className="px-4 pb-3">
-                                      <div className="rounded-xl border border-slate-200 overflow-hidden">
-                                        <div className="divide-y divide-slate-100 bg-white">
-                                          {dateGroup.lots.map((lot) => (
-                                            <div
-                                              key={lot.id}
-                                              className="px-4 py-3 flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors"
-                                            >
-                                              <div className="flex items-center gap-2.5 min-w-0">
-                                                {/* Nút mắt 👁️ xem chi tiết lô thành phẩm (Chiều 1) */}
-                                                <button
-                                                  type="button"
-                                                  onClick={() => setSelectedLotForDetailModal(lot)}
-                                                  title="Xem chi tiết lô thành phẩm"
-                                                  aria-label={`Xem chi tiết lô ${lot.ma_lo}`}
-                                                  className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center shrink-0 transition-colors"
-                                                >
-                                                  <Eye size={14} />
-                                                </button>
+                                    {dateExpanded && (
+                                      <div className="px-4 pb-3">
+                                        <div className="rounded-xl border border-slate-200 overflow-hidden">
+                                          <div className="divide-y divide-slate-100 bg-white">
+                                            {dateGroup.lots.map(lot => (
+                                              <div key={lot.id} className="px-4 py-3 flex items-center justify-between gap-4">
                                                 <div className="min-w-0">
-                                                  <div className="font-bold text-slate-800 flex items-center gap-2">
-                                                    <span className="font-mono">{lot.ma_lo}</span>
-                                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                                                      {lot.trang_thai}
-                                                    </span>
-                                                  </div>
-                                                  <div className="text-xs text-slate-500 mt-0.5">
-                                                    Ca {lot.ca || "—"} · {lot.tong_banh || 0} bành
+                                                  <div className="font-bold text-slate-800">{lot.ma_lo}</div>
+                                                  <div className="text-xs text-slate-500">
+                                                    Ca {lot.ca || "—"} · {lot.tong_banh || 0} bành · {lot.trang_thai}
                                                   </div>
                                                 </div>
-                                              </div>
-                                              <div className="text-right shrink-0">
-                                                <div className="text-sm font-semibold font-mono text-slate-700">
-                                                  {fmtKg(lot.tong_kg || 0)}
+                                                <div className="text-right shrink-0">
+                                                  <div className="text-sm font-semibold text-slate-700">{fmtKg(lot.tong_kg || 0)}</div>
                                                 </div>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => setSelectedLotForDetailModal(lot)}
-                                                  className="text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline mt-0.5 inline-flex items-center gap-0.5"
-                                                >
-                                                  <span>Chi tiết</span>
-                                                  <Eye size={11} />
-                                                </button>
                                               </div>
-                                            </div>
-                                          ))}
+                                            ))}
+                                          </div>
                                         </div>
                                       </div>
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </ModalShell>
-      )}
-
-      {/* Modal xem chi tiết lô thành phẩm bằng LotDetailModal (Chiều 1) */}
-      {selectedLotForDetailModal && (
-        <StorageLotDetailModal
-          lot={selectedLotForDetailModal}
-          onClose={() => setSelectedLotForDetailModal(null)}
-        />
+        </div>
       )}
 
       {/* ── Delete confirm ─────────────────────────────────────────────────── */}

@@ -24,10 +24,8 @@ import {
   ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
   RefreshCw, Clock, Star, ArrowLeft, Printer, Eye, FileText, Loader2,
-  Upload, Download, CheckCircle, FlaskConical,
-  Activity, Calendar, CheckCircle2, Layers, Percent, ShieldCheck, Tag, Truck
+  Upload, Download, CheckCircle, FlaskConical
 } from "lucide-react"
-import { DetailCard, DetailFieldItem, DetailFileCard } from "@/app/dashboard/_components/detail-view-ui"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Samples = Record<string, (string | number)[]>
@@ -374,7 +372,6 @@ export default function QualityPage() {
   const [selectedDeleteIds, setSelectedDeleteIds] = useState<Set<string>>(new Set())
   const [delConfirm,    setDelConfirm]   = useState<string|null>(null)
   const [expandedId,    setExpandedId]   = useState<string|null>(null)
-  const [detailModalQc, setDetailModalQc] = useState<QcResult|null>(null)
   const [parentMap,     setParentMap]    = useState<Map<string,QcResult>>(new Map())
 
   // ── Uninspected completed lots state ─────────────────────────────────────────
@@ -2634,22 +2631,10 @@ export default function QualityPage() {
                                       </span>
                                     </td>
                                     <td className="px-3 py-2.5">
-                                      <div className="flex items-center gap-1 justify-end">
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            setDetailModalQc(r)
-                                          }}
-                                          title="Xem chi tiết phiếu kiểm nghiệm"
-                                          className="p-1 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors"
-                                        >
-                                          <Eye size={13} />
-                                        </button>
-                                        <button onClick={e=>{e.stopPropagation();setExpandedId(expandedId===r.id?null:r.id)}}
-                                          className="p-1 hover:bg-slate-100 rounded-lg">
-                                          {expandedId===r.id?<ChevronDown size={13} className="text-slate-400"/>:<ChevronRight size={13} className="text-slate-400"/>}
-                                        </button>
-                                      </div>
+                                      <button onClick={e=>{e.stopPropagation();setExpandedId(expandedId===r.id?null:r.id)}}
+                                        className="p-1 hover:bg-slate-100 rounded-lg">
+                                        {expandedId===r.id?<ChevronDown size={13} className="text-slate-400"/>:<ChevronRight size={13} className="text-slate-400"/>}
+                                      </button>
                                     </td>
                                   </tr>
                                   {/* Expanded detail */}
@@ -2787,27 +2772,18 @@ export default function QualityPage() {
                           <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${!r.dat_hang?.endsWith("RH")?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
                             {!r.dat_hang?.endsWith("RH")?`✓ ${r.dat_hang}`:`✗ ${r.dat_hang}`}
                           </span>
-                          <div className="ml-auto flex items-center gap-1.5">
-                            <button
-                              onClick={() => setDetailModalQc(r)}
-                              className="flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg border border-emerald-200 transition-colors"
-                              title="Xem chi tiết phiếu kiểm nghiệm"
-                            >
-                              <Eye size={12} /> Chi tiết
-                            </button>
-                            <button onClick={async ()=>{
-                              const batchLots = results.filter(r2=>
-                                r.batch_id ? r2.batch_id===r.batch_id : (r2.pkn===r.pkn&&r2.ngay_kn===r.ngay_kn&&!!r2.parent_id)
-                              )
-                              try {
-                                await downloadQualityKqknPdf(batchLots.length?batchLots:[r], r.ngay_kn, factoryCode)
-                              } catch {
-                                showToast("Không tạo được PDF phiếu KQKN.", false)
-                              }
-                            }} className="flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold rounded-lg border border-slate-200 transition-colors">
-                              <Printer size={11}/> PDF
-                            </button>
-                          </div>
+                          <button onClick={async ()=>{
+                            const batchLots = results.filter(r2=>
+                              r.batch_id ? r2.batch_id===r.batch_id : (r2.pkn===r.pkn&&r2.ngay_kn===r.ngay_kn&&!!r2.parent_id)
+                            )
+                            try {
+                              await downloadQualityKqknPdf(batchLots.length?batchLots:[r], r.ngay_kn, factoryCode)
+                            } catch {
+                              showToast("Không tạo được PDF phiếu KQKN.", false)
+                            }
+                          }} className="ml-auto flex items-center gap-1 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-bold rounded-lg border border-slate-200 transition-colors">
+                            <Printer size={11}/> PDF
+                          </button>
                         </div>
 
                         {/* Comparison */}
@@ -2867,214 +2843,6 @@ export default function QualityPage() {
           )}
         </div>
       )}
-
-      {/* ── DETAIL QC MODAL (KQKN) ────────────────────────────────────────────── */}
-      {detailModalQc && (() => {
-        const effectiveR = getEffectiveQc(detailModalQc)
-        const isRetested = effectiveR.id !== detailModalQc.id
-        const isEffectivePassed = !effectiveR.dat_hang?.endsWith("RH")
-        const signStatus = signingStatusByDate.get(detailModalQc.ngay_kn)
-        const pknLabel = formatPKN(effectiveR.pkn, effectiveR.ngay_kn, factoryCode)
-        const fileHienTai = signStatus?.fileHienTai
-
-        return (
-          <ModalShell
-            title={`Chi tiết phiếu kiểm nghiệm ${pknLabel}`}
-            onClose={() => setDetailModalQc(null)}
-            maxWidth="3xl"
-          >
-            <div className="space-y-4">
-              {/* File-First: Phiếu KQKN đã ký duyệt hoặc bản in nháp */}
-              {fileHienTai ? (
-                <DetailFileCard
-                  fileName={`Phiếu KQKN ${factoryCode} ${detailModalQc.ngay_kn}.pdf`}
-                  fileType="pdf"
-                  fileSize="Bản điện tử ký duyệt"
-                  statusLabel={signStatus?.trangThai === "hoan_tat" ? "Đã ký duyệt" : "Đang chờ ký"}
-                  statusTone={signStatus?.trangThai === "hoan_tat" ? "emerald" : "amber"}
-                  onView={() => window.open(fileHienTai, "_blank")}
-                  onDownload={() => {
-                    window.location.href = buildStorageDownloadUrl(
-                      fileHienTai,
-                      `Phiếu KQKN ${factoryCode} ${detailModalQc.ngay_kn}`
-                    )
-                  }}
-                />
-              ) : (
-                <DetailFileCard
-                  fileName={`Phiếu KQKN ${factoryCode} ${detailModalQc.ngay_kn}.pdf`}
-                  fileType="pdf"
-                  fileSize="Bản in PDF"
-                  statusLabel="Chưa ký duyệt"
-                  statusTone="blue"
-                  onView={async () => {
-                    try {
-                      await downloadQualityKqknPdf([detailModalQc], detailModalQc.ngay_kn, factoryCode)
-                    } catch {
-                      showToast("Không tạo được bản in PDF.", false)
-                    }
-                  }}
-                  onDownload={async () => {
-                    try {
-                      await downloadQualityKqknPdf([detailModalQc], detailModalQc.ngay_kn, factoryCode)
-                    } catch {
-                      showToast("Không tạo được bản in PDF.", false)
-                    }
-                  }}
-                />
-              )}
-
-              {/* Thông báo kiểm nghiệm lại nếu có */}
-              {isRetested && (
-                <div className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3.5 py-2.5 rounded-xl flex items-center gap-2">
-                  <CheckCircle size={15} /> Kết quả hiển thị từ lần kiểm nghiệm lại (Lần {effectiveR.lan || 2} - Ngày {formatDateDisplay(effectiveR.ngay_kn)}). Lần 1 rớt hạng ({detailModalQc.dat_hang}).
-                </div>
-              )}
-
-              {/* Thẻ thông tin phiếu & mẫu kiểm nghiệm: Lưới 2 cột 50-50 mobile */}
-              <DetailCard
-                title={`Thông tin kiểm nghiệm lô ${effectiveR.ma_lo}`}
-                subtitle={`Phiếu ${pknLabel} · Lô PKN ${effectiveR.lo_kn || "—"} · ${effectiveR.tieu_chuan}`}
-                icon={<FlaskConical size={18} />}
-                iconTone="teal"
-                badge={
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                    isEffectivePassed ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"
-                  }`}>
-                    {isEffectivePassed ? `✓ Đạt (${effectiveR.dat_hang})` : `✗ Không đạt (${effectiveR.dat_hang || "Rớt hạng"})`}
-                  </span>
-                }
-              >
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-                  <DetailFieldItem
-                    icon={<Tag size={15} />}
-                    iconTone="rose"
-                    label="Số phiếu"
-                    value={pknLabel}
-                    mono
-                  />
-                  <DetailFieldItem
-                    icon={<Calendar size={15} />}
-                    iconTone="emerald"
-                    label="Ngày kiểm"
-                    value={formatDateDisplay(effectiveR.ngay_kn)}
-                  />
-                  <DetailFieldItem
-                    icon={<Clock size={15} />}
-                    iconTone="blue"
-                    label="Ngày sản xuất"
-                    value={formatDateDisplay(effectiveR.ngay_sx || effectiveR.lots?.ngay_sx) || "—"}
-                  />
-                  <DetailFieldItem
-                    icon={<Layers size={15} />}
-                    iconTone="amber"
-                    label="Loại mủ / CSR"
-                    value={effectiveR.loai_csr || effectiveR.chung_loai}
-                  />
-                  <DetailFieldItem
-                    icon={<Truck size={15} />}
-                    iconTone="orange"
-                    label="Lô PKN / Đội xe"
-                    value={effectiveR.lo_kn ? `Lô ${effectiveR.lo_kn}` : "—"}
-                  />
-                  <DetailFieldItem
-                    icon={<Percent size={15} />}
-                    iconTone="slate"
-                    label="Tạp chất %"
-                    value={effectiveR.grade?.tap_chat?.tb != null ? `${effectiveR.grade.tap_chat.tb.toFixed(4)}%` : "—"}
-                    highlight={effectiveR.grade?.tap_chat?.dat ? "emerald" : "rose"}
-                  />
-                  <DetailFieldItem
-                    icon={<Percent size={15} />}
-                    iconTone="slate"
-                    label="Độ tro %"
-                    value={effectiveR.grade?.tro?.tb != null ? `${effectiveR.grade.tro.tb.toFixed(4)}%` : "—"}
-                    highlight={effectiveR.grade?.tro?.dat ? "emerald" : "rose"}
-                  />
-                  <DetailFieldItem
-                    icon={<Percent size={15} />}
-                    iconTone="emerald"
-                    label="DRC / Bay hơi %"
-                    value={effectiveR.grade?.bay_hoi?.tb != null ? `${effectiveR.grade.bay_hoi.tb.toFixed(3)}%` : "—"}
-                    highlight={effectiveR.grade?.bay_hoi?.dat ? "emerald" : "rose"}
-                  />
-                  <DetailFieldItem
-                    icon={<Activity size={15} />}
-                    iconTone="blue"
-                    label="Chỉ số PRI"
-                    value={effectiveR.grade?.pri?.tb != null ? effectiveR.grade.pri.tb.toFixed(1) : "—"}
-                    highlight={effectiveR.grade?.pri?.dat ? "emerald" : "rose"}
-                  />
-                  <DetailFieldItem
-                    icon={<CheckCircle2 size={15} />}
-                    iconTone="teal"
-                    label="Trạng thái"
-                    value={isEffectivePassed ? `Đạt ${effectiveR.dat_hang}` : `Không đạt (${effectiveR.dat_hang || "Rớt hạng"})`}
-                    highlight={isEffectivePassed ? "emerald" : "rose"}
-                  />
-                  <DetailFieldItem
-                    icon={<ShieldCheck size={15} />}
-                    iconTone="violet"
-                    label="Tiêu chuẩn áp dụng"
-                    value={effectiveR.tieu_chuan}
-                    colSpan={2}
-                  />
-                </div>
-              </DetailCard>
-
-              {/* Bảng chi tiết các mẫu thử */}
-              <DetailCard
-                title={`Kết quả phân tích ${effectiveR.so_mau || 6} mẫu thử`}
-                subtitle="Chi tiết từng mẫu và điều kiện kiểm tra đạt theo tiêu chuẩn"
-                icon={<BarChart2 size={18} />}
-                iconTone="indigo"
-              >
-                <div className="flex flex-wrap gap-2.5 sm:gap-3 text-xs">
-                  {ALL_FIELDS.filter(f => effectiveR.grade?.[f.key] || (effectiveR.samples as any)?.[f.key]?.some((v: any) => v > 0)).map(f => {
-                    const vals = ((effectiveR.samples as any)?.[f.key] || []) as number[]
-                    const g = effectiveR.grade?.[f.key]
-                    return (
-                      <div
-                        key={f.key}
-                        className={`rounded-xl p-3 border flex-1 min-w-[130px] ${
-                          g?.dat === false ? "border-red-200 bg-red-50/60" : "border-slate-200 bg-slate-50/50"
-                        }`}
-                      >
-                        <div className="font-extrabold text-slate-700 mb-2 flex items-center justify-between">
-                          <span>{f.label}</span>
-                          {g && (
-                            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full ${
-                              g.dat ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"
-                            }`}>
-                              {g.dat ? "✓" : "✗"}
-                            </span>
-                          )}
-                        </div>
-                        <div className="space-y-1">
-                          {vals.map((v, i) => (
-                            <div key={i} className="flex justify-between items-center text-[11px]">
-                              <span className="text-slate-400 font-medium">Mẫu {i + 1}</span>
-                              <span className="font-mono font-bold text-slate-800">{v || "—"}</span>
-                            </div>
-                          ))}
-                        </div>
-                        {g && (
-                          <div className={`mt-2 pt-1.5 border-t border-slate-200/80 text-[10px] ${
-                            g.dat ? "text-emerald-700" : "text-red-600"
-                          }`}>
-                            <span className="font-bold">{g.dat ? "✓ Đạt tiêu chuẩn" : "✗ Không đạt"}</span>
-                            {g.detail && <p className="text-[10px] text-slate-500 font-normal mt-0.5">{g.detail}</p>}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </DetailCard>
-            </div>
-          </ModalShell>
-        )
-      })()}
 
       {/* ── EDIT DATE MODAL ──────────────────────────────────────────────────── */}
       {editDateModal && (

@@ -1,8 +1,7 @@
 "use client"
 
 import { useState, useMemo } from "react"
-import { ChevronDown, ChevronRight, GripVertical, Search, Eye } from "lucide-react"
-import { LotDetailModal } from "./lot-detail-modal"
+import { ChevronDown, ChevronRight, GripVertical, Search } from "lucide-react"
 import {
   type LotInfo,
   type WarehousePlacement,
@@ -34,7 +33,6 @@ export default function LotPanel({
   onRemovePlacement,
 }: Props) {
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set())
-  const [detailLot, setDetailLot] = useState<LotInfo | null>(null)
   const [isDragBackOver, setIsDragBackOver] = useState(false)
   // Bộ lọc nội bộ cho panel (độc lập với filter sơ đồ kho)
   const [search, setSearch] = useState("")
@@ -213,18 +211,8 @@ export default function LotPanel({
                   ) : placedCount > 0 ? (
                     <span className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded-full font-bold shrink-0">{placedCount}/4</span>
                   ) : null}
-                  {/* Eye detail button */}
-                  <button
-                    type="button"
-                    onClick={e => { e.stopPropagation(); setDetailLot(lot) }}
-                    className={`${c.text} opacity-60 hover:opacity-100 shrink-0 p-0.5 rounded hover:bg-black/5 transition-colors`}
-                    title="Xem chi tiết lô"
-                  >
-                    <Eye size={10} />
-                  </button>
                   {/* Expand toggle */}
                   <button
-                    type="button"
                     onClick={e => { e.stopPropagation(); toggleLot(lot.id) }}
                     className={`${c.text} opacity-60 hover:opacity-100 shrink-0`}
                   >
@@ -282,15 +270,6 @@ export default function LotPanel({
           })
         )}
       </div>
-
-      {/* Modal chi tiết lô thành phẩm */}
-      {detailLot && (
-        <LotDetailModal
-          lot={detailLot}
-          placedSlots={placedSlotLookup}
-          onClose={() => setDetailLot(null)}
-        />
-      )}
     </div>
   )
 }

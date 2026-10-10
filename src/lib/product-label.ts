@@ -62,51 +62,19 @@ export type ProductLabelLookupResult = {
   maxPerKien: number | null
   eudrOrderCode: string | null
   eudrOrderUrl: string | null
-  // Thông tin phiếu KQKN / File chứng nhận kiểm nghiệm chất lượng (File-First)
-  kqknFileName?: string | null
-  kqknFileUrl?: string | null
-  kqknStatus?: string | null
-  kqknPkn?: number | null
-  kqknNgay?: string | null
 }
 
 const KIEN_LOWER: Record<KienLetter, string> = { A: "a", B: "b", C: "c", D: "d" }
 
-// Lấy thông tin phiếu KN và file ký số mới nhất cho 1 lô thật — dedupe theo lan lớn nhất rồi created_at
-async function fetchLatestQc(
-  lotId: string,
-  factoryId: string,
-  maLo: string,
-  client: SupabaseClient,
-): Promise<{
-  datHang: string | null
-  kqknFileName: string | null
-  kqknFileUrl: string | null
-  kqknStatus: string | null
-  kqknPkn: number | null
-  kqknNgay: string | null
-}> {
+// Lấy dat_hang của phiếu KN mới nhất cho 1 lô thật — dedupe theo lan lớn nhất rồi created_at
+// mới nhất, mirror đúng logic getRotHangLotCount() trong module-tasks.ts.
+async function fetchLatestDatHang(lotId: string, client: SupabaseClient): Promise<string | null> {
   const { data } = await client
     .from("qc_results")
-    .select("lan, created_at, dat_hang, pkn, ngay_kn")
+    .select("lan, created_at, dat_hang")
     .eq("lot_id", lotId)
-  const rows = (data || []) as {
-    lan: number | null
-    created_at: string
-    dat_hang: string | null
-    pkn: number | null
-    ngay_kn: string | null
-  }[]
-  if (rows.length === 0) {
-    return {
-      datHang: null,
-      kqknFileName: null,
-      kqknFileUrl: null,
-      kqknStatus: null,
-      kqknPkn: null,
-      kqknNgay: null,
-    }
-  }
+  const rows = (data || []) as { lan: number | null; created_at: string; dat_hang: string | null }[]
+  if (rows.length === 0) return null
   let latest = rows[0]
   for (const r of rows) {
     const rLan = r.lan || 1
@@ -115,50 +83,7 @@ async function fetchLatestQc(
       latest = r
     }
   }
-
-  let kqknFileUrl: string | null = null
-  let kqknStatus: string | null = null
-  if (latest.ngay_kn) {
-    try {
-      const { data: yck } = await client
-        .from("yeu_cau_ky")
-        .select("file_hien_tai, trang_thai")
-        .eq("factory_id", factoryId)
-        .eq("modun", "quality")
-        .eq("loai_tai_lieu", "quality_kqkn")
-        .eq("ma_ho_so", latest.ngay_kn)
-        .in("trang_thai", ["dang_luan_chuyen", "hoan_tat"])
-        .order("tao_luc", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (yck?.file_hien_tai) {
-        kqknFileUrl = yck.file_hien_tai
-        kqknStatus = yck.trang_thai === "hoan_tat" ? "Đã duyệt & ký số" : "Đang trình ký"
-      }
-    } catch {
-      // bỏ qua lỗi nếu bảng ký không truy cập được
-    }
-  }
-
-  const pknStr = latest.pkn ? `PKN-${latest.pkn}` : null
-  const kqknFileName = kqknFileUrl
-    ? `KQKN_${maLo}_${latest.ngay_kn || "signed"}.pdf`
-    : pknStr
-      ? `Phiếu kiểm nghiệm ${pknStr} (${maLo}).pdf`
-      : `Phiếu kiểm nghiệm ${maLo}.pdf`
-
-  if (!kqknStatus && latest.dat_hang) {
-    kqknStatus = `Đạt hạng ${latest.dat_hang}`
-  }
-
-  return {
-    datHang: latest.dat_hang || null,
-    kqknFileName,
-    kqknFileUrl,
-    kqknStatus,
-    kqknPkn: latest.pkn || null,
-    kqknNgay: latest.ngay_kn || null,
-  }
+  return latest.dat_hang || null
 }
 
 export async function resolveProductLabelLookupTarget(
@@ -253,7 +178,7 @@ export async function resolveProductLabelLookupTarget(
     const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined) : null
     const maxPerKien = config?.max_per_kien ?? 36
 
-    const qc = await fetchLatestQc(lot.id, normalizedFactoryId, normalizedMaLo, client)
+    const datHang = await fetchLatestDatHang(lot.id, client)
 
     // Tra cứu đơn xuất hàng liên quan
     const matchedOrder = (exportOrders || []).find((ord) => {
@@ -307,16 +232,11 @@ export async function resolveProductLabelLookupTarget(
         gioSx: resolvedGioSx,
         ca: lastKienTx?.ca || null,
         realLotId: lot.id,
-        datHang: qc.datHang,
+        datHang,
         existingBanh,
         maxPerKien: config?.max_per_kien ?? null,
         eudrOrderCode,
         eudrOrderUrl,
-        kqknFileName: qc.kqknFileName,
-        kqknFileUrl: qc.kqknFileUrl,
-        kqknStatus: qc.kqknStatus,
-        kqknPkn: qc.kqknPkn,
-        kqknNgay: qc.kqknNgay,
       }
     }
 
@@ -336,16 +256,11 @@ export async function resolveProductLabelLookupTarget(
         gioSx: resolvedGioSx,
         ca: lastKienTx.ca || null,
         realLotId: lot.id,
-        datHang: qc.datHang,
+        datHang,
         existingBanh,
         maxPerKien: config?.max_per_kien ?? null,
         eudrOrderCode,
         eudrOrderUrl,
-        kqknFileName: qc.kqknFileName,
-        kqknFileUrl: qc.kqknFileUrl,
-        kqknStatus: qc.kqknStatus,
-        kqknPkn: qc.kqknPkn,
-        kqknNgay: qc.kqknNgay,
       }
     }
 
@@ -365,16 +280,11 @@ export async function resolveProductLabelLookupTarget(
         gioSx: resolvedGioSx,
         ca: lastKienTx.ca || null,
         realLotId: lot.id,
-        datHang: qc.datHang,
+        datHang,
         existingBanh,
         maxPerKien: config?.max_per_kien ?? null,
         eudrOrderCode,
         eudrOrderUrl,
-        kqknFileName: qc.kqknFileName,
-        kqknFileUrl: qc.kqknFileUrl,
-        kqknStatus: qc.kqknStatus,
-        kqknPkn: qc.kqknPkn,
-        kqknNgay: qc.kqknNgay,
       }
     }
 
@@ -393,16 +303,11 @@ export async function resolveProductLabelLookupTarget(
       gioSx: null,
       ca: null,
       realLotId: lot.id,
-      datHang: qc.datHang,
+      datHang,
       existingBanh: 0,
       maxPerKien: config?.max_per_kien ?? null,
       eudrOrderCode,
       eudrOrderUrl,
-      kqknFileName: qc.kqknFileName,
-      kqknFileUrl: qc.kqknFileUrl,
-      kqknStatus: qc.kqknStatus,
-      kqknPkn: qc.kqknPkn,
-      kqknNgay: qc.kqknNgay,
     }
   }
 

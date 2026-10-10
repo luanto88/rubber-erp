@@ -5,13 +5,12 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { QRCodeSVG } from "qrcode.react"
 import {
-  AlertCircle, AlertTriangle, ArrowLeft, Building, Calendar, CheckCircle2, ChevronDown, ChevronUp, Clock, Coins, Edit3, Eye, ExternalLink, FileSignature, FileText, ImagePlus, Layers, Loader2, Plus,
-  QrCode, RotateCcw, Save, Send, ShieldCheck, ShoppingCart, Tag, Trash2, User, UserCheck, Users, Wrench, X,
+  AlertCircle, AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, Coins, Edit3, Eye, ExternalLink, FileSignature, FileText, ImagePlus, Loader2, Plus,
+  QrCode, RotateCcw, Save, Send, ShoppingCart, Trash2, Users, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../../_components/maintenance-shell"
-import { DetailCard, DetailFieldItem, DetailQrBox } from "@/app/dashboard/_components/detail-view-ui"
 
 function fmtDateVi(dateStr?: string | null): string {
   if (!dateStr) return "—"
@@ -1455,33 +1454,28 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     : <span className="px-3 py-1 rounded-full text-sm font-bold bg-amber-100 text-amber-700">Chờ duyệt</span>
 
   const renderReadOnlyGeneralInfo = () => (
-    <DetailCard
-      icon={<Wrench size={18} />}
-      iconTone="orange"
-      title="Thông tin chung"
-      subtitle="Biên bản bảo trì / sửa chữa thiết bị"
-      badge={
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
+        <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+          <Wrench size={18} className="text-orange-500" />
+          Thông tin chung
+        </h2>
         <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
           Chế độ xem
         </span>
-      }
-    >
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-        <DetailFieldItem
-          icon={<Tag size={15} />}
-          iconTone="rose"
-          label="Mã biên bản"
-          value={record?.ma_bb || "—"}
-          mono
-          highlight="rose"
-        />
-        <DetailFieldItem
-          icon={<Layers size={15} />}
-          iconTone="amber"
-          label="Hạng mục"
-          value={
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+        <div>
+          <p className="text-sm font-medium text-slate-500">Mã biên bản</p>
+          <p className="text-base font-bold font-mono text-orange-600 mt-1 break-all">
+            {record?.ma_bb || "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Hạng mục</p>
+          <div className="mt-1">
             <span
-              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
                 hangMuc === "Sửa chữa"
                   ? "bg-amber-100 text-amber-800 border border-amber-200"
                   : "bg-sky-100 text-sky-800 border border-sky-200"
@@ -1489,46 +1483,36 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             >
               {hangMuc}
             </span>
-          }
-        />
-        <DetailFieldItem
-          icon={<Building size={15} />}
-          iconTone="blue"
-          label="Bộ phận"
-          value={boPhan || "—"}
-        />
-        <DetailFieldItem
-          icon={<Calendar size={15} />}
-          iconTone="emerald"
-          label="Ngày lập biên bản"
-          value={fmtDateVi(ngay)}
-        />
-        <DetailFieldItem
-          icon={<Clock size={15} />}
-          iconTone="emerald"
-          label="Giờ bắt đầu"
-          value={tuGio || "—"}
-        />
-        <DetailFieldItem
-          icon={<CheckCircle2 size={15} />}
-          iconTone="blue"
-          label="Giờ kết thúc"
-          value={denGio ? denGio.replace("T", " ") : "—"}
-        />
-        <DetailFieldItem
-          icon={<User size={15} />}
-          iconTone="pink"
-          label="Người tạo biên bản"
-          value={record?.nguoi_tao || "—"}
-        />
-        <DetailFieldItem
-          icon={<ShieldCheck size={15} />}
-          iconTone="teal"
-          label="Trạng thái phê duyệt"
-          value={statusBadge}
-        />
+          </div>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Bộ phận</p>
+          <p className="text-base font-bold text-slate-900 mt-1">{boPhan || "—"}</p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Ngày lập biên bản</p>
+          <p className="text-base font-semibold text-slate-800 mt-1">{fmtDateVi(ngay)}</p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Giờ bắt đầu</p>
+          <p className="text-base font-semibold text-slate-800 mt-1">{tuGio || "—"}</p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Giờ kết thúc</p>
+          <p className="text-base font-semibold text-slate-800 mt-1">
+            {denGio ? denGio.replace("T", " ") : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Người tạo biên bản</p>
+          <p className="text-base font-semibold text-slate-800 mt-1">{record?.nguoi_tao || "—"}</p>
+        </div>
+        <div>
+          <p className="text-sm font-medium text-slate-500">Trạng thái phê duyệt</p>
+          <div className="mt-1">{statusBadge}</div>
+        </div>
       </div>
-    </DetailCard>
+    </div>
   )
 
   const renderReadOnlyLines = () => (
@@ -3016,16 +3000,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-start gap-3">
-              <span className="w-8 h-8 rounded-xl bg-slate-100 text-slate-600 grid place-items-center shrink-0 mt-0.5">
-                <FileText size={16} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] text-slate-400 font-medium">Nội dung ghi chú</p>
-                <p className="text-sm font-semibold text-slate-800 mt-1 whitespace-pre-wrap leading-relaxed">
-                  {ghiChu?.trim() || "(Không có ghi chú thêm)"}
-                </p>
-              </div>
+            <div>
+              <p className="text-sm font-medium text-slate-500">Nội dung ghi chú</p>
+              <p className="text-sm font-semibold text-slate-900 mt-1 whitespace-pre-wrap">
+                {ghiChu?.trim() || "(Không có ghi chú thêm)"}
+              </p>
             </div>
           </div>
         )}
@@ -3033,8 +3012,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       {/* Tra cứu QR mini */}
       {!effectiveIsNew && recordQrUrl && (
-        <div className="mt-5 pt-4 border-t border-slate-100">
-          <DetailQrBox label="Liên kết tra cứu trực tuyến" qrUrl={recordQrUrl} />
+        <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-4">
+          <div className="text-xs text-slate-500">
+            <span className="font-bold text-slate-700 block">Liên kết tra cứu trực tuyến</span>
+            <span className="font-mono text-[11px] text-slate-400 break-all">{recordQrUrl}</span>
+          </div>
+          <div className="shrink-0 p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+            <QRCodeSVG value={recordQrUrl} size={48} level="M" />
+          </div>
         </div>
       )}
     </div>
@@ -3125,17 +3110,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         ) : (
           <div className="space-y-4">
             <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-7 h-7 rounded-xl bg-pink-50 text-pink-600 grid place-items-center shrink-0">
-                  <Users size={14} />
-                </span>
-                <div>
-                  <p className="text-[11px] text-slate-400 font-medium">Người thực hiện</p>
-                  <p className="text-xs font-bold text-slate-700">{selectedStaff.length} nhân sự</p>
-                </div>
-              </div>
+              <p className="text-sm font-medium text-slate-500">Người thực hiện ({selectedStaff.length})</p>
               {selectedStaff.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5 pl-9">
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {selectedStaff.map((st) => (
                     <span
                       key={st}
@@ -3146,30 +3123,23 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-slate-400 italic pl-9">Chưa phân công người thực hiện</p>
+                <p className="text-sm text-slate-400 italic mt-1">Chưa phân công người thực hiện</p>
               )}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-100">
-              <DetailFieldItem
-                icon={<UserCheck size={14} />}
-                iconTone="blue"
-                label="NV Phụ trách"
-                value={nvPhuTrach || "—"}
-              />
-              <DetailFieldItem
-                icon={<UserCheck size={14} />}
-                iconTone="amber"
-                label="BGĐ Phụ trách"
-                value={bgdPhuTrach || "—"}
-              />
-              <DetailFieldItem
-                icon={<ShieldCheck size={14} />}
-                iconTone="violet"
-                label="Giám đốc"
-                value={giamDoc || "—"}
-                colSpan={2}
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+              <div>
+                <p className="text-sm font-medium text-slate-500">NV Phụ trách</p>
+                <p className="text-sm font-bold text-slate-800 mt-1">{nvPhuTrach || "—"}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">BGĐ Phụ trách</p>
+                <p className="text-sm font-bold text-slate-800 mt-1">{bgdPhuTrach || "—"}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Giám đốc</p>
+                <p className="text-sm font-bold text-slate-800 mt-1">{giamDoc || "—"}</p>
+              </div>
             </div>
           </div>
         )}

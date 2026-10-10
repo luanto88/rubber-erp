@@ -4,10 +4,9 @@ import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "r
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
-  AlertTriangle, ArrowLeft, Ban, BarChart3, Bell, Building, Calendar, CalendarClock, CheckCircle2, Clock, Coins, Download, Eye, FilePen, FileText, ImagePlus, Images, Loader2, Lock, PackageCheck,
-  Pencil, PenTool, Send, ShieldCheck, ShoppingCart, Tag, User,
+  AlertTriangle, ArrowLeft, Ban, BarChart3, Bell, CalendarClock, CheckCircle2, Clock, Download, Eye, FilePen, ImagePlus, Images, Loader2, Lock, PackageCheck,
+  Pencil, PenTool, Send, ShoppingCart,
 } from "lucide-react"
-import { DetailCard, DetailFieldItem, DetailFileCard, DetailQrBox } from "@/app/dashboard/_components/detail-view-ui"
 import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
 import { buildStorageDownloadUrl, safeDownloadFileName } from "@/lib/storage-download"
@@ -270,103 +269,6 @@ function PurchaseDetailInner() {
         </div>
       )}
       {actionError && <div className="whitespace-pre-line rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm font-semibold text-red-700">{actionError}</div>}
-
-      {/* Top Card: File-First nếu đã có PDF */}
-      {detail.fileHienTai && (
-        <DetailFileCard
-          fileName={fileName}
-          fileType="pdf"
-          fileSize="PDF Bản điện tử"
-          statusLabel={PURCHASE_STATUS_LABEL[req.trang_thai]}
-          statusTone={req.trang_thai === "hoan_tat" ? "emerald" : req.trang_thai === "cho_ky" ? "amber" : "blue"}
-          onView={() => window.open(detail.fileHienTai!, "_blank")}
-          onDownload={() => { window.location.href = buildStorageDownloadUrl(detail.fileHienTai!, fileName) }}
-        />
-      )}
-
-      {/* Thông tin chung phiếu đề nghị */}
-      <DetailCard
-        title={`${isAdjustment ? "Phiếu điều chỉnh" : "Đề nghị mua sắm"} ${soPhieu}`}
-        subtitle={`Phiếu được khởi tạo ngày ${fmtDate(req.ngay)} · Đề xuất vật tư sản xuất & vận hành`}
-        icon={<ShoppingCart size={18} />}
-        iconTone="teal"
-        badge={
-          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${PURCHASE_STATUS_CLASS[req.trang_thai]}`}>
-            {PURCHASE_STATUS_LABEL[req.trang_thai]}
-          </span>
-        }
-      >
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 sm:gap-4">
-          <DetailFieldItem
-            icon={<Tag size={15} />}
-            iconTone="rose"
-            label="Mã / Số phiếu"
-            value={soPhieu}
-            mono
-          />
-          <DetailFieldItem
-            icon={<Calendar size={15} />}
-            iconTone="emerald"
-            label="Ngày đề nghị"
-            value={fmtDate(req.ngay)}
-          />
-          <DetailFieldItem
-            icon={<User size={15} />}
-            iconTone="pink"
-            label="Người đề nghị"
-            value={req.nguoi_de_nghi_ten || detail.names[req.nguoi_de_nghi_id] || "—"}
-          />
-          <DetailFieldItem
-            icon={<Building size={15} />}
-            iconTone="blue"
-            label="Bộ phận đề nghị"
-            value={req.bo_phan || "—"}
-          />
-          <DetailFieldItem
-            icon={<CalendarClock size={15} />}
-            iconTone="amber"
-            label="Cần hàng sớm nhất"
-            value={req.ngay_can_hang ? fmtDate(req.ngay_can_hang) : "—"}
-            extra={
-              urgency ? (
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${urgency.className}`}>
-                  {urgency.label}
-                </span>
-              ) : null
-            }
-          />
-          <DetailFieldItem
-            icon={<Coins size={15} />}
-            iconTone="emerald"
-            label="Tổng tiền dự toán"
-            value={`${formatMoney(req.tong_tien, req.loai_tien)} ${req.loai_tien}`}
-            highlight="emerald"
-            mono
-          />
-          <DetailFieldItem
-            icon={<ShieldCheck size={15} />}
-            iconTone="teal"
-            label="Trạng thái duyệt"
-            value={PURCHASE_STATUS_LABEL[req.trang_thai]}
-          />
-          <DetailFieldItem
-            icon={<FileText size={15} />}
-            iconTone="slate"
-            label="Ghi chú / Mục đích"
-            value={req.ghi_chu || req.ly_do_dieu_chinh || "Không có ghi chú"}
-            colSpan={2}
-          />
-        </div>
-
-        {typeof window !== "undefined" && (
-          <div className="mt-4 pt-3.5 border-t border-slate-100">
-            <DetailQrBox
-              qrUrl={`${window.location.origin}/dashboard/purchase/${id}`}
-              label="Tra cứu trực tuyến phiếu đề nghị mua"
-            />
-          </div>
-        )}
-      </DetailCard>
 
       {/* Thanh hành động */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 flex flex-wrap items-center gap-2">
