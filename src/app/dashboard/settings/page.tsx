@@ -642,6 +642,7 @@ const PERMISSION_ACTION_LABELS: Record<string, string> = {
   settings: "cấu hình",
   signature: "ký số",
   soat_xet: "soát xét",
+  tech_support: "hỗ trợ kỹ thuật",
   upload_signed: "tải lên bản đã ký",
   view: "xem",
   view_all: "xem toàn bộ",
@@ -650,6 +651,8 @@ const PERMISSION_ACTION_LABELS: Record<string, string> = {
 }
 
 const PERMISSION_CODE_LABELS: Record<string, string> = {
+  "output.tech_support": "hỗ trợ kỹ thuật sản lượng",
+  "quality.tech_support": "hỗ trợ kỹ thuật KQKN",
   "quality.import": "tải lên phiếu KN",
   "quality.create": "tạo phiếu KN",
   "quality.edit": "sửa phiếu KN",

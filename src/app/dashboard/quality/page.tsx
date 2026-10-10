@@ -13,6 +13,7 @@ import { downloadQualityKqknPdf, type QualityKqknResult } from "@/lib/quality-pd
 import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { QualitySignModal } from "@/app/dashboard/quality/_components/quality-sign-modal"
 import { QualitySignStatusBadge, type QualitySigningStatus } from "@/app/dashboard/quality/_components/quality-sign-status"
+import { QualityConverterView, FxToExcelIcon } from "@/app/dashboard/quality/_components/quality-converter-view"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -358,7 +359,7 @@ export default function QualityPage() {
 
   // ── Navigation ───────────────────────────────────────────────────────────────
   const [mainTab,  setMainTab]  = useState<"xep_hang"|"giam_sat"|"thong_ke">("xep_hang")
-  const [view,     setView]     = useState<"list"|"create">("list")
+  const [view,     setView]     = useState<"list"|"create"|"converter">("list")
 
   // ── List-view state ──────────────────────────────────────────────────────────
   const [search,      setSearch]      = useState("")
@@ -2227,6 +2228,16 @@ export default function QualityPage() {
             icon={FlaskConical}
             action={mainTab !== "thong_ke" && (
               <>
+                {(hasPermission(currentUser, "quality.tech_support") || currentUser?.role === "admin") && (
+                  <button
+                    type="button"
+                    onClick={() => setView("converter")}
+                    title="Hỗ trợ kỹ thuật: Phân tích biểu KQKN (PDF) & Tái tạo số liệu chi tiết"
+                    className="flex items-center justify-center px-3 py-2 text-white border border-white/40 bg-white/15 hover:bg-white/25 active:scale-95 rounded-xl transition-all shadow-xs"
+                  >
+                    <FxToExcelIcon className="w-9 h-5 text-white" />
+                  </button>
+                )}
                 {hasPermission(currentUser, "quality.import") && (
                   <>
                     <button onClick={handleDownloadTemplate}
@@ -3012,6 +3023,33 @@ export default function QualityPage() {
               </div>
             </div>
         </ModalShell>
+      )}
+
+      {/* ── Hỗ trợ Kỹ thuật: Phân tích KQKN PDF & Tái tạo Số liệu ─────────── */}
+      {view === "converter" && factoryId && (
+        <QualityConverterView
+          currentUser={currentUser}
+          factoryId={factoryId}
+          factoryCode={factoryCode}
+          signingStatusByDate={signingStatusByDate}
+          onBack={() => setView("list")}
+          onSuccess={(count, batchPKN, ngayKN) => {
+            setView("list")
+            if (factoryId) {
+              loadResults(factoryId)
+              loadStats(factoryId)
+              loadUninspectedLots(factoryId)
+            }
+          }}
+          showToast={showToast}
+          calcGrade={calcGrade}
+          getNextPKN={getNextPKN}
+          getNextLoKN={getNextLoKN}
+          normalizeLotCode={normalizeLotCode}
+          stripYear={stripYear}
+          getLotQcDate={getLotQcDate}
+          formatPKN={formatPKN}
+        />
       )}
 
       {/* ── Ký duyệt Phiếu KQKN (Giai đoạn 3) ───────────────────────────────── */}

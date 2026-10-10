@@ -60,5 +60,115 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **Responsive 50-50 trên Mobile**: Các trường ngắn trên mobile bắt buộc chia 2 cột đều nhau (Grid `grid-cols-2` 50%-50%), cân đối lề trên-dưới và trái-phải. Các trường dài (ghi chú, trích yếu, URL tra cứu, mã QR) chiếm trọn 1 dòng (`col-span-2`).
 - **Tái sử dụng**: Khuyến khích sử dụng bộ component chuẩn trong `src/app/dashboard/_components/detail-view-ui.tsx` để đồng bộ toàn bộ hệ thống (ISO, Văn bản nội bộ, Bảo trì, Điều xe, Mua sắm, Kho...).
 
+## Quy ước Kiến trúc & Nghiệp vụ Hỗ trợ Kỹ thuật (Technical Support / Converter Engine)
+
+Hệ thống Hỗ trợ Kỹ thuật (Converter Engine) chuẩn hóa luồng tiếp nhận tài liệu số (PDF kết quả thí nghiệm, file báo cáo tổng hợp...), tự động bóc tách chỉ số bằng engine Python chuyên dụng, đối soát nghiêm ngặt với dữ liệu vận hành hiện có và cho phép đẩy thẳng vào cơ sở dữ liệu hệ thống mà không bắt buộc người dùng phải tải về / nhập lại thủ công.
+
+Kiến trúc này đã hoàn thiện cho phân hệ **Kiểm nghiệm (`quality`)** và được chuẩn hóa để áp dụng cho phân hệ **Sản lượng (`output`)** theo các quy ước bất biến dưới đây:
+
+### 1. Nút Action trên Header Banner
+- **Vị trí**: Đặt trực tiếp trên thanh header banner (`PageHeaderBanner`) của module tương ứng (`quality/page.tsx`, `output/page.tsx`).
+- **Thiết kế**: Dạng nút bo góc viên thuốc `rounded-xl`, phong cách kính mờ `bg-white/15 border border-white/40 hover:bg-white/25 active:scale-95 transition-all`.
+- **Nguyên tắc nhãn**: **Tuyệt đối không có text chú thích bên cạnh icon** (đảm bảo thanh header gọn gàng, tinh tế và đồng bộ phong cách).
+- **Biểu tượng (Icon)**: Sử dụng biểu tượng hàm toán học sang bảng tính Excel: $f(x) \rightarrow$ [icon Excel] (`FxToExcelIcon`).
+- **Phân quyền kích hoạt**: Nút chỉ hiển thị khi người dùng có quyền `<module>.tech_support` hoặc là `admin` (`hasPermission(currentUser, "<module>.tech_support") || currentUser?.role === "admin"`).
+- **Điều hướng View**: Nhấp vào nút sẽ chuyển trạng thái hiển thị của trang sang view chuyên biệt `view === "converter"` (như `QualityConverterView`, `OutputConverterView`) thay vì mở modal nhỏ, đảm bảo không gian làm việc rộng rãi và trực quan.
+
+### 2. Phân quyền Cơ sở Dữ liệu & Việt hóa Nhãn
+- **Database Permissions**: BẮT BUỘC phải INSERT bản ghi quyền vào bảng `permissions` trong cơ sở dữ liệu Supabase:
+  - Kiểm nghiệm: `code = 'quality.tech_support'`, `module_name = 'quality'`, `action_name = 'tech_support'`.
+  - Sản lượng: `code = 'output.tech_support'`, `module_name = 'output'`, `action_name = 'tech_support'`.
+- **Gán quyền mặc định**: Luôn cấp quyền mặc định cho vai trò `admin` trong bảng `role_permissions`.
+- **Đồng bộ mã quyền hệ thống**: Khai báo mã quyền trong mảng `DEFAULT_PERMISSION_CODES` tại `src/lib/auth.ts`.
+- **Việt hóa nhãn (Bắt buộc theo quy ước chung)**:
+  - Khai báo hành động chung trong `PERMISSION_ACTION_LABELS` tại `src/app/dashboard/settings/page.tsx`:
+    `tech_support: "hỗ trợ kỹ thuật"`
+  - Khai báo nhãn hiển thị chi tiết trong `PERMISSION_CODE_LABELS` tại `src/app/dashboard/settings/page.tsx`:
+    `"quality.tech_support": "hỗ trợ kỹ thuật KQKN"`
+    `"output.tech_support": "hỗ trợ kỹ thuật sản lượng"`
+
+### 3. Kiến trúc Engine Xử lý Tài liệu (PyMuPDF / Python Sub-process)
+- **Vị trí script**: Đặt toàn bộ backend parser script trong `src/server/scripts/`:
+  - Kiểm nghiệm: `src/server/scripts/parse_kqkn.py`
+  - Sản lượng: `src/server/scripts/parse_san_luong.py`
+- **Truyền nhận dữ liệu an toàn**: Tiếp nhận dữ liệu file qua `stdin` dạng base64 (`--stdin-base64`). Tuyệt đối không tạo file tạm trên ổ cứng server để tránh lỗi quyền ghi và rò rỉ dữ liệu.
+- **Quy tắc cô lập kết quả JSON (Bắt buộc)**: Các thư viện xử lý tài liệu như `fitz` (PyMuPDF) thường tự động in cảnh báo (như `Consider using the pymupdf_layout package...`) thẳng vào stdout, gây lỗi `SyntaxError: Unexpected token ... is not valid JSON` khi parse. Vì vậy, mọi script Python BẮT BUỘC phải bọc chuỗi JSON kết quả trong cặp thẻ định danh độc nhất:
+  ```python
+  print(f"__{MODULE}__JSON_START__{json.dumps(result, ensure_ascii=False)}__{MODULE}__JSON_END__")
+  ```
+  *(Ví dụ: `__KQKN_JSON_START__ ... __KQKN_JSON_END__` hoặc `__OUTPUT_JSON_START__ ... __OUTPUT_JSON_END__`)*
+- **Phía API Route (`route.ts`)**: Bóc tách chính xác chuỗi nằm giữa cặp thẻ định danh trên trước khi thực hiện `JSON.parse`. Nếu không tìm thấy cặp thẻ, trả về lỗi chi tiết từ stderr/stdout của tiến trình Python.
+
+### 4. Xác thực API Route & Bảo mật Phân quyền
+- **Đính kèm Bearer Token**: Client khi gọi `fetch` lên API `/api/<module>/parse-...` BẮT BUỘC phải đính kèm header xác thực:
+  `Authorization: Bearer ${accessToken}` (lấy từ `supabase.auth.getSession()`).
+- **Xác thực Server**: API Route sử dụng `requireAuthUser(req)`.
+- **Kiểm tra quyền**:
+  - Người dùng là `admin` $\rightarrow$ Cho phép thực thi.
+  - Người dùng thông thường $\rightarrow$ Kiểm tra bảng `user_permissions` (theo `user_id`, `permission_code = "<module>.tech_support"` hoặc `<module>.import`, và `granted = true`). Nếu không có dòng ghi đè, fallback về `role_permissions`.
+
+---
+
+### 5. Chi tiết Nghiệp vụ Hỗ trợ Kỹ thuật cho Phân hệ KIỂM NGHIỆM (`quality`)
+- **Tài liệu nguồn**: File PDF "Biểu Kết Quả Kiểm Nghiệm Cao Su" phát hành từ phòng thí nghiệm/KCS (chứa bảng tổng hợp số lô, hạng đăng ký, kết quả các chỉ tiêu cơ lý hóa).
+- **Bộ lọc động tại View**:
+  - Cho phép chọn Tiêu chuẩn: **TCCS 112:2022** hoặc **TCVN 3769:2016**.
+  - Cho phép chọn Số lượng mẫu kiểm nghiệm: **6 mẫu**, **10 mẫu**, hoặc **14 mẫu** để engine tự động tái tạo bảng số liệu chi tiết từng mẫu thử.
+- **Tự động nhận diện Đa Chủng loại**: Parser bóc tách cột "Hạng ĐK" trên từng dòng bản ghi (ví dụ: `CSR10`, `CSR20`, `CSRL`, `CSR3L`...), không ép cứng 1 chủng loại cho cả trang.
+- **Tiêu chí Đối soát 4 Yếu tố**:
+  1. Số lô (`so_lo`)
+  2. Chủng loại (`chung_loai` / `hang_dk`)
+  3. Ngày sản xuất (`ngay_san_xuat`)
+  4. Ngày kiểm nghiệm (`ngay_kiem_nghiem`)
+- **Tác vụ Kép (Dual Actions)**:
+  - **"Đẩy thẳng lên phân hệ kiểm nghiệm"**: Tự động đánh giá Đạt/Không đạt theo tiêu chuẩn đã chọn, lưu trực tiếp vào bảng `chat_luong_lo` / `chat_luong_lo_samples`, thông báo thành công và chuyển về danh sách kiểm nghiệm.
+  - **"Tải file Excel đối chiếu"**: Xuất file `.xlsx` đầy đủ 6/10/14 mẫu chi tiết đã tái tạo để lưu trữ hoặc đối soát ngoại tuyến.
+- **Duy trì chức năng cũ**: Vẫn giữ nguyên nút "Tải mẫu" và "Nhập KQKN" (file Excel mẫu truyền thống) làm fallback.
+
+---
+
+### 6. Chi tiết Nghiệp vụ Hỗ trợ Kỹ thuật cho Phân hệ SẢN LƯỢNG (`output`)
+*(Chuẩn bị áp dụng theo đúng quy chuẩn kiến trúc của hệ thống)*
+
+- **Tài liệu nguồn**:
+  - File PDF Báo cáo sản lượng ngày từ nông trường / nhà máy (bảng tổng hợp theo đội, xe, chuyến, các loại mủ).
+  - Hoặc file Excel xuất từ trạm cân / phần mềm thống kê nông trường (mẫu `SLRpt_SanLuongNgay_TongHop` hoặc tương đương).
+- **Engine Xử lý (`src/server/scripts/parse_san_luong.py`)**:
+  - Bóc tách tự động các trường thông tin: Ngày thu nhận (`ngay`), Đội (`doi`), Biển số xe (`so_xe`), Chuyến (`chuyen`), Ghi chú (`ghi_chu`).
+  - Chuẩn hóa biển số xe bằng helper `parseVehicleCode` (tách `base_xe` và số chuyến).
+  - Phân loại Đội: `0` tương ứng với Thu mua (`TM`), `1` đến `12` tương ứng với các Đội nông trường từ Đội 1 đến Đội 12.
+  - Bóc tách đầy đủ 5 nhóm chỉ tiêu mủ:
+    1. **Mủ nước**: Khối lượng tươi (`mn_tuoi`), DRC (`mn_drc`), Khối lượng quy khô (`mn_kho`).
+    2. **Mủ chén**: Khối lượng tươi (`ct_tuoi`), DRC (`ct_drc`), Khối lượng quy khô (`ct_kho`).
+    3. **Mủ đông chén**: Khối lượng tươi (`dct_tuoi`), DRC (`dct_drc`), Khối lượng quy khô (`dct_kho`).
+    4. **Mủ đông khối**: Khối lượng tươi (`dkt_tuoi`), DRC (`dkt_drc`), Khối lượng quy khô (`dkt_kho`).
+    5. **Mủ dây**: Khối lượng tươi (`dt_tuoi`), DRC (`dt_drc`), Khối lượng quy khô (`dt_kho`).
+  - Tự động tính quy khô nếu thiếu: `kho = round(tuoi * drc / 100, 2)` khi `kho == 0` nhưng `tuoi > 0` và `drc > 0`.
+  - Xuất JSON kết quả cô lập giữa cặp marker `__OUTPUT_JSON_START__` và `__OUTPUT_JSON_END__`.
+- **Ma trận Đối soát Thông minh Sản lượng (Smart Matching Matrix)**:
+  - Khóa bản ghi duy nhất: `buildProductionRecordKey({ ngay, doi, so_xe: base_xe, chuyen, ma_nguon })`.
+  - **Liên kết 2 chiều với Điều xe (`dispatch`)**: Tự động tra cứu `dispatch_entries` và `dispatch_entry_rows` theo Ngày, Số xe, Chuyến để:
+    + Tự động ghép tên Tài xế (`tai_xe`).
+    + Đối chiếu Điểm giao nhận (`diem_gn`) của chuyến xe với Đội trong báo cáo sản lượng.
+  - **Phân loại trạng thái đối soát**:
+    - 🟢 **Khớp hoàn toàn**: Khớp ngày, xe, chuyến, đội và khớp chính xác chuyến trong phân hệ Điều xe $\rightarrow$ Tự động chọn sẵn sàng nhập.
+    - 🟡 **Cảnh báo nghiệp vụ** (cho phép người dùng kiểm tra và quyết định):
+      + `DUPLICATE_IN_SYSTEM`: Đã tồn tại bản ghi sản lượng của xe/chuyến này trong ngày $\rightarrow$ Cảnh báo ghi đè dữ liệu.
+      + `NO_DISPATCH_DATE` / `VEHICLE_NOT_FOUND` / `CHUYEN_NOT_FOUND`: Chuyến xe này chưa được khai báo trong Điều xe ngày hôm đó.
+      + `DOI_MISMATCH`: Đội ghi trên phiếu sản lượng không khớp với điểm giao nhận đã phân công trên lệnh điều xe.
+      + `ZERO_KL`: Dòng dữ liệu không có phát sinh khối lượng mủ nào.
+      + `UNKNOWN_NOTE`: Ghi chú nằm ngoài danh mục ghi chú bắt buộc (`required_notes`).
+    - 🔴 **Lỗi nghiêm trọng**: Thiếu ngày, số xe không hợp lệ, hoặc chỉ số DRC vượt ngưỡng sinh lý mủ.
+- **Cơ chế Ghi Dữ liệu Kép (Dual Write Action)**:
+  - Khi người dùng bấm **"Đẩy thẳng lên phân hệ Sản lượng"**:
+    1. Sinh mã lô nạp duy nhất (`import_batch_id = batch_${Date.now()}_...`).
+    2. Ghi/Cập nhật các bản ghi hợp lệ vào bảng `production_records` trong Supabase, gắn kèm `factory_id`, `created_by`, `nguoi_upload`.
+    3. Tự động gọi cơ chế **đồng bộ ngược sang Điều xe (`writeBackToDispatch`)**: Cập nhật khối lượng thực tế và trạng thái của các chuyến tương ứng trong cả `dispatch_entries.rows` và bảng vật lý `dispatch_entry_rows`.
+    4. Hiển thị Toast thông báo kết quả (số bản ghi thành công, số chuyến điều xe đã liên kết), dọn cache và tự động quay về view danh sách sản lượng.
+  - Nút phụ **"Tải file Excel đối chiếu"**: Cho phép tải file bảng tính Excel chuẩn hóa chứa toàn bộ dữ liệu đã bóc tách và trạng thái đối soát để đối chiếu ngoại tuyến.
+- **Bảo toàn chức năng truyền thống**: Nút "Tải file mẫu" và "Nhập Excel" (`output-import.tsx`) vẫn được giữ nguyên vẹn để người dùng có nhiều phương thức thao tác linh hoạt.
+
+
+
 
 

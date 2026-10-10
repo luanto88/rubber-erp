@@ -6,7 +6,6 @@ import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUs
 import { loadDispatchEntriesWithResolvedRows, type LegacyDispatchRow } from "@/lib/dispatch-entry-rows"
 import {
   AlertTriangle,
-  BarChart3,
   Calendar,
   CalendarDays,
   ChevronRight,
@@ -32,6 +31,7 @@ import {
 } from "./_components/output-types"
 import { OutputImport } from "./_components/output-import"
 import { OutputForm } from "./_components/output-form"
+import { OutputConverterView, FxToExcelIcon } from "./_components/output-converter-view"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, isBlankNoteContent, matchesNoteFilterMulti } from "@/lib/note-filter"
@@ -182,6 +182,7 @@ export default function OutputPage() {
   const [dispatches, setDispatches] = useState<DispatchEntry[]>([])
   const [deliveryPoints, setDeliveryPoints] = useState<DeliveryPoint[]>([])
 
+  const [view, setView] = useState<"list" | "converter">("list")
   const [tab, setTab] = useState<"list" | "stats" | "import">("list")
   const [showImport, setShowImport] = useState(false)
   const [showForm, setShowForm] = useState(false)
@@ -560,7 +561,6 @@ export default function OutputPage() {
       created_by: currentUser?.id ?? null,
     }
 
-    let error
     let savedId: string | null = null
     const executeSave = async (dataPayload: Record<string, unknown>) => {
       if (editRecord) {
@@ -597,7 +597,7 @@ export default function OutputPage() {
       delete fallback.ma_nguon
       res = await executeSave(fallback)
     }
-    error = res.error
+    const error = res.error
     savedId = res.data?.id ?? editRecord?.id ?? null
     if (error) throw new Error(error.message)
 
@@ -659,6 +659,20 @@ export default function OutputPage() {
     }
   }
 
+  if (view === "converter" && factoryId) {
+    return (
+      <OutputConverterView
+        currentUser={currentUser}
+        factoryId={factoryId}
+        onBack={() => setView("list")}
+        onSuccess={() => {
+          setView("list")
+          if (factoryId) void loadRecords(factoryId)
+        }}
+      />
+    )
+  }
+
   return (
     <div className="p-4 sm:p-6">
       <PageBackgroundMotif theme="forest"/>
@@ -679,6 +693,16 @@ export default function OutputPage() {
         icon={Droplet}
         action={
           <>
+            {(hasPermission(currentUser, "output.tech_support") || isAdmin) && (
+              <button
+                type="button"
+                onClick={() => setView("converter")}
+                title="Hỗ trợ kỹ thuật: Bóc tách Báo cáo Trạm cân & Đối soát Điều xe"
+                className="flex items-center justify-center px-3 py-2 text-white border border-white/40 bg-white/15 hover:bg-white/25 active:scale-95 rounded-xl transition-all shadow-xs"
+              >
+                <FxToExcelIcon className="w-9 h-5 text-white" />
+              </button>
+            )}
             {(isAdmin || canImport) && (
               <button
                 onClick={() => setShowImport(true)}
