@@ -95,12 +95,12 @@ ON CONFLICT DO NOTHING;
 
 ---
 
-## 4. Kiến trúc Engine Xử lý (Backend Python & API Route)
+## 4. Kiến trúc Engine Xử lý (Thuần TypeScript / Node.js Serverless)
 
-### 4.1. Python Parser Script (`src/server/scripts/parse_san_luong.py`)
-- **Nguyên tắc an toàn**: Không tạo file tạm trên ổ đĩa server. Dữ liệu file được gửi qua `stdin` dạng Base64 (`--stdin-base64`).
+### 4.1. TypeScript Parser Engine (`src/lib/output-parser.ts`)
+- **Nguyên tắc môi trường Serverless**: Do hệ thống triển khai trên Vercel, Node.js runtime không hỗ trợ Python. Toàn bộ logic bóc tách tài liệu phải viết bằng **thuần TypeScript / Node.js** để tránh lỗi `spawn python ENOENT`.
 - **Nhiệm vụ bóc tách**:
-  - Nhận diện định dạng tệp: PDF (bằng `fitz`/PyMuPDF) hoặc Excel (bằng `openpyxl`/`pandas`).
+  - Nhận diện định dạng tệp: PDF (bằng `pdfjs-dist/legacy/build/pdf.mjs`) hoặc Excel (bằng `exceljs`/`xlsx`).
   - Trích xuất các cột: Ngày (`ngay`), Đội (`doi`: 0 cho Thu mua 'TM', 1-12 cho Đội 1..12), Số xe (`so_xe`), Chuyến (`chuyen`), Ghi chú (`ghi_chu`).
   - Chuẩn hóa biển số xe qua logic tách số xe (`base_xe`) và chuyến tương tự helper `parseVehicleCode`.
   - Bóc tách 5 bộ chỉ tiêu mủ:
@@ -110,24 +110,17 @@ ON CONFLICT DO NOTHING;
     4. **Mủ đông khối**: `dkt_tuoi`, `dkt_drc`, `dkt_kho`.
     5. **Mủ dây**: `dt_tuoi`, `dt_drc`, `dt_kho`.
   - Tự động bù trừ/tính quy khô nếu thiếu: `kho = round(tuoi * drc / 100, 2)` khi `kho == 0` nhưng `tuoi > 0` và `drc > 0`.
-- **Nguyên tắc cô lập output (Bắt buộc)**:
-  Bọc chuỗi JSON kết quả trong cặp thẻ đánh dấu độc nhất để tránh lỗi do cảnh báo tự động của thư viện in ra stdout:
-  ```python
-  print(f"__OUTPUT_JSON_START__{json.dumps(result, ensure_ascii=False)}__OUTPUT_JSON_END__")
-  ```
+  - Thực thi trực tiếp trong tiến trình Node.js không qua subprocess, thời gian hoàn tất dưới 50ms.
 
 ### 4.2. API Route (`src/app/api/output/parse-report/route.ts`)
 - **Bảo mật**:
   - Nhận header `Authorization: Bearer <accessToken>`.
   - Xác thực qua `requireAuthUser(req)`.
   - Kiểm tra quyền: Admin hoặc có quyền `output.tech_support` / `output.import` trong `user_permissions` hoặc `role_permissions`.
-- **Thực thi tiến trình**:
-  - Chuyển `ArrayBuffer` của file thành chuỗi base64.
-  - Khởi tạo tiến trình `spawn("python", [scriptPath, "--stdin-base64"])`.
-  - Bơm base64 vào `child.stdin.write(base64Data); child.stdin.end()`.
-  - Thu thập stdout và stderr.
-  - Bóc tách chuỗi nằm giữa `__OUTPUT_JSON_START__` và `__OUTPUT_JSON_END__` rồi `JSON.parse`.
+- **Thực thi phân tích**:
+  - Gọi trực tiếp hàm parse từ `src/lib/output-parser.ts`.
   - Trả về payload cấu trúc: `{ success: true, rows: ParsedSlRow[], metadata: { totalRows, detectedDate, ... } }`.
+
 
 ---
 

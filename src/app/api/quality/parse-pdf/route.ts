@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { spawn } from "node:child_process"
-import path from "node:path"
 import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
+import { processKqknPdf } from "@/lib/kqkn-parser"
 
 export const dynamic = "force-dynamic"
 
@@ -90,75 +89,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Định dạng file không hợp lệ (yêu cầu file .pdf)" }, { status: 400 })
     }
 
-    // Đường dẫn script Python
-    const scriptPath = path.join(process.cwd(), "src", "server", "scripts", "parse_kqkn.py")
-    const pdfBase64 = fileBuffer.toString("base64")
-
-    // Gọi Python script qua stdin-base64
-    const result = await new Promise<any>((resolve, reject) => {
-      const pyProcess = spawn("python", [
-        scriptPath,
-        "--stdin-base64",
-        String(nSamples),
-        tieuChuan,
-        filename
-      ])
-
-      let stdoutData = ""
-      let stderrData = ""
-
-      pyProcess.stdout.on("data", (chunk) => {
-        stdoutData += chunk.toString("utf-8")
-      })
-
-      pyProcess.stderr.on("data", (chunk) => {
-        stderrData += chunk.toString("utf-8")
-      })
-
-      pyProcess.on("close", (code) => {
-        let jsonString = stdoutData.trim()
-        const startMarker = "__KQKN_JSON_START__"
-        const endMarker = "__KQKN_JSON_END__"
-
-        if (jsonString.includes(startMarker) && jsonString.includes(endMarker)) {
-          jsonString = jsonString.slice(
-            jsonString.indexOf(startMarker) + startMarker.length,
-            jsonString.indexOf(endMarker),
-          ).trim()
-        } else {
-          // Bỏ qua cảnh báo như "Consider using the pymupdf_layout..."
-          const firstBrace = jsonString.indexOf("{")
-          const lastBrace = jsonString.lastIndexOf("}")
-          if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-            jsonString = jsonString.slice(firstBrace, lastBrace + 1)
-          }
-        }
-
-        if (code !== 0) {
-          try {
-            const parsedErr = JSON.parse(jsonString)
-            if (parsedErr.error) return reject(new Error(parsedErr.error))
-          } catch {
-            // Dùng stderrData nếu không parse được json
-          }
-          return reject(new Error(stderrData.trim() || `Lỗi xử lý file PDF (mã thoát ${code})`))
-        }
-
-        try {
-          const parsed = JSON.parse(jsonString)
-          resolve(parsed)
-        } catch (e: any) {
-          reject(new Error(`Không thể giải mã kết quả phân tích: ${e.message}\n${stdoutData.slice(0, 300)}`))
-        }
-      })
-
-      pyProcess.on("error", (err) => {
-        reject(new Error(`Không thể khởi động trình phân tích Python: ${err.message}`))
-      })
-
-      // Ghi dữ liệu base64 vào stdin
-      pyProcess.stdin.write(pdfBase64)
-      pyProcess.stdin.end()
+    // Phân tích file PDF biểu KQKN thuần TypeScript (chạy ổn định trên mọi môi trường bao gồm Vercel Serverless)
+    const result = await processKqknPdf(fileBuffer, {
+      nSamples,
+      tieuChuan,
+      filenameHint: filename,
     })
 
     return NextResponse.json(result)

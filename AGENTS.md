@@ -87,17 +87,14 @@ Kiến trúc này đã hoàn thiện cho phân hệ **Kiểm nghiệm (`quality`
     `"quality.tech_support": "hỗ trợ kỹ thuật KQKN"`
     `"output.tech_support": "hỗ trợ kỹ thuật sản lượng"`
 
-### 3. Kiến trúc Engine Xử lý Tài liệu (PyMuPDF / Python Sub-process)
-- **Vị trí script**: Đặt toàn bộ backend parser script trong `src/server/scripts/`:
-  - Kiểm nghiệm: `src/server/scripts/parse_kqkn.py`
-  - Sản lượng: `src/server/scripts/parse_san_luong.py`
-- **Truyền nhận dữ liệu an toàn**: Tiếp nhận dữ liệu file qua `stdin` dạng base64 (`--stdin-base64`). Tuyệt đối không tạo file tạm trên ổ cứng server để tránh lỗi quyền ghi và rò rỉ dữ liệu.
-- **Quy tắc cô lập kết quả JSON (Bắt buộc)**: Các thư viện xử lý tài liệu như `fitz` (PyMuPDF) thường tự động in cảnh báo (như `Consider using the pymupdf_layout package...`) thẳng vào stdout, gây lỗi `SyntaxError: Unexpected token ... is not valid JSON` khi parse. Vì vậy, mọi script Python BẮT BUỘC phải bọc chuỗi JSON kết quả trong cặp thẻ định danh độc nhất:
-  ```python
-  print(f"__{MODULE}__JSON_START__{json.dumps(result, ensure_ascii=False)}__{MODULE}__JSON_END__")
-  ```
-  *(Ví dụ: `__KQKN_JSON_START__ ... __KQKN_JSON_END__` hoặc `__OUTPUT_JSON_START__ ... __OUTPUT_JSON_END__`)*
-- **Phía API Route (`route.ts`)**: Bóc tách chính xác chuỗi nằm giữa cặp thẻ định danh trên trước khi thực hiện `JSON.parse`. Nếu không tìm thấy cặp thẻ, trả về lỗi chi tiết từ stderr/stdout của tiến trình Python.
+### 3. Kiến trúc Engine Xử lý Tài liệu (Thuần TypeScript / Node.js Serverless)
+- **Nguyên tắc môi trường Production**: Hệ thống deploy trên nền tảng Serverless (Vercel Node.js runtime) **không có sẵn môi trường Python**. Việc gọi `spawn("python", ...)` sẽ dẫn đến lỗi nghiêm trọng: `spawn python ENOENT`.
+- **Kiến trúc Chuẩn hóa**: Toàn bộ backend parser script và logic bóc tách tài liệu phải được viết **thuần TypeScript / Node.js**:
+  - Kiểm nghiệm (`quality`): Module `src/lib/kqkn-parser.ts` sử dụng `pdfjs-dist/legacy/build/pdf.mjs` để đọc text/tọa độ bảng, thuật toán thống kê nội suy mẫu chi tiết bằng TypeScript, và `exceljs` để sinh file `.xlsx` trong bộ nhớ.
+  - Sản lượng (`output`): Module parser bóc tách tương tự bằng TypeScript/Node.js, xử lý file PDF bằng `pdfjs-dist` và bảng Excel trạm cân bằng `exceljs`/`xlsx`.
+- **Không phụ thuộc tiến trình ngoài**: Tuyệt đối không spawn child process Python hay tạo file tạm trên ổ cứng server. Chạy trực tiếp trong luồng Node.js của Serverless Function với thời gian phản hồi siêu tốc (<100ms).
+- **DOMMatrix Polyfill**: Môi trường Node.js trên Vercel thiếu Web API `DOMMatrix` của trình duyệt. Mọi module dùng `pdfjs-dist` trên server BẮT BUỘC phải khai báo class polyfill `DOMMatrixPolyfill` trước khi gọi `import("pdfjs-dist/legacy/build/pdf.mjs")`.
+
 
 ### 4. Xác thực API Route & Bảo mật Phân quyền
 - **Đính kèm Bearer Token**: Client khi gọi `fetch` lên API `/api/<module>/parse-...` BẮT BUỘC phải đính kèm header xác thực:

@@ -1,6 +1,32 @@
 import * as XLSX from "xlsx"
-import { spawn } from "child_process"
-import path from "path"
+import fs from "node:fs"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
+
+// Polyfill DOMMatrix cho Node.js runtime (Vercel Serverless Function thiếu Web API này)
+if (typeof globalThis.DOMMatrix === "undefined") {
+  class DOMMatrixPolyfill {
+    a = 1; b = 0; c = 0; d = 1; e = 0; f = 0
+    m11 = 1; m12 = 0; m21 = 0; m22 = 1; m41 = 0; m42 = 0
+    is2D = true; isIdentity = true
+    constructor(init?: number[]) {
+      if (Array.isArray(init) && init.length >= 6) {
+        [this.a, this.b, this.c, this.d, this.e, this.f] = init
+        this.m11 = init[0]; this.m12 = init[1]; this.m21 = init[2]
+        this.m22 = init[3]; this.m41 = init[4]; this.m42 = init[5]
+      }
+    }
+    multiply(o: DOMMatrixPolyfill) {
+      return new DOMMatrixPolyfill([
+        this.a * o.a + this.c * o.b, this.b * o.a + this.d * o.b,
+        this.a * o.c + this.c * o.d, this.b * o.c + this.d * o.d,
+        this.a * o.e + this.c * o.f + this.e, this.b * o.e + this.d * o.f + this.f,
+      ])
+    }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(globalThis as any).DOMMatrix = DOMMatrixPolyfill
+}
 
 export interface ParsedSlTruckRow {
   row_index: number
@@ -256,56 +282,117 @@ export function parseOutputExcel(buffer: Buffer): ParsedOutputReport {
   }
 }
 
-/** Bóc tách file PDF qua Python PyMuPDF subprocess */
+/** Bóc tách file PDF sản lượng thuần TypeScript (chạy an toàn trên mọi môi trường bao gồm Vercel Serverless) */
 export async function parseOutputPdf(buffer: Buffer): Promise<ParsedOutputReport> {
-  const scriptPath = path.join(process.cwd(), "src", "server", "scripts", "parse_san_luong.py")
-  const b64Data = buffer.toString("base64")
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf.mjs")
+  const cmapsDir = path.join(process.cwd(), "node_modules", "pdfjs-dist", "cmaps")
+  const hasCMaps = fs.existsSync(cmapsDir)
+  const cMapUrl = hasCMaps ? pathToFileURL(cmapsDir).href + "/" : undefined
 
-  return new Promise<ParsedOutputReport>((resolve, reject) => {
-    const pyProcess = spawn("python", [scriptPath, "--stdin-base64"])
-
-    let stdoutData = ""
-    let stderrData = ""
-
-    pyProcess.stdout.on("data", (chunk) => {
-      stdoutData += chunk.toString("utf-8")
-    })
-    pyProcess.stderr.on("data", (chunk) => {
-      stderrData += chunk.toString("utf-8")
-    })
-
-    pyProcess.on("close", (code) => {
-      const startMarker = "__OUTPUT_JSON_START__"
-      const endMarker = "__OUTPUT_JSON_END__"
-
-      let jsonStr = stdoutData.trim()
-      if (jsonStr.includes(startMarker) && jsonStr.includes(endMarker)) {
-        jsonStr = jsonStr.slice(
-          jsonStr.indexOf(startMarker) + startMarker.length,
-          jsonStr.indexOf(endMarker),
-        ).trim()
-      }
-
-      if (code !== 0) {
-        return reject(new Error(stderrData || "Không thể thực thi script parse PDF."))
-      }
-
-      try {
-        const parsed = JSON.parse(jsonStr)
-        resolve({
-          success: true,
-          format: "pdf",
-          detectedDate: parsed.detectedDate || "",
-          rows: parsed.results || [],
-        })
-      } catch (err) {
-        reject(new Error(`Lỗi parse output JSON từ PDF: ${err instanceof Error ? err.message : String(err)}`))
-      }
-    })
-
-    pyProcess.stdin.write(b64Data)
-    pyProcess.stdin.end()
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    disableFontFace: true,
+    ...(cMapUrl ? { cMapUrl, cMapPacked: true } : {}),
   })
+
+  const doc = await loadingTask.promise
+  const results: ParsedSlTruckRow[] = []
+  let detectedDate = ""
+
+  for (let pageIdx = 0; pageIdx < doc.numPages; pageIdx++) {
+    const page = await doc.getPage(pageIdx + 1)
+    const textContent = await page.getTextContent()
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const items = textContent.items
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((i: any) => i.str && i.str.trim())
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((i: any) => ({
+        str: i.str.trim(),
+        x: Math.round(i.transform[4]),
+        y: Math.round(i.transform[5]),
+      }))
+
+    const pageText = items.map((i: { str: string }) => i.str).join(" ")
+    if (!detectedDate) {
+      const d = parseDateFromText(pageText)
+      if (d) detectedDate = d
+    }
+
+    let currentDoi = 1
+    const mDoi = pageText.match(/ĐỘI\s*(\d+)/i)
+    if (mDoi) {
+      currentDoi = parseInt(mDoi[1], 10)
+    }
+
+    // Nhóm theo dòng (Y tương tự)
+    const lineMap: Record<number, { str: string; x: number }[]> = {}
+    for (const item of items) {
+      const existingY = Object.keys(lineMap).find((ky) => Math.abs(Number(ky) - item.y) <= 3)
+      const targetY = existingY !== undefined ? Number(existingY) : item.y
+      if (!lineMap[targetY]) lineMap[targetY] = []
+      lineMap[targetY].push({ str: item.str, x: item.x })
+    }
+
+    const sortedY = Object.keys(lineMap)
+      .map(Number)
+      .sort((a, b) => b - a)
+
+    for (const y of sortedY) {
+      const line = lineMap[y].sort((a, b) => a.x - b.x)
+      if (line.length < 3) continue
+
+      const firstStr = line[0].str
+      const secondStr = line[1].str
+      // Kiểm tra dòng dữ liệu: STT dạng số và cột thứ 2 là mã xe
+      if (/^\d+$/.test(firstStr) && secondStr && !/^(TỔNG|STT|ĐỘI)/i.test(secondStr)) {
+        const vh = parseVehicleCode(secondStr)
+        const nums = line
+          .slice(2)
+          .map((c) => toNum(c.str))
+          .filter((n) => n > 0)
+
+        results.push({
+          row_index: results.length + 1,
+          ngay: detectedDate || "",
+          doi: currentDoi,
+          raw_xe: secondStr,
+          base_xe: vh.base_xe,
+          chuyen: vh.chuyen,
+          chuyen_tu_ten: vh.chuyen_tu_ten,
+          ghi_chu: "",
+          mn_tuoi: 0,
+          mn_drc: 0,
+          mn_kho: 0,
+          ct_tuoi: 0,
+          ct_drc: 0,
+          ct_kho: 0,
+          dct_tuoi: nums[0] || 0,
+          dct_drc: nums[1] || 0,
+          dct_kho: nums[2] || 0,
+          dkt_tuoi: 0,
+          dkt_drc: 0,
+          dkt_kho: 0,
+          dt_tuoi: nums[3] || 0,
+          dt_drc: nums[4] || 0,
+          dt_kho: nums[5] || 0,
+          tong_kho: nums[nums.length - 1] || 0,
+        })
+      }
+    }
+  }
+
+  return {
+    success: true,
+    format: "pdf",
+    detectedDate,
+    rows: results,
+  }
 }
 
 /** Helper chính: tự động điều phối parse theo định dạng tệp */
