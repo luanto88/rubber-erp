@@ -539,7 +539,7 @@ export default function UploadVanBanPage() {
   if (hasCreatePerm === false) {
     return (
       <DocumentsShell>
-        <PageBackgroundMotif theme="cyan" />
+        <PageBackgroundMotif theme="forest" />
         <div className="max-w-md mx-auto my-16 p-8 bg-white border border-slate-200 rounded-2xl shadow-sm text-center">
           <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Lock size={28} />
@@ -582,19 +582,24 @@ export default function UploadVanBanPage() {
         </div>
       )}
 
-      <PageBackgroundMotif theme="cyan" />
+      <PageBackgroundMotif theme="forest" />
       <PageHeaderBanner
         title="Upload văn bản đã ký tay"
         subtitle="Tải lên văn bản đã ký tay, hệ thống tự sinh số và lưu vào hồ sơ"
-        theme="cyan"
-        icon={FileSignature}
+        theme="forest"
+        icon={FileText}
+        collapsible={true}
+        storageKey="banner_collapsed_documents_upload"
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Cột trái: thông tin văn bản */}
         <div className="lg:col-span-2 space-y-5">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h2 className="text-sm font-bold text-slate-700 mb-4">Thông tin văn bản</h2>
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-6">
+            <h2 className="text-base font-extrabold text-slate-800 mb-4 flex items-center gap-2">
+              <span className="w-2 h-5 rounded-full bg-emerald-600 inline-block" />
+              Thông tin văn bản
+            </h2>
             <div className="space-y-5">
               {/* Upload file — đặt lên đầu vì auto-fill các trường bên dưới phụ thuộc vào tên file */}
               <div>
@@ -602,39 +607,42 @@ export default function UploadVanBanPage() {
                   File văn bản đã ký <span className="text-red-500">*</span>
                 </label>
                 {file ? (
-                  <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                    <FileText size={16} className="text-blue-600 shrink-0" />
+                  <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl">
+                    <FileText size={18} className="text-emerald-700 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
                       <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB</p>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       {previewUrl && (
                         <a
                           href={previewUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg"
+                          className="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all"
                         >
                           Xem
                         </a>
                       )}
                       <button
                         onClick={() => { setFile(null); setPreviewUrl(null) }}
-                        className="p-1 text-slate-400 hover:text-red-600 rounded"
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-all"
+                        title="Gỡ file"
                       >
-                        <X size={14} />
+                        <X size={16} />
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <label className="flex flex-col items-center gap-2 px-4 py-6 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all">
-                    <Upload size={24} className="text-slate-400" />
-                    <span className="text-sm text-slate-500">
-                      Kéo thả file hoặc <span className="text-blue-600 font-bold">chọn từ máy tính</span>
+                  <label className="flex flex-col items-center justify-center gap-2 px-4 py-8 border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/40 rounded-2xl cursor-pointer transition-all group">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                      <Upload size={20} />
+                    </div>
+                    <span className="text-sm text-slate-600">
+                      Kéo thả file hoặc <span className="text-emerald-700 font-extrabold group-hover:underline">chọn từ máy tính</span>
                     </span>
-                    <span className="text-xs text-slate-400">
-                      PDF, DOCX, XLSX — tối đa 20MB. Đặt tên file dạng &quot;01 ĐN-NMCB Tên văn bản&quot; để hệ thống tự điền các trường bên dưới.
+                    <span className="text-xs text-slate-400 text-center max-w-md">
+                      Hỗ trợ PDF, DOCX, XLSX (tối đa 20MB). Tên file định dạng &quot;01 ĐN-NMCB Tên văn bản&quot; sẽ tự điền tự động.
                     </span>
                     <input
                       type="file"
@@ -699,7 +707,7 @@ export default function UploadVanBanPage() {
                       Loại văn bản <span className="text-red-500">*</span>
                     </label>
                     <select
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                       value={form.loai_van_ban}
                       onChange={(e) => {
                         setForm((f) => ({ ...f, loai_van_ban: e.target.value }))
@@ -722,7 +730,7 @@ export default function UploadVanBanPage() {
                     Phòng ban <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                     value={form.phong_ban}
                     onChange={(e) => {
                       setForm((f) => ({ ...f, phong_ban: e.target.value }))
@@ -745,7 +753,7 @@ export default function UploadVanBanPage() {
                       Mã văn bản <span className="text-red-500">*</span>
                     </label>
                     <input
-                      className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-blue-500 ${maVanBanExists ? "border-red-400 bg-red-50" : "border-slate-300"}`}
+                      className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 ${maVanBanExists ? "border-red-400 bg-red-50" : "border-slate-300"}`}
                       placeholder="Ví dụ: 01/BC-NMCB"
                       value={maVanBan}
                       onChange={(e) => {
@@ -775,23 +783,19 @@ export default function UploadVanBanPage() {
                   Tên / Trích yếu văn bản <span className="text-red-500">*</span>
                 </label>
                 <input
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                   placeholder="Nhập tên hoặc trích yếu nội dung văn bản..."
                   value={form.ten_van_ban}
                   onChange={(e) => setForm((f) => ({ ...f, ten_van_ban: e.target.value }))}
                 />
               </div>
 
-              {/* Ô "Cấp văn bản" đã gỡ 2026-09-05 cùng với luồng soạn thảo. Ở luồng upload nó
-                  vốn thuần trang trí: văn bản ký tay được insert thẳng ở trạng thái
-                  `da_phe_duyet`, không đi qua vòng ký nào. */}
-
               {/* Ngày phê duyệt */}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày ký / Ngày phê duyệt</label>
                 <input
                   type="date"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                   value={form.ngay_phe_duyet}
                   onChange={(e) => setForm((f) => ({ ...f, ngay_phe_duyet: e.target.value }))}
                 />
@@ -801,7 +805,7 @@ export default function UploadVanBanPage() {
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 resize-none"
                   rows={2}
                   placeholder="Ghi chú thêm (nếu có)..."
                   value={form.ghi_chu}
@@ -816,8 +820,9 @@ export default function UploadVanBanPage() {
         {/* Cột phải: người phê duyệt + phòng ban đã ký / người lập */}
         <div className="space-y-4">
           {/* Người phê duyệt */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <h2 className="text-sm font-bold text-slate-700 mb-3">
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
+            <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
+              <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
               Người phê duyệt <span className="text-red-500">*</span>
             </h2>
 
@@ -829,7 +834,7 @@ export default function UploadVanBanPage() {
                   </p>
                 ) : deptLeaderLoading ? (
                   <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                    <span className="w-3 h-3 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                    <span className="w-3 h-3 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
                     Đang xác định người phê duyệt...
                   </p>
                 ) : deptLeaderQueried && deptLeaderCandidates.length === 0 ? (
@@ -856,7 +861,7 @@ export default function UploadVanBanPage() {
                   </div>
                 ) : (
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                     value={form.phe_duyet_user_id}
                     onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
                   >
@@ -872,7 +877,7 @@ export default function UploadVanBanPage() {
             ) : (
               <>
                 <select
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                   value={form.phe_duyet_user_id}
                   onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
                 >
@@ -906,6 +911,7 @@ export default function UploadVanBanPage() {
                     name="upload-sign-as"
                     checked={pheDuyetSignAs === "none"}
                     onChange={() => setPheDuyetSignAs("none")}
+                    className="accent-emerald-600"
                   />
                   Ký trực tiếp
                 </label>
@@ -916,6 +922,7 @@ export default function UploadVanBanPage() {
                       name="upload-sign-as"
                       checked={pheDuyetSignAs === opt}
                       onChange={() => setPheDuyetSignAs(opt)}
+                      className="accent-emerald-600"
                     />
                     {SIGN_AS_LABEL[opt]}
                   </label>
@@ -924,19 +931,19 @@ export default function UploadVanBanPage() {
             </div>
           </div>
 
-          {/* Ký xác nhận (chỉ Nội bộ đơn vị) — ghi nhận lại những người đã ký tay trên
-              giấy theo đúng thứ tự, mirror "Ký xác nhận" của new/page.tsx. Tùy chọn. */}
+          {/* Ký xác nhận (chỉ Nội bộ đơn vị) */}
           {form.pham_vi === "Don_vi" && (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-sm font-bold text-slate-700 mb-3">
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
+              <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
+                <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
                 Ký xác nhận
-                <span className="ml-2 text-xs font-normal text-slate-400">(tùy chọn — có thể để trống)</span>
+                <span className="ml-1 text-xs font-normal text-slate-400">(tùy chọn)</span>
               </h2>
               {!form.phong_ban ? (
                 <p className="text-xs text-amber-600">Chọn phòng ban trước để hiện danh sách người ký.</p>
               ) : unitSignUsersLoading ? (
                 <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                  <span className="w-3 h-3 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                  <span className="w-3 h-3 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
                   Đang tải danh sách...
                 </p>
               ) : unitSignUsers.length === 0 ? (
@@ -953,8 +960,8 @@ export default function UploadVanBanPage() {
                       return (
                         <label
                           key={u.id}
-                          className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all ${
-                            selected ? "border-blue-300 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
+                          className={`flex items-center gap-2.5 p-2 rounded-xl border cursor-pointer transition-all ${
+                            selected ? "border-emerald-300 bg-emerald-50/60" : "border-slate-200 hover:bg-slate-50"
                           }`}
                         >
                           <input
@@ -965,10 +972,10 @@ export default function UploadVanBanPage() {
                                 e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
                               )
                             }}
-                            className="rounded"
+                            className="rounded text-emerald-600 focus:ring-emerald-500"
                           />
                           {selected && (
-                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                            <span className="w-5 h-5 rounded-full bg-emerald-700 text-white text-xs flex items-center justify-center font-bold shrink-0">
                               {idx + 1}
                             </span>
                           )}
@@ -984,19 +991,22 @@ export default function UploadVanBanPage() {
 
           {/* Phòng ban đã ký (Cong_ty) / Người lập (Don_vi) */}
           {form.pham_vi === "Cong_ty" ? (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-bold text-slate-700">Phòng ban đã ký</h2>
+                <h2 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                  <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+                  Phòng ban đã ký
+                </h2>
                 <button
                   type="button"
                   onClick={addStep}
-                  className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg"
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-all"
                 >
-                  <Plus size={12} /> Thêm bước
+                  <Plus size={13} /> Thêm bước
                 </button>
               </div>
               {steps.length === 0 ? (
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-400 bg-slate-50/50 p-3 rounded-xl border border-dashed border-slate-200 text-center">
                   Chưa có phòng ban nào — bấm &quot;Thêm bước&quot; nếu văn bản giấy có chữ ký phòng ban.
                 </p>
               ) : (
@@ -1012,12 +1022,12 @@ export default function UploadVanBanPage() {
                     const loadingUsers = s.phong_ban_code ? !!stepUsersLoading[s.phong_ban_code] : false
                     return (
                       <div key={s.id} className="flex items-start gap-2">
-                        <span className="mt-2 w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold shrink-0">
+                        <span className="mt-2 w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold shrink-0">
                           {i + 1}
                         </span>
                         <div className="flex-1 space-y-1.5">
                           <select
-                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-blue-500"
+                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                             value={s.phong_ban_code}
                             onChange={(e) => updateStepDept(s.id, e.target.value)}
                           >
@@ -1027,7 +1037,7 @@ export default function UploadVanBanPage() {
                             ))}
                           </select>
                           <select
-                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 disabled:bg-slate-50 disabled:text-slate-400"
                             value={s.user_id}
                             disabled={!s.phong_ban_code}
                             onChange={(e) => updateStepUser(s.id, e.target.value)}
@@ -1057,21 +1067,22 @@ export default function UploadVanBanPage() {
               )}
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-              <h2 className="text-sm font-bold text-slate-700 mb-3">
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
+              <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
+                <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
                 Người lập <span className="text-red-500">*</span>
               </h2>
               {!form.phong_ban ? (
                 <p className="text-xs text-amber-600">Chọn phòng ban trước để chọn người lập.</p>
               ) : donViUsersLoading ? (
                 <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                  <span className="w-3 h-3 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                  <span className="w-3 h-3 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
                   Đang tải danh sách...
                 </p>
               ) : (
                 <>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                     value={form.soan_thao_user_id}
                     onChange={(e) => setForm((f) => ({ ...f, soan_thao_user_id: e.target.value }))}
                   >
@@ -1094,23 +1105,23 @@ export default function UploadVanBanPage() {
           )}
 
           {/* Nút hành động */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-2 pt-1">
             <button
               onClick={handleSave}
               disabled={saving || uploading || maVanBanExists || (form.pham_vi === "Don_vi" && deptLeaderLoading)}
-              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md transition-all"
+              className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-[0.99]"
             >
               {saving || uploading ? (
                 <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
-                <Upload size={15} />
+                <Upload size={16} />
               )}
               {uploading ? "Đang tải file..." : saving ? "Đang lưu..." : "Lưu văn bản"}
             </button>
             <button
               onClick={() => router.push("/dashboard/documents")}
               disabled={saving}
-              className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+              className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all text-center"
             >
               Hủy
             </button>

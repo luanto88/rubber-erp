@@ -2,6 +2,7 @@ import * as XLSX from "xlsx"
 import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import { loadPdfjs } from "@/lib/pdfjs-server"
 
 // Polyfill DOMMatrix cho Node.js runtime (Vercel Serverless Function thiếu Web API này)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -285,7 +286,7 @@ export function parseOutputExcel(buffer: Buffer): ParsedOutputReport {
 /** Bóc tách file PDF sản lượng thuần TypeScript (chạy an toàn trên mọi môi trường bao gồm Vercel Serverless) */
 export async function parseOutputPdf(buffer: Buffer): Promise<ParsedOutputReport> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf.mjs")
+  const pdfjsLib: any = await loadPdfjs()
   const cmapsDir = path.join(process.cwd(), "node_modules", "pdfjs-dist", "cmaps")
   const hasCMaps = fs.existsSync(cmapsDir)
   const cMapUrl = hasCMaps ? pathToFileURL(cmapsDir).href + "/" : undefined

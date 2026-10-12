@@ -204,3 +204,16 @@ thì ném) + `datesKey` ổn định (tập ngày sắp xếp) + `signingReqSeq`
 (`!signingStatusError`). Danh sách chỉ hiện "Đang tải..." khi chưa có dữ liệu (không gỡ bảng).
 Route `/api/quality/signing-status` nhận cả GET (cũ) và POST `{ factoryId, dates[] }`, chia lô
 qua `status-query.ts`, lỗi phiên trả 401.
+
+## Hỗ trợ kỹ thuật — phân tích PDF KQKN (sửa 2026-10-12)
+
+- `processKqknPdf` (`src/lib/kqkn-parser.ts`): ô "LÔ NM" tìm trong khoảng giữa dòng "LÔ PKN"
+  (y≈43, số lô QLCL) và "HẠNG ĐK" (y≈107), lấy item gần y=71 nhất. Chữ ngắn canh giữa (vd `1M`
+  lô thu mua) nằm ở y≈78. **Không bao giờ fallback về số PKN** — không đọc được thì
+  `lo_nm_missing: true`, UI báo riêng. (Bug cũ: lấy nhầm 1715 làm số lô nhà máy.)
+- `quality-converter-view.tsx` nạp `lots` + `qc_results` bằng `fetchAllPaginated` (trước đây
+  bị cắt 1000 dòng → không nhận ra lô đã KN → lô 1752cs–1763cs ngày 07/10 bị nhập 2 lần, PKN
+  225 và 229 — chưa dọn). Có banner "Trùng ngày kiểm nghiệm", chặn lô trùng trong cùng PDF, và
+  kiểm tra lại `qc_results` theo `lot_id` ngay trước khi insert.
+- Chế độ xóa theo ngày có "Chọn hết" (chỉ phiếu được phép xóa: admin tất cả, người khác phiếu
+  `created_by` của mình).

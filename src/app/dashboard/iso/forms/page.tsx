@@ -1,11 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Search, Plus, FolderOpen, AlertTriangle,
   FileText, Loader2, Sparkles, RefreshCw, ClipboardList,
   Eye, Pencil, Trash2, Download, BadgeCheck, Share2,
+  ClipboardCheck, Clock, CheckCircle2, RotateCcw,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
@@ -137,13 +138,13 @@ function TemplateCard({
   const ext = tmpl.file_ext
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-violet-300 hover:shadow-md transition-all">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-emerald-300 hover:shadow-md transition-all">
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex-1 min-w-0">
           <div className="font-bold text-slate-800 text-sm leading-snug line-clamp-2">{tmpl.ten_tai_lieu}</div>
           <div className="text-xs text-slate-400 mt-0.5">{tmpl.ma_tai_lieu} &middot; {tmpl.phong_ban} &middot; LBH: {tmpl.lan_ban_hanh}</div>
         </div>
-        <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-violet-100 text-violet-700">
+        <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
           {pct}%
         </span>
       </div>
@@ -205,8 +206,14 @@ function StatusBadge({ status, inst }: { status: IsoFormInstanceStatus; inst?: I
     }
   }
 
+  const dotColor =
+    status === "da_phe_duyet" ? "bg-emerald-500" :
+    status === "tra_ve" ? "bg-rose-500" :
+    status === "draft" ? "bg-slate-400" : "bg-amber-500"
+
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${color}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${color}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
       {label}
     </span>
   )
@@ -574,6 +581,14 @@ export default function IsoFormsPage() {
     }
   }
 
+  const statCounts = useMemo(() => {
+    const total = instances.length
+    const inProgress = instances.filter((i) => i.trang_thai === "draft" || i.trang_thai === "cho_xem_xet" || i.trang_thai === "cho_phe_duyet").length
+    const completed = instances.filter((i) => i.trang_thai === "da_phe_duyet").length
+    const returned = instances.filter((i) => i.trang_thai === "tra_ve").length
+    return { total, inProgress, completed, returned }
+  }, [instances])
+
   const filteredInstances = filterStatus === "all"
     ? instances
     : instances.filter((i) => i.trang_thai === filterStatus)
@@ -593,12 +608,14 @@ export default function IsoFormsPage() {
     <IsoShell>
       <div className="space-y-6">
 
-        <PageBackgroundMotif theme="indigo" />
+        <PageBackgroundMotif theme="forest" />
         <PageHeaderBanner
           title="Thực hiện hồ sơ ISO"
           subtitle="Tìm biểu mẫu bằng AI, tạo bản thực hiện và gửi phê duyệt"
-          theme="indigo"
-          icon={BadgeCheck}
+          theme="forest"
+          icon={ClipboardCheck}
+          collapsible={true}
+          storageKey="banner_collapsed_iso_forms"
           action={
             <div className="flex flex-col sm:items-end gap-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -607,7 +624,7 @@ export default function IsoFormsPage() {
                   onClick={handleReembed}
                   disabled={reembedding || !factoryId}
                   title="Cập nhật chỉ mục AI cho các tài liệu chưa được index"
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-white/15 hover:bg-white/25 disabled:opacity-50 rounded-xl border border-white/40 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-white/15 hover:bg-white/25 disabled:opacity-50 rounded-xl border border-white/40 transition-all active:scale-95"
                 >
                   {reembedding ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
                   Cập nhật chỉ mục AI
@@ -617,7 +634,7 @@ export default function IsoFormsPage() {
                 <button
                   onClick={() => setLapHoSoOpen(true)}
                   disabled={!factoryId}
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-indigo-700 bg-white hover:bg-slate-50 disabled:opacity-50 rounded-xl shadow-md transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-emerald-800 bg-white hover:bg-emerald-50 disabled:opacity-50 rounded-xl shadow-md transition-all active:scale-95"
                 >
                   <ClipboardList size={15} />
                   Lập hồ sơ
@@ -635,13 +652,13 @@ export default function IsoFormsPage() {
         {canLapHoSo && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-3">
-            <Sparkles size={16} className="text-violet-500" />
+            <Sparkles size={16} className="text-emerald-600" />
             <span className="text-sm font-bold text-slate-700">Tìm kiếm biểu mẫu bằng AI</span>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
               ref={searchInputRef}
-              className="flex-1 min-w-0 px-4 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400 transition-colors"
+              className="flex-1 min-w-0 px-4 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 transition-colors"
               placeholder="Ví dụ: biểu mẫu mục tiêu chất lượng, phiếu kiểm tra sản phẩm..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -650,10 +667,8 @@ export default function IsoFormsPage() {
             <button
               onClick={handleSearch}
               disabled={searching || !searchQuery.trim() || !factoryId}
-              className="flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors"
+              className="flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
             >
-              {searching ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
-              Tìm kiếm
             </button>
           </div>
 
@@ -697,6 +712,46 @@ export default function IsoFormsPage() {
         </div>
         )}
 
+        {/* Thẻ trạng thái quy trình (Process Stats Cards) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 grid place-items-center shrink-0">
+              <FileText size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs text-slate-400 font-medium truncate">Tổng hồ sơ</p>
+              <p className="text-lg sm:text-xl font-extrabold text-slate-800">{statCounts.total}</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 grid place-items-center shrink-0">
+              <Clock size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs text-slate-400 font-medium truncate">Đang thực hiện</p>
+              <p className="text-lg sm:text-xl font-extrabold text-amber-600">{statCounts.inProgress}</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 grid place-items-center shrink-0">
+              <CheckCircle2 size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs text-slate-400 font-medium truncate">Đã hoàn thành</p>
+              <p className="text-lg sm:text-xl font-extrabold text-emerald-600">{statCounts.completed}</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 grid place-items-center shrink-0">
+              <RotateCcw size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs text-slate-400 font-medium truncate">Trả về / Cần sửa</p>
+              <p className="text-lg sm:text-xl font-extrabold text-rose-600">{statCounts.returned}</p>
+            </div>
+          </div>
+        </div>
+
         {/* ── Instances list ── */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-slate-100">
@@ -713,10 +768,10 @@ export default function IsoFormsPage() {
                   key={s}
                   onClick={() => setFilterStatus(s)}
                   className={
-                    "px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors " +
+                    "px-3 py-1 rounded-xl text-xs font-bold transition-all " +
                     (filterStatus === s
-                      ? "bg-violet-100 text-violet-700"
-                      : "text-slate-500 hover:bg-slate-50")
+                      ? "bg-emerald-100 text-emerald-800 shadow-2xs ring-1 ring-emerald-300"
+                      : "text-slate-500 hover:bg-slate-100")
                   }
                 >
                   {s === "all" ? "Tất cả" : (FORM_INSTANCE_STATUS_LABEL[s as IsoFormInstanceStatus] ?? s)}
@@ -744,7 +799,7 @@ export default function IsoFormsPage() {
                   <th className="px-4 py-2.5 text-xs font-bold text-slate-500 max-w-[220px]">Tiêu đề</th>
                   <th className="px-4 py-2.5 text-xs font-bold text-slate-500">Trạng thái</th>
                   <th className="px-4 py-2.5 text-xs font-bold text-slate-500">Ngày tạo</th>
-                  <th className="px-4 py-2.5 text-xs font-bold text-slate-500">Cấp</th>
+                  <th className="px-4 py-2.5 text-xs font-bold text-slate-500">Tiến độ</th>
                   <th className="px-4 py-2.5 text-xs font-bold text-slate-500 w-32"></th>
                 </tr>
               </thead>
@@ -761,7 +816,7 @@ export default function IsoFormsPage() {
                     <tr
                       key={inst.id}
                       onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
-                      className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors"
+                      className="border-t border-slate-100 hover:bg-emerald-50/40 cursor-pointer transition-colors"
                     >
                       <td className="px-4 py-3 max-w-[260px]">
                         <div className="font-semibold text-slate-800 truncate">{inst.tieu_de}</div>
@@ -781,8 +836,9 @@ export default function IsoFormsPage() {
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(inst.created_at)}</td>
                       <td className="px-4 py-3">
-                        <span className="text-xs text-slate-500">
-                          {(inst.so_buoc_tong ?? 0) > 0 ? `${inst.so_buoc_tong} bước` : inst.cap_tl}
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/70">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          {(inst.so_buoc_tong ?? 0) > 0 ? `${inst.so_buoc_tong} bước` : inst.cap_tl || "—"}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">

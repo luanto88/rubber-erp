@@ -28,7 +28,7 @@ import type { PageBannerTheme } from "./page-header-banner"
 // với `--color-brand`/`--color-ocean-600`/`--color-mint-600`/`--color-moss-600` trong
 // globals.css; `amber`/`slate` dùng hex chuẩn Tailwind (không có token riêng).
 const MOTIF_COLOR: Record<PageBannerTheme, string> = {
-  forest: "#2f5d52",
+  forest: "#166534",
   ocean: "#1b5590",
   mint: "#34a68d",
   moss: "#596532",

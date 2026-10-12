@@ -7,8 +7,8 @@
 // mục "Pastel Rừng Cao Su" — phạm vi mở rộng 2026-08-24: chỉ phần header/banner đầu
 // trang, không đổi màu nút/bảng/filter bên dưới.
 
-import type { ReactNode } from "react"
-import type { LucideIcon } from "lucide-react"
+import { useState, useEffect, type ReactNode } from "react"
+import { ChevronDown, ChevronUp, type LucideIcon } from "lucide-react"
 
 export type PageBannerTheme =
   | "forest"
@@ -36,9 +36,10 @@ export type PageBannerTheme =
 // custom token mới vào globals.css cho 2 theme này).
 const PAGE_THEME_BANNER: Record<PageBannerTheme, { pattern: string; from: string; to: string; bgSize?: string }> = {
   forest: {
-    pattern: "repeating-linear-gradient(52deg, rgba(255,255,255,0.12) 0 2px, transparent 2px 18px)",
-    from: "#2f5d52",
-    to: "#1c3a32",
+    pattern:
+      "repeating-linear-gradient(52deg, rgba(255,255,255,0.1) 0 2px, transparent 2px 18px), repeating-radial-gradient(circle at 100% 100%, rgba(255,255,255,0.12) 0 2px, transparent 2px 16px)",
+    from: "#093719",
+    to: "#166534",
   },
   ocean: {
     pattern: "repeating-linear-gradient(-8deg, rgba(255,255,255,0.14) 0 3px, transparent 3px 22px)",
@@ -118,6 +119,8 @@ export function PageHeaderBanner({
   icon,
   action,
   className = "",
+  collapsible = false,
+  storageKey,
 }: {
   title: ReactNode
   subtitle?: ReactNode
@@ -125,12 +128,42 @@ export function PageHeaderBanner({
   icon?: LucideIcon
   action?: ReactNode
   className?: string
+  collapsible?: boolean
+  storageKey?: string
 }) {
   const t = PAGE_THEME_BANNER[theme]
   const Icon = icon
+
+  const actualKey = storageKey || `banner_collapsed_${theme}`
+  const [collapsed, setCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (!collapsible) return
+    try {
+      const saved = localStorage.getItem(actualKey)
+      if (saved === "true") setCollapsed(true)
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [collapsible, actualKey])
+
+  const toggleCollapsed = () => {
+    const next = !collapsed
+    setCollapsed(next)
+    try {
+      localStorage.setItem(actualKey, String(next))
+    } catch {
+      // Ignore localStorage errors
+    }
+  }
+
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl shadow-md mb-6 px-5 py-5 sm:px-6 sm:py-6 ${className}`}
+      className={`relative overflow-hidden rounded-2xl shadow-md transition-all duration-200 ${
+        collapsed
+          ? "mb-4 px-4 py-2.5 sm:px-5 sm:py-3"
+          : "mb-6 px-5 py-5 sm:px-6 sm:py-6"
+      } ${className}`}
       style={{
         backgroundImage: `${t.pattern}, linear-gradient(to bottom right, ${t.from}, ${t.to})`,
         backgroundSize: t.bgSize,
@@ -138,24 +171,50 @@ export function PageHeaderBanner({
     >
       {Icon && (
         <Icon
-          className="absolute -right-3 -bottom-4 text-white opacity-15 pointer-events-none"
-          size={110}
+          className={`absolute -right-3 pointer-events-none text-white opacity-[0.13] transition-all ${
+            collapsed ? "-bottom-2 scale-75" : "-bottom-4"
+          }`}
+          size={120}
           strokeWidth={1.5}
         />
       )}
-      <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
+      <div className="relative z-10 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3 min-w-0">
           {Icon && (
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/20 text-white">
-              <Icon size={22} />
+            <span
+              className={`flex shrink-0 items-center justify-center rounded-full bg-white/20 text-white transition-all ${
+                collapsed ? "h-8 w-8" : "h-11 w-11"
+              }`}
+            >
+              <Icon size={collapsed ? 16 : 22} />
             </span>
           )}
-          <div>
-            <h1 className="text-2xl font-extrabold text-white">{title}</h1>
-            {subtitle && <p className="text-sm text-white/80 mt-0.5">{subtitle}</p>}
+          <div className="min-w-0">
+            <h1
+              className={`font-extrabold text-white transition-all truncate ${
+                collapsed ? "text-lg sm:text-xl" : "text-2xl"
+              }`}
+            >
+              {title}
+            </h1>
+            {!collapsed && subtitle && (
+              <p className="text-sm text-white/80 mt-0.5">{subtitle}</p>
+            )}
           </div>
         </div>
-        {action && <div className="flex flex-wrap items-center gap-2">{action}</div>}
+        <div className="flex flex-wrap items-center gap-2">
+          {action}
+          {collapsible && (
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white/90 hover:text-white transition-all active:scale-95 flex items-center justify-center"
+              title={collapsed ? "Mở rộng banner" : "Thu gọn banner để tăng không gian làm việc"}
+            >
+              {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

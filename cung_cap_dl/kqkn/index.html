@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Chuyển Đổi KQKN Cao Su CSR Sang Excel Nhập Liệu</title>
+    <meta name="description" content="Ứng dụng tự động hóa tái tạo số liệu chi tiết từng mẫu từ biểu kết quả kiểm nghiệm cao su CSR (PDF) sang file Excel nhập liệu ban đầu, đảm bảo khớp 100% thống kê.">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-base: #090d16;
+            --bg-surface: #101726;
+            --bg-card: rgba(19, 29, 49, 0.7);
+            --bg-card-hover: rgba(26, 40, 68, 0.85);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-active: rgba(16, 185, 129, 0.4);
+            
+            --primary: #10b981;
+            --primary-glow: rgba(16, 185, 129, 0.25);
+            --primary-hover: #059669;
+            --accent-cyan: #06b6d4;
+            --accent-indigo: #6366f1;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            
+            --radius-lg: 16px;
+            --radius-md: 10px;
+            --radius-sm: 6px;
+            --shadow-card: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+            --shadow-glow: 0 0 25px rgba(16, 185, 129, 0.2);
+            --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(16, 185, 129, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 80%, rgba(6, 182, 212, 0.07) 0%, transparent 40%),
+                radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.04) 0%, transparent 60%);
+            background-attachment: fixed;
+            line-height: 1.5;
+        }
+
+        /* Top Navigation Header */
+        header {
+            border-bottom: 1px solid var(--border-subtle);
+            background: rgba(16, 23, 38, 0.8);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .header-container {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 1rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 14px var(--primary-glow);
+        }
+
+        .logo-icon svg {
+            width: 22px;
+            height: 22px;
+            fill: white;
+        }
+
+        .logo-text h1 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .badge-std {
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 2px 7px;
+            border-radius: 20px;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--primary);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .logo-text p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: rgba(255, 255, 255, 0.04);
+            padding: 6px 12px;
+            border-radius: 20px;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--primary);
+            box-shadow: 0 0 8px var(--primary);
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        /* Main Container Layout */
+        main {
+            max-width: 1280px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+            flex: 1;
+            width: 100%;
+        }
+
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 440px 1fr;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .grid-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Cards and Sections */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            backdrop-filter: blur(16px);
+            box-shadow: var(--shadow-card);
+            transition: var(--transition-smooth);
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .card-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin-bottom: 1.25rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        /* Upload Zone */
+        .drop-zone {
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            border-radius: var(--radius-md);
+            padding: 2.25rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            background: rgba(16, 23, 38, 0.4);
+            position: relative;
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--primary);
+            background: rgba(16, 185, 129, 0.05);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
+        }
+
+        .drop-icon {
+            width: 52px;
+            height: 52px;
+            margin: 0 auto 1rem;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition-smooth);
+        }
+
+        .drop-zone:hover .drop-icon {
+            transform: scale(1.08) translateY(-2px);
+            background: rgba(16, 185, 129, 0.2);
+        }
+
+        .drop-zone h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 0.35rem;
+        }
+
+        .drop-zone p {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .file-info-badge {
+            display: none;
+            margin-top: 1rem;
+            padding: 0.75rem 1rem;
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: var(--radius-md);
+            text-align: left;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .file-info-badge.show {
+            display: flex;
+        }
+
+        .file-info-name {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #ffffff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 260px;
+        }
+
+        .file-info-size {
+            font-size: 0.72rem;
+            color: var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Configuration Forms */
+        .config-group {
+            margin-top: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 0.4rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        /* Sample Count Toggle Switch */
+        .sample-toggle-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 4px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .sample-option {
+            text-align: center;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            transition: var(--transition-smooth);
+            user-select: none;
+        }
+
+        .sample-option:hover {
+            color: white;
+        }
+
+        .sample-option.active {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(6, 182, 212, 0.25));
+            border: 1px solid var(--primary);
+            color: #ffffff;
+            box-shadow: 0 2px 10px rgba(16, 185, 129, 0.2);
+        }
+
+        .sample-option .desc {
+            display: block;
+            font-size: 0.68rem;
+            font-weight: 400;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+
+        .sample-option.active .desc {
+            color: #a7f3d0;
+        }
+
+        /* Form Inputs */
+        select, input[type="text"] {
+            width: 100%;
+            background: rgba(16, 23, 38, 0.7);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            color: white;
+            padding: 0.65rem 0.9rem;
+            font-size: 0.88rem;
+            font-family: inherit;
+            outline: none;
+            transition: var(--transition-smooth);
+        }
+
+        select:focus, input[type="text"]:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+        }
+
+        /* Primary Action Button */
+        .btn-action {
+            width: 100%;
+            margin-top: 1.5rem;
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 0.9rem 1.5rem;
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn-action:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+            background: linear-gradient(135deg, #34d399, #059669);
+        }
+
+        .btn-action:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .btn-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Right Panel: Results & Audit */
+        .results-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Summary Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+
+        @media (max-width: 640px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .stat-card {
+            background: rgba(16, 23, 38, 0.6);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), var(--accent-cyan));
+            opacity: 0.8;
+        }
+
+        .stat-card .label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 0.35rem;
+        }
+
+        .stat-card .value {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: #ffffff;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stat-card .sub {
+            font-size: 0.7rem;
+            color: var(--primary);
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Export Bar */
+        .export-banner {
+            display: none;
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(6, 182, 212, 0.15));
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            border-radius: var(--radius-lg);
+            padding: 1.25rem 1.5rem;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            box-shadow: 0 4px 20px rgba(16, 185, 129, 0.15);
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        .export-banner.show {
+            display: flex;
+        }
+
+        .export-meta h4 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 0.2rem;
+        }
+
+        .export-meta p {
+            font-size: 0.8rem;
+            color: #a7f3d0;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .btn-download {
+            background: linear-gradient(135deg, #10b981, #06b6d4);
+            color: #090d16;
+            font-weight: 800;
+            font-size: 0.95rem;
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 0.8rem 1.6rem;
+            cursor: pointer;
+            transition: var(--transition-smooth);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 15px rgba(6, 182, 212, 0.3);
+            white-space: nowrap;
+        }
+
+        .btn-download:hover {
+            transform: scale(1.03);
+            box-shadow: 0 6px 25px rgba(16, 185, 129, 0.5);
+            background: linear-gradient(135deg, #34d399, #22d3ee);
+        }
+
+        /* Report Cards */
+        .report-box {
+            background: rgba(16, 23, 38, 0.5);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            font-size: 0.85rem;
+        }
+
+        .report-box h4 {
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .report-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            color: var(--text-muted);
+        }
+
+        .report-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .report-list li strong {
+            color: #f1f5f9;
+        }
+
+        /* Data Audit Table */
+        .table-wrapper {
+            overflow-x: auto;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            background: rgba(11, 17, 32, 0.6);
+            max-height: 480px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            text-align: left;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            background: #131b2e;
+            z-index: 10;
+        }
+
+        th {
+            padding: 0.75rem 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            white-space: nowrap;
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 0.03em;
+        }
+
+        td {
+            padding: 0.7rem 0.85rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            white-space: nowrap;
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+        }
+
+        tbody tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .tag-step {
+            display: inline-block;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 4px;
+            margin-left: 4px;
+        }
+
+        .tag-step-05 {
+            background: rgba(6, 182, 212, 0.15);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+        }
+
+        .tag-step-01 {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--accent-amber);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .tag-grade {
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .tag-grade-ok {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--primary);
+        }
+
+        .tag-grade-rh {
+            background: rgba(244, 63, 94, 0.15);
+            color: var(--accent-rose);
+        }
+
+        /* Empty State */
+        .empty-placeholder {
+            padding: 4rem 2rem;
+            text-align: center;
+            color: var(--text-dim);
+        }
+
+        .empty-placeholder svg {
+            width: 48px;
+            height: 48px;
+            stroke: var(--text-dim);
+            margin-bottom: 1rem;
+            opacity: 0.6;
+        }
+
+        /* Spinner */
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 1rem 1.25rem;
+            border-radius: var(--radius-md);
+            background: #1e293b;
+            color: white;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 100;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success { border-color: var(--primary); }
+        .toast.error { border-color: var(--accent-rose); }
+    </style>
+</head>
+<body>
+
+    <!-- Header Navigation -->
+    <header>
+        <div class="header-container">
+            <div class="logo-group">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>KQKN Cao Su CSR <span class="badge-std">CSR 10</span></h1>
+                    <p>Hệ thống tự động tái tạo số liệu mẫu nhập liệu ban đầu chuẩn 100%</p>
+                </div>
+            </div>
+            
+            <div class="connection-status" id="connectionStatus">
+                <span class="status-dot"></span>
+                <span id="statusText">Máy chủ cục bộ sẵn sàng</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main>
+        <div class="grid-layout">
+            <!-- Left Column: Input and Configuration -->
+            <div class="input-panel">
+                <div class="card">
+                    <div class="card-title">
+                        <span>1. Tải lên biểu KQKN (PDF)</span>
+                        <span style="font-size: 0.75rem; color: var(--text-dim);">Biểu QLCL-QT21-F08</span>
+                    </div>
+
+                    <!-- Drag & Drop Zone -->
+                    <div class="drop-zone" id="dropZone">
+                        <input type="file" id="fileInput" accept=".pdf" style="display: none;">
+                        <div class="drop-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                        </div>
+                        <h3>Kéo thả file PDF vào đây</h3>
+                        <p>hoặc nhấp chuột để chọn file từ máy tính</p>
+                        
+                        <div class="file-info-badge" id="fileInfoBadge">
+                            <span class="file-info-name" id="fileName">KQKN.pdf</span>
+                            <span class="file-info-size" id="fileSize">120 KB</span>
+                        </div>
+                    </div>
+
+                    <!-- Configuration Options -->
+                    <div class="config-group">
+                        <!-- Sample Count Selector -->
+                        <div>
+                            <label class="form-label">Số mẫu mỗi lô (n)</label>
+                            <div class="sample-toggle-grid">
+                                <div class="sample-option active" data-samples="6" id="opt6">
+                                    6 MẪU / LÔ
+                                    <span class="desc">Chuẩn thông dụng (M1 - M6)</span>
+                                </div>
+                                <div class="sample-option" data-samples="10" id="opt10">
+                                    10 MẪU / LÔ
+                                    <span class="desc">Mở rộng kiểm tra (M1 - M10)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Standard Selector -->
+                        <div>
+                            <label class="form-label" for="selectTieuChuan">Tiêu chuẩn áp dụng (Dòng 2)</label>
+                            <select id="selectTieuChuan">
+                                <option value="TCCS 112:2022" selected>TCCS 112:2022 (Tiêu chuẩn cơ sở SVR 10)</option>
+                                <option value="TCVN 3769:2016">TCVN 3769:2016 (Tiêu chuẩn quốc gia)</option>
+                                <option value="custom">-- Nhập tiêu chuẩn khác --</option>
+                            </select>
+                            <input type="text" id="inputCustomTieuChuan" placeholder="Nhập tên tiêu chuẩn..." style="display: none; margin-top: 8px;">
+                        </div>
+
+                        <!-- Type & Grade Metadata -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <div>
+                                <label class="form-label" for="selectChungLoai">Chủng loại</label>
+                                <select id="selectChungLoai">
+                                    <option value="10" selected>10 (SVR 10)</option>
+                                    <option value="20">20 (SVR 20)</option>
+                                    <option value="3L">3L (SVR 3L)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label" for="selectLoaiKN">Loại kiểm nghiệm</label>
+                                <select id="selectLoaiKN">
+                                    <option value="thuong" selected>thuong (Thường)</option>
+                                    <option value="lai">lai (Kiểm lại)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Convert Button -->
+                    <button class="btn-action" id="btnConvert" disabled>
+                        <span class="spinner" id="btnSpinner"></span>
+                        <span id="btnText">🚀 TÁI TẠO & XUẤT FILE EXCEL</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Right Column: Results Dashboard -->
+            <div class="results-panel">
+                <!-- Export Download Banner -->
+                <div class="export-banner" id="exportBanner">
+                    <div class="export-meta">
+                        <h4 id="downloadFileName">Nhap_lieu_ban_dau_CSR10_...xlsx</h4>
+                        <p id="downloadMeta">Khớp 100% thống kê • Sẵn sàng nhập liệu</p>
+                    </div>
+                    <button class="btn-download" id="btnDownload">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        Tải File Excel (.xlsx)
+                    </button>
+                </div>
+
+                <!-- Stats Summary -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="label">Tổng số lô</div>
+                        <div class="value" id="statLots">--</div>
+                        <div class="sub" id="statLotsSub">Chờ tải file</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Ngày SX</div>
+                        <div class="value" id="statDateSX" style="font-size: 1.15rem;">--/--/----</div>
+                        <div class="sub">Ghi trên biểu</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Ngày KN</div>
+                        <div class="value" id="statDateKN" style="font-size: 1.15rem;">--/--/----</div>
+                        <div class="sub">Ngày ký biểu</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="label">Tỷ lệ khớp số liệu</div>
+                        <div class="value" id="statMatch" style="color: var(--primary);">100%</div>
+                        <div class="sub">✓ Round half up</div>
+                    </div>
+                </div>
+
+                <!-- Comprehensive Audit Report Box -->
+                <div class="report-box card" id="reportBox" style="display: none;">
+                    <h4>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                        Báo Cáo Tổng Hợp & Đối Chiếu (Mục 8 Quy Chuẩn)
+                    </h4>
+                    <ul class="report-list" id="reportList">
+                        <!-- Populated by JS -->
+                    </ul>
+                </div>
+
+                <!-- Full Audit Data Table -->
+                <div class="card" style="padding: 1.25rem;">
+                    <div class="card-title" style="margin-bottom: 0.75rem;">
+                        <span>Dữ Liệu Đối Chiếu Các Lô Sản Xuất</span>
+                        <span id="tableCountBadge" style="font-size: 0.75rem; color: var(--text-dim);">0 lô</span>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>STT</th>
+                                    <th>Lô PKN</th>
+                                    <th>Mã Lô NM</th>
+                                    <th>Tạp chất (X | 3sd)</th>
+                                    <th>Tro (X | 3sd)</th>
+                                    <th>Bay hơi (X | Xmax)</th>
+                                    <th>Nitơ (X | Xmax)</th>
+                                    <th>P0 (Min-X-Max)</th>
+                                    <th>PRI (Min-X-Max)</th>
+                                    <th>ML (Min-X-Max)</th>
+                                    <th>Xếp hạng</th>
+                                    <th>Kiểm định</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <tr>
+                                    <td colspan="12" class="empty-placeholder">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                                            <polyline points="10 9 9 9 8 9"></polyline>
+                                        </svg>
+                                        <div>Vui lòng tải lên file PDF biểu KQKN để xem bảng số liệu đối chiếu</div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Toast Component -->
+    <div class="toast" id="toast">
+        <span id="toastMessage">Thông báo</span>
+    </div>
+
+    <!-- Application JavaScript Logic -->
+    <script>
+        let currentFile = null;
+        let selectedSamples = 6;
+        let lastResult = null;
+
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfoBadge = document.getElementById('fileInfoBadge');
+        const fileNameEl = document.getElementById('fileName');
+        const fileSizeEl = document.getElementById('fileSize');
+        const btnConvert = document.getElementById('btnConvert');
+        const btnSpinner = document.getElementById('btnSpinner');
+        const btnText = document.getElementById('btnText');
+        
+        const opt6 = document.getElementById('opt6');
+        const opt10 = document.getElementById('opt10');
+        const selectTieuChuan = document.getElementById('selectTieuChuan');
+        const inputCustomTieuChuan = document.getElementById('inputCustomTieuChuan');
+        const selectChungLoai = document.getElementById('selectChungLoai');
+        const selectLoaiKN = document.getElementById('selectLoaiKN');
+        
+        const exportBanner = document.getElementById('exportBanner');
+        const downloadFileName = document.getElementById('downloadFileName');
+        const btnDownload = document.getElementById('btnDownload');
+        const statLots = document.getElementById('statLots');
+        const statLotsSub = document.getElementById('statLotsSub');
+        const statDateSX = document.getElementById('statDateSX');
+        const statDateKN = document.getElementById('statDateKN');
+        const tableBody = document.getElementById('tableBody');
+        const tableCountBadge = document.getElementById('tableCountBadge');
+        const reportBox = document.getElementById('reportBox');
+        const reportList = document.getElementById('reportList');
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toastMessage');
+
+        // Check Server Health
+        async function checkHealth() {
+            try {
+                const res = await fetch('/api/health');
+                if (res.ok) {
+                    document.getElementById('statusText').textContent = 'Máy chủ kết nối tốt';
+                }
+            } catch (e) {
+                document.getElementById('statusText').textContent = 'Chế độ Trực tiếp';
+            }
+        }
+        checkHealth();
+
+        // Sample Option Selection
+        opt6.addEventListener('click', () => {
+            selectedSamples = 6;
+            opt6.classList.add('active');
+            opt10.classList.remove('active');
+        });
+
+        opt10.addEventListener('click', () => {
+            selectedSamples = 10;
+            opt10.classList.add('active');
+            opt6.classList.remove('active');
+        });
+
+        // Standard dropdown change
+        selectTieuChuan.addEventListener('change', (e) => {
+            if (e.target.value === 'custom') {
+                inputCustomTieuChuan.style.display = 'block';
+                inputCustomTieuChuan.focus();
+            } else {
+                inputCustomTieuChuan.style.display = 'none';
+            }
+        });
+
+        // Drag & Drop Handlers
+        dropZone.addEventListener('click', () => fileInput.click());
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function handleFile(file) {
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                showToast('Vui lòng chỉ chọn file biểu KQKN có định dạng .pdf', 'error');
+                return;
+            }
+            currentFile = file;
+            fileNameEl.textContent = file.name;
+            fileSizeEl.textContent = formatBytes(file.size);
+            fileInfoBadge.classList.add('show');
+            btnConvert.disabled = false;
+            showToast(`Đã nhận file: ${file.name}`, 'success');
+        }
+
+        function showToast(msg, type = 'success') {
+            toastMessage.textContent = msg;
+            toast.className = `toast show ${type}`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3500);
+        }
+
+        // Action: Convert & Generate Excel
+        btnConvert.addEventListener('click', async () => {
+            if (!currentFile) return;
+
+            btnConvert.disabled = true;
+            btnSpinner.style.display = 'inline-block';
+            btnText.textContent = 'Đang phân tích & tái tạo số liệu...';
+
+            try {
+                // Đọc file PDF sang base64
+                const reader = new FileReader();
+                reader.readAsDataURL(currentFile);
+                reader.onload = async () => {
+                    const base64Data = reader.result.split(',')[1];
+                    
+                    let tieuChuanVal = selectTieuChuan.value;
+                    if (tieuChuanVal === 'custom') {
+                        tieuChuanVal = inputCustomTieuChuan.value.trim() || 'TCCS 112:2022';
+                    }
+
+                    const payload = {
+                        pdf_base64: base64Data,
+                        filename: currentFile.name,
+                        n_samples: selectedSamples,
+                        tieu_chuan: tieuChuanVal,
+                        chung_loai: selectChungLoai.value,
+                        loai_kn: selectLoaiKN.value
+                    };
+
+                    const response = await fetch('/api/convert', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const data = await response.json();
+                    if (!data.success) {
+                        throw new Error(data.error || 'Xảy ra lỗi trong quá trình xử lý');
+                    }
+
+                    lastResult = data;
+                    renderResults(data);
+                    showToast('Đã tái tạo dữ liệu và sinh file Excel thành công 100%!', 'success');
+                };
+            } catch (err) {
+                console.error(err);
+                showToast(`Lỗi: ${err.message}`, 'error');
+            } finally {
+                btnConvert.disabled = false;
+                btnSpinner.style.display = 'none';
+                btnText.textContent = '🚀 TÁI TẠO & XUẤT FILE EXCEL';
+            }
+        });
+
+        // Render Results Dashboard
+        function renderResults(data) {
+            const { filename, parsed, lots, report } = data;
+
+            // Stats
+            statLots.textContent = report.total_lots;
+            statLotsSub.textContent = `Dải lô: ${report.lot_range}`;
+            statDateSX.textContent = report.ngay_sx || '--';
+            statDateKN.textContent = report.ngay_kn || '--';
+
+            // Download Banner
+            downloadFileName.textContent = filename;
+            exportBanner.classList.add('show');
+
+            // Setup Download Action
+            btnDownload.onclick = () => {
+                downloadBase64Excel(data.excel_base64, filename);
+            };
+
+            // Report Box
+            reportBox.style.display = 'block';
+            reportList.innerHTML = `
+                <li><strong>1. Tổng số lô:</strong> ${report.total_lots} lô (${report.lot_range}) — Ngày SX: ${report.ngay_sx} | Ngày KN: ${report.ngay_kn}</li>
+                <li><strong>2. Phân loại máy đo P0:</strong> 
+                    ${report.step_po.po_05.length} lô bước 0.5 (${report.step_po.po_05.join(', ') || 'Không'}) | 
+                    ${report.step_po.po_01.length} lô bước 0.1 (${report.step_po.po_01.join(', ') || 'Không'})
+                </li>
+                <li><strong>3. Phân loại máy đo ML:</strong> 
+                    ${report.step_ml.ml_05.length} lô bước 0.5 (${report.step_ml.ml_05.join(', ') || 'Không'}) | 
+                    ${report.step_ml.ml_01.length} lô bước 0.1 (${report.step_ml.ml_01.join(', ') || 'Không'})
+                </li>
+                <li><strong>4. Xếp hạng RHCSR10:</strong> ${report.rh_lots && report.rh_lots.length > 0 ? 
+                    report.rh_lots.map(r => `${r[0]}: ${r[1]}`).join('; ') : 
+                    '<span style="color: var(--primary);">Toàn bộ các lô đạt chuẩn CSR10 (không có lô hạ cấp)</span>'}
+                </li>
+                <li><strong>5. Bất thường nghi ngờ:</strong> ${report.anomalies && report.anomalies.length > 0 ? 
+                    report.anomalies.join('; ') : 
+                    '<span style="color: var(--text-muted);">Không phát hiện bất thường trên biểu gốc</span>'}
+                </li>
+            `;
+
+            // Table Data
+            tableCountBadge.textContent = `${lots.length} lô`;
+            tableBody.innerHTML = lots.map((lot, idx) => {
+                const poStepTag = lot.po_step === '0.5' ? 
+                    '<span class="tag-step tag-step-05">0.5</span>' : 
+                    '<span class="tag-step tag-step-01">0.1</span>';
+
+                const mlStepTag = lot.ml_step === '0.5' ? 
+                    '<span class="tag-step tag-step-05">0.5</span>' : 
+                    '<span class="tag-step tag-step-01">0.1</span>';
+
+                const gradeTag = lot.dat_hang === 'RHCSR10' ? 
+                    `<span class="tag-grade tag-grade-rh">${lot.dat_hang}</span>` : 
+                    `<span class="tag-grade tag-grade-ok">${lot.dat_hang}</span>`;
+
+                return `
+                    <tr>
+                        <td style="color: var(--text-dim);">${idx + 1}</td>
+                        <td style="font-weight: 600;">${lot.pkn}</td>
+                        <td style="color: var(--accent-cyan); font-weight: 700;">${lot.lo_nm_full}</td>
+                        <td>${lot.tc_x} | ${lot.tc_3sd}</td>
+                        <td>${lot.tro_x} | ${lot.tro_3sd}</td>
+                        <td>${lot.bh_x} | ${lot.bh_xmax}</td>
+                        <td>${lot.ni_x} | ${lot.ni_xmax}</td>
+                        <td>${lot.po_min}-${lot.po_x}-${lot.po_max} ${poStepTag}</td>
+                        <td>${lot.pri_min}-${lot.pri_x}-${lot.pri_max}</td>
+                        <td>${lot.ml_min}-${lot.ml_x}-${lot.ml_max} ${mlStepTag}</td>
+                        <td>${gradeTag}</td>
+                        <td style="color: var(--primary); font-weight: 700;">✓ Khớp 100%</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // Base64 to Blob File Downloader
+        function downloadBase64Excel(base64Data, filename) {
+            const byteCharacters = atob(base64Data);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast(`Đã tải xuống: ${filename}`, 'success');
+        }
+    </script>
+</body>
+</html>

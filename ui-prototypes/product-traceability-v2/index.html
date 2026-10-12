@@ -1,0 +1,2119 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cổng Tra Cứu Kiện Thành Phẩm — Industrial Traceability Portal v2</title>
+  <meta name="description" content="Hệ thống tra cứu nguồn gốc kiện thành phẩm cao su xuất khẩu theo chuẩn quốc tế (EUDR, PEFC, ISO)">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&family=Kantumruy+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ==========================================================================
+       DESIGN SYSTEM - INDUSTRIAL TRACEABILITY V2
+       Palettes:
+         - Brand Green: #009B72
+         - Deep Navy:    #142B45
+         - Page BG:      #F2F5F8
+         - Card BG:      #FFFFFF
+         - Text Primary: #142B45
+         - Text Muted:   #64748B
+         - Border:       #D8E1EA
+       ========================================================================== */
+    :root {
+      --brand-green: #009B72;
+      --brand-green-hover: #00825F;
+      --brand-green-subtle: #E8F7EF;
+      --brand-green-border: #B7E8D3;
+      
+      --deep-navy: #142B45;
+      --navy-subtle: #E8EEF5;
+      --navy-border: #C8D6E5;
+      
+      --page-bg: #F2F5F8;
+      --card-bg: #FFFFFF;
+      --text-primary: #142B45;
+      --text-secondary: #64748B;
+      --text-tertiary: #94A3B8;
+      
+      --border-color: #D8E1EA;
+      --border-light: #EBF0F5;
+      
+      --success-bg: #E8F7EF;
+      --success-text: #087443;
+      --success-border: #B4E6CD;
+      
+      --warning-bg: #FFF7D6;
+      --warning-text: #925400;
+      --warning-border: #FFE58F;
+      
+      --danger-bg: #FCE8E8;
+      --danger-text: #B91C1C;
+      --danger-border: #FCA5A5;
+
+      --info-bg: #EBF5FF;
+      --info-text: #1E40AF;
+      --info-border: #BFDBFE;
+
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+      --radius-pill: 9999px;
+
+      --shadow-sm: 0 1px 2px 0 rgba(20, 43, 69, 0.04);
+      --shadow-md: 0 4px 12px -2px rgba(20, 43, 69, 0.08), 0 2px 6px -1px rgba(20, 43, 69, 0.04);
+      --shadow-lg: 0 12px 28px -6px rgba(20, 43, 69, 0.12), 0 4px 10px -2px rgba(20, 43, 69, 0.05);
+
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --font-khmer: 'Kantumruy Pro', 'Khmer OS Content', 'Inter', sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--page-bg);
+      color: var(--text-primary);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      padding-bottom: 40px;
+    }
+
+    body.lang-km {
+      font-family: var(--font-khmer);
+    }
+
+    /* Interactive Simulation Bar for Reviewing Prototype */
+    .prototype-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--deep-navy);
+      color: #FFFFFF;
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+      font-size: 13px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    .proto-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.2);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+
+    .proto-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .proto-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .proto-label {
+      color: #94A3B8;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .proto-btn-group {
+      display: inline-flex;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+
+    .proto-btn {
+      background: transparent;
+      border: none;
+      color: #CBD5E1;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .proto-btn:hover {
+      background: rgba(255,255,255,0.12);
+      color: #FFFFFF;
+    }
+
+    .proto-btn.active {
+      background: var(--brand-green);
+      color: #FFFFFF;
+    }
+
+    /* Container */
+    .portal-container {
+      max-width: 760px;
+      margin: 24px auto 0 auto;
+      padding: 0 16px;
+      transition: max-width 0.25s ease;
+    }
+
+    /* Width modes for interactive responsive preview */
+    .preview-mode-desktop { max-width: 1040px !important; }
+    .preview-mode-tablet  { max-width: 768px !important; }
+    .preview-mode-mobile  { max-width: 390px !important; }
+    .preview-mode-small   { max-width: 360px !important; }
+
+    /* Top Brand & Header Section */
+    .portal-header {
+      margin-bottom: 20px;
+    }
+
+    .brand-eyebrow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .factory-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--brand-green);
+      background: var(--brand-green-subtle);
+      border: 1px solid var(--brand-green-border);
+      padding: 3px 10px;
+      border-radius: var(--radius-pill);
+    }
+
+    .factory-tag svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .system-status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--brand-green);
+      box-shadow: 0 0 0 2px rgba(0, 155, 114, 0.25);
+    }
+
+    /* Header Main Row: Title & Language Toggle on the SAME LINE! */
+    .header-main-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .page-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--deep-navy);
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+    }
+
+    .page-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      line-height: 1.45;
+    }
+
+    /* Language Switcher Pill */
+    .lang-switcher {
+      display: inline-flex;
+      align-items: center;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-pill);
+      padding: 2px;
+      box-shadow: var(--shadow-sm);
+      flex-shrink: 0;
+    }
+
+    .lang-btn {
+      border: none;
+      background: transparent;
+      padding: 5px 12px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .lang-btn:hover {
+      color: var(--text-primary);
+      background: var(--page-bg);
+    }
+
+    .lang-btn.active {
+      background: var(--brand-green);
+      color: #FFFFFF;
+      box-shadow: 0 1px 3px rgba(0, 155, 114, 0.3);
+    }
+
+    /* Card Standard Styles */
+    .industrial-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 16px;
+      overflow: hidden;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .industrial-card:hover {
+      border-color: #B8C9D9;
+      box-shadow: var(--shadow-md);
+    }
+
+    /* Top File Card: Quality Certificate / Inspection PDF (Principle: File-First) */
+    .file-first-card {
+      background: linear-gradient(135deg, #FAFBFD 0%, #FFFFFF 100%);
+      border: 1px solid var(--border-color);
+      border-left: 4px solid var(--brand-green);
+      border-radius: var(--radius-lg);
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .file-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .file-icon-box {
+      width: 42px;
+      height: 42px;
+      border-radius: var(--radius-md);
+      background: #FEE2E2;
+      color: #DC2626;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .file-info {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .file-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .file-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--deep-navy);
+      line-height: 1.3;
+      word-break: break-word;
+    }
+
+    .file-type-badge {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      background: #F1F5F9;
+      color: #475569;
+      padding: 2px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+    }
+
+    .file-meta-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 3px;
+      flex-wrap: wrap;
+    }
+
+    .file-status-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 700;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      background: var(--success-bg);
+      color: var(--success-text);
+      border: 1px solid var(--success-border);
+    }
+
+    .file-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .btn-file-view {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--navy-subtle);
+      border: 1px solid var(--navy-border);
+      color: var(--deep-navy);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+
+    .btn-file-view:hover {
+      background: #D9E4EF;
+    }
+
+    .btn-file-download {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--brand-green-subtle);
+      border: 1px solid var(--brand-green-border);
+      color: var(--brand-green);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+
+    .btn-file-download:hover {
+      background: #D1EFE1;
+    }
+
+    /* Card Header */
+    .card-head {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card-head-left {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .card-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .icon-teal {
+      background: #E6F7F2;
+      color: var(--brand-green);
+    }
+
+    .icon-blue {
+      background: #EFF6FF;
+      color: #2563EB;
+    }
+
+    .icon-amber {
+      background: #FEF3C7;
+      color: #D97706;
+    }
+
+    .icon-rose {
+      background: #FFE4E6;
+      color: #E11D48;
+    }
+
+    .card-title-group {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--deep-navy);
+      line-height: 1.25;
+      word-break: break-word; /* Prevents 1799cs/... truncation! */
+    }
+
+    .card-title-sub {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    /* Status Badges */
+    .badge-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .badge-predicted {
+      background: var(--warning-bg);
+      color: var(--warning-text);
+      border: 1px solid var(--warning-border);
+    }
+
+    .badge-produced {
+      background: var(--success-bg);
+      color: var(--success-text);
+      border: 1px solid var(--success-border);
+    }
+
+    .badge-partial {
+      background: #F1F5F9;
+      color: #475569;
+      border: 1px solid #CBD5E1;
+    }
+
+    /* Alert Banner inside Card (e.g. Partial bale notice) */
+    .card-alert-box {
+      margin: 16px 20px 0 20px;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .alert-amber {
+      background: var(--warning-bg);
+      color: var(--warning-text);
+      border: 1px solid var(--warning-border);
+    }
+
+    /* Card Body & Information Grid */
+    .card-body {
+      padding: 18px 20px 20px 20px;
+    }
+
+    /* 4 Columns Desktop, 2 Columns Tablet/Mobile (50-50) */
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px 14px;
+    }
+
+    @media (max-width: 860px) {
+      .info-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .field-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .field-item.col-span-2 {
+      grid-column: span 2;
+    }
+
+    .field-item.col-span-4 {
+      grid-column: span 4;
+    }
+
+    @media (max-width: 860px) {
+      .field-item.col-span-4 {
+        grid-column: span 2;
+      }
+    }
+
+    .field-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .field-content {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .field-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 3px;
+      line-height: 1.25;
+    }
+
+    /* CRITICAL FIX: No truncate! Use smart wrapping and high contrast */
+    .field-value {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.4;
+      word-break: break-word; /* NEVER CUT WITH ELLIPSIS! */
+      overflow-wrap: anywhere;
+    }
+
+    .field-value.mono {
+      font-family: var(--font-mono);
+      font-size: 13.5px;
+      letter-spacing: -0.01em;
+    }
+
+    .val-highlight-rose {
+      color: #BE123C;
+    }
+
+    .val-highlight-emerald {
+      color: #047857;
+    }
+
+    .val-highlight-blue {
+      color: #1D4ED8;
+    }
+
+    .val-highlight-amber {
+      color: #B45309;
+    }
+
+    .copy-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      background: rgba(0,0,0,0.03);
+      padding: 1px 6px;
+      border-radius: 4px;
+      transition: background 0.15s ease;
+      font-size: 13px;
+    }
+
+    .copy-pill:hover {
+      background: rgba(0, 155, 114, 0.1);
+      color: var(--brand-green);
+    }
+
+    .copy-icon {
+      width: 12px;
+      height: 12px;
+      opacity: 0.6;
+    }
+
+    /* Operator Action Section (Separated & Role-Aware) */
+    .staff-action-bar {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px dashed var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .staff-role-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #0369A1;
+      background: #E0F2FE;
+      padding: 2px 8px;
+      border-radius: var(--radius-sm);
+      align-self: flex-start;
+    }
+
+    .btn-confirm-action {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      background: var(--brand-green);
+      color: #FFFFFF;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 12px 18px;
+      border-radius: var(--radius-md);
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0, 155, 114, 0.25);
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+
+    .btn-confirm-action:hover {
+      background: var(--brand-green-hover);
+      box-shadow: 0 4px 10px rgba(0, 155, 114, 0.35);
+      transform: translateY(-1px);
+    }
+
+    /* Traceability Origin Bin Card */
+    .bin-overview-box {
+      background: #F8FAFC;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-lg);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    @media (min-width: 640px) {
+      .bin-overview-box {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+      }
+    }
+
+    .bin-info-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .bin-icon-badge {
+      width: 38px;
+      height: 38px;
+      border-radius: var(--radius-md);
+      background: #FFE4E6;
+      color: #E11D48;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .bin-names {
+      min-width: 0;
+    }
+
+    .bin-label-hint {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .bin-primary-code {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--deep-navy);
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .bin-ref-code {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      word-break: break-all;
+    }
+
+    .bin-actions-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn-bin-quickview {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      color: var(--deep-navy);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 7px 12px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-bin-quickview:hover {
+      background: #F1F5F9;
+      border-color: #CBD5E1;
+    }
+
+    .btn-bin-detail {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--brand-green-subtle);
+      border: 1px solid var(--brand-green-border);
+      color: var(--brand-green);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 7px 12px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+
+    .btn-bin-detail:hover {
+      background: #D5F1E3;
+    }
+
+    .btn-bin-swap {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #EFF6FF;
+      border: 1px solid #BFDBFE;
+      color: #1D4ED8;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 7px 12px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-bin-swap:hover {
+      background: #DBEAFE;
+    }
+
+    /* Verification URL & QR Footer Section (Compact, Non-distracting) */
+    .qr-verification-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .qr-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .qr-icon-link {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-md);
+      background: var(--navy-subtle);
+      color: var(--deep-navy);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .qr-text-info {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .qr-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--deep-navy);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .qr-url-string {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      margin-top: 2px;
+      word-break: break-all;
+      line-height: 1.35;
+    }
+
+    .qr-copy-btn {
+      margin-top: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--brand-green);
+      background: var(--brand-green-subtle);
+      border: 1px solid var(--brand-green-border);
+      padding: 2px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .qr-copy-btn:hover {
+      background: #D4F0E3;
+    }
+
+    .qr-code-box {
+      width: 58px;
+      height: 58px;
+      padding: 4px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .qr-code-box svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Modal Sheet / Popups for Quick Preview */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 43, 69, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .modal-backdrop.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-box {
+      background: #FFFFFF;
+      border-radius: var(--radius-xl);
+      max-width: 600px;
+      width: 100%;
+      max-height: 88vh;
+      overflow-y: auto;
+      box-shadow: var(--shadow-lg);
+      transform: translateY(20px);
+      transition: transform 0.2s ease;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-backdrop.active .modal-box {
+      transform: translateY(0);
+    }
+
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      background: #FFFFFF;
+      z-index: 10;
+    }
+
+    .modal-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--deep-navy);
+    }
+
+    .modal-close-btn {
+      background: transparent;
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+    }
+
+    .modal-close-btn:hover {
+      background: var(--page-bg);
+      color: var(--text-primary);
+    }
+
+    .modal-content {
+      padding: 20px;
+    }
+
+    .modal-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border-light);
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      background: #FAFBFD;
+    }
+
+    .btn-secondary {
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 8px 16px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--brand-green);
+      border: none;
+      color: #FFFFFF;
+      padding: 8px 16px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Toast Notification */
+    .toast-popup {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: var(--deep-navy);
+      color: #FFFFFF;
+      padding: 10px 18px;
+      border-radius: var(--radius-pill);
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+      z-index: 300;
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toast-popup.visible {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Verification Footer Banner */
+    .audit-footer {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .audit-badges-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 4px;
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+
+    .audit-badges-row span {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ========================================================================
+       PROTOTYPE CONTROL TOOLBAR (For Evaluation & Device Switching)
+       ======================================================================== -->
+  <header class="prototype-toolbar" role="region" aria-label="Prototype Controls">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span class="proto-badge">Prototype v2</span>
+      <span style="font-weight:600; color:#E2E8F0;">Industrial Traceability Preview</span>
+    </div>
+
+    <div class="proto-controls">
+      <!-- Device Frame Switching -->
+      <div class="proto-group">
+        <span class="proto-label">Khung nhìn:</span>
+        <div class="proto-btn-group" id="group-viewport">
+          <button type="button" class="proto-btn active" data-vp="desktop">Desktop</button>
+          <button type="button" class="proto-btn" data-vp="tablet">Tablet (768px)</button>
+          <button type="button" class="proto-btn" data-vp="mobile">Mobile (390px)</button>
+          <button type="button" class="proto-btn" data-vp="small">Small (360px)</button>
+        </div>
+      </div>
+
+      <!-- State Preset Simulator -->
+      <div class="proto-group">
+        <span class="proto-label">Trạng thái:</span>
+        <div class="proto-btn-group" id="group-status">
+          <button type="button" class="proto-btn active" data-status="predicted">Dự kiến</button>
+          <button type="button" class="proto-btn" data-status="produced">Đã sản xuất</button>
+          <button type="button" class="proto-btn" data-status="partial">Dở dang</button>
+        </div>
+      </div>
+
+      <!-- User Role Mode -->
+      <div class="proto-group">
+        <span class="proto-label">Chế độ:</span>
+        <div class="proto-btn-group" id="group-mode">
+          <button type="button" class="proto-btn active" data-mode="public">Khách hàng QR</button>
+          <button type="button" class="proto-btn" data-mode="staff">Công nhân / KCS</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       MAIN APPLICATION VIEWPORT
+       ======================================================================== -->
+  <main class="portal-container preview-mode-desktop" id="portalContainer">
+
+    <!-- TOP HEADER -->
+    <section class="portal-header">
+      <!-- Eyebrow: Factory & Verification Status -->
+      <div class="brand-eyebrow">
+        <div class="factory-tag">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-3"/></svg>
+          <span id="txt-factory-name">Nhà máy Chế biến Cao su CRCK Kampong Thom</span>
+        </div>
+        <div class="system-status-indicator">
+          <span class="status-dot"></span>
+          <span id="txt-portal-status">Dữ liệu thời gian thực</span>
+        </div>
+      </div>
+
+      <!-- MAIN HEADER ROW: Title + Language Switcher on the EXACT SAME ROW -->
+      <div class="header-main-row">
+        <div>
+          <h1 class="page-title" id="txt-page-title">Tra cứu kiện thành phẩm</h1>
+          <p class="page-subtitle" id="txt-page-subtitle">Quét mã QR nhãn kiện để xác thực xuất xứ nguồn gốc mủ và chuỗi cung ứng.</p>
+        </div>
+
+        <!-- Language Switcher: Inline & Compact (VI / KM / EN) -->
+        <div class="lang-switcher" role="radiogroup" aria-label="Language selection">
+          <button type="button" class="lang-btn active" data-lang="vi" aria-pressed="true">VI</button>
+          <button type="button" class="lang-btn" data-lang="km" aria-pressed="false">ខ្មែរ</button>
+          <button type="button" class="lang-btn" data-lang="en" aria-pressed="false">EN</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 1. FILE-FIRST PRINCIPLE: Quality Inspection Certificate (KQKN PDF / COA) -->
+    <section class="file-first-card" id="card-kqkn-file">
+      <div class="file-left">
+        <div class="file-icon-box" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <div class="file-info">
+          <div class="file-title-row">
+            <span class="file-name" id="txt-file-name">Phiếu kết quả kiểm nghiệm chất lượng — Lô 1799cs/26.pdf</span>
+            <span class="file-type-badge">PDF / COA</span>
+          </div>
+          <div class="file-meta-row">
+            <span id="txt-file-date">Ngày KN: 09/10/2026</span>
+            <span class="file-status-tag" id="tag-file-grade">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+              <span id="txt-file-grade">Đạt hạng CSR10</span>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div class="file-actions">
+        <button type="button" class="btn-file-view" id="btn-view-pdf" onclick="openFilePreviewModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span id="txt-btn-view">Xem phiếu</span>
+        </button>
+        <button type="button" class="btn-file-download" onclick="triggerToast('Bắt đầu tải file KQKN_1799cs_26.pdf')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <span id="txt-btn-download">Tải về</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 2. BALE SPECIFICATION & TRACEABILITY CARD -->
+    <article class="industrial-card">
+      <div class="card-head">
+        <div class="card-head-left">
+          <div class="card-icon icon-teal" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          </div>
+          <div class="card-title-group">
+            <!-- Full non-truncated identifier -->
+            <h2 class="card-title" id="txt-bale-title">1799cs/26 — Kiện KD</h2>
+            <p class="card-title-sub" id="txt-bale-sub">Chủng loại CSR: CSR10 · Pallet: Sắt đế gỗ</p>
+          </div>
+        </div>
+        <div id="box-status-badge">
+          <span class="badge-status badge-predicted" id="badge-status-content">
+            <span class="status-dot" style="background:#925400;"></span>
+            <span id="txt-status-label">Dự kiến — chưa sản xuất</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Partial bale warning if applicable -->
+      <div class="card-alert-box alert-amber" id="alert-partial-banner" style="display:none;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span id="txt-partial-desc">Kiện dở dang: Đã ghi nhận 29 bành — Ca A</span>
+      </div>
+
+      <!-- Field Grid: 4 columns on Desktop, 2 columns on Mobile (50-50) -->
+      <div class="card-body">
+        <div class="info-grid">
+
+          <!-- 1. Mã lô & Kiện -->
+          <div class="field-item">
+            <div class="field-icon icon-rose">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-malo">Mã lô &amp; Kiện</div>
+              <div class="field-value mono val-highlight-rose">
+                <span class="copy-pill" onclick="copyText('1799cs/26 (KD)')" title="Nhấp để sao chép mã">
+                  1799cs/26 (KD)
+                  <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Loại CSR -->
+          <div class="field-item">
+            <div class="field-icon icon-blue">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></polygon></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-csr">Loại CSR</div>
+              <div class="field-value" id="val-csr">CSR10</div>
+            </div>
+          </div>
+
+          <!-- 3. Quy cách bành -->
+          <div class="field-item">
+            <div class="field-icon icon-amber">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-banh">Loại bành</div>
+              <div class="field-value mono" id="val-banh">35 kg/bành</div>
+            </div>
+          </div>
+
+          <!-- 4. Loại bọc (NO TRUNCATION!) -->
+          <div class="field-item">
+            <div class="field-icon icon-teal">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-boc">Loại bọc</div>
+              <div class="field-value" id="val-boc">Bọc nhãn 0,04 mm</div>
+            </div>
+          </div>
+
+          <!-- 5. Ngày sản xuất -->
+          <div class="field-item">
+            <div class="field-icon icon-teal">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-ngaysx">Ngày sản xuất</div>
+              <div class="field-value" id="val-ngaysx">Chờ nhập liệu</div>
+            </div>
+          </div>
+
+          <!-- 6. Giờ sản xuất -->
+          <div class="field-item">
+            <div class="field-icon icon-blue">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-giosx">Giờ sản xuất</div>
+              <div class="field-value mono" id="val-giosx">Chờ nhập liệu</div>
+            </div>
+          </div>
+
+          <!-- 7. Ca sản xuất -->
+          <div class="field-item">
+            <div class="field-icon icon-teal">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-casx">Ca sản xuất</div>
+              <div class="field-value" id="val-casx">Chờ nhập liệu</div>
+            </div>
+          </div>
+
+          <!-- 8. Loại pallet -->
+          <div class="field-item">
+            <div class="field-icon icon-amber">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-pallet">Loại pallet</div>
+              <div class="field-value" id="val-pallet">Sắt đế gỗ</div>
+            </div>
+          </div>
+
+          <!-- 9. Đạt hạng chất lượng (NO TRUNCATION!) -->
+          <div class="field-item col-span-2">
+            <div class="field-icon icon-teal" id="icon-dathang">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-dathang">Đạt hạng</div>
+              <div class="field-value val-highlight-amber" id="val-dathang">Đang chờ kiểm nghiệm</div>
+            </div>
+          </div>
+
+          <!-- 10. Truy xuất EUDR / Lâm sản bền vững -->
+          <div class="field-item col-span-2">
+            <div class="field-icon icon-blue">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label" id="lbl-eudr">Chứng nhận &amp; EUDR</div>
+              <div class="field-value">
+                <a href="#eudr-modal" onclick="openEudrModal(); return false;" style="color:#2563EB; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
+                  <span id="val-eudr">PEFC CS / Hợp chuẩn EUDR 2026</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </a>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Role-Based Staff Action (Hidden in Public Mode, Visible in Staff Mode) -->
+        <div class="staff-action-bar" id="staffActionBar" style="display:none;">
+          <div class="staff-role-badge">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <span id="txt-operator-note">Quyền thao tác: Công nhân xưởng / Trực ca đóng bánh</span>
+          </div>
+          <button type="button" class="btn-confirm-action" id="btn-confirm-sx" onclick="triggerToast('Chuyển hướng đến màn hình xác nhận sản xuất /dashboard/product/confirm')">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="m9 14 2 2 4-4"/></svg>
+            <span id="txt-btn-confirm">Xác nhận sản xuất kiện này</span>
+          </button>
+        </div>
+      </div>
+    </article>
+
+    <!-- 3. ORIGIN RAW MATERIAL BIN (TRACEABILITY 2-WAY LINK) -->
+    <article class="industrial-card">
+      <div class="card-head">
+        <div class="card-head-left">
+          <div class="card-icon icon-blue" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+          </div>
+          <div class="card-title-group">
+            <h2 class="card-title" id="txt-bin-card-title">Ngăn nguyên liệu nguồn gốc</h2>
+            <p class="card-title-sub" id="txt-bin-card-sub">Truy xuất nguồn gốc nguyên liệu mủ đông chén và lô vườn cây thu hoạch</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="bin-overview-box">
+          <div class="bin-info-left">
+            <div class="bin-icon-badge" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+            </div>
+            <div class="bin-names">
+              <div class="bin-label-hint" id="lbl-bin-loc">Vị trí &amp; Mã ngăn</div>
+              <div class="bin-primary-code">
+                <span>N10</span>
+                <span class="bin-ref-code">(N10-NT-ĐC-X-12/09/26-15/09/26)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bin-actions-group">
+            <!-- Quick View Modal Trigger -->
+            <button type="button" class="btn-bin-quickview" onclick="openBinQuickViewModal()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span id="txt-bin-quickview">Xem nhanh</span>
+            </button>
+
+            <!-- Full Page Link -->
+            <a href="#bin-full-page" class="btn-bin-detail" onclick="triggerToast('Mở trang chi tiết ngăn N10 trong tab mới'); return false;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-3"/></svg>
+              <span id="txt-bin-fulldetail">Xem chi tiết ngăn nguồn gốc: N10</span>
+            </a>
+
+            <!-- Swap Bin (Staff only) -->
+            <button type="button" class="btn-bin-swap" id="btn-bin-swap" style="display:none;" onclick="triggerToast('Mở hộp thoại đổi ngăn nguồn cho kiện này')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>
+              <span id="txt-bin-swap">Đổi ngăn</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- 4. ONLINE VERIFICATION LINK & QR CODE (Compact & High Contrast) -->
+    <section class="qr-verification-card">
+      <div class="qr-left">
+        <div class="qr-icon-link" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        </div>
+        <div class="qr-text-info">
+          <div class="qr-label">
+            <span id="txt-qr-title">Liên kết tra cứu trực tuyến</span>
+            <span style="font-size:10px; font-weight:700; color:var(--brand-green); background:var(--brand-green-subtle); padding:1px 6px; border-radius:4px;">SSL Verified</span>
+          </div>
+          <div class="qr-url-string" id="txt-qr-url">https://erp.crck-rubber.com/product-label?f=KT-01&amp;lo=1799cs%2F26&amp;kien=D</div>
+          <button type="button" class="qr-copy-btn" onclick="copyLookupUrl()">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span id="txt-copy-btn">Sao chép liên kết</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Real Scalable SVG QR Code Preview -->
+      <div class="qr-code-box" title="Quét mã QR để mở trang tra cứu">
+        <svg viewBox="0 0 29 29" shape-rendering="crispEdges">
+          <path fill="#ffffff" d="M0 0h29v29H0z"/>
+          <path fill="#142B45" d="M0 0h7v7H0zM1 1h5v5H1zM2 2h3v3H2zM22 0h7v7h-7zM23 1h5v5h-5zM24 2h3v3h-3zM0 22h7v7H0zM1 23h5v5H1zM2 24h3v3H2zM8 2h1v1H8zM10 2h1v2h-1zM13 1h2v1h-2zM9 4h2v1H9zM12 4h1v2h-1zM15 3h1v3h-1zM17 1h1v1h-1zM19 2h2v2h-2zM9 7h1v2H9zM11 8h2v1h-2zM15 7h1v1h-1zM17 8h1v2h-1zM19 7h2v1h-2zM0 8h2v1H0zM3 8h1v2H3zM5 9h2v1H5zM1 11h2v2H1zM4 11h2v1H4zM7 11h1v1H7zM9 11h1v2H9zM12 11h2v1h-2zM15 11h1v1h-1zM17 11h2v2h-2zM20 10h1v1h-1zM22 9h2v1h-2zM25 8h1v2h-1zM27 9h2v1h-2zM22 12h1v1h-1zM24 11h1v2h-1zM27 12h1v2h-1zM1 14h2v1H1zM4 14h1v1H4zM7 13h1v2H7zM10 14h1v1h-1zM12 13h3v1h-3zM16 14h1v2h-1zM18 14h1v1h-1zM20 13h1v2h-1zM22 14h3v1h-3zM26 14h2v1h-2zM0 16h1v2H0zM2 17h2v1H2zM5 16h2v1H5zM8 17h1v1H8zM10 16h2v2h-2zM13 17h1v1h-1zM15 16h1v1h-1zM17 17h1v1h-1zM19 16h2v1h-2zM22 16h1v2h-1zM24 17h2v1h-2zM27 16h2v2h-2zM1 19h2v1H1zM4 20h2v1H4zM7 19h2v1H7zM10 19h1v1h-1zM13 19h2v1h-2zM17 19h1v1h-1zM19 19h2v2h-2zM22 19h1v1h-1zM25 19h1v1h-1zM27 20h2v1h-2zM8 22h1v1H8zM11 22h1v2h-1zM14 22h2v1h-2zM17 22h1v2h-1zM19 23h2v1h-2zM23 22h1v1h-1zM25 23h2v1h-2zM9 25h1v1H9zM12 25h1v2h-1zM14 24h2v1h-2zM18 25h1v1h-1zM20 25h1v2h-1zM22 25h2v1h-2zM26 25h1v1h-1zM28 25h1v2h-1zM8 27h2v1H8zM11 28h2v1h-2zM15 27h1v1h-1zM17 27h1v1h-1zM19 28h1v1h-1zM21 27h2v1h-2zM24 28h2v1h-2zM27 28h1v1h-1z"/>
+        </svg>
+      </div>
+    </section>
+
+    <!-- FOOTER AUDIT STAMP -->
+    <footer class="audit-footer">
+      <div class="audit-badges-row">
+        <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ISO 9001:2015</span>
+        <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> ISO 14001:2015</span>
+        <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> PEFC Chain of Custody</span>
+      </div>
+      <div>Hệ thống Quản trị Nguồn lực &amp; Truy xuất Nguồn gốc Chuỗi Cung ứng Cao su Quốc tế &copy; 2026</div>
+    </footer>
+
+  </main>
+
+  <!-- ========================================================================
+       MODAL 1: QUICK PREVIEW NGĂN NGUỒN GỐC N10 (From 1.jpg & 2.jpg)
+       ======================================================================== -->
+  <div class="modal-backdrop" id="modalBinQuickView" role="dialog" aria-modal="true" aria-labelledby="modalBinTitle">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title" id="modalBinTitle">Chi tiết ngăn lưu N10</h3>
+          <p style="font-size:12px; color:var(--text-secondary); margin-top:2px;">N10-NT-ĐC-X-12/09/26-15/09/26</p>
+        </div>
+        <button type="button" class="modal-close-btn" onclick="closeModals()">&times;</button>
+      </div>
+
+      <div class="modal-content">
+        <!-- Status & Files inside Bin -->
+        <div style="background:#F8FAFC; border:1px solid var(--border-light); border-radius:var(--radius-lg); padding:12px 16px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:36px; height:36px; border-radius:var(--radius-md); background:#E6F7F2; color:var(--brand-green); display:grid; place-items:center;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-3"/></svg>
+            </div>
+            <div>
+              <div style="font-size:15px; font-weight:800; color:var(--deep-navy);">Ngăn N10</div>
+              <div style="font-size:11px; color:var(--text-secondary);">Mủ đông chén · Nông trường</div>
+            </div>
+          </div>
+          <span class="badge-status badge-produced">Đang sản xuất · In production</span>
+        </div>
+
+        <!-- Metric Grid -->
+        <div class="info-grid">
+          <div class="field-item">
+            <div class="field-icon icon-rose">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Mã ngăn</div>
+              <div class="field-value mono val-highlight-rose">N10-NT-ĐC-X-12/09/26</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-amber">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Loại nguyên liệu</div>
+              <div class="field-value">Mủ đông chén</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-teal">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Nguồn gốc / Đơn vị</div>
+              <div class="field-value">Nông trường (NT)</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-blue">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Chứng nhận</div>
+              <div class="field-value">PEFC CS</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-teal">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Ngày BĐ nhận</div>
+              <div class="field-value mono">12/09/2026</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-rose">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Ngày KT nhận</div>
+              <div class="field-value mono">15/09/2026</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-amber">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Ngày xé nguyên liệu</div>
+              <div class="field-value mono">13/09/2026 - 15/09/2026</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-blue">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Số ngày lưu</div>
+              <div class="field-value val-highlight-rose">27 ngày</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-teal">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 16 3-8 3 8"/><path d="m2 16 3-8 3 8"/><path d="M12 3v18"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">KL mủ tươi</div>
+              <div class="field-value mono">245.500 kg</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-blue">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 16 3-8 3 8"/><path d="m2 16 3-8 3 8"/><path d="M12 3v18"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">KL mủ khô</div>
+              <div class="field-value mono val-highlight-blue">123.445,09 kg</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-teal">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Tỷ lệ TP / QK</div>
+              <div class="field-value val-highlight-emerald">82.7% (102.090 kg)</div>
+            </div>
+          </div>
+
+          <div class="field-item">
+            <div class="field-icon icon-amber">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+            </div>
+            <div class="field-content">
+              <div class="field-label">Số chuyến xe</div>
+              <div class="field-value">52 chuyến</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" onclick="closeModals()">Đóng</button>
+        <a href="#full-storage-page" class="btn-primary" onclick="triggerToast('Điều hướng tới trang quản lý kho ngăn N10'); return false;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          <span>Xem trang đầy đủ</span>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       MODAL 2: LOT & BALES ALLOCATION (Explaining 4.jpg & 5.jpg)
+       ======================================================================== -->
+  <div class="modal-backdrop" id="modalLotDetail" role="dialog" aria-modal="true" aria-labelledby="modalLotTitle">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title" id="modalLotTitle">Chi tiết lô thành phẩm 1790cs/26</h3>
+          <p style="font-size:12px; color:var(--text-secondary); margin-top:2px;">Giải trình kỹ thuật trường Dây chuyền &amp; Ngày hoàn thành</p>
+        </div>
+        <button type="button" class="modal-close-btn" onclick="closeModals()">&times;</button>
+      </div>
+
+      <div class="modal-content">
+        <!-- Callout explanation answering user prompt -->
+        <div style="background:#EFF6FF; border:1px solid #BFDBFE; border-radius:var(--radius-md); padding:12px 14px; margin-bottom:16px; font-size:12.5px; color:#1E40AF; line-height:1.5;">
+          <strong>Lý do "Dây chuyền" và "Ngày hoàn thành" hiển thị gạch nối (—) ở ảnh 5.jpg:</strong>
+          <ul style="margin-left:18px; margin-top:6px;">
+            <li><strong>Dây chuyền (—):</strong> Lô được tạo từ dữ liệu lịch sử hoặc chưa gán dây chuyền (Mủ tạp / Mủ nước) tại thời điểm ghi nhận mẻ sấy/đóng bánh.</li>
+            <li><strong>Ngày hoàn thành (—):</strong> Lô này mới chỉ nhập 29 bánh (ở Kiện C), 3 kiện A, B, D còn 0 bánh (tổng 29/144 bánh tiêu chuẩn). Trạng thái nền vẫn là dở dang nên hệ thống chưa tự động chốt ngày hoàn thành (<code>ngay_ht = null</code>).</li>
+          </ul>
+        </div>
+
+        <!-- 4 Bales Allocation Grid -->
+        <div style="font-size:13px; font-weight:700; color:var(--deep-navy); margin-bottom:10px;">Phân bổ các kiện mủ (A, B, C, D)</div>
+        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:10px;">
+          <!-- Kien A -->
+          <div style="padding:10px 12px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:var(--radius-md); opacity:0.65;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700;">
+              <span>Kiện A</span>
+              <span style="color:#94A3B8; font-size:10px;">Chưa đặt</span>
+            </div>
+            <div style="font-size:16px; font-weight:800; font-family:var(--font-mono); margin-top:2px;">0 <span style="font-size:11px; font-weight:400; color:#64748B;">bánh</span></div>
+            <div style="font-size:11px; color:#94A3B8;">Chưa có ô</div>
+          </div>
+
+          <!-- Kien B -->
+          <div style="padding:10px 12px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:var(--radius-md); opacity:0.65;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700;">
+              <span>Kiện B</span>
+              <span style="color:#94A3B8; font-size:10px;">Chưa đặt</span>
+            </div>
+            <div style="font-size:16px; font-weight:800; font-family:var(--font-mono); margin-top:2px;">0 <span style="font-size:11px; font-weight:400; color:#64748B;">bánh</span></div>
+            <div style="font-size:11px; color:#94A3B8;">Chưa có ô</div>
+          </div>
+
+          <!-- Kien C -->
+          <div style="padding:10px 12px; background:#EFF6FF; border:1px solid #BFDBFE; border-radius:var(--radius-md);">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:#1E40AF;">
+              <span>Kiện C</span>
+              <span style="color:#2563EB; font-size:10px; font-weight:700;">Chưa đặt</span>
+            </div>
+            <div style="font-size:16px; font-weight:800; font-family:var(--font-mono); color:#1E40AF; margin-top:2px;">
+              29 <span style="font-size:11px; font-weight:400;">bánh</span>
+              <span style="color:#D97706; font-size:12px;" title="Kiện dở dang">&#9888;</span>
+            </div>
+            <div style="font-size:11px; color:#64748B;">Chưa có ô kho</div>
+          </div>
+
+          <!-- Kien D -->
+          <div style="padding:10px 12px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:var(--radius-md); opacity:0.65;">
+            <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700;">
+              <span>Kiện D</span>
+              <span style="color:#94A3B8; font-size:10px;">Chưa đặt</span>
+            </div>
+            <div style="font-size:16px; font-weight:800; font-family:var(--font-mono); margin-top:2px;">0 <span style="font-size:11px; font-weight:400; color:#64748B;">bánh</span></div>
+            <div style="font-size:11px; color:#94A3B8;">Chưa có ô</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" onclick="closeModals()">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST FEEDBACK ELEMENT -->
+  <div class="toast-popup" id="toastBox">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+    <span id="toastMsg">Thao tác thành công</span>
+  </div>
+
+  <!-- ========================================================================
+       CLIENT SCRIPT & MULTI-LANGUAGE ENGINE
+       ======================================================================== -->
+  <script>
+    // Dictionary for VI, KM, EN with accurate technical rubber terms
+    const I18N = {
+      vi: {
+        pageTitle: "Tra cứu kiện thành phẩm",
+        pageSubtitle: "Quét mã QR nhãn kiện để xác thực xuất xứ nguồn gốc mủ và chuỗi cung ứng.",
+        factoryName: "Nhà máy Chế biến Cao su CRCK Kampong Thom",
+        portalStatus: "Dữ liệu thời gian thực",
+        baleTitlePredicted: "1799cs/26 — Kiện KD",
+        baleTitleProduced: "1799cs/26 — Kiện KD",
+        baleTitlePartial: "1790cs/26 — Kiện KC",
+        baleSub: "Chủng loại CSR: CSR10 · Pallet: Sắt đế gỗ",
+        statusPredicted: "Dự kiến — chưa sản xuất",
+        statusProduced: "Đã sản xuất — Đạt chuẩn",
+        statusPartial: "Dở dang — đã có 29 bành",
+        fileName: "Phiếu kết quả kiểm nghiệm chất lượng — Lô 1799cs/26.pdf",
+        fileDate: "Ngày KN: 09/10/2026",
+        fileGrade: "Đạt hạng CSR10",
+        btnView: "Xem phiếu",
+        btnDownload: "Tải về",
+        lblMaLo: "Mã lô & Kiện",
+        lblCsr: "Loại CSR",
+        lblBanh: "Loại bành",
+        valBanh: "35 kg/bành",
+        lblBoc: "Loại bọc",
+        valBoc: "Bọc nhãn 0,04 mm",
+        lblNgaySx: "Ngày sản xuất",
+        valNgaySxWait: "Chờ nhập liệu",
+        valNgaySxDone: "09/10/2026",
+        lblGioSx: "Giờ sản xuất",
+        valGioSxWait: "Chờ nhập liệu",
+        valGioSxDone: "14:35:20",
+        lblCaSx: "Ca sản xuất",
+        valCaSxWait: "Chờ nhập liệu",
+        valCaSxDone: "Ca A",
+        lblPallet: "Loại pallet",
+        valPallet: "Sắt đế gỗ",
+        lblDatHang: "Đạt hạng",
+        valDatHangWait: "Đang chờ kiểm nghiệm",
+        valDatHangDone: "CSR10 (TCCS 112:2022)",
+        lblEudr: "Chứng nhận & EUDR",
+        valEudr: "PEFC CS / Hợp chuẩn EUDR 2026",
+        operatorNote: "Quyền thao tác: Công nhân xưởng / Trực ca đóng bánh",
+        btnConfirm: "Xác nhận sản xuất kiện này",
+        binCardTitle: "Ngăn nguyên liệu nguồn gốc",
+        binCardSub: "Truy xuất nguồn gốc nguyên liệu mủ đông chén và lô vườn cây thu hoạch",
+        lblBinLoc: "Vị trí & Mã ngăn",
+        binQuickview: "Xem nhanh",
+        binFulldetail: "Xem chi tiết ngăn nguồn gốc: N10",
+        binSwap: "Đổi ngăn",
+        qrTitle: "Liên kết tra cứu trực tuyến",
+        copyBtn: "Sao chép liên kết",
+        copiedToast: "Đã sao chép liên kết vào clipboard!",
+        partialBanner: "Kiện dở dang: Đã ghi nhận 29 bành — Ca A"
+      },
+      km: {
+        pageTitle: "ស្វែងរកឡាំងផលិតផលសម្រេច",
+        pageSubtitle: "ស្កេនកូដ QR លើស្លាកឡាំង ដើម្បីផ្ទៀងផ្ទាត់ប្រភពដើមជ័រកៅស៊ូ និងខ្សែសង្វាក់ផ្គត់ផ្គង់។",
+        factoryName: "រោងចក្រកែច្នៃកៅស៊ូ CRCK កំពង់ធំ",
+        portalStatus: "ទិន្នន័យជាក់ស្តែង (Real-time)",
+        baleTitlePredicted: "1799cs/26 — ឡាំង KD",
+        baleTitleProduced: "1799cs/26 — ឡាំង KD",
+        baleTitlePartial: "1790cs/26 — ឡាំង KC",
+        baleSub: "ប្រភេទ CSR: CSR10 · ប៉ាឡែត: ប៉ារ៉ែតដែកក្រាស",
+        statusPredicted: "ព្យាករណ៍ — មិនទាន់ផលិត",
+        statusProduced: "បានផលិតរួច — ជាប់ស្តង់ដារ",
+        statusPartial: "ដំណើរការ — មានរួច ២៩ បន្ទះ",
+        fileName: "លិខិតពិនិត្យគុណភាព (COA) — ឡូត៍ 1799cs/26.pdf",
+        fileDate: "កាលបរិច្ឆេទ KN: 09/10/2026",
+        fileGrade: "ជាប់ថ្នាក់ CSR10",
+        btnView: "មើលឯកសារ",
+        btnDownload: "ទាញយក",
+        lblMaLo: "លេខឡូត៍ & ឡាំង",
+        lblCsr: "ប្រភេទ CSR",
+        lblBanh: "ទម្ងន់ដុំ",
+        valBanh: "៣៥ គ.ក្រ/ដុំ",
+        lblBoc: "ប្រភេទថង់ស្រោប",
+        valBoc: "ថង់ស្រោប 0,04 ម.ម PE",
+        lblNgaySx: "ថ្ងៃផលិត",
+        valNgaySxWait: "កំពុងរង់ចាំបញ្ចូលទិន្នន័យ",
+        valNgaySxDone: "09/10/2026",
+        lblGioSx: "ម៉ោងផលិត",
+        valGioSxWait: "កំពុងរង់ចាំបញ្ចូលទិន្នន័យ",
+        valGioSxDone: "14:35:20",
+        lblCaSx: "វេនផលិត",
+        valCaSxWait: "កំពុងរង់ចាំបញ្ចូលទិន្នន័យ",
+        valCaSxDone: "វេន A",
+        lblPallet: "ប្រភេទប៉ាឡែត",
+        valPallet: "ប៉ារ៉ែតដែកក្រាស",
+        lblDatHang: "ថ្នាក់គុណភាព",
+        valDatHangWait: "កំពុងរង់ចាំពិនិត្យគុណភាព",
+        valDatHangDone: "CSR10 (TCCS 112:2022)",
+        lblEudr: "វិញ្ញាបនបត្រ & EUDR",
+        valEudr: "PEFC CS / អនុលោមតាម EUDR 2026",
+        operatorNote: "សិទ្ធិប្រតិបត្តិការ៖ កម្មកររោងចក្រ / អ្នកកត់ត្រាវេន",
+        btnConfirm: "បញ្ជាក់ការផលិតឡាំងនេះ",
+        binCardTitle: "ផ្លង់វត្ថុធាតុដើមប្រភព",
+        binCardSub: "រុករកប្រភពដើមជ័រកៅស៊ូ និងចម្ការដើមប្រភពតាមឡូត៍នីមួយៗ",
+        lblBinLoc: "ទីតាំង & លេខកូដផ្លង់",
+        binQuickview: "មើលលម្អិតលឿន",
+        binFulldetail: "មើលព័ត៌មានលម្អិតផ្លង់ប្រភព៖ N10",
+        binSwap: "ប្តូរផ្លង់",
+        qrTitle: "តំណភ្ជាប់ស្វែងរកតាមអ៊ីនធឺណិត",
+        copyBtn: "ចម្លងតំណ",
+        copiedToast: "បានចម្លងតំណភ្ជាប់ដោយជោគជ័យ!",
+        partialBanner: "ឡាំងដំណើរការ៖ បានកត់ត្រា ២៩ បន្ទះ — វេន A"
+      },
+      en: {
+        pageTitle: "Rubber Bale Traceability Portal",
+        pageSubtitle: "Scan bale label QR code to verify raw rubber origin, processing line, and EUDR compliance.",
+        factoryName: "CRCK Kampong Thom Rubber Processing Facility",
+        portalStatus: "Live Verification",
+        baleTitlePredicted: "1799cs/26 — Bale KD",
+        baleTitleProduced: "1799cs/26 — Bale KD",
+        baleTitlePartial: "1790cs/26 — Bale KC",
+        baleSub: "Grade: CSR10 · Pallet: Steel with wooden base",
+        statusPredicted: "Planned — Not Yet Produced",
+        statusProduced: "Produced — Quality Certified",
+        statusPartial: "In Production — 29 Bales recorded",
+        fileName: "Quality Inspection Certificate (COA) — Lot 1799cs/26.pdf",
+        fileDate: "Test Date: Oct 09, 2026",
+        fileGrade: "Certified Grade CSR10",
+        btnView: "View Certificate",
+        btnDownload: "Download PDF",
+        lblMaLo: "Lot & Bale ID",
+        lblCsr: "CSR Grade",
+        lblBanh: "Bale Weight",
+        valBanh: "35 kg/bale",
+        lblBoc: "Wrapping Film",
+        valBoc: "0.04 mm Labeled PE Film",
+        lblNgaySx: "Production Date",
+        valNgaySxWait: "Awaiting Production Data",
+        valNgaySxDone: "Oct 09, 2026",
+        lblGioSx: "Production Time",
+        valGioSxWait: "Awaiting Production Data",
+        valGioSxDone: "14:35:20",
+        lblCaSx: "Production Shift",
+        valCaSxWait: "Awaiting Production Data",
+        valCaSxDone: "Shift A",
+        lblPallet: "Pallet Type",
+        valPallet: "Steel with wooden base",
+        lblDatHang: "Quality Grade",
+        valDatHangWait: "Under QMS Laboratory Testing",
+        valDatHangDone: "CSR10 (TCCS 112:2022)",
+        lblEudr: "Certification & EUDR",
+        valEudr: "PEFC CS / EUDR Compliant 2026",
+        operatorNote: "Operator Authorization: Factory Technician / Shift Leader",
+        btnConfirm: "Confirm Production for this Bale",
+        binCardTitle: "Origin Raw Material Bin",
+        binCardSub: "Trace intake latex batch, farm collection routes and plantation plots",
+        lblBinLoc: "Bin Location & Code",
+        binQuickview: "Quick Preview",
+        binFulldetail: "Full Origin Bin Details: N10",
+        binSwap: "Swap Origin Bin",
+        qrTitle: "Online Verification URL",
+        copyBtn: "Copy Link",
+        copiedToast: "Verification URL copied to clipboard!",
+        partialBanner: "Partial Bale: 29 bales registered — Shift A"
+      }
+    };
+
+    let currentLang = "vi";
+    let currentStatus = "predicted";
+    let currentMode = "public";
+
+    function applyTranslations() {
+      const d = I18N[currentLang];
+      document.body.className = currentLang === "km" ? "lang-km" : "";
+      
+      document.getElementById("txt-page-title").textContent = d.pageTitle;
+      document.getElementById("txt-page-subtitle").textContent = d.pageSubtitle;
+      document.getElementById("txt-factory-name").textContent = d.factoryName;
+      document.getElementById("txt-portal-status").textContent = d.portalStatus;
+
+      // Status specific strings
+      if (currentStatus === "predicted") {
+        document.getElementById("txt-bale-title").textContent = d.baleTitlePredicted;
+        document.getElementById("txt-status-label").textContent = d.statusPredicted;
+        document.getElementById("val-ngaysx").textContent = d.valNgaySxWait;
+        document.getElementById("val-ngaysx").className = "field-value val-highlight-amber";
+        document.getElementById("val-giosx").textContent = d.valGioSxWait;
+        document.getElementById("val-casx").textContent = d.valCaSxWait;
+        document.getElementById("val-dathang").textContent = d.valDatHangWait;
+        document.getElementById("val-dathang").className = "field-value val-highlight-amber";
+        document.getElementById("badge-status-content").className = "badge-status badge-predicted";
+        document.getElementById("badge-status-content").querySelector(".status-dot").style.background = "#925400";
+        document.getElementById("alert-partial-banner").style.display = "none";
+        document.getElementById("card-kqkn-file").style.display = "none";
+      } else if (currentStatus === "produced") {
+        document.getElementById("txt-bale-title").textContent = d.baleTitleProduced;
+        document.getElementById("txt-status-label").textContent = d.statusProduced;
+        document.getElementById("val-ngaysx").textContent = d.valNgaySxDone;
+        document.getElementById("val-ngaysx").className = "field-value mono val-highlight-emerald";
+        document.getElementById("val-giosx").textContent = d.valGioSxDone;
+        document.getElementById("val-casx").textContent = d.valCaSxDone;
+        document.getElementById("val-dathang").textContent = d.valDatHangDone;
+        document.getElementById("val-dathang").className = "field-value val-highlight-emerald";
+        document.getElementById("badge-status-content").className = "badge-status badge-produced";
+        document.getElementById("badge-status-content").querySelector(".status-dot").style.background = "#087443";
+        document.getElementById("alert-partial-banner").style.display = "none";
+        document.getElementById("card-kqkn-file").style.display = "flex";
+      } else if (currentStatus === "partial") {
+        document.getElementById("txt-bale-title").textContent = d.baleTitlePartial;
+        document.getElementById("txt-status-label").textContent = d.statusPartial;
+        document.getElementById("val-ngaysx").textContent = d.valNgaySxDone;
+        document.getElementById("val-ngaysx").className = "field-value mono";
+        document.getElementById("val-giosx").textContent = d.valGioSxDone;
+        document.getElementById("val-casx").textContent = d.valCaSxDone;
+        document.getElementById("val-dathang").textContent = d.valDatHangWait;
+        document.getElementById("val-dathang").className = "field-value val-highlight-amber";
+        document.getElementById("badge-status-content").className = "badge-status badge-predicted";
+        document.getElementById("badge-status-content").querySelector(".status-dot").style.background = "#D97706";
+        document.getElementById("alert-partial-banner").style.display = "flex";
+        document.getElementById("txt-partial-desc").textContent = d.partialBanner;
+        document.getElementById("card-kqkn-file").style.display = "none";
+      }
+
+      document.getElementById("txt-bale-sub").textContent = d.baleSub;
+      document.getElementById("txt-file-name").textContent = d.fileName;
+      document.getElementById("txt-file-date").textContent = d.fileDate;
+      document.getElementById("txt-file-grade").textContent = d.fileGrade;
+      document.getElementById("txt-btn-view").textContent = d.btnView;
+      document.getElementById("txt-btn-download").textContent = d.btnDownload;
+
+      document.getElementById("lbl-malo").textContent = d.lblMaLo;
+      document.getElementById("lbl-csr").textContent = d.lblCsr;
+      document.getElementById("lbl-banh").textContent = d.lblBanh;
+      document.getElementById("val-banh").textContent = d.valBanh;
+      document.getElementById("lbl-boc").textContent = d.lblBoc;
+      document.getElementById("val-boc").textContent = d.valBoc;
+      document.getElementById("lbl-ngaysx").textContent = d.lblNgaySx;
+      document.getElementById("lbl-giosx").textContent = d.lblGioSx;
+      document.getElementById("lbl-casx").textContent = d.lblCaSx;
+      document.getElementById("lbl-pallet").textContent = d.lblPallet;
+      document.getElementById("val-pallet").textContent = d.valPallet;
+      document.getElementById("lbl-dathang").textContent = d.lblDatHang;
+      document.getElementById("lbl-eudr").textContent = d.lblEudr;
+      document.getElementById("val-eudr").textContent = d.valEudr;
+
+      document.getElementById("txt-operator-note").textContent = d.operatorNote;
+      document.getElementById("txt-btn-confirm").textContent = d.btnConfirm;
+
+      document.getElementById("txt-bin-card-title").textContent = d.binCardTitle;
+      document.getElementById("txt-bin-card-sub").textContent = d.binCardSub;
+      document.getElementById("lbl-bin-loc").textContent = d.lblBinLoc;
+      document.getElementById("txt-bin-quickview").textContent = d.binQuickview;
+      document.getElementById("txt-bin-fulldetail").textContent = d.binFulldetail;
+      document.getElementById("txt-bin-swap").textContent = d.binSwap;
+
+      document.getElementById("txt-qr-title").textContent = d.qrTitle;
+      document.getElementById("txt-copy-btn").textContent = d.copyBtn;
+    }
+
+    // Language Toggle
+    document.querySelectorAll(".lang-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".lang-btn").forEach(b => {
+          b.classList.remove("active");
+          b.setAttribute("aria-pressed", "false");
+        });
+        btn.classList.add("active");
+        btn.setAttribute("aria-pressed", "true");
+        currentLang = btn.dataset.lang;
+        applyTranslations();
+        triggerToast(currentLang === "km" ? "បានប្តូរទៅភាសាខ្មែរ" : currentLang === "en" ? "Switched to English" : "Đã chuyển sang Tiếng Việt");
+      });
+    });
+
+    // Viewport Simulator
+    document.querySelectorAll("#group-viewport .proto-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#group-viewport .proto-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        const vp = btn.dataset.vp;
+        const container = document.getElementById("portalContainer");
+        container.className = `portal-container preview-mode-${vp}`;
+      });
+    });
+
+    // Status Simulator
+    document.querySelectorAll("#group-status .proto-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#group-status .proto-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentStatus = btn.dataset.status;
+        applyTranslations();
+      });
+    });
+
+    // Mode Simulator (Public vs Staff)
+    document.querySelectorAll("#group-mode .proto-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("#group-mode .proto-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentMode = btn.dataset.mode;
+        const staffBar = document.getElementById("staffActionBar");
+        const swapBtn = document.getElementById("btn-bin-swap");
+        if (currentMode === "staff") {
+          staffBar.style.display = "flex";
+          swapBtn.style.display = "inline-flex";
+          triggerToast("Chuyển sang chế độ Nhân viên xưởng (được quyền xác nhận / đổi ngăn)");
+        } else {
+          staffBar.style.display = "none";
+          swapBtn.style.display = "none";
+          triggerToast("Chuyển sang chế độ Khách hàng quét QR công khai");
+        }
+      });
+    });
+
+    // Copy Helper
+    function copyText(str) {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(str).then(() => {
+          triggerToast(`Đã sao chép: "${str}"`);
+        });
+      } else {
+        triggerToast(`Đã sao chép: "${str}"`);
+      }
+    }
+
+    function copyLookupUrl() {
+      const url = document.getElementById("txt-qr-url").textContent.trim();
+      copyText(url);
+    }
+
+    // Toast
+    let toastTimer = null;
+    function triggerToast(msg) {
+      const t = document.getElementById("toastBox");
+      const m = document.getElementById("toastMsg");
+      m.textContent = msg;
+      t.classList.add("visible");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        t.classList.remove("visible");
+      }, 2400);
+    }
+
+    // Modal Handlers
+    function openBinQuickViewModal() {
+      document.getElementById("modalBinQuickView").classList.add("active");
+    }
+
+    function openEudrModal() {
+      document.getElementById("modalLotDetail").classList.add("active");
+    }
+
+    function openFilePreviewModal() {
+      triggerToast("Mở bản xem thử tài liệu PDF phiếu kiểm nghiệm trong cửa sổ mới");
+    }
+
+    function closeModals() {
+      document.querySelectorAll(".modal-backdrop").forEach(m => m.classList.remove("active"));
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeModals();
+    });
+
+    document.querySelectorAll(".modal-backdrop").forEach(m => {
+      m.addEventListener("click", (e) => {
+        if (e.target === m) closeModals();
+      });
+    });
+
+    // Initialize
+    applyTranslations();
+  </script>
+</body>
+</html>

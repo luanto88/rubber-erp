@@ -2414,6 +2414,11 @@ export default function QualityPage() {
                     // Trưởng phòng QLCL (chỉ là người PHÊ DUYỆT, không phải chủ phiếu) vẫn thêm được
                     // phiếu mới vào ngày đang chờ chính họ duyệt vì "+" trước đây chỉ khoá ở hoan_tat.
                     const isAddBlocked = currentUser?.role !== "admin" && !!signingStatusByDate.get(date)
+                    // "Chọn hết" ở chế độ xóa: chỉ các phiếu người dùng thực sự được xóa — admin tất
+                    // cả, người khác chỉ phiếu do chính mình tạo (khớp RLS xóa theo từng phiếu).
+                    const deletableIds = dateResults
+                      .filter(r => currentUser?.role === "admin" || (!!currentUser && r.created_by === currentUser.id))
+                      .map(r => r.id)
 
                     // Distinct batches in this date group (dedup by batch_id or pkn)
                     const batches = Array.from(
@@ -2450,6 +2455,14 @@ export default function QualityPage() {
                             {inDeleteMode ? (
                               <>
                                 <span className="text-xs text-red-600 font-bold">Chọn phiếu cần xóa...</span>
+                                <button onClick={()=>{
+                                    const allSelected = deletableIds.length > 0 && deletableIds.every(id => selectedDeleteIds.has(id))
+                                    setSelectedDeleteIds(allSelected ? new Set() : new Set(deletableIds))
+                                  }}
+                                  disabled={deletableIds.length === 0}
+                                  className="px-2.5 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded-lg disabled:opacity-40">
+                                  {deletableIds.length > 0 && deletableIds.every(id => selectedDeleteIds.has(id)) ? "Bỏ chọn hết" : `Chọn hết (${deletableIds.length})`}
+                                </button>
                                 <button onClick={handleBulkDelete}
                                   className="flex items-center gap-1 px-2.5 py-1 bg-red-600 text-white text-xs font-bold rounded-lg">
                                   <Trash2 size={11}/> Xóa {selectedDeleteIds.size}
@@ -2576,7 +2589,20 @@ export default function QualityPage() {
                           <table className="w-full text-sm">
                             <thead className="bg-slate-50 border-b border-slate-100">
                               <tr>
-                                {inDeleteMode && <th className="px-3 py-2 w-8"/>}
+                                {inDeleteMode && (
+                                  <th className="px-3 py-2 w-8">
+                                    <input type="checkbox" className="rounded"
+                                      title="Chọn tất cả phiếu được phép xóa trong ngày"
+                                      checked={deletableIds.length > 0 && deletableIds.every(id => selectedDeleteIds.has(id))}
+                                      ref={el => {
+                                        if (el) el.indeterminate =
+                                          deletableIds.some(id => selectedDeleteIds.has(id)) &&
+                                          !deletableIds.every(id => selectedDeleteIds.has(id))
+                                      }}
+                                      onChange={e => setSelectedDeleteIds(e.target.checked ? new Set(deletableIds) : new Set())}
+                                    />
+                                  </th>
+                                )}
                                 {["Lô PKN","Lô KN","Loại","Tiêu chuẩn","Tạp chất","Tro","PRI","Kết quả",""].map(h=>(
                                   <th key={h} className="px-3 py-2 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                                 ))}

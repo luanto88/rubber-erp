@@ -57,6 +57,8 @@ export type SignTemplateBox = {
   // trước phiên này không có trường này, đọc ra sẽ là undefined, KHÔNG phá dữ liệu cũ. CHƯA được
   // api/documents/sign/route.ts đọc — chỉ có tác dụng khi tích hợp "vị trí CỨNG" ở phiên sau.
   sign_as?: SignTemplateSignAsKey | null
+  /** Vị trí tương đối của chức vụ: "above" (Chức vụ trên Tên - mặc định) hoặc "below" (Chức vụ dưới Tên) */
+  chuc_vu_position?: "above" | "below"
 }
 
 export type SignTemplateRow = {

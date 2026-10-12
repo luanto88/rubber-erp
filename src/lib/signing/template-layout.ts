@@ -67,6 +67,8 @@ export type SignerSubLayout = {
   show_name: boolean
   show_chuc_vu: boolean
   show_prefix: boolean
+  /** Vị trí tương đối của chức vụ: "above" (Chức vụ trên Tên - mặc định) hoặc "below" (Chức vụ dưới Tên) */
+  chuc_vu_position?: "above" | "below"
 }
 
 /** Bố cục 2 khối con của khung "Ghi chú" (ý kiến chỉ đạo + chữ ký nháy). */
@@ -88,6 +90,7 @@ export type TemplateSignBox = TemplateAnchorBox & {
   show_name: boolean
   show_chuc_vu: boolean
   chuc_vu_key: ChucVuKey | null
+  chuc_vu_position?: "above" | "below"
   /** Người ký tự xê dịch trong khung. Không có = dùng bố cục mặc định (văn bản ký trước 2026-09-05). */
   layout?: SignerSubLayout | null
 }
@@ -182,10 +185,11 @@ const PREFIX_RATIO = 0.16
  */
 export function computeDefaultSubLayout(
   box: { x: number; y: number; width: number; height: number },
-  opts: { withName: boolean; withChucVu: boolean; withPrefix?: boolean },
+  opts: { withName: boolean; withChucVu: boolean; withPrefix?: boolean; chucVuPosition?: "above" | "below" },
 ): { sig: LayoutRect; name: LayoutRect | null; chuc_vu: LayoutRect | null; prefix: LayoutRect | null } {
   const { withName, withChucVu } = opts
   const withPrefix = !!opts.withPrefix
+  const chucVuPosition = opts.chucVuPosition ?? "above"
 
   const prefixH = withPrefix ? box.height * PREFIX_RATIO : 0
   const innerH = box.height - prefixH
@@ -204,21 +208,37 @@ export function computeDefaultSubLayout(
     height: sigH,
   }
 
+  const nameH = withChucVu ? innerH * 0.22 : innerH * 0.26
+  const chucVuH = withName ? innerH * 0.23 : innerH * 0.26
+
+  let nameY = box.y
+  let chucVuY = box.y
+
+  if (withName && withChucVu) {
+    if (chucVuPosition === "above") {
+      nameY = box.y
+      chucVuY = box.y + nameH
+    } else {
+      chucVuY = box.y
+      nameY = box.y + chucVuH
+    }
+  }
+
   const name: LayoutRect | null = withName
     ? {
         x: box.x,
-        y: box.y,
+        y: nameY,
         width: box.width,
-        height: withChucVu ? innerH * 0.22 : innerH * 0.26,
+        height: nameH,
       }
     : null
 
   const chuc_vu: LayoutRect | null = withChucVu
     ? {
         x: box.x,
-        y: withName ? box.y + innerH * 0.22 : box.y,
+        y: chucVuY,
         width: box.width,
-        height: withName ? innerH * 0.23 : innerH * 0.26,
+        height: chucVuH,
       }
     : null
 
@@ -245,11 +265,14 @@ export function sanitizeSignerSubLayout(
   const showName = allowName && raw.show_name !== false
   const showChucVu = allowChucVu && raw.show_chuc_vu !== false
   const showPrefix = allowPrefix && raw.show_prefix !== false
+  const chucVuPosition: "above" | "below" =
+    raw.chuc_vu_position === "below" || box.chuc_vu_position === "below" ? "below" : "above"
 
   const fallback = computeDefaultSubLayout(box, {
     withName: showName,
     withChucVu: showChucVu,
     withPrefix: showPrefix,
+    chucVuPosition,
   })
 
   const sig = clampRectToBox(readRect(raw.sig) ?? fallback.sig, box)
@@ -269,6 +292,7 @@ export function sanitizeSignerSubLayout(
     show_name: showName,
     show_chuc_vu: showChucVu,
     show_prefix: showPrefix,
+    chuc_vu_position: chucVuPosition,
   }
 }
 
@@ -309,6 +333,8 @@ export function resolveEffectiveSubLayout(
     const showName = allowName && stored.show_name !== false
     const showChucVu = allowChucVu && stored.show_chuc_vu !== false
     const showPrefix = allowPrefix && stored.show_prefix !== false
+    const chucVuPosition: "above" | "below" =
+      stored.chuc_vu_position || box.chuc_vu_position || "above"
     return {
       sig: clampRectToBox(stored.sig, box),
       name: showName && stored.name ? clampRectToBox(stored.name, box) : null,
@@ -317,13 +343,16 @@ export function resolveEffectiveSubLayout(
       show_name: showName && !!stored.name,
       show_chuc_vu: showChucVu && !!stored.chuc_vu,
       show_prefix: showPrefix && !!stored.prefix,
+      chuc_vu_position: chucVuPosition,
     }
   }
 
+  const chucVuPosition: "above" | "below" = box.chuc_vu_position || "above"
   const fallback = computeDefaultSubLayout(box, {
     withName: allowName,
     withChucVu: allowChucVu,
     withPrefix: allowPrefix,
+    chucVuPosition,
   })
   return {
     sig: fallback.sig,
@@ -333,6 +362,7 @@ export function resolveEffectiveSubLayout(
     show_name: allowName,
     show_chuc_vu: allowChucVu,
     show_prefix: allowPrefix,
+    chuc_vu_position: chucVuPosition,
   }
 }
 

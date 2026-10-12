@@ -3633,23 +3633,23 @@ export default function IsoFormInstancePage() {
 
           {/* Action buttons trên Top bar */}
           <div className="flex items-center gap-2 flex-wrap sm:flex-shrink-0 sm:justify-end">
-            {/* Nút Xem file (màu xanh lam như Ảnh 1) */}
+            {/* Nút Xem file */}
             {fileUrl && (
               <button
                 type="button"
                 onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all shadow-2xs"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all shadow-2xs"
               >
                 <Eye size={15} />
                 Xem file
               </button>
             )}
 
-            {/* Nút Phân phối (màu tím như Ảnh 1) */}
+            {/* Nút Phân phối */}
             {isDone && (
               <button
                 onClick={() => setShowDistributeModal(true)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all"
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl shadow-md transition-all"
                 title="Phân phối hồ sơ này đến người nhận / phòng ban"
               >
                 <Share2 size={15} />
@@ -3662,7 +3662,7 @@ export default function IsoFormInstancePage() {
               <button
                 onClick={openSendModal}
                 disabled={saving || !instance.draft_file_url || (needsSignTemplate && templateExists === true && !templateConfirmed)}
-                className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-md transition-all"
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded-xl shadow-md transition-all"
                 title={needsSignTemplate && templateExists === true && !templateConfirmed ? "Vui lòng xem qua mẫu vị trí ký trước khi ký & gửi" : undefined}
               >
                 {saving ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
@@ -3747,10 +3747,10 @@ export default function IsoFormInstancePage() {
                 disabled={!signStepsReady || saving}
                 className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-xl transition-all ${
                   mustSetupTemplate
-                    ? "bg-violet-600 hover:bg-violet-700 text-white border border-violet-600 shadow-md ring-2 ring-violet-300 animate-pulse"
+                    ? "bg-emerald-700 hover:bg-emerald-800 text-white border border-emerald-700 shadow-md ring-2 ring-emerald-300 animate-pulse"
                     : !templateConfirmed
                       ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 shadow-xs ring-1 ring-amber-200"
-                      : "bg-sky-50 hover:bg-sky-100 disabled:opacity-40 disabled:cursor-not-allowed text-sky-700 border border-sky-200"
+                      : "bg-emerald-50 hover:bg-emerald-100 disabled:opacity-40 disabled:cursor-not-allowed text-emerald-800 border border-emerald-200"
                 }`}
                 title={signStepsReady
                   ? (mustSetupTemplate ? "Cần cài đặt vị trí ký trước khi ký & gửi hồ sơ" : "Xem / kiểm tra vị trí chữ ký của biểu mẫu này")
@@ -3816,8 +3816,8 @@ export default function IsoFormInstancePage() {
           {/* ── Cột trái: Thông tin hồ sơ (3/5) ── */}
           <div className="lg:col-span-3 flex flex-col">
             <div className="flex-1 flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="flex items-center gap-2.5 px-5 py-3.5 bg-mint-50 border-b border-mint-100">
-                <span className="w-8 h-8 rounded-full bg-mint-100 grid place-items-center text-[#1f6a58] shrink-0">
+              <div className="flex items-center gap-2.5 px-5 py-3.5 bg-emerald-50/70 border-b border-emerald-100/80">
+                <span className="w-8 h-8 rounded-full bg-emerald-100 grid place-items-center text-emerald-800 shrink-0">
                   <FileText size={16} />
                 </span>
                 <h2 className="text-sm font-extrabold text-slate-800">Thông tin hồ sơ</h2>
@@ -3825,7 +3825,7 @@ export default function IsoFormInstancePage() {
 
               <div className="p-5 flex-1 flex flex-col">
                 {/* ── Phân vùng File hồ sơ nổi bật (Được đưa lên đầu theo yêu cầu) ── */}
-                <div className="mb-5 p-4 rounded-2xl bg-gradient-to-br from-emerald-50/70 via-slate-50 to-teal-50/50 border border-emerald-200/80 shadow-xs space-y-3">
+                <div className="mb-5 p-4 rounded-2xl bg-emerald-50/40 border border-emerald-200/80 shadow-xs space-y-3">
                   <div className="flex items-center justify-between pb-1 border-b border-emerald-100/60">
                     <dt className="text-xs font-extrabold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
                       <FileText size={15} className="text-emerald-600" />
@@ -4075,10 +4075,10 @@ export default function IsoFormInstancePage() {
           {/* ── Cột phải: Tiến trình ký xác nhận & phê duyệt (2/5) ── */}
           <div className="lg:col-span-2 flex flex-col">
             <div className="flex-1 w-full flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              {/* Header đồng bộ ảnh 1 */}
-              <div className="flex items-center justify-between gap-2.5 px-5 py-3.5 bg-amber-50 border-b border-amber-100">
+              {/* Header đồng bộ */}
+              <div className="flex items-center justify-between gap-2.5 px-5 py-3.5 bg-emerald-50/70 border-b border-emerald-100/80">
                 <div className="flex items-center gap-2.5">
-                  <span className="w-8 h-8 rounded-full bg-amber-100 grid place-items-center text-amber-700 shrink-0">
+                  <span className="w-8 h-8 rounded-full bg-emerald-100 grid place-items-center text-emerald-800 shrink-0">
                     <ShieldCheck size={16} />
                   </span>
                   <h2 className="text-sm font-extrabold text-slate-800">
@@ -4094,25 +4094,25 @@ export default function IsoFormInstancePage() {
                         type="button"
                         onClick={handleManualSaveConfig}
                         disabled={saving}
-                        className="flex items-center gap-1.5 px-3 py-1 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors disabled:opacity-50"
+                        className="flex items-center gap-1.5 px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors disabled:opacity-50"
                         title="Lưu cấu hình phê duyệt"
                       >
                         {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                         Lưu cấu hình
                       </button>
                     )}
-                    <div className="flex items-center gap-1 bg-amber-100/70 p-0.5 rounded-lg text-xs font-bold">
+                    <div className="flex items-center gap-1 bg-emerald-100/70 p-0.5 rounded-lg text-xs font-bold">
                       <button
                         type="button"
                         onClick={() => setRightTab("timeline")}
-                        className={`px-2 py-1 rounded-md transition-all ${rightTab === "timeline" ? "bg-white text-slate-800 shadow-2xs" : "text-amber-800 hover:text-amber-900"}`}
+                        className={`px-2 py-1 rounded-md transition-all ${rightTab === "timeline" ? "bg-white text-slate-800 shadow-2xs" : "text-emerald-800 hover:text-emerald-900"}`}
                       >
                         Tiến trình
                       </button>
                       <button
                         type="button"
                         onClick={() => setRightTab("config")}
-                        className={`px-2 py-1 rounded-md transition-all ${rightTab === "config" ? "bg-white text-slate-800 shadow-2xs" : "text-amber-800 hover:text-amber-900"}`}
+                        className={`px-2 py-1 rounded-md transition-all ${rightTab === "config" ? "bg-white text-slate-800 shadow-2xs" : "text-emerald-800 hover:text-emerald-900"}`}
                       >
                         Cấu hình
                       </button>
@@ -4132,7 +4132,7 @@ export default function IsoFormInstancePage() {
                     <button
                       type="button"
                       onClick={addStep}
-                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold bg-violet-50 hover:bg-violet-100 text-violet-700 rounded-lg border border-violet-200 transition-colors"
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg border border-emerald-200 transition-colors"
                     >
                       <Plus size={12} /> Thêm bước
                     </button>
@@ -4151,7 +4151,7 @@ export default function IsoFormInstancePage() {
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 flex-1 min-w-0">
-                              <span className="w-5 h-5 rounded-full bg-violet-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                              <span className="w-5 h-5 rounded-full bg-emerald-700 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
                                 {idx + 1}
                               </span>
                               <input
@@ -4159,7 +4159,7 @@ export default function IsoFormInstancePage() {
                                 value={s.ten || ""}
                                 onChange={(e) => updateStep(idx, { ten: e.target.value })}
                                 placeholder={isFirst ? "Người lập" : isLast ? "Phê duyệt" : `Bước ${idx + 1}`}
-                                className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:border-violet-400"
+                                className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                               />
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
@@ -4199,7 +4199,7 @@ export default function IsoFormInstancePage() {
                               <select
                                 value={s.phong_ban_code || ""}
                                 onChange={(e) => handleStepDeptChange(idx, e.target.value)}
-                                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-violet-400 font-medium"
+                                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 font-medium"
                               >
                                 <option value="">Tất cả phòng ban</option>
                                 {PHONG_BAN_OPTIONS.map((pb) => (
@@ -4209,12 +4209,12 @@ export default function IsoFormInstancePage() {
                             </div>
                             <div>
                               <label className="text-[10px] font-bold text-slate-500 block mb-0.5">
-                                Người ký đích danh {s.phong_ban_code && deptUsersLoading[s.phong_ban_code] && <span className="text-violet-600 font-normal">(đang tải...)</span>}
+                                Người ký đích danh {s.phong_ban_code && deptUsersLoading[s.phong_ban_code] && <span className="text-emerald-700 font-normal">(đang tải...)</span>}
                               </label>
                               <select
                                 value={signerId || ""}
                                 onChange={(e) => handleStepSignerChange(idx, e.target.value)}
-                                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-violet-400 font-medium"
+                                className="w-full px-2 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 font-medium"
                               >
                                 <option value="">— Chọn người ký —</option>
                                 {(() => {
@@ -4276,7 +4276,7 @@ export default function IsoFormInstancePage() {
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
                     <textarea
                       rows={2}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400 resize-none"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 resize-none"
                       value={ghiChu}
                       onChange={(e) => setGhiChu(e.target.value)}
                     />

@@ -86,6 +86,7 @@ import {
 } from "@/lib/signing/template-layout"
 import { collectPreviewBoxes, groupPreviewBoxesByPage } from "@/lib/signing/placement-preview"
 import { getKyBuocColor, getPlacementKeyColor, ROLE_COLORS } from "@/lib/signing/template-colors"
+import { computeAutoFitFontSize } from "@/lib/signing/text-fit"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
 const STORAGE_BUCKET = "iso-documents"
@@ -645,6 +646,8 @@ function SignPlacementModal({
     () => previewBoxes.find((b) => b.tier === "mine")?.page ?? null,
     [previewBoxes],
   )
+  const myBoxes = useMemo(() => previewBoxes.filter((b) => b.tier === "mine"), [previewBoxes])
+  const myPages = useMemo(() => Array.from(new Set(myBoxes.map((b) => b.page))), [myBoxes])
   /** Khung của bước/vai trò KHÁC trên trang đang xem — vẽ mờ làm tham chiếu bố cục. */
   const otherBoxesOnPage = useMemo(
     () => (previewByPage[currentPage] || []).filter((b) => b.tier !== "mine"),
@@ -1056,16 +1059,22 @@ function SignPlacementModal({
             {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => {
               const boxes = previewByPage[p] || []
               const hasMine = boxes.some((b) => b.tier === "mine")
+              const hasDone = boxes.some((b) => b.tier === "done")
+              const isSelected = p === currentPage
               return (
                 <button
                   key={p}
                   onClick={() => goToPage(p)}
                   title={hasMine ? `Trang ${p} — có khung ký của bạn` : `Trang ${p}`}
-                  className="relative shrink-0 w-[52px] h-[72px] lg:w-20 lg:h-28 rounded-md overflow-hidden border-2 bg-white mx-auto"
-                  style={{
-                    borderColor: p === currentPage ? "#2f5d52" : hasMine ? myColor.fg : "#e2e8f0",
-                    boxShadow: hasMine ? `0 0 0 2px ${myColor.fg}44` : undefined,
-                  }}
+                  className={`relative shrink-0 w-[52px] h-[72px] lg:w-20 lg:h-28 rounded-md overflow-hidden border-2 bg-white mx-auto transition-all ${
+                    isSelected
+                      ? "ring-2 ring-forest-600 border-[#2f5d52] shadow-md"
+                      : hasMine
+                        ? "ring-2 ring-amber-400/80 border-amber-500 shadow-xs"
+                        : hasDone
+                          ? "border-emerald-300"
+                          : "border-dashed border-slate-300 hover:border-slate-400"
+                  }`}
                 >
                   {thumbs[p] ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -1099,11 +1108,22 @@ function SignPlacementModal({
                     />
                   ))}
 
+                  {/* Badges trạng thái */}
                   {hasMine && (
                     <span
-                      className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full"
-                      style={{ background: myColor.fg }}
-                    />
+                      className="absolute top-0.5 right-0.5 px-1 py-0.2 rounded text-[7px] font-extrabold bg-amber-500 text-white shadow-2xs leading-tight uppercase"
+                      title="Trang có khung ký của bạn"
+                    >
+                      Của bạn
+                    </span>
+                  )}
+                  {hasDone && !hasMine && (
+                    <span
+                      className="absolute top-0.5 right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[8px] font-bold shadow-2xs"
+                      title="Đã có chữ ký hoàn thành"
+                    >
+                      ✓
+                    </span>
                   )}
                   <span className="absolute bottom-0 right-0 text-[9px] font-bold text-slate-500 bg-white/85 px-1 rounded-tl">
                     {p}
@@ -1626,18 +1646,24 @@ function SignPlacementModal({
                                 handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                                 handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                               >
-                                <SignBlockCard
-                                  active={layout.show_name}
-                                  tone="sky"
-                                  fontSizePx={SIGN_TEXT_FONT_SIZE_PT * pdfScale}
-                                  /* PDF đặt đường chân chữ của TÊN ở đáy khối (drawSignerName) — canh
-                                     đáy để xem trước khớp đúng chỗ chữ sẽ rơi vào. */
-                                  alignBottom
-                                  onToggle={() => toggleLockedBlock(idx, "name")}
-                                  toggleTitle={layout.show_name ? "Ẩn họ tên" : "Hiện lại họ tên"}
-                                >
-                                  {userName || "Người ký"}
-                                </SignBlockCard>
+                                  {(() => {
+                                    const nameText = userName || "Người ký"
+                                    const nameFit = computeAutoFitFontSize(nameText, nameCan.w, false, SIGN_TEXT_FONT_SIZE_PT, 9, pdfScale)
+                                    return (
+                                      <SignBlockCard
+                                        active={layout.show_name}
+                                        tone="sky"
+                                        fontSizePx={nameFit.fontSizePx}
+                                        /* PDF đặt đường chân chữ của TÊN ở đáy khối (drawSignerName) — canh
+                                           đáy để xem trước khớp đúng chỗ chữ sẽ rơi vào. */
+                                        alignBottom
+                                        onToggle={() => toggleLockedBlock(idx, "name")}
+                                        toggleTitle={layout.show_name ? "Ẩn họ tên" : "Hiện lại họ tên"}
+                                      >
+                                        {nameText}
+                                      </SignBlockCard>
+                                    )
+                                  })()}
                               </Resizable>
                             </ExtraDraggableBox>
                           )}
@@ -1658,15 +1684,20 @@ function SignPlacementModal({
                                 handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                                 handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                               >
-                                <SignBlockCard
-                                  active={layout.show_chuc_vu}
-                                  tone="violet"
-                                  fontSizePx={SIGN_TEXT_FONT_SIZE_PT * pdfScale}
-                                  onToggle={() => toggleLockedBlock(idx, "chuc_vu")}
-                                  toggleTitle={layout.show_chuc_vu ? "Ẩn chức danh" : "Hiện lại chức danh"}
-                                >
-                                  {boxChucVuText}
-                                </SignBlockCard>
+                                {(() => {
+                                  const cvFit = boxChucVuText ? computeAutoFitFontSize(boxChucVuText, chucVuCan.w, false, SIGN_TEXT_FONT_SIZE_PT, 9, pdfScale) : null
+                                  return (
+                                    <SignBlockCard
+                                      active={layout.show_chuc_vu}
+                                      tone="violet"
+                                      fontSizePx={cvFit ? cvFit.fontSizePx : SIGN_TEXT_FONT_SIZE_PT * pdfScale}
+                                      onToggle={() => toggleLockedBlock(idx, "chuc_vu")}
+                                      toggleTitle={layout.show_chuc_vu ? "Ẩn chức danh" : "Hiện lại chức danh"}
+                                    >
+                                      {boxChucVuText}
+                                    </SignBlockCard>
+                                  )
+                                })()}
                               </Resizable>
                             </ExtraDraggableBox>
                           )}
@@ -1943,25 +1974,35 @@ function SignPlacementModal({
             </div>
           )}
 
-          <div className="flex items-center gap-2 justify-between">
-            {/* Nhảy thẳng tới trang có khung của mình — tài liệu nhiều trang không phải lật tay */}
-            {showCanvas && myFirstPage != null && myFirstPage !== currentPage ? (
-              <button
-                onClick={() => goToPage(myFirstPage)}
-                className="text-xs font-bold px-3 py-2 rounded-xl border bg-white hover:bg-slate-50"
-                style={{ color: myColor.fg, borderColor: `${myColor.fg}66` }}
-              >
-                Tới khung của bạn (trang {myFirstPage})
-              </button>
-            ) : (
-              <span />
-            )}
+          <div className="flex items-center gap-2 justify-between flex-wrap">
+            <div className="flex items-center gap-2">
+              {/* Nhảy thẳng tới trang có khung của mình — tài liệu nhiều trang không phải lật tay */}
+              {showCanvas && myFirstPage != null && myFirstPage !== currentPage ? (
+                <button
+                  type="button"
+                  onClick={() => goToPage(myFirstPage)}
+                  className="text-xs font-bold px-3 py-2 rounded-xl border bg-white hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+                  style={{ color: myColor.fg, borderColor: `${myColor.fg}66` }}
+                >
+                  Đi đến vị trí chưa ký (trang {myFirstPage})
+                </button>
+              ) : null}
+              {showCanvas && myBoxes.length > 0 && (
+                <span className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
+                  {myPages.includes(currentPage) ? (
+                    <span className="text-emerald-700 font-bold">✓ Đang ở trang ký ({myBoxes.filter((b) => b.page === currentPage).length}/{myBoxes.length} khung)</span>
+                  ) : (
+                    <span className="text-amber-700 font-bold">⚠ Chưa xem khung ký ({myBoxes.length} khung trên trang {myPages.join(", ")})</span>
+                  )}
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
-              <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+              <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer">Hủy</button>
               <button
                 onClick={handleConfirm}
                 disabled={acting}
-                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-md"
+                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-md cursor-pointer"
               >
                 <PenLine size={14} /> {acting ? "Đang xử lý..." : "Xác nhận ký"}
               </button>
@@ -2578,7 +2619,7 @@ export default function DocumentDetailPage() {
             <button
               type="button"
               onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all"
+              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all shadow-2xs"
             >
               <Eye size={15} />
               Xem file
@@ -2616,7 +2657,7 @@ export default function DocumentDetailPage() {
           {canDistribute && (
             <button
               onClick={() => void openDistModal()}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md transition-all"
+              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl shadow-md transition-all"
             >
               <Share2 size={15} />
               Phân phối
@@ -2626,7 +2667,7 @@ export default function DocumentDetailPage() {
             <button
               onClick={handleGuiKy}
               disabled={acting}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
+              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl shadow-md transition-all"
             >
               <Send size={15} />
               {/* Văn bản nguồn PDF: bấm vào là VÀO MÀN CÀI ĐẶT VỊ TRÍ, việc gửi ký chỉ xảy ra
@@ -2689,8 +2730,6 @@ export default function DocumentDetailPage() {
             <DetailFileCard
               fileName={doc.ten_van_ban}
               fileType={docExt ? docExt.toUpperCase() : "PDF"}
-              statusLabel={TRANG_THAI_LABEL[doc.trang_thai]}
-              statusTone={doc.trang_thai === "da_phe_duyet" ? "emerald" : doc.trang_thai === "tra_ve" ? "amber" : "blue"}
               onView={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
               onDownload={() => void openSecureFile(`/api/documents/${doc.id}/file-url?download=1`)}
               onReplace={canGuiKy ? () => fileReplaceInputRef.current?.click() : undefined}
@@ -2702,14 +2741,9 @@ export default function DocumentDetailPage() {
           {/* 2. CARD - Thông tin văn bản chuẩn 2 cột cân đối */}
           <DetailCard
             icon={<FileText size={18} />}
-            iconTone="violet"
+            iconTone="emerald"
             title="Thông tin văn bản"
             subtitle="Số hiệu, phòng ban và phạm vi ban hành"
-            badge={
-              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai]}`}>
-                {TRANG_THAI_LABEL[doc.trang_thai]}
-              </span>
-            }
           >
             <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
               <DetailFieldItem
@@ -2848,8 +2882,8 @@ export default function DocumentDetailPage() {
         {/* Timeline ký */}
         <div className="lg:col-span-2 flex">
           <div className="flex-1 w-full flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2.5 px-5 py-3.5 bg-amber-50 border-b border-amber-100">
-              <span className="w-8 h-8 rounded-full bg-amber-100 grid place-items-center text-amber-700 shrink-0">
+            <div className="flex items-center gap-2.5 px-5 py-3.5 bg-emerald-50/70 border-b border-emerald-100/80">
+              <span className="w-8 h-8 rounded-full bg-emerald-100 grid place-items-center text-emerald-800 shrink-0">
                 <ShieldCheck size={16} />
               </span>
               <h2 className="text-sm font-extrabold text-slate-800">

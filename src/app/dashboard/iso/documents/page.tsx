@@ -21,7 +21,7 @@ import {
   type IsoTrangThai,
 } from "../_components/iso-types"
 import { canOpenIsoFile, EXPIRED_FILE_HINT } from "../_components/iso-file-access"
-import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download, BadgeCheck, FileSignature } from "lucide-react"
+import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download, BadgeCheck, FileSignature, ShieldCheck } from "lucide-react"
 import Link from "next/link"
 import { DistributionModal } from "../_components/distribution-modal"
 import { DistributionManagement } from "../_components/distribution-management"
@@ -202,23 +202,81 @@ export default function IsoDocumentsPage() {
       if (parentId) acc[parentId] = [...(acc[parentId] || []), item]
       return acc
     }, {})
+  const renderCapBadge = (cap: string | null | undefined) => {
+    if (!cap) return <span className="text-slate-300">—</span>
+    if (cap === "Cấp 1") {
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200/80">
+          Cấp 1
+        </span>
+      )
+    }
+    if (cap === "Cấp 2") {
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200/80">
+          Cấp 2
+        </span>
+      )
+    }
+    return (
+      <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200/80">
+        {cap}
+      </span>
+    )
+  }
+
+  const renderLoaiBadge = (loai: string | null | undefined) => {
+    if (!loai) return <span className="text-slate-300">—</span>
+    const u = loai.toUpperCase()
+    if (u === "F" || u === "BM" || u.includes("BIỂU MẪU")) {
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+          {loai}
+        </span>
+      )
+    }
+    if (u === "QT" || u.includes("QUY TRÌNH")) {
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200/80">
+          {loai}
+        </span>
+      )
+    }
+    if (u === "HD" || u.includes("HƯỚNG DẪN")) {
+      return (
+        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200/80">
+          {loai}
+        </span>
+      )
+    }
+    return (
+      <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200/80">
+        {loai}
+      </span>
+    )
+  }
+
   const renderStatusBadge = (status: IsoTrangThai) => {
     if (status === "co_hieu_luc") {
       return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700 shadow-sm">
-          <CheckCircle2 size={12} /> Có hiệu lực
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 shadow-2xs">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Có hiệu lực
         </span>
       )
     }
     if (status === "het_hieu_luc") {
       return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-1 text-xs font-bold text-red-700 shadow-sm">
-          <XCircle size={12} /> Hết hiệu lực
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 shadow-2xs">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Hết hiệu lực
         </span>
       )
     }
     return (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[status]}`}>
+      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[status]}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${
+          status === "cho_phe_duyet" || status === "cho_xem_xet" ? "bg-amber-500" :
+          status === "tra_ve" || status === "bi_tu_choi_phe_duyet" ? "bg-rose-500" : "bg-slate-400"
+        }`} />
         {TRANG_THAI_LABEL[status]}
       </span>
     )
@@ -239,28 +297,28 @@ export default function IsoDocumentsPage() {
   return (
     <IsoShell>
       <div className="space-y-4">
-        <PageBackgroundMotif theme="indigo" />
+        <PageBackgroundMotif theme="forest" />
         <PageHeaderBanner
           title="Tài liệu ISO"
           subtitle="Quy trình, hướng dẫn, biểu mẫu và tiêu chuẩn"
-          theme="indigo"
-          icon={BadgeCheck}
+          theme="forest"
+          icon={ShieldCheck}
+          collapsible={true}
+          storageKey="banner_collapsed_iso_documents"
           action={
             <>
               {canDistribute && (
                 <button
                   onClick={() => { setDistributeDocId(undefined); setShowDistributeModal(true) }}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 border border-white/40 text-white font-bold rounded-xl transition-all"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 border border-white/40 text-white font-bold rounded-xl transition-all active:scale-95"
                 >
                   <Share2 size={15} /> Phân phối
                 </button>
               )}
-              {/* GĐ3: bỏ nút "Mẫu vị trí ký" ở header — đã có nút "Cài đặt vị trí ký" đúng lúc
-                  trong trang chi tiết và icon trên từng dòng. */}
               {canCreate && (
                 <Link
                   href="/dashboard/iso/documents/new-doc"
-                  className="flex items-center gap-2 px-5 py-2.5 bg-white text-indigo-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white text-emerald-800 hover:bg-emerald-50 font-bold rounded-xl shadow-md transition-all active:scale-95"
                 >
                   <Plus size={16} /> Tạo tài liệu
                 </Link>
@@ -278,13 +336,13 @@ export default function IsoDocumentsPage() {
               placeholder="Tìm mã, tên tài liệu..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+              className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
             />
           </div>
           <select
             value={filterStandard}
             onChange={(e) => setFilterStandard(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
           >
             <option value="">Tất cả tiêu chuẩn</option>
             {standards.map((standard) => (
@@ -294,7 +352,7 @@ export default function IsoDocumentsPage() {
           <select
             value={filterLoai}
             onChange={(e) => setFilterLoai(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
           >
             <option value="">Tất cả loại</option>
             {typeOptions.map((l) => (
@@ -304,7 +362,7 @@ export default function IsoDocumentsPage() {
           <select
             value={filterTrangThai}
             onChange={(e) => setFilterTrangThai(e.target.value as IsoTrangThai | "")}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
           >
             {trangThaiOptions.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -313,7 +371,7 @@ export default function IsoDocumentsPage() {
           <select
             value={filterCap}
             onChange={(e) => setFilterCap(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
           >
             <option value="">Tất cả cấp</option>
             <option value="Cấp 1">Cấp 1</option>
@@ -322,7 +380,7 @@ export default function IsoDocumentsPage() {
           <select
             value={filterPhongBan}
             onChange={(e) => setFilterPhongBan(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
           >
             <option value="">Tất cả phòng ban</option>
             {phongBanOptions.map((pb) => (
@@ -364,7 +422,7 @@ export default function IsoDocumentsPage() {
                   const isExpanded = !!expandedParents[doc.id]
                   return (
                   <Fragment key={doc.id}>
-                  <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
+                  <tr key={doc.id} className="hover:bg-emerald-50/40 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {childRows.length > 0 ? (
@@ -403,9 +461,7 @@ export default function IsoDocumentsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">
-                      <span className="px-2 py-0.5 bg-violet-50 text-violet-700 rounded-md text-xs font-bold">
-                        {doc.loai_tai_lieu || "—"}
-                      </span>
+                      {renderLoaiBadge(doc.loai_tai_lieu)}
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell text-xs text-slate-500">
                       {doc.phong_ban || "—"}
@@ -414,7 +470,7 @@ export default function IsoDocumentsPage() {
                       {doc.lan_ban_hanh}
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">
-                      {doc.cap_tl || "—"}
+                      {renderCapBadge(doc.cap_tl)}
                     </td>
                     <td className="px-4 py-3">
                       {renderStatusBadge(doc.trang_thai)}
@@ -512,7 +568,7 @@ export default function IsoDocumentsPage() {
                     </td>
                   </tr>
                   {isExpanded && childRows.map((child) => (
-                    <tr key={child.id} className="bg-slate-50/70 hover:bg-slate-100 transition-colors">
+                    <tr key={child.id} className="bg-emerald-50/20 hover:bg-emerald-50/50 transition-colors">
                       <td className="px-4 py-3 pl-12">
                         <span className="font-mono text-xs font-bold text-sky-700">{child.ma_tai_lieu || "—"}</span>
                       </td>
@@ -521,13 +577,11 @@ export default function IsoDocumentsPage() {
                         <div className="text-[11px] text-slate-400 mt-0.5">Hồ sơ</div>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
-                        <span className="px-2 py-0.5 bg-sky-50 text-sky-700 rounded-md text-xs font-bold">
-                          {child.loai_tai_lieu || "—"}
-                        </span>
+                        {renderLoaiBadge(child.loai_tai_lieu)}
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell text-xs text-slate-500">{child.phong_ban || doc.phong_ban || "—"}</td>
                       <td className="px-4 py-3 hidden lg:table-cell text-center text-slate-600 text-xs font-mono">{child.lan_ban_hanh}</td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">{child.cap_tl || doc.cap_tl || "—"}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">{renderCapBadge(child.cap_tl || doc.cap_tl)}</td>
                       <td className="px-4 py-3">{renderStatusBadge(child.trang_thai)}</td>
                       <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">{fmtDate(child.ngay_hieu_luc)}</td>
                       <td className="px-4 py-3 text-right">

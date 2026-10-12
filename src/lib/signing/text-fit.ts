@@ -76,3 +76,41 @@ export function computeSnugBoxSize(
 
   return { w: snugW, h: snugH }
 }
+
+/**
+ * Thuật toán co cỡ chữ tự động (Auto-Shrink Font Size) theo Quy tắc 7.
+ * Đo bề rộng text thực tế so với bề rộng khung chữ nhật, tự động giảm cỡ chữ
+ * từ initialSizePt (13pt) xuống tối thiểu minSizePt (9pt) để text không bị cắt cụt.
+ */
+export function computeAutoFitFontSize(
+  text: string | null | undefined,
+  boxWidthPx: number,
+  isBold = false,
+  initialSizePt = 13,
+  minSizePt = 9,
+  scale = 1.0,
+): { fontSizePt: number; fontSizePx: number; isTruncated: boolean } {
+  const content = (text || "").trim()
+  if (!content || boxWidthPx <= 0) {
+    return { fontSizePt: initialSizePt, fontSizePx: initialSizePt * scale, isTruncated: false }
+  }
+
+  // Padding lề an toàn: 12px
+  const targetWidth = Math.max(20, boxWidthPx - 12)
+
+  for (let pt = initialSizePt; pt >= minSizePt; pt -= 0.5) {
+    const px = pt * scale
+    const measured = measureTextWidth(content, px, isBold ? "bold" : "normal")
+    if (measured <= targetWidth) {
+      return { fontSizePt: pt, fontSizePx: px, isTruncated: false }
+    }
+  }
+
+  const minPx = minSizePt * scale
+  const finalMeasured = measureTextWidth(content, minPx, isBold ? "bold" : "normal")
+  return {
+    fontSizePt: minSizePt,
+    fontSizePx: minPx,
+    isTruncated: finalMeasured > targetWidth,
+  }
+}

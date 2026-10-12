@@ -17,13 +17,13 @@ export type ScopeOption<T extends string> = {
 }
 
 const ACTIVE_TONE: Record<ScopeTone, string> = {
-  blue: "bg-blue-600 text-white shadow-sm",
+  blue: "bg-emerald-700 text-white shadow-sm",
   slate: "bg-slate-700 text-white shadow-sm",
   amber: "bg-amber-600 text-white shadow-sm",
 }
 
 const DESC_TONE: Record<ScopeTone, string> = {
-  blue: "text-blue-700",
+  blue: "text-emerald-700",
   slate: "text-slate-500",
   amber: "text-amber-700 font-medium",
 }
@@ -81,10 +81,11 @@ export function ScopeToggleGroup<T extends string>({
           )
         })}
       </div>
-      {/* Chiều cao tối thiểu cố định để 2 cột không lệch khi mô tả dài/ngắn khác nhau. */}
-      <p className={`mt-1.5 min-h-[2rem] text-xs leading-snug ${active ? DESC_TONE[active.tone] : "text-slate-400"}`}>
-        {description}
-      </p>
+      {description && (
+        <p className={`mt-1 text-[11px] leading-tight line-clamp-1 ${active ? DESC_TONE[active.tone] : "text-slate-400"}`}>
+          {description}
+        </p>
+      )}
     </div>
   )
 }

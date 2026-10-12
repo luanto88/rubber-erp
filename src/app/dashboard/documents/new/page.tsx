@@ -599,19 +599,24 @@ export default function NewDocumentPage() {
         </div>
       )}
 
-      <PageBackgroundMotif theme="cyan" />
+      <PageBackgroundMotif theme="forest" />
       <PageHeaderBanner
         title="Soạn thảo văn bản mới"
         subtitle="Tạo văn bản và cấu hình vòng ký phòng ban"
-        theme="cyan"
-        icon={FileSignature}
+        theme="forest"
+        icon={FileText}
+        collapsible={true}
+        storageKey="banner_collapsed_documents_new"
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Cột trái: thông tin văn bản */}
         <div className="lg:col-span-2 space-y-5">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <h2 className="text-sm font-bold text-slate-700 mb-4">Thông tin văn bản</h2>
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-6">
+            <h2 className="text-base font-extrabold text-slate-800 mb-4 flex items-center gap-2">
+              <span className="w-2 h-5 rounded-full bg-emerald-600 inline-block" />
+              Thông tin văn bản
+            </h2>
             <div className="space-y-4">
 
               {/* File đính kèm — đặt đầu tiên vì các trường bên dưới phụ thuộc auto-fill từ tên file */}
@@ -620,26 +625,33 @@ export default function NewDocumentPage() {
                   File đính kèm (tùy chọn)
                 </label>
                 {file ? (
-                  <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                    <FileText size={16} className="text-blue-600 shrink-0" />
+                  <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl">
+                    <FileText size={18} className="text-emerald-700 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
                       <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB</p>
                     </div>
                     <button
                       onClick={() => setFile(null)}
-                      className="p-1 text-slate-400 hover:text-red-600 rounded"
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-white rounded-lg transition-all"
+                      title="Gỡ file"
                     >
-                      <X size={14} />
+                      <X size={16} />
                     </button>
                   </div>
                 ) : (
-                  <label className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-slate-200 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all">
-                    <Plus size={16} className="text-slate-400" />
-                    <span className="text-sm text-slate-500">
-                      Đính kèm file nháp (PDF, DOCX, XLSX)
-                      <span className="ml-1 text-slate-400 text-xs">— tên file sẽ tự điền tên VB nếu trống</span>
-                    </span>
+                  <label className="flex flex-col sm:flex-row items-center justify-center gap-2.5 px-4 py-5 border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/40 rounded-2xl cursor-pointer transition-all text-center sm:text-left group">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+                      <Plus size={18} />
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-slate-700 group-hover:text-emerald-800">
+                        Đính kèm file nháp (.pdf, .docx, .xlsx)
+                      </span>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Tên file sẽ tự động điền vào tên và mã văn bản nếu để trống
+                      </p>
+                    </div>
                     <input
                       type="file"
                       accept=".pdf,.docx,.xlsx,.doc,.xls"
@@ -720,7 +732,7 @@ export default function NewDocumentPage() {
                     Phòng ban soạn thảo <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                     value={form.phong_ban}
                     onChange={(e) => {
                       setForm((f) => ({ ...f, phong_ban: e.target.value }))
@@ -749,7 +761,7 @@ export default function NewDocumentPage() {
                             ? "border-red-400 bg-red-50 focus:border-red-500"
                             : hasGapWarning
                             ? "border-amber-400 bg-amber-50 focus:border-amber-500"
-                            : "border-slate-300 focus:border-blue-500"
+                            : "border-slate-300 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                         }`}
                         value={maVanBan}
                         onChange={(e) => {
@@ -764,7 +776,7 @@ export default function NewDocumentPage() {
                       />
                       {maVanBanChecking && (
                         <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                          <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                          <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
                         </div>
                       )}
                     </div>
@@ -793,20 +805,17 @@ export default function NewDocumentPage() {
                   Tên / Trích yếu nội dung <span className="text-red-500">*</span>
                 </label>
                 <input
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                   placeholder="Nhập tên hoặc trích yếu nội dung văn bản..."
                   value={form.ten_van_ban}
                   onChange={(e) => setForm((f) => ({ ...f, ten_van_ban: e.target.value }))}
                 />
               </div>
 
-              {/* Ô "Cấp văn bản" đã gỡ 2026-09-05 — số bước ký ở khối "Vòng ký" bên dưới quyết
-                  định luồng: có bước ⇒ đi vòng ký, không có bước ⇒ lên thẳng phê duyệt. */}
-
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 resize-none"
                   rows={2}
                   placeholder="Ghi chú thêm (nếu có)..."
                   value={form.ghi_chu}
@@ -817,12 +826,12 @@ export default function NewDocumentPage() {
               {/* Bug 6e: Mô tả tìm kiếm AI */}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  <Sparkles size={12} className="inline mr-1 text-violet-500" />
+                  <Sparkles size={12} className="inline mr-1 text-emerald-600" />
                   Mô tả tìm kiếm AI
                   <span className="ml-1.5 text-xs font-normal text-slate-400">(tùy chọn)</span>
                 </label>
                 <textarea
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 resize-none"
                   rows={2}
                   placeholder="Mô tả ngắn gọn nội dung để AI tìm kiếm chính xác hơn (VD: kế hoạch sản xuất quý 3 NMCB)..."
                   value={form.mo_ta_tim_kiem}
@@ -836,8 +845,9 @@ export default function NewDocumentPage() {
         {/* Cột phải: vòng ký + người phê duyệt */}
         <div className="space-y-4">
           {/* Người phê duyệt cuối — đặt trước vòng ký để approverDept luôn được chọn trước */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <h2 className="text-sm font-bold text-slate-700 mb-3">
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
+            <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
+              <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
               Người phê duyệt cuối <span className="text-red-500">*</span>
             </h2>
 
@@ -850,7 +860,7 @@ export default function NewDocumentPage() {
                   </p>
                 ) : deptLeaderLoading ? (
                   <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                    <span className="w-3 h-3 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" />
+                    <span className="w-3 h-3 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
                     Đang xác định người phê duyệt...
                   </p>
                 ) : deptLeaderQueried && deptLeaderCandidates.length === 0 ? (
@@ -877,7 +887,7 @@ export default function NewDocumentPage() {
                   </div>
                 ) : (
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                     value={form.phe_duyet_user_id}
                     onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
                   >
@@ -894,7 +904,7 @@ export default function NewDocumentPage() {
               /* --- Nội bộ công ty: chọn tay từ danh sách toàn nhà máy --- */
               <>
                 <select
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
                   value={form.phe_duyet_user_id}
                   onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
                 >
@@ -922,13 +932,14 @@ export default function NewDocumentPage() {
           </div>
 
           {/* Vòng ký / Ký xác nhận — phân nhánh theo pham_vi */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
             {form.pham_vi === "Don_vi" ? (
               /* --- Nội bộ đơn vị: chọn người ký xác nhận --- */
               <>
-                <h2 className="text-sm font-bold text-slate-700 mb-3">
+                <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
+                  <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
                   Ký xác nhận (Nội bộ đơn vị)
-                  <span className="ml-2 text-xs font-normal text-slate-400">(tùy chọn — có thể để trống)</span>
+                  <span className="ml-1 text-xs font-normal text-slate-400">(tùy chọn)</span>
                 </h2>
                 {!form.phong_ban ? (
                   <p className="text-sm text-amber-600 text-center py-4">
@@ -949,9 +960,9 @@ export default function NewDocumentPage() {
                         return (
                           <label
                             key={u.id}
-                            className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all ${
+                            className={`flex items-center gap-2.5 p-2 rounded-xl border cursor-pointer transition-all ${
                               selected
-                                ? "border-blue-300 bg-blue-50"
+                                ? "border-emerald-300 bg-emerald-50/60"
                                 : "border-slate-200 hover:bg-slate-50"
                             }`}
                           >
@@ -965,10 +976,10 @@ export default function NewDocumentPage() {
                                     : prev.filter((id) => id !== u.id),
                                 )
                               }}
-                              className="rounded"
+                              className="rounded text-emerald-600 focus:ring-emerald-500"
                             />
                             {selected && (
-                              <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                              <span className="w-5 h-5 rounded-full bg-emerald-700 text-white text-xs flex items-center justify-center font-bold shrink-0">
                                 {idx + 1}
                               </span>
                             )}
@@ -999,23 +1010,24 @@ export default function NewDocumentPage() {
               /* --- Nội bộ công ty: vòng ký phòng ban --- */
               <>
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-sm font-bold text-slate-700">Vòng ký phòng ban</h2>
+                  <h2 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                    <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+                    Vòng ký phòng ban
+                  </h2>
                   <button
                     onClick={addStep}
-                    className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-all"
                   >
-                    <Plus size={12} />
+                    <Plus size={13} />
                     Thêm bước
                   </button>
                 </div>
 
-                {/* Không còn nhánh "Cấp 2 chuyển thẳng lên phê duyệt" — 0 bước giờ là lựa chọn
-                    hợp lệ và mang đúng ý nghĩa đó. */}
                 {steps.length === 0 ? (
-                  <div className="text-sm text-slate-400 text-center py-4">
+                  <div className="text-sm text-slate-400 text-center py-4 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
                     Chưa có bước ký — văn bản sẽ được gửi thẳng lên người phê duyệt.
                     <br />
-                    Nhấn <span className="font-bold text-blue-600">+ Thêm bước</span> nếu cần ký qua
+                    Nhấn <span className="font-bold text-emerald-700">+ Thêm bước</span> nếu cần ký qua
                     các phòng ban trước.
                   </div>
                 ) : (
@@ -1025,22 +1037,22 @@ export default function NewDocumentPage() {
                       return (
                         <div
                           key={s.id}
-                          className={`rounded-lg border p-2.5 space-y-2 ${
-                            isGioiHan ? "border-amber-200 bg-amber-50/40" : "border-slate-200"
+                          className={`rounded-xl border p-3 space-y-2.5 ${
+                            isGioiHan ? "border-amber-200 bg-amber-50/40" : "border-slate-200/90 bg-slate-50/30"
                           }`}
                         >
                           <div className="flex items-center gap-2">
                             <div className="flex items-center gap-1.5 w-5 shrink-0 text-slate-300">
                               <GripVertical size={14} />
                             </div>
-                            <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0">
+                            <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold shrink-0">
                               {i + 1}
                             </div>
                             <select
-                              className={`flex-1 px-2 py-1.5 border rounded-lg text-sm outline-none ${
+                              className={`flex-1 px-2.5 py-1.5 border rounded-xl text-sm outline-none ${
                                 isApproverDept
                                   ? "border-amber-400 bg-amber-50 focus:border-amber-500"
-                                  : "border-slate-300 focus:border-blue-500"
+                                  : "border-slate-300 focus:border-emerald-600"
                               }`}
                               value={s.phong_ban_code}
                               onChange={(e) => updateStepPhongBan(s.id, e.target.value)}
@@ -1052,9 +1064,9 @@ export default function NewDocumentPage() {
                             </select>
                             <button
                               onClick={() => removeStep(s.id)}
-                              className="p-1.5 text-slate-300 hover:text-red-500 rounded transition-all"
+                              className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-all"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={15} />
                             </button>
                           </div>
 
@@ -1065,17 +1077,15 @@ export default function NewDocumentPage() {
                             </div>
                           )}
 
-                          {/* Chọn người ký đích danh — LUÔN hiện và bắt buộc (trước 2026-09-05 chỉ
-                              hiện với văn bản "Mật"). Chọn phòng ban ở trên chỉ để lọc danh sách. */}
                           <div className="ml-7">
                             <label className="text-[10px] font-bold text-slate-600 block mb-1">
                               Người ký <span className="text-red-500">*</span>
                             </label>
                             <select
-                              className={`w-full px-2 py-1.5 text-xs border rounded-lg outline-none ${
+                              className={`w-full px-2.5 py-1.5 text-xs border rounded-xl outline-none ${
                                 !s.user_id && s.phong_ban_code
                                   ? "border-amber-300 bg-amber-50 focus:border-amber-400"
-                                  : "border-slate-300 focus:border-blue-400"
+                                  : "border-slate-300 focus:border-emerald-600"
                               }`}
                               value={s.user_id}
                               onChange={(e) => updateStepSigner(s.id, e.target.value)}
@@ -1125,7 +1135,7 @@ export default function NewDocumentPage() {
           <TagGuidePanel />
 
           {/* Nút lưu */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 pt-1">
             <button
               onClick={handleSave}
               disabled={
@@ -1133,12 +1143,12 @@ export default function NewDocumentPage() {
                 maVanBanExists ||
                 (form.pham_vi === "Don_vi" && deptLeaderQueried && deptLeaderCandidates.length === 0)
               }
-              className="flex items-center justify-center gap-2 w-full px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md transition-all"
+              className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-[0.99]"
             >
               {saving ? (
                 <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
-                <FileText size={15} />
+                <FileText size={16} />
               )}
               {saving ? "Đang tạo..." : "Tạo văn bản"}
             </button>

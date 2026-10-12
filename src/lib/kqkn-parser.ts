@@ -2,6 +2,7 @@ import path from "node:path"
 import fs from "node:fs"
 import { pathToFileURL } from "node:url"
 import ExcelJS from "exceljs"
+import { loadPdfjs } from "@/lib/pdfjs-server"
 
 // Polyfill DOMMatrix cho Node.js runtime (Vercel Serverless Function thiếu Web API này)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -72,6 +73,8 @@ export type ParsedLot = {
   ml_x: number
   ml_xmax: number
   ml_step: string
+  /** true khi không đọc được ô "LÔ NM" trên PDF — tuyệt đối không suy từ số PKN (số lô QLCL). */
+  lo_nm_missing?: boolean
   samples: SampleMap
 }
 
@@ -316,7 +319,7 @@ export async function processKqknPdf(
 
   // Load pdfjs-dist
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pdfjsLib: any = await import("pdfjs-dist/legacy/build/pdf.mjs")
+  const pdfjsLib: any = await loadPdfjs()
   const cmapsDir = path.join(process.cwd(), "node_modules", "pdfjs-dist", "cmaps")
   const hasCMaps = fs.existsSync(cmapsDir)
   const cMapUrl = hasCMaps ? pathToFileURL(cmapsDir).href + "/" : undefined
@@ -407,8 +410,21 @@ export async function processKqknPdf(
     }
 
     const pkn = parseInt(pknItem.str, 10)
-    const lo_nm_raw = getItemAtY(71) || pknItem.str
-    const lo_nm_full = lo_nm_raw.includes("/") ? lo_nm_raw : `${lo_nm_raw}/${yearSuffix}`
+    // Ô "LÔ NM" (số lô nhà máy) nằm giữa dòng "LÔ PKN" (y≈43, số lô QLCL) và dòng
+    // "HẠNG ĐK" (y≈107). Chữ ngắn (vd "1M" của lô thu mua) được canh giữa ô nên lệch
+    // y (≈78) so với lô thường (≈71) — không được dò cứng y=71 rồi rơi về số PKN, vì
+    // như thế sẽ lấy nhầm số lô QLCL (vd 1715) làm số lô nhà máy.
+    const loNmCandidates = colItems
+      .filter((i: { y: number; str: string }) => i.y > pknItem.y + 12 && i.y < 98 && i.str !== pknItem.str)
+      .sort((a: { y: number }, b: { y: number }) => Math.abs(a.y - 71) - Math.abs(b.y - 71))
+    const lo_nm_raw: string = loNmCandidates[0]?.str || ""
+    const lo_nm_missing = !lo_nm_raw
+    const lo_nm_full = lo_nm_missing
+      ? `Không đọc được (PKN ${pknItem.str})`
+      : lo_nm_raw.includes("/") ? lo_nm_raw : `${lo_nm_raw}/${yearSuffix}`
+    if (lo_nm_missing) {
+      anomalies.push(`Cột PKN ${pknItem.str}: không đọc được số lô nhà máy (LÔ NM) trên PDF`)
+    }
     const hang_dk = getItemAtY(107) || "CSR10"
     const dat_hang = getItemAtY(718) || hang_dk
 
@@ -493,6 +509,7 @@ export async function processKqknPdf(
       ml_x,
       ml_xmax,
       ml_step: String(stepMl),
+      lo_nm_missing,
       samples: {
         tap_chat: tcSamples,
         tro: troSamples,

@@ -60,7 +60,9 @@ import {
   SIGN_TEXT_FONT_FAMILY,
   SIGN_TEXT_FONT_SIZE_PT,
 } from "@/lib/signing/template-layout"
+import { computeAutoFitFontSize } from "@/lib/signing/text-fit"
 import { ResizeHandleIcon } from "@/app/dashboard/_components/resize-handle-icon"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
 // ── Vai trò gốc — cấu hình cho module "documents" (Văn bản) và "iso" (ISO). Vai trò khác free-text,
 // người dùng có thể "Nhân bản" (duplicate) bất kỳ vai trò đã đặt nào để tạo thêm vị trí
@@ -180,6 +182,7 @@ type EditorRole = {
   showName: boolean
   showChucVu: boolean
   chucVuKey: ChucVuKey | null
+  chucVuPosition?: "above" | "below"
   // Tiền tố ký thay KT./TM./TL./TUQ. — chỉ có ý nghĩa với loai==="chu_ky" (phe_duyet, hoặc
   // ky_buoc khi bước đó thực sự là ký theo phòng ban). Người soạn thảo chọn 1 lần ở đây, lưu vào
   // mẫu — CHƯA được route ký thật đọc (xem SignTemplateBox.sign_as trong templates.ts).
@@ -281,6 +284,7 @@ function makeBaseRole(
         showName: false,
         showChucVu: false,
         chucVuKey: null,
+        chucVuPosition: "above",
         signAs: null,
         outOfBounds: false,
         hiddenForDoc: false,
@@ -311,6 +315,7 @@ function makeBaseRole(
       showName: false,
       showChucVu: false,
       chucVuKey: null,
+      chucVuPosition: "above",
       signAs: null,
       outOfBounds: false,
       hiddenForDoc: false,
@@ -331,6 +336,7 @@ function makeBaseRole(
     showName: def.showNameDefault,
     showChucVu: def.showNameDefault,
     chucVuKey: def.showNameDefault ? "chinh_quyen" : null,
+    chucVuPosition: "above",
     signAs: null,
     outOfBounds: false,
     hiddenForDoc: false,
@@ -364,6 +370,7 @@ function makeCloneRole(
       showName: false,
       showChucVu: false,
       chucVuKey: null,
+      chucVuPosition: "above",
       signAs: null,
       outOfBounds: false,
       hiddenForDoc: false,
@@ -385,6 +392,7 @@ function makeCloneRole(
     showName: def.showNameDefault,
     showChucVu: def.showNameDefault,
     chucVuKey: def.showNameDefault ? "chinh_quyen" : null,
+    chucVuPosition: "above",
     signAs: null,
     outOfBounds: false,
     hiddenForDoc: false,
@@ -592,6 +600,7 @@ export default function SignTemplateEditorPage() {
   const [sidebarWidth, setSidebarWidth] = useState(320)
   const [showMobileSidebar, setShowMobileSidebar] = useState(false)
   const [showMobilePagePicker, setShowMobilePagePicker] = useState(false)
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false)
 
   // ── Đồng bộ dữ liệu người ký thật của văn bản đang mở (chỉ khi có docId) ──
   const [docLoaded, setDocLoaded] = useState(!docId && !formInstanceId)
@@ -862,6 +871,7 @@ export default function SignTemplateEditorPage() {
               showName: box.show_name ?? def?.showNameDefault ?? false,
               showChucVu: box.show_chuc_vu ?? false,
               chucVuKey: box.chuc_vu_key ?? null,
+              chucVuPosition: box.chuc_vu_position ?? "above",
               signAs: box.sign_as ?? null,
               outOfBounds: false,
               hiddenForDoc: false,
@@ -901,6 +911,7 @@ export default function SignTemplateEditorPage() {
               showName: box.show_name ?? def?.showNameDefault ?? false,
               showChucVu: box.show_chuc_vu ?? (box.show_name ?? def?.showNameDefault ?? false),
               chucVuKey: box.chuc_vu_key ?? null,
+              chucVuPosition: box.chuc_vu_position ?? "above",
               signAs: box.sign_as ?? null,
               outOfBounds: false,
               hiddenForDoc: false,
@@ -1610,6 +1621,23 @@ export default function SignTemplateEditorPage() {
     })
   }, [boundsSignature, recomputeBounds])
 
+  const bringAllRolesIntoPage = useCallback(() => {
+    setRoles((prev) =>
+      recomputeBounds(
+        prev.map((r) => {
+          if (!r.placed || r.hiddenForDoc || !r.outOfBounds) return r
+          const wPct = Math.min(100, Math.max(MIN_BOX_PCT, r.box.wPct))
+          const hPct = Math.min(100, Math.max(MIN_BOX_PCT, r.box.hPct))
+          return {
+            ...r,
+            box: { xPct: clampPct(r.box.xPct, wPct), yPct: clampPct(r.box.yPct, hPct), wPct, hPct },
+          }
+        }),
+      ),
+    )
+    showToast("Đã kéo toàn bộ khung tràn mép về trong trang.")
+  }, [recomputeBounds])
+
   const goToPage = (p: number) => {
     setCurrentPage(Math.min(Math.max(p, 1), numPages || 1))
   }
@@ -1731,11 +1759,28 @@ export default function SignTemplateEditorPage() {
   const toggleShowChucVu = (roleId: string) => {
     setRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, showChucVu: !r.showChucVu } : r)))
   }
+  const toggleChucVuPosition = (roleId: string) => {
+    setRoles((prev) =>
+      prev.map((r) =>
+        r.id === roleId
+          ? { ...r, chucVuPosition: r.chucVuPosition === "below" ? "above" : "below" }
+          : r,
+      ),
+    )
+  }
   const setChucVu = (roleId: string, key: ChucVuKey) => {
     setRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, chucVuKey: key } : r)))
   }
   const setSignAs = (roleId: string, key: SignTemplateSignAsKey | null) => {
     setRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, signAs: key } : r)))
+  }
+
+  const handleNewTemplateClick = () => {
+    if (roles.some((r) => r.placed && !r.hiddenForDoc)) {
+      setShowResetConfirmModal(true)
+    } else {
+      void resetToBlankTemplate()
+    }
   }
 
   // ── Kéo/resize khung đã đặt (pointer events, tránh remount DOM khi di chuyển) ──
@@ -1960,6 +2005,7 @@ export default function SignTemplateEditorPage() {
           show_name: r.loai === "chu_ky" ? r.showName : undefined,
           show_chuc_vu: r.loai === "chu_ky" ? r.showChucVu : undefined,
           chuc_vu_key: r.loai === "chu_ky" && r.showChucVu ? r.chucVuKey : null,
+          chuc_vu_position: r.loai === "chu_ky" && r.showChucVu ? (r.chucVuPosition ?? "above") : undefined,
           sign_as: r.loai === "chu_ky" ? r.signAs : undefined,
         }
       })
@@ -2364,6 +2410,22 @@ export default function SignTemplateEditorPage() {
                         />
                       </button>
                     </div>
+                    {role.showChucVu && role.showName && (
+                      <div className="mt-1.5 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-slate-600">Chức vụ nằm trên Tên</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleChucVuPosition(role.id)}
+                          className={`w-7 h-4 rounded-full relative transition-colors ${role.chucVuPosition !== "below" ? "bg-emerald-600" : "bg-slate-300"}`}
+                          title={role.chucVuPosition !== "below" ? "Chức vụ nằm trên Tên (chuẩn văn bản)" : "Chức vụ nằm dưới Tên"}
+                        >
+                          <span
+                            className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
+                            style={{ left: role.chucVuPosition !== "below" ? 14 : 2 }}
+                          />
+                        </button>
+                      </div>
+                    )}
                     {!role.showName && !role.showChucVu && (
                       <p className="mt-1.5 text-[10px] text-slate-400 italic leading-snug">
                         Chỉ đóng ảnh chữ ký lên khung — dùng khi file gốc đã in sẵn tên và chức vụ.
@@ -2495,7 +2557,7 @@ export default function SignTemplateEditorPage() {
               Huỷ
             </button>
             <button
-              onClick={resetToBlankTemplate}
+              onClick={handleNewTemplateClick}
               className="px-2 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-amber-200 hover:text-amber-100"
               title="Xóa toàn bộ các khung đã đặt và tạo mẫu mới từ đầu"
             >
@@ -2544,7 +2606,7 @@ export default function SignTemplateEditorPage() {
             Huỷ
           </button>
           <button
-            onClick={resetToBlankTemplate}
+            onClick={handleNewTemplateClick}
             className="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-amber-200 hover:text-amber-100"
             title="Xóa toàn bộ các khung đã đặt và tạo mẫu mới từ đầu"
           >
@@ -2762,6 +2824,22 @@ export default function SignTemplateEditorPage() {
             </div>
           </div>
 
+          {outOfBoundsRoles.length > 0 && (
+            <div className="w-full max-w-[640px] mb-2 border border-amber-300 rounded-xl bg-amber-50 px-3 py-2 flex items-center justify-between text-xs font-semibold text-amber-900 shadow-xs">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={15} className="text-amber-600 shrink-0" />
+                <span>Có {outOfBoundsRoles.length} khung ký nằm tràn ra ngoài mép trang ({outOfBoundsRoles.map((r) => r.label).join(", ")})</span>
+              </div>
+              <button
+                type="button"
+                onClick={bringAllRolesIntoPage}
+                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shrink-0 transition-colors shadow-2xs cursor-pointer"
+              >
+                Kéo về trong trang
+              </button>
+            </div>
+          )}
+
           {armedRoleId && (
             <div className="w-full max-w-[640px] mb-2 border-2 border-dashed border-slate-400 rounded-xl bg-white px-3 py-2 flex items-center justify-between text-xs font-semibold text-slate-700">
               <span>Nhấp vào tài liệu để đặt khung &quot;{roles.find((r) => r.id === armedRoleId)?.label}&quot;</span>
@@ -2818,7 +2896,13 @@ export default function SignTemplateEditorPage() {
                   }}
                 >
                   {previewMode ? (
-                    <PreviewContent role={role} color={color.fg} signer={docSignerByRoleId[role.id]} ptToPx={ptToPx} />
+                    <PreviewContent
+                      role={role}
+                      color={color.fg}
+                      signer={docSignerByRoleId[role.id]}
+                      ptToPx={ptToPx}
+                      boxWidthPx={pageWrapRef.current ? (pageWrapRef.current.clientWidth * role.box.wPct) / 100 : undefined}
+                    />
                   ) : (
                     <span
                       className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-white pointer-events-none whitespace-nowrap"
@@ -3060,6 +3144,51 @@ export default function SignTemplateEditorPage() {
           </div>
         </div>
       )}
+      {/* Modal xác nhận đặt lại/tạo mẫu mới */}
+      {showResetConfirmModal && (
+        <ModalShell
+          title="Tạo mẫu vị trí ký mới?"
+          onClose={() => setShowResetConfirmModal(false)}
+          maxWidth="sm"
+        >
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Thao tác này sẽ xóa toàn bộ các khung đã đặt trên tài liệu hiện tại và bắt đầu lại từ đầu. Bạn có chắc chắn muốn tiếp tục?
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirmModal(false)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                Huỷ bỏ
+              </button>
+              {templateExisted && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetToSaved()
+                    setShowResetConfirmModal(false)
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold rounded-xl border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 transition-colors"
+                >
+                  Đặt lại mẫu đã lưu
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  await resetToBlankTemplate()
+                  setShowResetConfirmModal(false)
+                }}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-red-600 text-white hover:bg-red-700 transition-colors shadow-sm"
+              >
+                Xác nhận tạo mới
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
     </div>
   )
 }
@@ -3082,7 +3211,9 @@ function SignBoxPreviewLayout({
   prefixText,
   showName,
   showChucVu,
+  chucVuPosition = "above",
   ptToPx,
+  boxWidthPx,
 }: {
   sigNode: React.ReactNode
   nameText: string
@@ -3090,11 +3221,13 @@ function SignBoxPreviewLayout({
   prefixText: string | null
   showName: boolean
   showChucVu: boolean
+  chucVuPosition?: "above" | "below"
   ptToPx: number
+  boxWidthPx?: number
 }) {
   const d = computeDefaultSubLayout(
     { x: 0, y: 0, width: 100, height: 100 },
-    { withName: showName, withChucVu: showChucVu, withPrefix: !!prefixText },
+    { withName: showName, withChucVu: showChucVu, withPrefix: !!prefixText, chucVuPosition },
   )
   // Hệ của computeDefaultSubLayout là gốc DƯỚI-trái (như pdf-lib); CSS là gốc TRÊN-trái.
   const toCss = (r: { x: number; y: number; width: number; height: number }): React.CSSProperties => ({
@@ -3107,6 +3240,18 @@ function SignBoxPreviewLayout({
   const textFontPx = Math.max(4, SIGN_TEXT_FONT_SIZE_PT * ptToPx)
   const prefixFontPx = Math.max(4, SIGN_PREFIX_FONT_SIZE_PT * ptToPx)
 
+  const nameFit =
+    boxWidthPx && nameText && d.name
+      ? computeAutoFitFontSize(nameText, (boxWidthPx * d.name.width) / 100, true, SIGN_TEXT_FONT_SIZE_PT, 9, ptToPx)
+      : null
+  const nameFontSizePx = nameFit ? nameFit.fontSizePx : textFontPx
+
+  const chucVuFit =
+    boxWidthPx && chucVuText && d.chuc_vu
+      ? computeAutoFitFontSize(chucVuText, (boxWidthPx * d.chuc_vu.width) / 100, false, SIGN_TEXT_FONT_SIZE_PT, 9, ptToPx)
+      : null
+  const chucVuFontSizePx = chucVuFit ? chucVuFit.fontSizePx : textFontPx
+
   return (
     <div className="absolute inset-0" style={{ fontFamily: SIGN_TEXT_FONT_FAMILY }}>
       <div style={toCss(d.sig)} className="flex items-center justify-center overflow-hidden">
@@ -3115,14 +3260,14 @@ function SignBoxPreviewLayout({
       {showName && d.name && (
         // pdf-lib đặt đường chân chữ của TÊN ở đáy khối → canh đáy cho khớp.
         <div style={toCss(d.name)} className="flex items-end justify-center overflow-hidden">
-          <span className="leading-none text-slate-900 whitespace-nowrap" style={{ fontSize: textFontPx }}>
+          <span className="leading-none text-slate-900 whitespace-nowrap" style={{ fontSize: nameFontSizePx }}>
             {nameText}
           </span>
         </div>
       )}
-      {showChucVu && chucVuText && (
-        <div style={toCss(d.chuc_vu!)} className="flex items-center justify-center overflow-hidden">
-          <span className="leading-none text-slate-900 whitespace-nowrap" style={{ fontSize: textFontPx }}>
+      {showChucVu && chucVuText && d.chuc_vu && (
+        <div style={toCss(d.chuc_vu)} className="flex items-center justify-center overflow-hidden">
+          <span className="leading-none text-slate-900 whitespace-nowrap" style={{ fontSize: chucVuFontSizePx }}>
             {chucVuText}
           </span>
         </div>
@@ -3143,12 +3288,14 @@ function PreviewContent({
   color,
   signer,
   ptToPx,
+  boxWidthPx,
 }: {
   role: EditorRole
   color: string
   signer?: DocSignerInfo
   /** Hệ số quy đổi point (PDF) → pixel theo bề rộng trang đang hiển thị. */
   ptToPx: number
+  boxWidthPx?: number
 }) {
   // Vá bảo mật 2026-09-21: bucket `iso-documents` không còn public — không thể set thẳng
   // `getPublicUrl(...)` vào `<img src>` nữa (sẽ 403). Phải mint signed URL qua route đã có sẵn
@@ -3210,7 +3357,9 @@ function PreviewContent({
         prefixText={prefixText}
         showName={role.showName}
         showChucVu={false}
+        chucVuPosition={role.chucVuPosition}
         ptToPx={ptToPx}
+        boxWidthPx={boxWidthPx}
       />
     )
   }
@@ -3245,7 +3394,9 @@ function PreviewContent({
         prefixText={prefixText}
         showName={role.showName}
         showChucVu={role.showChucVu && !!chucVuText}
+        chucVuPosition={role.chucVuPosition}
         ptToPx={ptToPx}
+        boxWidthPx={boxWidthPx}
       />
     )
   }
@@ -3258,7 +3409,9 @@ function PreviewContent({
       prefixText={prefixText}
       showName={role.showName}
       showChucVu={role.showChucVu && !!role.chucVuKey}
+      chucVuPosition={role.chucVuPosition}
       ptToPx={ptToPx}
+      boxWidthPx={boxWidthPx}
     />
   )
 }

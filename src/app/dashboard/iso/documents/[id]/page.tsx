@@ -551,6 +551,7 @@ export default function IsoDocumentDetailPage() {
     showSignature: boolean
     showSignerName: boolean
     showChucVu?: boolean
+    chucVuPosition?: "above" | "below"
     isLocked?: boolean
     sigInnerX?: number
     sigInnerY?: number
@@ -2843,13 +2844,16 @@ export default function IsoDocumentDetailPage() {
       height = Math.min(st.h_pt - innerY_pt, innerH_pt)
       y = st.y_pt + st.h_pt - innerY_pt - height
 
-      // Chức vụ (TRÊN Họ tên)
+      const isCvAbove = placementModal.chucVuPosition !== "below"
+
+      // Chức vụ
       if (placementModal.showChucVu) {
         const snugCv = computeSnugBoxSize(placementModal.signerChucVu, "chuc_vu")
         const cvInnerW = typeof placementModal.cvInnerW === "number" && placementModal.cvInnerW > 0 ? placementModal.cvInnerW : Math.min(boxW - 8, snugCv.w)
         const cvInnerH = typeof placementModal.cvInnerH === "number" && placementModal.cvInnerH > 0 ? placementModal.cvInnerH : snugCv.h
         const cvInnerX = typeof placementModal.cvInnerX === "number" ? placementModal.cvInnerX : (boxW - cvInnerW) / 2
-        const cvInnerY = typeof placementModal.cvInnerY === "number" ? placementModal.cvInnerY : Math.max(4, boxH - (placementModal.showSignerName ? 44 : 22))
+        const defaultCvY = isCvAbove ? Math.max(4, boxH - (placementModal.showSignerName ? 44 : 22)) : Math.max(18, boxH - 22)
+        const cvInnerY = typeof placementModal.cvInnerY === "number" ? placementModal.cvInnerY : defaultCvY
 
         const cvX_pt = (cvInnerX / boxW) * st.w_pt
         const cvY_pt = (cvInnerY / boxH) * st.h_pt
@@ -2862,12 +2866,13 @@ export default function IsoDocumentDetailPage() {
         chucVuY = st.y_pt + st.h_pt - cvY_pt - chucVuHeight
       }
 
-      // Họ tên (DƯỚI Chức vụ)
+      // Họ tên
       const snugName = computeSnugBoxSize(placementModal.signerName, "name")
       const nameInnerW = typeof placementModal.nameInnerW === "number" && placementModal.nameInnerW > 0 ? placementModal.nameInnerW : Math.min(boxW - 8, snugName.w)
       const nameInnerH = typeof placementModal.nameInnerH === "number" && placementModal.nameInnerH > 0 ? placementModal.nameInnerH : snugName.h
       const nameInnerX = typeof placementModal.nameInnerX === "number" ? placementModal.nameInnerX : (boxW - nameInnerW) / 2
-      const nameInnerY = typeof placementModal.nameInnerY === "number" ? placementModal.nameInnerY : Math.max(18, boxH - 22)
+      const defaultNameY = isCvAbove ? Math.max(18, boxH - 22) : Math.max(4, boxH - (placementModal.showChucVu ? 44 : 22))
+      const nameInnerY = typeof placementModal.nameInnerY === "number" ? placementModal.nameInnerY : defaultNameY
 
       const nameX_pt = (nameInnerX / boxW) * st.w_pt
       const nameY_pt = (nameInnerY / boxH) * st.h_pt
@@ -5601,6 +5606,31 @@ export default function IsoDocumentDetailPage() {
                   <Lock size={12} className="text-emerald-600" />
                   Đã khóa vị trí theo mẫu
                 </span>
+                {placementModal.showChucVu && placementModal.showSignerName && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPlacementModal((p) => {
+                        if (!p) return null
+                        const nextPos = p.chucVuPosition === "below" ? "above" : "below"
+                        return {
+                          ...p,
+                          chucVuPosition: nextPos,
+                          cvInnerY: undefined,
+                          nameInnerY: undefined,
+                        }
+                      })
+                    }}
+                    className={`px-2 py-1 rounded-lg border text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer ${
+                      placementModal.chucVuPosition !== "below"
+                        ? "bg-violet-50 border-violet-300 text-violet-800"
+                        : "bg-slate-50 border-slate-300 text-slate-700"
+                    }`}
+                    title={placementModal.chucVuPosition !== "below" ? "Chức vụ đang nằm TRÊN Tên (chuẩn). Nhấp để đổi Chức vụ xuống DƯỚI Tên" : "Chức vụ đang nằm DƯỚI Tên. Nhấp để đổi Chức vụ lên TRÊN Tên"}
+                  >
+                    <span>{placementModal.chucVuPosition !== "below" ? "Chức vụ trên Tên" : "Chức vụ dưới Tên"}</span>
+                  </button>
+                )}
               </div>
               <div className="flex gap-2">
                 <button
@@ -5633,19 +5663,21 @@ export default function IsoDocumentDetailPage() {
                       onClick={() => void handlePageChange(pageNum)}
                       className={`relative w-full rounded-lg border-2 transition-all p-1 flex flex-col items-center bg-white ${
                         isCurrent
-                          ? "border-amber-500 shadow-md ring-2 ring-amber-200"
-                          : "border-slate-200 hover:border-slate-400"
+                          ? "border-[#2f5d52] shadow-md ring-2 ring-[#2f5d52]/30"
+                          : hasSignature
+                            ? "border-amber-400 bg-amber-50/25 hover:border-amber-500 ring-1 ring-amber-300/60"
+                            : "border-slate-200 hover:border-slate-400"
                       }`}
                     >
                       {(hasSignature || hasQr) && (
                         <div className="absolute -top-1.5 -right-1.5 flex gap-0.5 z-10">
                           {hasSignature && (
-                            <span className="bg-amber-500 text-white rounded-full px-1 py-0.2 text-[8px] font-bold shadow-xs" title="Trang có chữ ký">
-                              ✍
+                            <span className="bg-amber-500 text-white rounded-full px-1.5 py-0.2 text-[8px] font-bold shadow-xs flex items-center gap-0.5" title="Trang có khung ký của bạn">
+                              ✍ Của bạn
                             </span>
                           )}
                           {hasQr && (
-                            <span className="bg-sky-500 text-white rounded-full px-1 py-0.2 text-[8px] font-bold shadow-xs" title="Trang có mã QR">
+                            <span className="bg-sky-500 text-white rounded-full px-1.5 py-0.2 text-[8px] font-bold shadow-xs" title="Trang có mã QR">
                               QR
                             </span>
                           )}
@@ -5729,17 +5761,25 @@ export default function IsoDocumentDetailPage() {
                       const sigInnerX = Math.max(0, Math.min(frameW - sigInnerW, placementModal.sigInnerX ?? Math.max(0, (frameW - sigInnerW) / 2)))
                       const sigInnerY = Math.max(0, Math.min(frameH - sigInnerH, placementModal.sigInnerY ?? 4))
 
+                      const isCvAbove = placementModal.chucVuPosition !== "below"
+
                       const snugCv = computeSnugBoxSize(placementModal.signerChucVu, "chuc_vu")
                       const cvInnerW = Math.min(frameW, Math.max(40, placementModal.cvInnerW || Math.min(frameW - 8, snugCv.w)))
                       const cvInnerH = placementModal.cvInnerH || snugCv.h
                       const cvInnerX = Math.max(0, Math.min(frameW - cvInnerW, placementModal.cvInnerX ?? Math.max(0, (frameW - cvInnerW) / 2)))
-                      const cvInnerY = Math.max(0, Math.min(frameH - cvInnerH, placementModal.cvInnerY ?? Math.max(4, frameH - (placementModal.showSignerName ? 44 : 22))))
+                      const defaultCvY = isCvAbove
+                        ? Math.max(4, frameH - (placementModal.showSignerName ? 44 : 22))
+                        : Math.max(18, frameH - 22)
+                      const cvInnerY = Math.max(0, Math.min(frameH - cvInnerH, placementModal.cvInnerY ?? defaultCvY))
 
                       const snugName = computeSnugBoxSize(placementModal.signerName, "name")
                       const nameInnerW = Math.min(frameW, Math.max(40, placementModal.nameInnerW || Math.min(frameW - 8, snugName.w)))
                       const nameInnerH = placementModal.nameInnerH || snugName.h
                       const nameInnerX = Math.max(0, Math.min(frameW - nameInnerW, placementModal.nameInnerX ?? Math.max(0, (frameW - nameInnerW) / 2)))
-                      const nameInnerY = Math.max(0, Math.min(frameH - nameInnerH, placementModal.nameInnerY ?? Math.max(18, frameH - 22)))
+                      const defaultNameY = isCvAbove
+                        ? Math.max(18, frameH - 22)
+                        : Math.max(4, frameH - (placementModal.showChucVu ? 44 : 22))
+                      const nameInnerY = Math.max(0, Math.min(frameH - nameInnerH, placementModal.nameInnerY ?? defaultNameY))
 
                       return (
                         <div
@@ -5885,41 +5925,43 @@ export default function IsoDocumentDetailPage() {
                                 {placementModal.showChucVu ? <Eye size={12} /> : <EyeOff size={12} />}
                               </button>
 
-                              <div
-                                className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-violet-600 hover:bg-violet-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
-                                title="Kéo để co giãn kích thước chức vụ"
-                                onPointerDown={(e) => {
-                                  e.stopPropagation()
-                                  e.preventDefault()
-                                  const startX = e.clientX
-                                  const startY = e.clientY
-                                  const startW = cvInnerW
-                                  const startH = cvInnerH
-                                  const curX = cvInnerX
-                                  const curY = cvInnerY
+                              {placementModal.showChucVu && (
+                                <div
+                                  className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-violet-600 hover:bg-violet-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+                                  title="Kéo để co giãn kích thước chức vụ"
+                                  onPointerDown={(e) => {
+                                    e.stopPropagation()
+                                    e.preventDefault()
+                                    const startX = e.clientX
+                                    const startY = e.clientY
+                                    const startW = cvInnerW
+                                    const startH = cvInnerH
+                                    const curX = cvInnerX
+                                    const curY = cvInnerY
 
-                                  const onMove = (ev: PointerEvent) => {
-                                    const dx = ev.clientX - startX
-                                    const dy = ev.clientY - startY
-                                    const newW = Math.max(30, Math.min(frameW - curX, startW + dx))
-                                    const newH = Math.max(12, Math.min(frameH - curY, startH + dy))
-                                    setPlacementModal((p) => p ? { ...p, cvInnerW: newW, cvInnerH: newH } : null)
-                                  }
-                                  const onUp = () => {
-                                    window.removeEventListener("pointermove", onMove)
-                                    window.removeEventListener("pointerup", onUp)
-                                  }
-                                  window.addEventListener("pointermove", onMove)
-                                  window.addEventListener("pointerup", onUp)
-                                }}
-                              >
-                                <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                                  <polyline points="9 3 3 3 3 9" />
-                                  <polyline points="15 21 21 21 21 15" />
-                                  <line x1="3" y1="3" x2="10" y2="10" />
-                                  <line x1="21" y1="21" x2="14" y2="14" />
-                                </svg>
-                              </div>
+                                    const onMove = (ev: PointerEvent) => {
+                                      const dx = ev.clientX - startX
+                                      const dy = ev.clientY - startY
+                                      const newW = Math.max(30, Math.min(frameW - curX, startW + dx))
+                                      const newH = Math.max(12, Math.min(frameH - curY, startH + dy))
+                                      setPlacementModal((p) => p ? { ...p, cvInnerW: newW, cvInnerH: newH } : null)
+                                    }
+                                    const onUp = () => {
+                                      window.removeEventListener("pointermove", onMove)
+                                      window.removeEventListener("pointerup", onUp)
+                                    }
+                                    window.addEventListener("pointermove", onMove)
+                                    window.addEventListener("pointerup", onUp)
+                                  }}
+                                >
+                                  <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="9 3 3 3 3 9" />
+                                    <polyline points="15 21 21 21 21 15" />
+                                    <line x1="3" y1="3" x2="10" y2="10" />
+                                    <line x1="21" y1="21" x2="14" y2="14" />
+                                  </svg>
+                                </div>
+                              )}
                             </div>
                           </Draggable>
 
@@ -5971,41 +6013,43 @@ export default function IsoDocumentDetailPage() {
                                 {placementModal.showSignerName ? <Eye size={12} /> : <EyeOff size={12} />}
                               </button>
 
-                              <div
-                                className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-sky-600 hover:bg-sky-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
-                                title="Kéo để co giãn kích thước họ tên"
-                                onPointerDown={(e) => {
-                                  e.stopPropagation()
-                                  e.preventDefault()
-                                  const startX = e.clientX
-                                  const startY = e.clientY
-                                  const startW = nameInnerW
-                                  const startH = nameInnerH
-                                  const curX = nameInnerX
-                                  const curY = nameInnerY
+                              {placementModal.showSignerName && (
+                                <div
+                                  className="resize-handle absolute -bottom-1.5 -right-1.5 w-4 h-4 bg-sky-600 hover:bg-sky-700 text-white rounded-full flex items-center justify-center shadow-xs cursor-nwse-resize z-20 hover:scale-110 transition-transform touch-none"
+                                  title="Kéo để co giãn kích thước họ tên"
+                                  onPointerDown={(e) => {
+                                    e.stopPropagation()
+                                    e.preventDefault()
+                                    const startX = e.clientX
+                                    const startY = e.clientY
+                                    const startW = nameInnerW
+                                    const startH = nameInnerH
+                                    const curX = nameInnerX
+                                    const curY = nameInnerY
 
-                                  const onMove = (ev: PointerEvent) => {
-                                    const dx = ev.clientX - startX
-                                    const dy = ev.clientY - startY
-                                    const newW = Math.max(30, Math.min(frameW - curX, startW + dx))
-                                    const newH = Math.max(12, Math.min(frameH - curY, startH + dy))
-                                    setPlacementModal((p) => p ? { ...p, nameInnerW: newW, nameInnerH: newH } : null)
-                                  }
-                                  const onUp = () => {
-                                    window.removeEventListener("pointermove", onMove)
-                                    window.removeEventListener("pointerup", onUp)
-                                  }
-                                  window.addEventListener("pointermove", onMove)
-                                  window.addEventListener("pointerup", onUp)
-                                }}
-                              >
-                                <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                                  <polyline points="9 3 3 3 3 9" />
-                                  <polyline points="15 21 21 21 21 15" />
-                                  <line x1="3" y1="3" x2="10" y2="10" />
-                                  <line x1="21" y1="21" x2="14" y2="14" />
-                                </svg>
-                              </div>
+                                    const onMove = (ev: PointerEvent) => {
+                                      const dx = ev.clientX - startX
+                                      const dy = ev.clientY - startY
+                                      const newW = Math.max(30, Math.min(frameW - curX, startW + dx))
+                                      const newH = Math.max(12, Math.min(frameH - curY, startH + dy))
+                                      setPlacementModal((p) => p ? { ...p, nameInnerW: newW, nameInnerH: newH } : null)
+                                    }
+                                    const onUp = () => {
+                                      window.removeEventListener("pointermove", onMove)
+                                      window.removeEventListener("pointerup", onUp)
+                                    }
+                                    window.addEventListener("pointermove", onMove)
+                                    window.addEventListener("pointerup", onUp)
+                                  }}
+                                >
+                                  <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="9 3 3 3 3 9" />
+                                    <polyline points="15 21 21 21 21 15" />
+                                    <line x1="3" y1="3" x2="10" y2="10" />
+                                    <line x1="21" y1="21" x2="14" y2="14" />
+                                  </svg>
+                                </div>
+                              )}
                             </div>
                           </Draggable>
                         </div>

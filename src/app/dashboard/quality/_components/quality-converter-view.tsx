@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useMemo } from "react"
+import { useState, useRef, useMemo, useEffect } from "react"
 import {
   ArrowLeft, Upload, FileText, CheckCircle2, AlertTriangle, XCircle,
   RefreshCw, Download, Check, Sparkles, Layers, ShieldCheck, Calendar,
@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import { supabase } from "@/lib/supabase"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import type { SessionUser } from "@/lib/auth"
 
 type SampleMap = Record<string, (string | number)[]>
@@ -39,6 +40,7 @@ type ParsedLot = {
   ml_x: number
   ml_xmax: number
   ml_step: string
+  lo_nm_missing?: boolean
   samples: SampleMap
 }
 
@@ -79,14 +81,26 @@ type ExistingQc = {
   lot_id: string | null
   ma_lo: string
   ngay_kn: string
+  pkn?: number | null
 }
 
 type MatchEvaluation = {
   lot: ParsedLot
   matchedLot: FactoryLot | null
-  status: "match_ready" | "wrong_date" | "wrong_csr" | "already_tested" | "not_found"
+  status: "match_ready" | "wrong_date" | "wrong_csr" | "already_tested" | "not_found" | "lo_nm_missing"
   message: string
   selected: boolean
+}
+
+// Chuyển ngày dd/mm/yyyy -> yyyy-mm-dd
+function parseVnDateToIso(vnDateStr: string | null): string {
+  if (!vnDateStr) return ""
+  const parts = vnDateStr.trim().split(/[\/\-]/)
+  if (parts.length === 3) {
+    const [d, m, y] = parts
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
+  }
+  return vnDateStr
 }
 
 export function FxToExcelIcon({ className = "w-9 h-5" }: { className?: string }) {
@@ -184,38 +198,55 @@ export function QualityConverterView({
   const factoryLots = propFactoryLots || internalLots
   const existingQcRows = propExistingQcRows || internalQcRows
 
-  useState(() => {
-    // initial
-  })
-
-  // Load kho khi mount
-  useMemo(() => {
-    if (!factoryId || propFactoryLots?.length) return
+  // Nạp kho thành phẩm + phiếu KN đã có. BẮT BUỘC phân trang: nhà máy đã vượt 1000 lô /
+  // 1000 phiếu KN, PostgREST tự cắt ở 1000 dòng nên trước đây phiếu KN gần đây không được nạp
+  // → không nhận ra lô đã kiểm nghiệm → nhập trùng (đã xảy ra với lô 1752cs–1763cs ngày 07/10).
+  const [dataLoading, setDataLoading] = useState(true)
+  const [dataError, setDataError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!factoryId) return
     let active = true
     const loadData = async () => {
+      setDataLoading(true)
+      setDataError(null)
       try {
-        const { data: lotsData } = await supabase
-          .from("lots")
-          .select("id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
-          .eq("factory_id", factoryId)
-          .limit(2000)
-
-        const { data: qcData } = await supabase
-          .from("qc_results")
-          .select("id,lot_id,ma_lo,ngay_kn")
-          .eq("factory_id", factoryId)
-
-        if (active) {
-          if (lotsData) setInternalLots(lotsData)
-          if (qcData) setInternalQcRows(qcData)
-        }
+        const [lotsData, qcData] = await Promise.all([
+          propFactoryLots?.length
+            ? Promise.resolve(null)
+            : fetchAllPaginated<FactoryLot>((from, to) =>
+                supabase
+                  .from("lots")
+                  .select("id,ma_lo,loai_csr,ngay_sx,ngay_ht,trang_thai,tong_banh")
+                  .eq("factory_id", factoryId)
+                  .order("id", { ascending: true })
+                  .range(from, to),
+              ),
+          propExistingQcRows
+            ? Promise.resolve(null)
+            : fetchAllPaginated<ExistingQc>((from, to) =>
+                supabase
+                  .from("qc_results")
+                  .select("id,lot_id,ma_lo,ngay_kn,pkn")
+                  .eq("factory_id", factoryId)
+                  .order("id", { ascending: true })
+                  .range(from, to),
+              ),
+        ])
+        if (!active) return
+        if (lotsData) setInternalLots(lotsData)
+        if (qcData) setInternalQcRows(qcData)
       } catch (err) {
         console.error("Lỗi nạp dữ liệu kho:", err)
+        if (active) {
+          setDataError(err instanceof Error ? err.message : "Không nạp được dữ liệu kho / phiếu KN")
+        }
+      } finally {
+        if (active) setDataLoading(false)
       }
     }
-    loadData()
+    void loadData()
     return () => { active = false }
-  }, [factoryId, propFactoryLots?.length])
+  }, [factoryId, propFactoryLots?.length, propExistingQcRows])
 
   // Map tra cứu lô trong kho nhanh
   const { lotByExact, lotByBase } = useMemo(() => {
@@ -230,17 +261,6 @@ export function QualityConverterView({
     return { lotByExact: byExact, lotByBase: byBase }
   }, [factoryLots, normalizeLotCode, stripYear])
 
-  // Chuyển ngày dd/mm/yyyy -> yyyy-mm-dd
-  const parseVnDateToIso = (vnDateStr: string | null): string => {
-    if (!vnDateStr) return ""
-    const parts = vnDateStr.trim().split(/[\/\-]/)
-    if (parts.length === 3) {
-      const [d, m, y] = parts
-      return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
-    }
-    return vnDateStr
-  }
-
   // Đánh giá 4 tiêu chí cho từng lô từ PDF
   const evaluations = useMemo<MatchEvaluation[]>(() => {
     if (!parseResult?.lots) return []
@@ -249,15 +269,21 @@ export function QualityConverterView({
     const ngaySX_Iso = parseVnDateToIso(parseResult.ngay_sx)
     const isDateLocked = currentUser?.role !== "admin" && Boolean(signingStatusByDate.get(ngayKN_Iso))
 
+    const seenLotIds = new Set<string>()
     return parseResult.lots.map((lot) => {
       const exactKey = normalizeLotCode(lot.lo_nm_full)
       const baseKey = stripYear(lot.lo_nm)
-      const matched = lotByExact.get(exactKey) || lotByBase.get(baseKey) || null
+      const matched = lot.lo_nm_missing
+        ? null
+        : lotByExact.get(exactKey) || lotByBase.get(baseKey) || null
 
       let status: MatchEvaluation["status"] = "match_ready"
       let message = "Khớp 4 tiêu chí — Sẵn sàng nhập"
 
-      if (!matched) {
+      if (lot.lo_nm_missing) {
+        status = "lo_nm_missing"
+        message = `Không đọc được số lô nhà máy trên PDF (cột PKN ${lot.pkn})`
+      } else if (!matched) {
         status = "not_found"
         message = "Không tìm thấy số lô tương ứng trong kho"
       } else {
@@ -281,6 +307,9 @@ export function QualityConverterView({
             if (alreadyQc) {
               status = "already_tested"
               message = `Đã kiểm nghiệm ngày ${alreadyQc.ngay_kn}`
+            } else if (seenLotIds.has(matched.id)) {
+              status = "already_tested"
+              message = "Trùng lô với cột khác trong cùng file PDF"
             } else if (isDateLocked) {
               status = "already_tested"
               message = `Ngày ${parseResult.ngay_kn} đã gửi ký duyệt (bị khóa)`
@@ -288,6 +317,8 @@ export function QualityConverterView({
           }
         }
       }
+
+      if (matched && status === "match_ready") seenLotIds.add(matched.id)
 
       const defaultSelected = status === "match_ready"
       const isSelected = selectedLotsMap[lot.lo_nm_full] !== undefined 
@@ -314,6 +345,18 @@ export function QualityConverterView({
     currentUser,
     selectedLotsMap,
   ])
+
+  // Phiếu KN đã có trong hệ thống cùng NGÀY KN với file PDF → cảnh báo trùng ngày.
+  const sameDayQc = useMemo(() => {
+    if (!parseResult) return null
+    const ngayKN_Iso = parseVnDateToIso(parseResult.ngay_kn)
+    const rows = existingQcRows.filter((qc) => qc.ngay_kn === ngayKN_Iso)
+    if (!rows.length) return null
+    const pkns = Array.from(
+      new Set(rows.map((r) => r.pkn).filter((p): p is number => typeof p === "number")),
+    ).sort((a, b) => a - b)
+    return { count: rows.length, pkns, ngayKN_Iso }
+  }, [parseResult, existingQcRows])
 
   // Số lượng lô hợp lệ được tick chọn
   const readyLotsToImport = useMemo(() => {
@@ -408,6 +451,35 @@ export function QualityConverterView({
 
     setSavingToDb(true)
     try {
+      // Kiểm tra lại DB ngay trước khi ghi: dữ liệu trên màn hình có thể đã cũ (người khác vừa
+      // nhập, hoặc tab mở lâu). Lô nào đã có phiếu KN thì bỏ qua, không nhập trùng.
+      const candidateIds = readyLotsToImport
+        .map((e) => e.matchedLot?.id)
+        .filter((id): id is string => Boolean(id))
+      const alreadyInDb = new Set<string>()
+      for (let i = 0; i < candidateIds.length; i += 200) {
+        const chunk = candidateIds.slice(i, i + 200)
+        const { data: dupRows, error: dupErr } = await supabase
+          .from("qc_results")
+          .select("lot_id")
+          .eq("factory_id", factoryId)
+          .in("lot_id", chunk)
+        if (dupErr) throw new Error("Không kiểm tra được phiếu KN trùng: " + dupErr.message)
+        ;(dupRows || []).forEach((r: { lot_id: string | null }) => {
+          if (r.lot_id) alreadyInDb.add(r.lot_id)
+        })
+      }
+      const toImport = readyLotsToImport.filter(
+        (e) => e.matchedLot && !alreadyInDb.has(e.matchedLot.id),
+      )
+      const skippedDup = readyLotsToImport
+        .filter((e) => e.matchedLot && alreadyInDb.has(e.matchedLot.id))
+        .map((e) => e.matchedLot!.ma_lo)
+      if (!toImport.length) {
+        showToast(`Tất cả lô đã chọn đều đã có phiếu kiểm nghiệm: ${skippedDup.join(", ")}`, false)
+        return
+      }
+
       const [startPKN, startLoKN] = await Promise.all([
         getNextPKN(factoryId, year),
         getNextLoKN(factoryId),
@@ -420,7 +492,7 @@ export function QualityConverterView({
       let successCount = 0
       const errors: string[] = []
 
-      for (const item of readyLotsToImport) {
+      for (const item of toImport) {
         const { lot, matchedLot } = item
         if (!matchedLot) continue
 
@@ -465,7 +537,11 @@ export function QualityConverterView({
 
       if (successCount > 0) {
         showToast(
-          `Đã nhập thành công ${successCount} lô vào phân hệ Kiểm nghiệm (${formatPKN(startPKN, ngayKN_Iso, factoryCode)})!`
+          `Đã nhập thành công ${successCount} lô vào phân hệ Kiểm nghiệm (${formatPKN(startPKN, ngayKN_Iso, factoryCode)})!` +
+            (skippedDup.length
+              ? ` Bỏ qua ${skippedDup.length} lô đã có phiếu KN: ${skippedDup.join(", ")}.`
+              : "") +
+            (errors.length ? ` Lỗi: ${errors.join("; ")}` : ""),
         )
         onSuccess(successCount, startPKN, ngayKN_Iso)
       } else {
@@ -713,6 +789,29 @@ export function QualityConverterView({
               </div>
             </div>
 
+            {dataError && (
+              <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
+                <XCircle size={18} className="mt-0.5 shrink-0" />
+                <span>
+                  Không nạp được dữ liệu kho / phiếu kiểm nghiệm ({dataError}) — tạm khóa đẩy dữ liệu để
+                  tránh nhập trùng. Tải lại trang để thử lại.
+                </span>
+              </div>
+            )}
+            {sameDayQc && (
+              <div className="flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                <span>
+                  <strong>Trùng ngày kiểm nghiệm:</strong> ngày KN {parseResult.ngay_kn} đã có{" "}
+                  <strong>{sameDayQc.count} lô</strong> trong hệ thống
+                  {sameDayQc.pkns.length > 0 && (
+                    <> (PKN {sameDayQc.pkns.map((p) => formatPKN(p, sameDayQc.ngayKN_Iso, factoryCode)).join(", ")})</>
+                  )}
+                  . Các lô đã kiểm nghiệm bị khóa chọn — chỉ những lô chưa có kết quả mới được đẩy lên.
+                </span>
+              </div>
+            )}
+
             {/* Bảng Đối soát 4 Tiêu chí */}
             <div className="bg-white border border-slate-200/90 rounded-2xl shadow-sm overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-200/90 flex flex-wrap items-center justify-between gap-4">
@@ -737,7 +836,7 @@ export function QualityConverterView({
 
                   <button
                     type="button"
-                    disabled={!readyLotsToImport.length || savingToDb}
+                    disabled={!readyLotsToImport.length || savingToDb || dataLoading || !!dataError}
                     onClick={handleDirectPushToQuality}
                     className="flex items-center gap-2 px-5 py-2 text-sm font-bold text-white bg-mint-600 hover:bg-mint-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
                   >
@@ -748,6 +847,8 @@ export function QualityConverterView({
                     )}
                     {savingToDb
                       ? "Đang ghi vào hệ thống..."
+                      : dataLoading
+                      ? "Đang nạp dữ liệu kho..."
                       : `Đẩy thẳng lên Kiểm nghiệm (${readyLotsToImport.length}/${parseResult.total_lots} lô)`}
                   </button>
                 </div>
@@ -794,7 +895,7 @@ export function QualityConverterView({
 
                       return (
                         <tr
-                          key={lot.lo_nm_full || idx}
+                          key={`${lot.pkn}-${lot.lo_nm_full || idx}`}
                           className={`hover:bg-slate-50/80 transition-colors ${
                             isMatch ? "bg-white" : "bg-slate-50/40 opacity-90"
                           }`}

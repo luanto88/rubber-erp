@@ -198,8 +198,24 @@ export default function DocumentsPage() {
     if (factoryId && hasViewPerm) void loadData(factoryId)
   }, [factoryId, hasViewPerm, loadData])
 
+  const [statusTab, setStatusTab] = useState<"all" | "cho_ban" | "dang_xu_ly" | "hoan_thanh" | "tra_ve">("all")
+
+  const counts = useMemo(() => {
+    return {
+      all: docs.length,
+      cho_ban: docs.filter((d) => isMyTurnToAct(d) && (d.trang_thai === "cho_phe_duyet" || d.trang_thai === "cho_ky_phong_ban")).length,
+      dang_xu_ly: docs.filter((d) => d.trang_thai === "cho_phe_duyet" || d.trang_thai === "cho_ky_phong_ban").length,
+      hoan_thanh: docs.filter((d) => d.trang_thai === "da_phe_duyet").length,
+      tra_ve: docs.filter((d) => d.trang_thai === "tra_ve").length,
+    }
+  }, [docs, user, myDeptCode, isAdmin])
+
   const filtered = useMemo(() => {
     return docs.filter((d) => {
+      if (statusTab === "cho_ban" && !(isMyTurnToAct(d) && (d.trang_thai === "cho_phe_duyet" || d.trang_thai === "cho_ky_phong_ban"))) return false
+      if (statusTab === "dang_xu_ly" && d.trang_thai !== "cho_phe_duyet" && d.trang_thai !== "cho_ky_phong_ban") return false
+      if (statusTab === "hoan_thanh" && d.trang_thai !== "da_phe_duyet") return false
+      if (statusTab === "tra_ve" && d.trang_thai !== "tra_ve") return false
       if (filterLoai && d.loai_van_ban !== filterLoai) return false
       if (filterTrangThai && d.trang_thai !== filterTrangThai) return false
       if (filterPhongBan && d.phong_ban !== filterPhongBan) return false
@@ -213,7 +229,7 @@ export default function DocumentsPage() {
       }
       return true
     })
-  }, [docs, search, filterLoai, filterTrangThai, filterPhongBan])
+  }, [docs, search, filterLoai, filterTrangThai, filterPhongBan, statusTab, user, myDeptCode, isAdmin])
 
   if (hasViewPerm === false) {
     return (
@@ -240,25 +256,27 @@ export default function DocumentsPage() {
 
   return (
     <DocumentsShell>
-      <PageBackgroundMotif theme="cyan" />
+      <PageBackgroundMotif theme="forest" />
       <PageHeaderBanner
         title="Văn bản nội bộ"
         subtitle="Quản lý đề nghị, tờ trình, báo cáo, kế hoạch, biên bản"
-        theme="cyan"
-        icon={FileSignature}
+        theme="forest"
+        icon={FileText}
+        collapsible={true}
+        storageKey="banner_collapsed_documents"
         action={
           canCreate ? (
             <>
               <Link
                 href="/dashboard/documents/new"
-                className="flex items-center gap-2 px-5 py-2.5 bg-white text-cyan-700 hover:bg-slate-50 font-bold rounded-xl shadow-md transition-all"
+                className="flex items-center gap-2 px-5 py-2.5 bg-white text-emerald-800 hover:bg-emerald-50 font-bold rounded-xl shadow-md transition-all active:scale-95"
               >
                 <FileText size={16} />
                 Soạn thảo mới
               </Link>
               <Link
                 href="/dashboard/documents/new/upload"
-                className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-white/15 hover:bg-white/25 border border-white/40 rounded-xl transition-all"
+                className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-white/15 hover:bg-white/25 border border-white/40 rounded-xl transition-all active:scale-95"
               >
                 Upload ký tay
               </Link>
@@ -267,29 +285,108 @@ export default function DocumentsPage() {
         }
       />
 
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 mb-4 bg-slate-100 rounded-xl p-1 w-fit">
-        <button
-          onClick={() => setActiveTab("list")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "list" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-        >
-          <FileText size={14} />
-          Danh sách
-        </button>
-        <button
-          onClick={() => setActiveTab("stats")}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === "stats" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-        >
-          <BarChart2 size={14} />
-          Thống kê
-        </button>
+      {/* Tab bar cấp cao (Danh sách / Thống kê) */}
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex items-center gap-1 bg-slate-100 rounded-xl p-1 w-fit">
+          <button
+            onClick={() => setActiveTab("list")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              activeTab === "list" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <FileText size={14} />
+            Danh sách
+          </button>
+          <button
+            onClick={() => setActiveTab("stats")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              activeTab === "stats" ? "bg-white text-emerald-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <BarChart2 size={14} />
+            Thống kê
+          </button>
+        </div>
+
+        {/* Quick status tabs pills khi ở tab Danh sách */}
+        {activeTab === "list" && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+            <button
+              onClick={() => setStatusTab("all")}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                statusTab === "all"
+                  ? "bg-slate-800 text-white shadow-sm"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+              }`}
+            >
+              Tất cả
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${statusTab === "all" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"}`}>
+                {counts.all}
+              </span>
+            </button>
+            <button
+              onClick={() => setStatusTab("cho_ban")}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                statusTab === "cho_ban"
+                  ? "bg-amber-600 text-white shadow-sm ring-1 ring-amber-400"
+                  : counts.cho_ban > 0
+                  ? "bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+              }`}
+            >
+              <span>🔔 Chờ bạn ký</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${counts.cho_ban > 0 ? "bg-amber-200 text-amber-900 font-extrabold" : "bg-slate-100 text-slate-600"}`}>
+                {counts.cho_ban}
+              </span>
+            </button>
+            <button
+              onClick={() => setStatusTab("dang_xu_ly")}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                statusTab === "dang_xu_ly"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+              }`}
+            >
+              Đang xử lý
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${statusTab === "dang_xu_ly" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"}`}>
+                {counts.dang_xu_ly}
+              </span>
+            </button>
+            <button
+              onClick={() => setStatusTab("hoan_thanh")}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                statusTab === "hoan_thanh"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+              }`}
+            >
+              Hoàn thành
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${statusTab === "hoan_thanh" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"}`}>
+                {counts.hoan_thanh}
+              </span>
+            </button>
+            <button
+              onClick={() => setStatusTab("tra_ve")}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                statusTab === "tra_ve"
+                  ? "bg-rose-600 text-white shadow-sm"
+                  : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+              }`}
+            >
+              Trả về
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${statusTab === "tra_ve" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"}`}>
+                {counts.tra_ve}
+              </span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tab Thống kê */}
       {activeTab === "stats" && <VanBanStats docs={docs} loading={loading} />}
 
       {/* Tab danh sách */}
-      {activeTab === "list" && (<><FilterBar activeCount={aiMode ? 0 : [search, filterLoai, filterPhongBan, filterTrangThai].filter(Boolean).length}>
+      {activeTab === "list" && (<><FilterBar activeCount={aiMode ? 0 : [search, filterLoai, filterPhongBan, filterTrangThai, statusTab !== "all" ? statusTab : ""].filter(Boolean).length}>
         <div className="flex flex-wrap gap-3 items-center w-full">
           {/* Toggle AI / Text search */}
           <button
@@ -507,12 +604,12 @@ export default function DocumentsPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => window.location.href = `/dashboard/documents/${doc.id}`}>
+                  <tr key={doc.id} className="hover:bg-emerald-50/40 transition-colors cursor-pointer" onClick={() => window.location.href = `/dashboard/documents/${doc.id}`}>
                     <td className="px-4 py-3 font-mono text-xs text-slate-700">
                       {doc.ma_van_ban || <span className="text-slate-300 italic">—</span>}
                     </td>
                     <td className="px-4 py-3 font-semibold text-slate-800 max-w-xs truncate">
-                      <Link href={`/dashboard/documents/${doc.id}`} className="hover:text-blue-700" onClick={(e) => e.stopPropagation()}>
+                      <Link href={`/dashboard/documents/${doc.id}`} className="hover:text-emerald-700" onClick={(e) => e.stopPropagation()}>
                         {doc.ten_van_ban}
                       </Link>
                     </td>
@@ -523,7 +620,12 @@ export default function DocumentsPage() {
                       {doc.phong_ban || <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai] || "bg-slate-100 text-slate-600"}`}>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai] || "bg-slate-100 text-slate-600"}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
+                          doc.trang_thai === "da_phe_duyet" ? "bg-emerald-500" :
+                          doc.trang_thai === "tra_ve" ? "bg-rose-500" :
+                          doc.trang_thai === "cho_phe_duyet" || doc.trang_thai === "cho_ky_phong_ban" ? "bg-amber-500" : "bg-slate-400"
+                        }`} />
                         {TRANG_THAI_LABEL[doc.trang_thai] || doc.trang_thai}
                       </span>
                       {doc.is_uploaded && (
@@ -550,15 +652,27 @@ export default function DocumentsPage() {
                     <td className="px-4 py-3">
                       {(() => {
                         const downloadUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
+                        const needsMySign = (doc.trang_thai === "cho_phe_duyet" || doc.trang_thai === "cho_ky_phong_ban") && isMyTurnToAct(doc)
                         return (
                           // Nút icon-only (chỉ icon + tooltip) — đồng bộ với Điều xe/Bảo trì/Chất
                           // lượng, tránh hàng nút tràn ngang trên điện thoại.
                           <div className="flex items-center gap-1">
+                            {needsMySign && (
+                              <Link
+                                href={`/dashboard/documents/${doc.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                title="Đến lượt bạn ký - Bấm để ký ngay"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 active:scale-95 rounded-lg shadow-xs transition-all mr-1"
+                              >
+                                <FileSignature size={12} />
+                                <span>Ký ngay</span>
+                              </Link>
+                            )}
                             <Link
                               href={`/dashboard/documents/${doc.id}`}
                               onClick={(e) => e.stopPropagation()}
                               title="Xem chi tiết văn bản"
-                              className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors"
+                              className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 transition-colors"
                             >
                               <Eye size={15} />
                             </Link>
