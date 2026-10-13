@@ -32,6 +32,8 @@ import {
 import { findRoleBoxForStep } from "@/lib/signing/template-layout"
 import { computeSnugBoxSize } from "@/lib/signing/text-fit"
 import { PinDialog } from "../../_components/doc-ui/pin-dialog"
+import { ensurePdfjsWorker } from "@/app/dashboard/_components/doc-ui/pdfjs-worker"
+import { SignWorkspaceShell } from "@/app/dashboard/_components/doc-ui/sign-workspace-shell"
 
 function toTitleCase(str: string | null | undefined): string {
   if (!str) return ""
@@ -857,12 +859,7 @@ export function IsoBatchSignModal({
 
         // Nạp pdfjs để đọc số trang & khổ giấy
         const pdfjsLib = await import("pdfjs-dist")
-        if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-            "pdfjs-dist/build/pdf.worker.mjs",
-            import.meta.url,
-          ).toString()
-        }
+        ensurePdfjsWorker(pdfjsLib)
 
         const initializedDocs: BatchSignDoc[] = []
 
@@ -1558,52 +1555,94 @@ export function IsoBatchSignModal({
 
   if (!open) return null
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/90 backdrop-blur-xs select-none">
-      {/* ── TOP HEADER ── */}
-      <div
-        className="flex h-13 sm:h-14 shrink-0 items-center justify-between px-3 sm:px-5 text-white shadow-md border-b border-white/10"
-        style={{ background: theme.headerBg }}
-      >
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <div className="flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg bg-white/15 backdrop-blur-xs font-black text-xs sm:text-sm">
-            ISO
+  const footerNode = (
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-center justify-between sm:justify-start gap-2 text-xs text-slate-600">
+          <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px] sm:text-xs">
+            <FileCheck size={15} className="text-brand-600 shrink-0" />
+            <span className="hidden sm:inline">Bộ hồ sơ:</span> {docItems.length} tài liệu ({docItems.reduce((acc, d) => acc + d.numPages, 0)} tr)
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <span className="font-bold text-xs sm:text-sm truncate">Ký duyệt</span>
-              <span className={`rounded-full px-1.5 sm:px-2 py-0.5 text-[10px] sm:text-[11px] font-bold shrink-0 ${theme.badgeBg}`}>
-                {theme.name}
-              </span>
-              {doc.cap_tl && (
-                <span className="hidden sm:inline rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold shrink-0">
-                  {doc.cap_tl}
-                </span>
-              )}
-            </div>
-            <div className="text-[10px] sm:text-[11px] text-white/80 line-clamp-1 max-w-[150px] sm:max-w-md">
-              {doc.ma_tai_lieu} · {doc.ten_tai_lieu}
-            </div>
+          <span className="text-slate-300">|</span>
+          <div className="text-[11px] sm:text-xs flex items-center gap-1.5">
+            <span className="hidden sm:inline">Vị trí ký: </span>
+            <span
+              className={`font-extrabold px-1.5 py-0.5 rounded text-[10px] sm:text-xs ${
+                allBoxesViewed
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800 animate-pulse"
+              }`}
+            >
+              {allBoxesViewed ? `✓ Đã xem đủ ${totalBoxesCount} vị trí` : `Đã xem ${viewedBoxesCount}/${totalBoxesCount} vị trí`}
+            </span>
           </div>
+          {!validationResult.valid && (
+            <div className="flex items-center gap-1 text-red-600 font-semibold text-[11px] sm:text-xs ml-1 sm:ml-3">
+              <AlertTriangle size={13} className="shrink-0" />
+              <span className="truncate max-w-[150px] sm:max-w-none">{validationResult.reason}</span>
+            </div>
+          )}
         </div>
 
-        {/* Action bên phải Header */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-2 justify-end">
+          {!allBoxesViewed && (
+            <button
+              type="button"
+              onClick={handleNextFrame}
+              className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-amber-900 transition-all shadow-2xs cursor-pointer animate-pulse"
+              title="Nhảy đến vị trí ký tiếp theo bạn chưa xem qua"
+            >
+              <span>Xem tiếp ({viewedBoxesCount}/{totalBoxesCount})</span>
+              <ArrowRight size={14} className="text-amber-700" />
+            </button>
+          )}
+
           <button
+            type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-white/20 text-white/90 transition-all cursor-pointer"
-            title="Đóng màn hình ký"
+            className="rounded-xl border border-slate-200 bg-white px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all"
           >
-            <X size={18} />
+            Hủy
+          </button>
+
+          <button
+            type="button"
+            onClick={handleStartSign}
+            disabled={!validationResult.valid || !allBoxesViewed || loading}
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-extrabold text-white shadow-md transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ background: theme.headerBg }}
+            title={
+              !allBoxesViewed
+                ? `Vui lòng lướt qua đủ tất cả ${totalBoxesCount} vị trí ký trước khi ký (Hiện đã xem ${viewedBoxesCount}/${totalBoxesCount})`
+                : undefined
+            }
+          >
+            <CheckCircle2 size={15} /> {theme.actionLabel}
           </button>
         </div>
       </div>
+  )
 
+  return (
+    <SignWorkspaceShell
+      eyebrow="Ký duyệt tài liệu ISO"
+      title={`${doc.ma_tai_lieu || "Tài liệu"} · ${doc.ten_tai_lieu || ""}`}
+      badges={
+        <>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold shrink-0 ${theme.badgeBg}`}>{theme.name}</span>
+          {doc.cap_tl && (
+            <span className="hidden sm:inline rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold shrink-0">{doc.cap_tl}</span>
+          )}
+        </>
+      }
+      onClose={onClose}
+      closeDisabled={pinLoading}
+      footer={footerNode}
+    >
       {/* ── MAIN CONTENT ── */}
-      <div className="flex flex-1 overflow-hidden bg-slate-100">
+      <div className="flex min-h-0 flex-1 overflow-hidden bg-slate-100">
         {loading ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 text-slate-500">
-            <Loader2 size={32} className="animate-spin text-emerald-600" />
+            <Loader2 size={32} className="animate-spin text-brand-600" />
             <p className="text-sm font-semibold">Đang tải bộ hồ sơ và tự động nạp mẫu vị trí...</p>
           </div>
         ) : error ? (
@@ -1658,7 +1697,7 @@ export function IsoBatchSignModal({
                         {item.requiresSign ? (
                           <span className="font-semibold text-amber-600">✍</span>
                         ) : (
-                          <span className="text-slate-400">Đọc</span>
+                          <span className="text-slate-500" title="Mẫu vị trí ký của hồ sơ này không có khung cho bước của bạn — hồ sơ chỉ để đọc, không đóng chữ ký. Muốn ký vào hồ sơ này, thêm khung ở Cài đặt vị trí ký.">Không có khung ký</span>
                         )}
                       </div>
                     </button>
@@ -1822,9 +1861,9 @@ export function IsoBatchSignModal({
               </div>
 
               {/* Khu vực hiển thị trang tài liệu & Khung chữ ký chuẩn màn Soạn thảo */}
-              <div className="relative flex-1 overflow-auto bg-slate-200/70 p-2 sm:p-4 flex items-start justify-center">
+              <div className="relative flex-1 overflow-auto bg-app-bg p-2 sm:p-4">
                 <div
-                  className="relative inline-block rounded-lg bg-white shadow-2xl my-auto select-none"
+                  className="relative mx-auto rounded-lg bg-white shadow-2xl select-none"
                   style={{
                     width: currentCanvasW,
                     height: currentCanvasH,
@@ -1912,72 +1951,6 @@ export function IsoBatchSignModal({
 
           </>
         )}
-      </div>
-
-      {/* ── BOTTOM ACTION FOOTER ── */}
-      <div className="flex flex-col sm:flex-row min-h-[56px] sm:h-16 shrink-0 sm:items-center justify-between border-t border-slate-200 bg-white px-3 sm:px-6 py-2 sm:py-0 shadow-xs gap-2">
-        <div className="flex items-center justify-between sm:justify-start gap-2 text-xs text-slate-600">
-          <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px] sm:text-xs">
-            <FileCheck size={15} className="text-emerald-600 shrink-0" />
-            <span className="hidden sm:inline">Bộ hồ sơ:</span> {docItems.length} tài liệu ({docItems.reduce((acc, d) => acc + d.numPages, 0)} tr)
-          </div>
-          <span className="text-slate-300">|</span>
-          <div className="text-[11px] sm:text-xs flex items-center gap-1.5">
-            <span className="hidden sm:inline">Vị trí ký: </span>
-            <span
-              className={`font-extrabold px-1.5 py-0.5 rounded text-[10px] sm:text-xs ${
-                allBoxesViewed
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-amber-100 text-amber-800 animate-pulse"
-              }`}
-            >
-              {allBoxesViewed ? `✓ Đã xem đủ ${totalBoxesCount} vị trí` : `Đã xem ${viewedBoxesCount}/${totalBoxesCount} vị trí`}
-            </span>
-          </div>
-          {!validationResult.valid && (
-            <div className="flex items-center gap-1 text-red-600 font-semibold text-[11px] sm:text-xs ml-1 sm:ml-3">
-              <AlertTriangle size={13} className="shrink-0" />
-              <span className="truncate max-w-[150px] sm:max-w-none">{validationResult.reason}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 justify-end">
-          {!allBoxesViewed && (
-            <button
-              type="button"
-              onClick={handleNextFrame}
-              className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-amber-900 transition-all shadow-2xs cursor-pointer animate-pulse"
-              title="Nhảy đến vị trí ký tiếp theo bạn chưa xem qua"
-            >
-              <span>Xem tiếp ({viewedBoxesCount}/${totalBoxesCount})</span>
-              <ArrowRight size={14} className="text-amber-700" />
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-slate-200 bg-white px-3 sm:px-4 py-2 sm:py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all"
-          >
-            Hủy
-          </button>
-
-          <button
-            type="button"
-            onClick={handleStartSign}
-            disabled={!validationResult.valid || !allBoxesViewed || loading}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl px-4 sm:px-5 py-2 sm:py-2.5 text-xs font-extrabold text-white shadow-md transition-all hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ background: theme.headerBg }}
-            title={
-              !allBoxesViewed
-                ? `Vui lòng lướt qua đủ tất cả ${totalBoxesCount} vị trí ký trước khi ký (Hiện đã xem ${viewedBoxesCount}/${totalBoxesCount})`
-                : undefined
-            }
-          >
-            <CheckCircle2 size={15} /> {theme.actionLabel}
-          </button>
-        </div>
       </div>
 
       {/* ── MOBILE DOCS & PAGES DRAWER ── */}
@@ -2148,6 +2121,6 @@ export function IsoBatchSignModal({
           ) : undefined}
         />
       )}
-    </div>
+    </SignWorkspaceShell>
   )
 }

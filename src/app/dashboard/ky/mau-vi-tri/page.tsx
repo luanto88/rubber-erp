@@ -871,7 +871,7 @@ export default function SignTemplateEditorPage() {
               showName: box.show_name ?? def?.showNameDefault ?? false,
               showChucVu: box.show_chuc_vu ?? false,
               chucVuKey: box.chuc_vu_key ?? null,
-              chucVuPosition: box.chuc_vu_position ?? "above",
+              chucVuPosition: "above",
               signAs: box.sign_as ?? null,
               outOfBounds: false,
               hiddenForDoc: false,
@@ -911,7 +911,7 @@ export default function SignTemplateEditorPage() {
               showName: box.show_name ?? def?.showNameDefault ?? false,
               showChucVu: box.show_chuc_vu ?? (box.show_name ?? def?.showNameDefault ?? false),
               chucVuKey: box.chuc_vu_key ?? null,
-              chucVuPosition: box.chuc_vu_position ?? "above",
+              chucVuPosition: "above",
               signAs: box.sign_as ?? null,
               outOfBounds: false,
               hiddenForDoc: false,
@@ -1759,15 +1759,6 @@ export default function SignTemplateEditorPage() {
   const toggleShowChucVu = (roleId: string) => {
     setRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, showChucVu: !r.showChucVu } : r)))
   }
-  const toggleChucVuPosition = (roleId: string) => {
-    setRoles((prev) =>
-      prev.map((r) =>
-        r.id === roleId
-          ? { ...r, chucVuPosition: r.chucVuPosition === "below" ? "above" : "below" }
-          : r,
-      ),
-    )
-  }
   const setChucVu = (roleId: string, key: ChucVuKey) => {
     setRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, chucVuKey: key } : r)))
   }
@@ -1839,6 +1830,18 @@ export default function SignTemplateEditorPage() {
     if (!st || st.id !== role.id) return
     const dwPct = ((e.clientX - st.startX) / st.rectW) * 100
     const dhPct = ((e.clientY - st.startY) / st.rectH) * 100
+    // QR luôn VUÔNG theo pixel thật của trang (trang không vuông nên % 2 trục khác nhau).
+    if (role.loai === "qr") {
+      const dx = e.clientX - st.startX
+      const dy = e.clientY - st.startY
+      const startPx = Math.min((st.startW / 100) * st.rectW, (st.startH / 100) * st.rectH)
+      const minPx = (MIN_BOX_PCT / 100) * Math.max(st.rectW, st.rectH)
+      const sizePx = Math.max(minPx, startPx + (Math.abs(dx) > Math.abs(dy) ? dx : dy))
+      const wPct = (sizePx / st.rectW) * 100
+      const hPct = (sizePx / st.rectH) * 100
+      setRoles((prev) => prev.map((r) => (r.id === role.id ? { ...r, box: { ...r.box, wPct, hPct } } : r)))
+      return
+    }
     // Kéo giãn mượt mà
     const wPct = Math.max(MIN_BOX_PCT, st.startW + dwPct)
     const hPct = Math.max(MIN_BOX_PCT, st.startH + dhPct)
@@ -1850,6 +1853,7 @@ export default function SignTemplateEditorPage() {
       setRoles((prev) =>
         prev.map((r) => {
           if (r.id !== st.id) return r
+          if (r.loai === "qr") return r // snap từng trục sẽ làm QR hết vuông
           const wPct = snap(r.box.wPct, true, pctStepFor(st.rectW))
           const hPct = snap(r.box.hPct, true, pctStepFor(st.rectH))
           return { ...r, box: { ...r.box, wPct, hPct } }
@@ -2005,7 +2009,7 @@ export default function SignTemplateEditorPage() {
           show_name: r.loai === "chu_ky" ? r.showName : undefined,
           show_chuc_vu: r.loai === "chu_ky" ? r.showChucVu : undefined,
           chuc_vu_key: r.loai === "chu_ky" && r.showChucVu ? r.chucVuKey : null,
-          chuc_vu_position: r.loai === "chu_ky" && r.showChucVu ? (r.chucVuPosition ?? "above") : undefined,
+          chuc_vu_position: undefined,
           sign_as: r.loai === "chu_ky" ? r.signAs : undefined,
         }
       })
@@ -2411,20 +2415,7 @@ export default function SignTemplateEditorPage() {
                       </button>
                     </div>
                     {role.showChucVu && role.showName && (
-                      <div className="mt-1.5 flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-slate-600">Chức vụ nằm trên Tên</span>
-                        <button
-                          type="button"
-                          onClick={() => toggleChucVuPosition(role.id)}
-                          className={`w-7 h-4 rounded-full relative transition-colors ${role.chucVuPosition !== "below" ? "bg-emerald-600" : "bg-slate-300"}`}
-                          title={role.chucVuPosition !== "below" ? "Chức vụ nằm trên Tên (chuẩn văn bản)" : "Chức vụ nằm dưới Tên"}
-                        >
-                          <span
-                            className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
-                            style={{ left: role.chucVuPosition !== "below" ? 14 : 2 }}
-                          />
-                        </button>
-                      </div>
+                      <p className="mt-1.5 text-[10px] text-slate-400 leading-snug">Chức vụ luôn nằm trên Tên.</p>
                     )}
                     {!role.showName && !role.showChucVu && (
                       <p className="mt-1.5 text-[10px] text-slate-400 italic leading-snug">

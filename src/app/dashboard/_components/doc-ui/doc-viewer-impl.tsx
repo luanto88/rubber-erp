@@ -17,6 +17,7 @@ import {
   RefreshCcw,
 } from "lucide-react"
 import { fetchSecureUrl, openSecureFile } from "@/app/dashboard/_components/secure-file-open"
+import { ensurePdfjsWorker } from "./pdfjs-worker"
 
 /**
  * Phần thân khung xem tài liệu (Doc-UI, GĐ3). CHỈ nạp qua `doc-viewer.tsx` (next/dynamic,
@@ -227,13 +228,7 @@ export default function DocViewerImpl({
         const bytes = await fetchPdfBytes(endpoint)
         if (cancelled) return
         const pdfjsLib = await import("pdfjs-dist")
-        if ((globalThis as Record<string, unknown>).pdfjsWorker) {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = ""
-        } else {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-            "pdfjs-dist/build/pdf.worker.mjs", import.meta.url
-          ).toString()
-        }
+        ensurePdfjsWorker(pdfjsLib)
         const doc = await pdfjsLib.getDocument({ data: new Uint8Array(bytes) }).promise
         loaded = doc
         if (cancelled) { void doc.destroy(); return }

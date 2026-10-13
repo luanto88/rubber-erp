@@ -51,8 +51,6 @@ import {
   Loader2,
   RotateCcw,
   Lock,
-  ChevronLeft,
-  ChevronRight,
   Share2,
   ChevronUp,
   FileSignature,
@@ -91,6 +89,15 @@ import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs
 import { DistributionManagement } from "../../_components/distribution-management"
 import { authFetch } from "@/lib/auth-fetch"
 import { canCreateIsoDocument, canViewIsoLibrary, readCachedIsoUser } from "../../_components/iso-access"
+import { ensurePdfjsWorker } from "@/app/dashboard/_components/doc-ui/pdfjs-worker"
+import {
+  SignCanvasArea,
+  SignFooterActions,
+  SignPageNav,
+  SignRail,
+  SignRailThumb,
+  SignWorkspaceShell,
+} from "@/app/dashboard/_components/doc-ui/sign-workspace-shell"
 
 /**
  * GĐ3 phân quyền ISO — ai được mở trang chi tiết một tài liệu:
@@ -456,7 +463,8 @@ export default function IsoDocumentDetailPage() {
   // Doc-UI GĐ2: tab "Tài liệu / Thông tin" trên mobile ở chế độ xem
   const [mobilePane, setMobilePane] = useState<"doc" | "info">("info")
   // Doc-UI GĐ3: file đang xem trong khung xem PDF nhúng (chế độ xem)
-  const [viewVariant, setViewVariant] = useState<"main" | "change_request" | "review_request">("main")
+  // "child:<id>" = xem hồ sơ con của bộ ngay trong khung xem (2026-10-13)
+  const [viewVariant, setViewVariant] = useState<string>("main")
   const isDesktop = useIsDesktop()
 
   // File upload
@@ -503,6 +511,10 @@ export default function IsoDocumentDetailPage() {
   const [pinError, setPinError] = useState("")
   const [pinLoading, setPinLoading] = useState(false)
   const [lyDoTraVe, setLyDoTraVe] = useState("")
+  // Trả về / Từ chối / Không phê duyệt: KHÔNG cần PIN, bắt buộc lý do (đồng bộ Văn bản, 2026-10-13).
+  const [returnModal, setReturnModal] = useState<{ action: PinModalAction; label: string } | null>(null)
+  const [returnBusy, setReturnBusy] = useState(false)
+  const [returnError, setReturnError] = useState("")
 
   useEffect(() => {
     if (autoSendTriedRef.current) return
@@ -560,7 +572,9 @@ export default function IsoDocumentDetailPage() {
     showSignature: boolean
     showSignerName: boolean
     showChucVu?: boolean
-    chucVuPosition?: "above" | "below"
+    /** MẪU vị trí cho phép hiện khối (2 tầng): false = mất hẳn khỏi màn ký. */
+    allowName?: boolean
+    allowChucVu?: boolean
     isLocked?: boolean
     sigInnerX?: number
     sigInnerY?: number
@@ -967,10 +981,7 @@ export default function IsoDocumentDetailPage() {
     const loadPdf = async () => {
       try {
         const pdfjsLib = await import("pdfjs-dist")
-        // Dùng version từ package để khớp với CDN worker (tránh version mismatch crash)
-        const ver = pdfjsLib.version
-        pdfjsLib.GlobalWorkerOptions.workerSrc =
-          `https://cdn.jsdelivr.net/npm/pdfjs-dist@${ver}/build/pdf.worker.min.mjs`
+        ensurePdfjsWorker(pdfjsLib)
         const pdfDoc = await pdfjsLib.getDocument(sourcePdfUrl).promise
         if (isCancelled) return
         pdfDocRef.current = pdfDoc
@@ -1917,12 +1928,112 @@ export default function IsoDocumentDetailPage() {
       return error
     }
 
+    const noSignActions: PinModalAction[] = ["tra_ve", "khong_xem_xet", "tu_choi_phe_duyet", "tra_ve_nhap"]
+    // Tạo PDF ký duyệt. Tách thành hàm để các bước gửi đi (soạn thảo/xem xét) chạy
+    // TRƯỚC khi đổi trạng thái: đóng dấu lỗi thì dừng, không để tài liệu "chờ xem xét"
+    // mà file thiếu chữ ký của bước trước (bug NMCB-QT77, 2026-10-13).
+    const generateSignedPdfs = async (): Promise<{ pdfError: string | null; pdfWarning: string | null }> => {
+    let pdfError: string | null = null
+    let pdfWarning: string | null = null
+    const placementsToGenerate = signedFilePlacements.length > 0
+      ? signedFilePlacements
+      : (placement ? [{ docId, kind: "main" as const, placement }] : [])
+    if (token && !noSignActions.includes(action) && placementsToGenerate.length > 0) {
+      try {
+        for (const filePlacement of placementsToGenerate) {
+        const pdfRes = await fetch("/api/sign/generate-pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token,
+            docId: filePlacement.docId,
+            docType: "iso",
+            fileKind: filePlacement.kind,
+            signaturePlacement: filePlacement.placement,
+            skipTagLabels: confirmedSkipTags,
+            action,
+          }),
+        })
+        const pdfJson = await pdfRes.json()
+        console.log("[generate-pdf] status:", pdfRes.status, "response:", pdfJson)
+        if (pdfJson.ok) {
+          if (pdfJson.skipped) {
+            showToast(true, "File không phải PDF — chữ ký số không được nhúng, đã lưu workflow")
+          }
+          // Cập nhật state ngay để UI hiển thị link PDF mà không cần chờ loadDoc
+          if (pdfJson.signedPdfUrl) {
+            if (filePlacement.docId === docId) {
+              setDoc((prev) => prev
+                ? {
+                    ...prev,
+                    ...(filePlacement.kind === "main" ? { file_signed_pdf_url: pdfJson.signedPdfUrl as string } : {}),
+                    ...(filePlacement.kind === "change_request" ? { file_phieu_yeu_cau_thay_doi_signed_url: pdfJson.signedPdfUrl as string } : {}),
+                    ...(filePlacement.kind === "review_request" ? { file_de_nghi_soat_xet_signed_url: pdfJson.signedPdfUrl as string } : {}),
+                  }
+                : prev)
+            } else if (filePlacement.kind === "main") {
+              setChildDocs((rows) => rows.map((child) =>
+                child.id === filePlacement.docId
+                  ? { ...child, file_signed_pdf_url: pdfJson.signedPdfUrl as string }
+                  : child
+              ))
+            }
+          }
+          if (pdfJson.metaMismatched?.length > 0) {
+            setHeaderMismatchWarnings(pdfJson.metaMismatched as Array<{ found: string; expected: string }>)
+          }
+          if (pdfJson.diagnostics?.metaFillError && !pdfJson.skipped) {
+            showToast(false, "Không đọc được text của PDF — tag header/footer chưa được điền. Kiểm tra PDF template có chứa text thuần (không phải ảnh).")
+            console.warn("[generate-pdf] metaFillError:", pdfJson.diagnostics.metaFillError)
+          }
+          const failedSigs = pdfJson.diagnostics?.sigImgLoadFailed as string[] | undefined
+          if (failedSigs && failedSigs.length > 0) {
+            const failedNames = (pdfJson.diagnostics?.sigImgMissingNames as string[] | undefined) ?? []
+            pdfWarning = `${failedSigs.length} người ký chưa có ảnh chữ ký${failedNames.length ? ` (${failedNames.join(", ")})` : ""}. Vào Cài đặt → Chữ ký cá nhân để upload.`
+          }
+          const outOfRange = (pdfJson.diagnostics?.pageOutOfRangeNames as string[] | undefined) ?? []
+          if (outOfRange.length > 0) {
+            const msg = `Vị trí ký của ${outOfRange.join(", ")} nằm ngoài số trang PDF — kiểm tra lại mẫu vị trí ký.`
+            pdfWarning = pdfWarning ? `${pdfWarning} | ${msg}` : msg
+          }
+        } else {
+          pdfError = (pdfJson.error as string) ?? "Không rõ lỗi"
+          break
+        }
+        }
+      } catch (pdfErr) {
+        pdfError = pdfErr instanceof Error ? pdfErr.message : String(pdfErr)
+      }
+    }
+
+    return { pdfError, pdfWarning }
+    }
+
     try {
-      const noSignActions: PinModalAction[] = ["tra_ve", "khong_xem_xet", "tu_choi_phe_duyet", "tra_ve_nhap"]
-      const officeError = await generateOfficeFiles(token, action)
+      // Trả về / từ chối không cần PIN (2026-10-13) ⇒ token null, không ký file Office.
+      const officeError = token ? await generateOfficeFiles(token, action) : null
       if (officeError && !noSignActions.includes(action)) {
         showToast(false, "Không thể ký DOCX/XLSX: " + officeError)
         return
+      }
+
+      // Các bước GỬI ĐI (soạn thảo / xem xét) đóng dấu PDF trước, lỗi thì không đổi trạng thái.
+      // Phê duyệt giữ thứ tự cũ (cần phe_duyet_sign_as/hết hiệu lực bản cũ ghi trước).
+      const preGenerated = !!token && (action === "gui_xem_xet" || action === "gui_phe_duyet" || action === "gui_lai_phe_duyet")
+      let preWarning: string | null = null
+      if (preGenerated) {
+        const mainIsPdf = /\.pdf(\?|$)/i.test(doc.file_goc_url || "")
+        const hasPlacements = signedFilePlacements.length > 0 || !!placement
+        if (mainIsPdf && !hasPlacements) {
+          showToast(false, "Chưa có vị trí chữ ký cho tài liệu nên chưa gửi đi. Mở lại màn ký và đặt chữ ký.")
+          return
+        }
+        const r = await generateSignedPdfs()
+        if (r.pdfError) {
+          showToast(false, "Không đóng dấu được chữ ký lên PDF nên chưa gửi đi: " + r.pdfError)
+          return
+        }
+        preWarning = r.pdfWarning
       }
 
       if (action === "gui_xem_xet") {
@@ -2096,73 +2207,14 @@ export default function IsoDocumentDetailPage() {
         ly_do: lyDo || null,
       })
 
-      // Tạo PDF ký duyệt (không block UI nếu lỗi)
+      // PDF đã đóng dấu trước khi đổi trạng thái (xem generateSignedPdfs) thì không chạy lại.
       let pdfError: string | null = null
-      const placementsToGenerate = signedFilePlacements.length > 0
-        ? signedFilePlacements
-        : (placement ? [{ docId, kind: "main" as const, placement }] : [])
-      if (token && !noSignActions.includes(action) && placementsToGenerate.length > 0) {
-        try {
-          for (const filePlacement of placementsToGenerate) {
-          const pdfRes = await fetch("/api/sign/generate-pdf", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              token,
-              docId: filePlacement.docId,
-              docType: "iso",
-              fileKind: filePlacement.kind,
-              signaturePlacement: filePlacement.placement,
-              skipTagLabels: confirmedSkipTags,
-              action,
-            }),
-          })
-          const pdfJson = await pdfRes.json()
-          console.log("[generate-pdf] status:", pdfRes.status, "response:", pdfJson)
-          if (pdfJson.ok) {
-            if (pdfJson.skipped) {
-              showToast(true, "File không phải PDF — chữ ký số không được nhúng, đã lưu workflow")
-            }
-            // Cập nhật state ngay để UI hiển thị link PDF mà không cần chờ loadDoc
-            if (pdfJson.signedPdfUrl) {
-              if (filePlacement.docId === docId) {
-                setDoc((prev) => prev
-                  ? {
-                      ...prev,
-                      ...(filePlacement.kind === "main" ? { file_signed_pdf_url: pdfJson.signedPdfUrl as string } : {}),
-                      ...(filePlacement.kind === "change_request" ? { file_phieu_yeu_cau_thay_doi_signed_url: pdfJson.signedPdfUrl as string } : {}),
-                      ...(filePlacement.kind === "review_request" ? { file_de_nghi_soat_xet_signed_url: pdfJson.signedPdfUrl as string } : {}),
-                    }
-                  : prev)
-              } else if (filePlacement.kind === "main") {
-                setChildDocs((rows) => rows.map((child) =>
-                  child.id === filePlacement.docId
-                    ? { ...child, file_signed_pdf_url: pdfJson.signedPdfUrl as string }
-                    : child
-                ))
-              }
-            }
-            if (pdfJson.metaMismatched?.length > 0) {
-              setHeaderMismatchWarnings(pdfJson.metaMismatched as Array<{ found: string; expected: string }>)
-            }
-            if (pdfJson.diagnostics?.metaFillError && !pdfJson.skipped) {
-              showToast(false, "Không đọc được text của PDF — tag header/footer chưa được điền. Kiểm tra PDF template có chứa text thuần (không phải ảnh).")
-              console.warn("[generate-pdf] metaFillError:", pdfJson.diagnostics.metaFillError)
-            }
-            const failedSigs = pdfJson.diagnostics?.sigImgLoadFailed as string[] | undefined
-            if (failedSigs && failedSigs.length > 0) {
-              pdfError = `${failedSigs.length} người ký chưa có ảnh chữ ký. Vào Cài đặt → Chữ ký cá nhân để upload.`
-            }
-          } else {
-            pdfError = (pdfJson.error as string) ?? "Không rõ lỗi"
-            break
-          }
-          }
-        } catch (pdfErr) {
-          pdfError = pdfErr instanceof Error ? pdfErr.message : String(pdfErr)
-        }
+      if (!preGenerated) {
+        const r = await generateSignedPdfs()
+        pdfError = r.pdfError ?? r.pdfWarning
+      } else if (preWarning) {
+        pdfError = preWarning
       }
-
       if (token && action === "phe_duyet") {
         const officePdfTasks = buildOfficeFileQueue().filter((task) => {
           if (task.kind !== "main") return false
@@ -2719,6 +2771,8 @@ export default function IsoDocumentDetailPage() {
       showSignature: rawTemplate.hasTemplate ? !!rawTemplate.soanThao : true,
       showSignerName: initialShowName,
       showChucVu: initialShowChucVu,
+      allowName: rawTemplate.hasTemplate ? initialShowName : true,
+      allowChucVu: rawTemplate.hasTemplate ? initialShowChucVu : true,
       isLocked: true,
       sigInnerX: 0,
       sigInnerY: 0,
@@ -2741,6 +2795,20 @@ export default function IsoDocumentDetailPage() {
       prefixH: 24,
       extraSigBoxes: [],
     })
+  }
+
+  const handleReturnConfirm = async () => {
+    if (!returnModal) return
+    const lyDo = lyDoTraVe.trim()
+    if (!lyDo) { setReturnError("Vui lòng nhập lý do."); return }
+    setReturnBusy(true)
+    try {
+      await doTransition(returnModal.action, null, null, lyDo)
+      setReturnModal(null)
+      setLyDoTraVe("")
+    } finally {
+      setReturnBusy(false)
+    }
   }
 
   const handlePinConfirm = async () => {
@@ -2767,7 +2835,6 @@ export default function IsoDocumentDetailPage() {
       if (!verifyRes.ok) { setPinError(verifyJson.error || "PIN không đúng"); return }
 
       const action = pinModal.action
-      const currentLyDo = lyDoTraVe
 
       // Đóng PIN modal
       setPinModal(null)
@@ -2776,18 +2843,12 @@ export default function IsoDocumentDetailPage() {
       // Reset lựa chọn ký thay cho lượt ký mới — không kế thừa từ lượt trước
       setSignAs("none")
 
-      // Các action không cần đặt chữ ký
-      const noSignActions: PinModalAction[] = ["tra_ve", "khong_xem_xet", "tu_choi_phe_duyet", "tra_ve_nhap"]
-      if (noSignActions.includes(action)) {
-        await doTransition(action, verifyJson.token, null, currentLyDo)
-        return
-      }
 
       // Có file PDF gốc → mở placement modal để đặt chữ ký; DOCX/XLSX → transition trực tiếp
       const signQueue = buildSignFileQueue()
       if (signQueue.length > 0) {
         const [firstTask, ...pendingFiles] = signQueue
-        await openPlacementForTask(firstTask, pendingFiles, [], verifyJson.token, action, currentLyDo, 1, signQueue.length)
+        await openPlacementForTask(firstTask, pendingFiles, [], verifyJson.token, action, "", 1, signQueue.length)
         return
       }
 
@@ -2799,7 +2860,7 @@ export default function IsoDocumentDetailPage() {
           label: "File PDF chính",
           url: doc.file_signed_pdf_url || doc.file_goc_url,
         }
-        await openPlacementForTask(fallbackTask, [], [], verifyJson.token, action, currentLyDo, 1, 1)
+        await openPlacementForTask(fallbackTask, [], [], verifyJson.token, action, "", 1, 1)
         return
       }
 
@@ -2853,7 +2914,7 @@ export default function IsoDocumentDetailPage() {
       height = Math.min(st.h_pt - innerY_pt, innerH_pt)
       y = st.y_pt + st.h_pt - innerY_pt - height
 
-      const isCvAbove = placementModal.chucVuPosition !== "below"
+      const isCvAbove = true // Chức vụ luôn trên Tên (2026-10-13)
 
       // Chức vụ
       if (placementModal.showChucVu) {
@@ -3207,19 +3268,31 @@ export default function IsoDocumentDetailPage() {
     if (v === "review_request") return doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || null
     return doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url || null
   }
-  const activeVariant = variantSourceUrl(viewVariant) ? viewVariant : "main"
-  const viewerSourceUrl = variantSourceUrl(activeVariant)
+  // Hồ sơ con của bộ (cả bản nháp) — mở được trong khung xem thay vì chỉ tab mới
+  const viewableChildren = childDocs.filter((child) => !!childFileUrl(child) && canOpenIsoFile(child.trang_thai, user, child, userId))
+  const viewChild = viewVariant.startsWith("child:")
+    ? viewableChildren.find((child) => `child:${child.id}` === viewVariant) ?? null
+    : null
+  const baseVariant = (viewVariant === "change_request" || viewVariant === "review_request") ? viewVariant : "main"
+  const activeVariant: string = viewChild ? viewVariant : (variantSourceUrl(baseVariant) ? baseVariant : "main")
+  const viewerSourceUrl = viewChild ? childFileUrl(viewChild) : variantSourceUrl(activeVariant as "main" | "change_request" | "review_request")
   const viewerExt = viewerSourceUrl ? extFromStorageUrl(viewerSourceUrl) : ""
+  const viewerEndpoint = viewChild
+    ? `/api/iso/documents/${viewChild.id}/file-url?variant=main`
+    : `/api/iso/documents/${docId}/file-url?variant=${activeVariant}`
   const viewerVariants = [
-    { key: "main", label: "Tài liệu chính" },
+    { key: "main", label: viewableChildren.length > 0 ? (doc?.ma_tai_lieu || "Tài liệu chính") : "Tài liệu chính" },
     ...(variantSourceUrl("change_request") ? [{ key: "change_request", label: "Phiếu yêu cầu thay đổi" }] : []),
     ...(variantSourceUrl("review_request") ? [{ key: "review_request", label: "Đề nghị soát xét" }] : []),
+    ...viewableChildren.map((child) => ({ key: `child:${child.id}`, label: child.ma_tai_lieu || child.ten_tai_lieu || "Hồ sơ" })),
   ]
-  const viewerLabel = activeVariant === "change_request"
-    ? "Phiếu yêu cầu thay đổi"
-    : activeVariant === "review_request"
-      ? "Đề nghị soát xét"
-      : (doc?.file_signed_pdf_url || doc?.file_signed_office_url ? "Bản đã ký" : "File gốc")
+  const viewerLabel = viewChild
+    ? `${viewChild.ma_tai_lieu || "Hồ sơ"}${viewChild.file_signed_pdf_url || viewChild.file_signed_office_url ? " · đã ký" : ""}`
+    : activeVariant === "change_request"
+      ? "Phiếu yêu cầu thay đổi"
+      : activeVariant === "review_request"
+        ? "Đề nghị soát xét"
+        : (doc?.file_signed_pdf_url || doc?.file_signed_office_url ? "Bản đã ký" : "File gốc")
   const mainFileName = doc?.file_signed_office_url
     ? `DOCX/XLSX \u0111\u00e3 c\u1eadp nh\u1eadt tag`
     : (uploadedFileName || "File t\u00e0i li\u1ec7u")
@@ -3539,13 +3612,13 @@ export default function IsoDocumentDetailPage() {
           <DocViewer
             key={`${activeVariant}:${viewerSourceUrl}`}
             active={(isDesktop || mobilePane === "doc") && !batchSignModal?.open && !placementModal?.show}
-            endpoint={`/api/iso/documents/${docId}/file-url?variant=${activeVariant}`}
+            endpoint={viewerEndpoint}
             kind={viewerExt === "pdf" ? "pdf" : "office"}
             fileExt={viewerExt}
             label={`${viewerLabel} · ${viewerExt.toUpperCase()}`}
             variants={viewerVariants}
             variant={activeVariant}
-            onVariantChange={(k) => setViewVariant(k as "main" | "change_request" | "review_request")}
+            onVariantChange={(k) => setViewVariant(k)}
           />
         )}
 
@@ -4073,9 +4146,6 @@ export default function IsoDocumentDetailPage() {
             <Link href="/dashboard/iso/my-tasks" className="px-4 py-2 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold">
               Về Việc của tôi
             </Link>
-            <Link href={`/iso-doc/${docId}`} className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm font-bold">
-              Xem thông tin công khai
-            </Link>
           </div>
         </div>
       </IsoShell>
@@ -4146,15 +4216,15 @@ export default function IsoDocumentDetailPage() {
   }
   if (!isNew && trangThai === "cho_xem_xet" && canXemXet) {
     isoPrimary = { key: "gui_phe_duyet", label: "Ký xem xét & Gửi phê duyệt", icon: <Send size={16} />, onClick: () => setBatchSignModal({ open: true, action: "gui_phe_duyet" }) }
-    isoDanger.push({ key: "khong_xem_xet", label: "Từ chối", icon: <X size={14} />, onClick: () => { setPinModal({ action: "khong_xem_xet", label: "Từ chối xem xét" }); setPin(""); setPinError("") } })
+    isoDanger.push({ key: "khong_xem_xet", label: "Từ chối", icon: <X size={14} />, onClick: () => { setReturnModal({ action: "khong_xem_xet", label: "Từ chối xem xét" }); setLyDoTraVe(""); setReturnError("") } })
   }
   if (!isNew && trangThai === "cho_phe_duyet" && canApprove) {
     isoPrimary = { key: "phe_duyet", label: "Phê duyệt & Ban hành", icon: <CheckCircle2 size={16} />, onClick: () => setBatchSignModal({ open: true, action: "phe_duyet" }) }
-    isoDanger.push({ key: "tu_choi_phe_duyet", label: "Không phê duyệt", icon: <X size={14} />, onClick: () => { setPinModal({ action: "tu_choi_phe_duyet", label: "Không phê duyệt" }); setPin(""); setPinError(""); setLyDoTraVe("") } })
+    isoDanger.push({ key: "tu_choi_phe_duyet", label: "Không phê duyệt", icon: <X size={14} />, onClick: () => { setReturnModal({ action: "tu_choi_phe_duyet", label: "Không phê duyệt" }); setLyDoTraVe(""); setReturnError("") } })
   }
   if (!isNew && trangThai === "bi_tu_choi_phe_duyet" && canXemXet) {
     isoPrimary = { key: "gui_lai_phe_duyet", label: "Ký xem xét & Gửi phê duyệt lại", icon: <Send size={16} />, onClick: () => setBatchSignModal({ open: true, action: "gui_lai_phe_duyet" }) }
-    isoDanger.push({ key: "tra_ve_nhap", label: "Trả về Nháp", icon: <RotateCcw size={14} />, onClick: () => { setPinModal({ action: "tra_ve_nhap", label: "Trả về Nháp" }); setPin(""); setPinError(""); setLyDoTraVe("") } })
+    isoDanger.push({ key: "tra_ve_nhap", label: "Trả về Nháp", icon: <RotateCcw size={14} />, onClick: () => { setReturnModal({ action: "tra_ve_nhap", label: "Trả về Nháp" }); setLyDoTraVe(""); setReturnError("") } })
   }
   if (canRecall) {
     isoSecondary.push({ key: "recall", label: "Thu hồi", icon: <Undo2 size={14} />, onClick: () => { setRecallReason(""); setRecallOpen(true) }, title: "Đưa tài liệu đã gửi về bản nháp để sửa hoặc xoá" })
@@ -4362,12 +4432,12 @@ export default function IsoDocumentDetailPage() {
                   <HeaderButton
                     icon={<Eye size={15} />}
                     label="Xem file"
-                    onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=${isViewMode ? activeVariant : "main"}`)}
+                    onClick={() => void openSecureFile(isViewMode ? viewerEndpoint : `/api/iso/documents/${docId}/file-url?variant=main`)}
                   />
                   <HeaderButton
                     icon={<Download size={15} />}
                     label="Tải file"
-                    onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=${isViewMode ? activeVariant : "main"}&download=1`)}
+                    onClick={() => void openSecureFile(`${isViewMode ? viewerEndpoint : `/api/iso/documents/${docId}/file-url?variant=main`}&download=1`)}
                   />
                 </>
               )}
@@ -5493,133 +5563,83 @@ export default function IsoDocumentDetailPage() {
 
         {/* Signature Placement Modal */}
         {placementModal?.show && (
-          <div className="fixed inset-0 bg-black/70 z-50 flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200 shrink-0 flex-wrap gap-2">
-              <h3 className="font-bold text-slate-800 text-sm">
-                Đặt chữ ký: {placementModal.fileLabel}
-                {placementModal.fileTotal > 1 ? ` (${placementModal.fileIndex}/${placementModal.fileTotal})` : ""}
-              </h3>
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-slate-500 mr-1">
-                  Trang {placementModal.currentPage} / {placementModal.totalPages}
-                </span>
-                <button
-                  onClick={() => void handlePageChange(placementModal.currentPage - 1)}
-                  disabled={placementModal.currentPage <= 1}
-                  className="p-1.5 hover:bg-slate-100 rounded-lg disabled:opacity-40 transition-all"
-                >
-                  <ChevronLeft size={16} className="text-slate-600" />
-                </button>
-                <button
-                  onClick={() => void handlePageChange(placementModal.currentPage + 1)}
-                  disabled={placementModal.currentPage >= placementModal.totalPages}
-                  className="p-1.5 hover:bg-slate-100 rounded-lg disabled:opacity-40 transition-all"
-                >
-                  <ChevronRight size={16} className="text-slate-600" />
-                </button>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
-                <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700 border border-emerald-300 font-semibold flex items-center gap-1 shadow-xs">
-                  <Lock size={12} className="text-emerald-600" />
-                  Đã khóa vị trí theo mẫu
-                </span>
-                {placementModal.showChucVu && placementModal.showSignerName && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPlacementModal((p) => {
-                        if (!p) return null
-                        const nextPos = p.chucVuPosition === "below" ? "above" : "below"
-                        return {
-                          ...p,
-                          chucVuPosition: nextPos,
-                          cvInnerY: undefined,
-                          nameInnerY: undefined,
-                        }
-                      })
-                    }}
-                    className={`px-2 py-1 rounded-lg border text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer ${
-                      placementModal.chucVuPosition !== "below"
-                        ? "bg-violet-50 border-violet-300 text-violet-800"
-                        : "bg-slate-50 border-slate-300 text-slate-700"
-                    }`}
-                    title={placementModal.chucVuPosition !== "below" ? "Chức vụ đang nằm TRÊN Tên (chuẩn). Nhấp để đổi Chức vụ xuống DƯỚI Tên" : "Chức vụ đang nằm DƯỚI Tên. Nhấp để đổi Chức vụ lên TRÊN Tên"}
-                  >
-                    <span>{placementModal.chucVuPosition !== "below" ? "Chức vụ trên Tên" : "Chức vụ dưới Tên"}</span>
-                  </button>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => void handlePlacementConfirm()}
-                  style={{ background: "#7c3aed" }}
-                  className="px-4 py-1.5 text-sm text-white font-bold rounded-xl hover:opacity-90 transition-all shadow-xs"
-                >
-                  Xác nhận vị trí
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Body: Left Thumbnail Rail + Main Canvas Area */}
-            <div className="flex-1 min-h-0 flex flex-row overflow-hidden bg-slate-100">
-              {/* Left Thumbnail Rail */}
-              <div className="w-28 shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-y-auto p-2 gap-2 select-none">
-                <div className="text-[10px] uppercase font-bold text-slate-400 text-center tracking-wider mb-1">
-                  {placementModal.totalPages} trang
-                </div>
+          <SignWorkspaceShell
+            eyebrow="Ký tài liệu ISO"
+            title={`Đặt chữ ký: ${placementModal.fileLabel}${placementModal.fileTotal > 1 ? ` (${placementModal.fileIndex}/${placementModal.fileTotal})` : ""}`}
+            badges={
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/15 border border-white/25 text-[11px] font-bold text-white">
+                <Lock size={11} />
+                Vị trí theo mẫu
+              </span>
+            }
+            toolbar={
+              <SignPageNav
+                page={placementModal.currentPage}
+                total={placementModal.totalPages}
+                onChange={(p) => void handlePageChange(p)}
+              />
+            }
+            // Đóng = huỷ lượt ký: chưa có gì được lưu (PIN đã xác thực nhưng trạng thái/PDF chỉ
+            // ghi khi xác nhận hết hàng đợi file), nên chỉ cần đóng modal.
+            onClose={() => setPlacementModal(null)}
+            notice="Đọc lại tài liệu trước khi ký — kéo/co giãn chữ ký, tên, chức vụ BÊN TRONG khung màu đã cài đặt."
+            rail={
+              <SignRail heading={`${placementModal.totalPages} trang`}>
                 {Array.from({ length: placementModal.totalPages }, (_, i) => i + 1).map((pageNum) => {
-                  const isCurrent = pageNum === placementModal.currentPage
                   const hasSignature = placementModal.rawTemplate?.soanThao?.so_trang === pageNum
                   const hasQr = placementModal.rawTemplate?.qr?.so_trang === pageNum
-                  const thumbUrl = placementModal.thumbnails?.[pageNum]
-
                   return (
-                    <button
+                    <SignRailThumb
                       key={`thumb-${pageNum}`}
-                      type="button"
+                      page={pageNum}
+                      src={placementModal.thumbnails?.[pageNum]}
+                      loading={placementModal.thumbnailsLoading}
+                      selected={pageNum === placementModal.currentPage}
+                      accentColor={hasSignature ? ISO_STEP_COLORS.soan_thao.fg : null}
                       onClick={() => void handlePageChange(pageNum)}
-                      className={`relative w-full rounded-lg border-2 transition-all p-1 flex flex-col items-center bg-white ${
-                        isCurrent
-                          ? "border-[#2f5d52] shadow-md ring-2 ring-[#2f5d52]/30"
-                          : hasSignature
-                            ? "border-amber-400 bg-amber-50/25 hover:border-amber-500 ring-1 ring-amber-300/60"
-                            : "border-slate-200 hover:border-slate-400"
-                      }`}
+                      title={hasSignature ? `Trang ${pageNum} — có khung ký của bạn` : `Trang ${pageNum}`}
                     >
                       {(hasSignature || hasQr) && (
-                        <div className="absolute -top-1.5 -right-1.5 flex gap-0.5 z-10">
+                        <span className="absolute top-0.5 right-0.5 flex flex-col items-end gap-0.5 z-10">
                           {hasSignature && (
-                            <span className="bg-amber-500 text-white rounded-full px-1.5 py-0.2 text-[8px] font-bold shadow-xs flex items-center gap-0.5" title="Trang có khung ký của bạn">
-                              ✍ Của bạn
+                            <span
+                              className="text-white rounded px-1 text-[7px] font-extrabold shadow-xs uppercase leading-tight"
+                              style={{ background: ISO_STEP_COLORS.soan_thao.fg }}
+                              title="Trang có khung ký của bạn"
+                            >
+                              Của bạn
                             </span>
                           )}
                           {hasQr && (
-                            <span className="bg-sky-500 text-white rounded-full px-1.5 py-0.2 text-[8px] font-bold shadow-xs" title="Trang có mã QR">
+                            <span className="bg-sky-500 text-white rounded px-1 text-[7px] font-bold shadow-xs leading-tight" title="Trang có mã QR">
                               QR
                             </span>
                           )}
-                        </div>
+                        </span>
                       )}
-                      {thumbUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={thumbUrl} alt={`Trang ${pageNum}`} className="w-full h-auto object-contain rounded shadow-2xs pointer-events-none" />
-                      ) : (
-                        <div className={`w-full aspect-[1/1.4] bg-slate-50 border border-slate-100 rounded flex items-center justify-center text-xs font-bold text-slate-400 ${placementModal.thumbnailsLoading ? "animate-pulse" : ""}`}>
-                          {pageNum}
-                        </div>
-                      )}
-                      <span className={`text-[10px] font-bold mt-1 ${isCurrent ? "text-amber-700" : "text-slate-500"}`}>
-                        Trang {pageNum}
-                      </span>
-                    </button>
+                    </SignRailThumb>
                   )
                 })}
+              </SignRail>
+            }
+            footer={
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-xs text-slate-500">
+                  {placementModal.fileTotal > 1
+                    ? `File ${placementModal.fileIndex}/${placementModal.fileTotal} — xác nhận để sang file tiếp theo`
+                    : "Xác nhận để đóng dấu chữ ký lên tài liệu"}
+                </p>
+                <SignFooterActions
+                  onCancel={() => setPlacementModal(null)}
+                  onConfirm={() => void handlePlacementConfirm()}
+                  confirmLabel={placementModal.fileIndex < placementModal.fileTotal ? "Xác nhận & file tiếp" : "Xác nhận vị trí"}
+                  confirmIcon={<PenLine size={14} />}
+                />
               </div>
-
-              {/* Main Canvas Area */}
-              <div className="flex-1 overflow-auto flex items-start p-4">
-                <div className="relative inline-block shadow-2xl bg-white select-none mx-auto">
+            }
+          >
+            <SignCanvasArea>
+                <div className="relative w-max shadow-2xl bg-white select-none mx-auto">
                   <canvas ref={pdfCanvasRef} className="block" />
                   {placementModal.previewSignatures
                     .filter((entry) => entry.page === placementModal.currentPage)
@@ -5679,7 +5699,7 @@ export default function IsoDocumentDetailPage() {
                       const sigInnerX = Math.max(0, Math.min(frameW - sigInnerW, placementModal.sigInnerX ?? Math.max(0, (frameW - sigInnerW) / 2)))
                       const sigInnerY = Math.max(0, Math.min(frameH - sigInnerH, placementModal.sigInnerY ?? 4))
 
-                      const isCvAbove = placementModal.chucVuPosition !== "below"
+                      const isCvAbove = true // Chức vụ luôn trên Tên (2026-10-13)
 
                       const snugCv = computeSnugBoxSize(placementModal.signerChucVu, "chuc_vu")
                       const cvInnerW = Math.min(frameW, Math.max(40, placementModal.cvInnerW || Math.min(frameW - 8, snugCv.w)))
@@ -5794,7 +5814,8 @@ export default function IsoDocumentDetailPage() {
                             </div>
                           </Draggable>
 
-                          {/* 2. Khối Chức vụ con (TRÊN Họ tên) */}
+                          {/* 2. Khối Chức vụ con (TRÊN Họ tên) — chỉ khi MẪU cho phép */}
+                          {placementModal.allowChucVu !== false && (
                           <Draggable
                             nodeRef={cvInnerNodeRef as RefObject<HTMLElement>}
                             position={{ x: cvInnerX, y: cvInnerY }}
@@ -5882,8 +5903,10 @@ export default function IsoDocumentDetailPage() {
                               )}
                             </div>
                           </Draggable>
+                          )}
 
-                          {/* 3. Khối Họ tên con (DƯỚI Chức vụ) */}
+                          {/* 3. Khối Họ tên con (DƯỚI Chức vụ) — chỉ khi MẪU cho phép */}
+                          {placementModal.allowName !== false && (
                           <Draggable
                             nodeRef={nameInnerNodeRef as RefObject<HTMLElement>}
                             position={{ x: nameInnerX, y: nameInnerY }}
@@ -5970,6 +5993,7 @@ export default function IsoDocumentDetailPage() {
                               )}
                             </div>
                           </Draggable>
+                          )}
                         </div>
                       )
                     })()
@@ -6092,9 +6116,11 @@ export default function IsoDocumentDetailPage() {
                                 const onMove = (ev: PointerEvent) => {
                                   const dx = ev.clientX - startX
                                   const dy = ev.clientY - startY
-                                  const newW = Math.max(32, Math.min(maxW, startW + dx))
-                                  const newH = Math.max(32, Math.min(maxH, startH + dy))
-                                  setPlacementModal((p) => p ? { ...p, qrW: newW, qrH: newH } : null)
+                                  // QR luôn vuông: kéo theo đường chéo, lấy cạnh theo hướng kéo xa hơn
+                                  const startSize = Math.min(startW, startH)
+                                  const want = startSize + (Math.abs(dx) > Math.abs(dy) ? dx : dy)
+                                  const size = Math.max(32, Math.min(maxW, maxH, want))
+                                  setPlacementModal((p) => p ? { ...p, qrW: size, qrH: size } : null)
                                 }
                                 const onUp = () => {
                                   window.removeEventListener("pointermove", onMove)
@@ -6168,9 +6194,8 @@ export default function IsoDocumentDetailPage() {
                     </Draggable>
                   )}
                 </div>
-              </div>
-            </div>
-          </div>
+            </SignCanvasArea>
+          </SignWorkspaceShell>
         )}
 
         {/* Quản lý phân phối tài liệu */}
@@ -6209,23 +6234,51 @@ export default function IsoDocumentDetailPage() {
             busy={pinLoading}
             confirmDisabled={!pin}
             onConfirm={() => void handlePinConfirm()}
-            onClose={() => { setPinModal(null); setPin(""); setPinError(""); setLyDoTraVe("") }}
+            onClose={() => { setPinModal(null); setPin(""); setPinError("") }}
+          />
+        )}
+
+        {/* Trả về / Từ chối / Không phê duyệt — không PIN, lý do bắt buộc */}
+        {returnModal && (
+          <ModalShell
+            title={returnModal.label}
+            onClose={() => { if (!returnBusy) { setReturnModal(null); setLyDoTraVe(""); setReturnError("") } }}
+            maxWidth="md"
+            footer={
+              <>
+                <button
+                  type="button"
+                  disabled={returnBusy}
+                  onClick={() => { setReturnModal(null); setLyDoTraVe(""); setReturnError("") }}
+                  className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl disabled:opacity-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={returnBusy || !lyDoTraVe.trim()}
+                  onClick={() => void handleReturnConfirm()}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  {returnBusy && <Loader2 size={14} className="animate-spin" />}
+                  {returnModal.label}
+                </button>
+              </>
+            }
           >
-            {(pinModal.action === "tra_ve" || pinModal.action === "khong_xem_xet" || pinModal.action === "tu_choi_phe_duyet" || pinModal.action === "tra_ve_nhap") && (
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  {pinModal.action === "khong_xem_xet" ? "Lý do từ chối xem xét" : pinModal.action === "tu_choi_phe_duyet" ? "Lý do không phê duyệt" : "Lý do trả về"}
-                </label>
-                <textarea
-                  value={lyDoTraVe}
-                  onChange={(e) => setLyDoTraVe(e.target.value)}
-                  rows={3}
-                  placeholder="Nhập lý do..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 resize-none"
-                />
-              </div>
-            )}
-          </PinDialog>
+            <label className="text-xs font-bold text-slate-600 block mb-1.5">
+              {returnModal.action === "khong_xem_xet" ? "Lý do từ chối xem xét" : returnModal.action === "tu_choi_phe_duyet" ? "Lý do không phê duyệt" : "Lý do trả về"} <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={lyDoTraVe}
+              onChange={(e) => { setLyDoTraVe(e.target.value); setReturnError("") }}
+              rows={4}
+              autoFocus
+              placeholder="Nhập lý do để người soạn thảo biết cần sửa gì..."
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 resize-none"
+            />
+            {returnError && <p className="mt-2 text-xs font-semibold text-red-600">{returnError}</p>}
+          </ModalShell>
         )}
       </div>
 

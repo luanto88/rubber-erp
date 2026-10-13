@@ -189,7 +189,9 @@ export function computeDefaultSubLayout(
 ): { sig: LayoutRect; name: LayoutRect | null; chuc_vu: LayoutRect | null; prefix: LayoutRect | null } {
   const { withName, withChucVu } = opts
   const withPrefix = !!opts.withPrefix
-  const chucVuPosition = opts.chucVuPosition ?? "above"
+  // Chức vụ LUÔN nằm trên Tên (chốt 2026-10-13) — bỏ qua tham số/giá trị "below" cũ.
+  void opts.chucVuPosition
+  const chucVuPosition: "above" | "below" = "above"
 
   const prefixH = withPrefix ? box.height * PREFIX_RATIO : 0
   const innerH = box.height - prefixH
@@ -265,8 +267,7 @@ export function sanitizeSignerSubLayout(
   const showName = allowName && raw.show_name !== false
   const showChucVu = allowChucVu && raw.show_chuc_vu !== false
   const showPrefix = allowPrefix && raw.show_prefix !== false
-  const chucVuPosition: "above" | "below" =
-    raw.chuc_vu_position === "below" || box.chuc_vu_position === "below" ? "below" : "above"
+  const chucVuPosition: "above" | "below" = "above"
 
   const fallback = computeDefaultSubLayout(box, {
     withName: showName,
@@ -333,8 +334,7 @@ export function resolveEffectiveSubLayout(
     const showName = allowName && stored.show_name !== false
     const showChucVu = allowChucVu && stored.show_chuc_vu !== false
     const showPrefix = allowPrefix && stored.show_prefix !== false
-    const chucVuPosition: "above" | "below" =
-      stored.chuc_vu_position || box.chuc_vu_position || "above"
+    const chucVuPosition: "above" | "below" = "above"
     return {
       sig: clampRectToBox(stored.sig, box),
       name: showName && stored.name ? clampRectToBox(stored.name, box) : null,
@@ -347,7 +347,7 @@ export function resolveEffectiveSubLayout(
     }
   }
 
-  const chucVuPosition: "above" | "below" = box.chuc_vu_position || "above"
+  const chucVuPosition: "above" | "below" = "above"
   const fallback = computeDefaultSubLayout(box, {
     withName: allowName,
     withChucVu: allowChucVu,
@@ -617,3 +617,13 @@ export function findRoleBoxForStep(
     || null
 }
 
+
+/**
+ * QR luôn VUÔNG (2026-10-13): khung lưu cũ có thể là hình chữ nhật (người dùng kéo méo) —
+ * lấy cạnh ngắn, canh giữa trong khung, để QR in ra không bị kéo dãn.
+ */
+export function squareRect<T extends { x: number; y: number; width: number; height: number }>(r: T): T {
+  const side = Math.min(r.width, r.height)
+  if (!(side > 0)) return r
+  return { ...r, x: r.x + (r.width - side) / 2, y: r.y + (r.height - side) / 2, width: side, height: side }
+}

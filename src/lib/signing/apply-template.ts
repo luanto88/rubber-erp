@@ -20,6 +20,7 @@ import {
   resolveEffectiveNoteLayout,
   resolveEffectiveQrRect,
   resolveEffectiveSubLayout,
+  squareRect,
   type TemplateAnchorBox,
   type TemplateBoxesPlacement,
   type TemplateNoteBox,
@@ -516,7 +517,7 @@ export async function stampPdfWithTemplate(params: {
         // Người soạn thảo quy định KHUNG + neo trang của QR trong mẫu; người ký ĐẦU TIÊN được
         // xê dịch QR bên trong khung đó (`box.layout`), các lượt ký sau dùng lại đúng vị trí ấy.
         for (const box of params.qrEntry.boxes) {
-          const rect = resolveEffectiveQrRect(box)
+          const rect = squareRect(resolveEffectiveQrRect(box))
           for (const pageNo of resolveAnchorPages(box, pageCount)) {
             pages[pageNo - 1].drawImage(qrImage, rect)
           }

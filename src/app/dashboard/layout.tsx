@@ -162,32 +162,13 @@ const NAV: NavItem[] = [
   { key: "/dashboard/settings", label: "Cài đặt", icon: Settings, hiddenForRoles: ["customer"] },
 ]
 
-/**
- * Đích điều hướng khi xác định CHẮC CHẮN người dùng chưa đăng nhập.
- *
- * Mặc định là `/login`. Ngoại lệ duy nhất: QR in trên tài liệu ISO trỏ thẳng vào
- * `/dashboard/iso/documents/{id}` — đường dẫn này đã được IN RA GIẤY hàng trăm bản nên không thể
- * đổi. Người ngoài (đánh giá viên ISO, khách) quét QR mà bị đá về `/login` thì coi như QR vô dụng,
- * nên chuyển họ sang trang tra cứu công khai `/iso-doc/{id}`. Người ĐÃ đăng nhập không đi qua đây,
- * vẫn vào trang dashboard đầy đủ như cũ.
- *
- * Đọc pathname tại thời điểm gọi (không phải từ closure) vì hàm này được dùng cả trong interval
- * và listener focus/visibility sống lâu hơn một lần render.
- */
-const ISO_DOC_ROUTE_RE = /^\/dashboard\/iso\/documents\/([0-9a-fA-F-]{36})\/?$/
-
-function isoPublicFallbackFor(pathname: string): string | null {
-  const matched = pathname.match(ISO_DOC_ROUTE_RE)
-  return matched ? `/iso-doc/${matched[1]}` : null
-}
-
+/** Đích điều hướng khi xác định CHẮC CHẮN người dùng chưa đăng nhập. */
 function resolveUnauthenticatedRedirect(): string {
   if (typeof window === "undefined") return "/login"
-  const path = window.location.pathname
-  // Giữ next=<path> để sau khi đăng nhập quay đúng lại route đang xem (vd hồ sơ thực hiện ISO
-  // quét từ QR) — trước đây fallback cứng "/login" làm mất ngữ cảnh, người dùng phải tự tìm lại.
-  // Route documents/[id] vẫn ưu tiên đưa về trang public /iso-doc/[id] như cũ.
-  return isoPublicFallbackFor(path) ?? `/login?next=${encodeURIComponent(path)}`
+  // 2026-10-13: tài liệu ISO KHÔNG còn công khai qua QR — mọi route dashboard (kể cả QR đã in
+  // và link Telegram/email) đều sang /login rồi quay đúng lại sau khi đăng nhập. Giữ cả query.
+  const path = window.location.pathname + window.location.search
+  return `/login?next=${encodeURIComponent(path)}`
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -588,7 +569,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (isPublicStorageLookup) return
     if (authResolved === "unauthenticated") {
-      window.location.replace(isoPublicFallbackFor(pathname) ?? `/login?next=${encodeURIComponent(pathname)}`)
+      window.location.replace(resolveUnauthenticatedRedirect())
     }
   }, [isPublicStorageLookup, authResolved, pathname])
 

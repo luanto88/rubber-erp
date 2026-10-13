@@ -727,3 +727,7 @@ sửa/xoá như nháp (rule xoá cũ giữ nguyên: chỉ draft + người tạo
   modal + lý do; banner amber khi đang nháp và dòng log mới nhất là `thu_hoi`.
 - Đã kiểm bằng script gọi route thật (tài khoản không phải người tạo → 403; người tạo trên bản đã
   hiệu lực → 409). CHƯA test tay luồng thu hồi thành công.
+
+## Trả về không PIN (2026-10-13)
+
+Từ chối xem xét / Không phê duyệt / Trả về Nháp của tài liệu ISO KHÔNG còn hỏi PIN — chỉ hộp xác nhận với lý do BẮT BUỘC (`returnModal`). QR tài liệu ISO không còn công khai: chưa đăng nhập ⇒ `/login?next=`. Chi tiết: rule 05 mục "Sửa sau test GĐ4 + GĐ5".

@@ -46,6 +46,7 @@ import {
   qrLayoutAlreadySet,
   resolveAnchorPages,
   resolveEffectiveQrRect,
+  squareRect,
 } from "@/lib/signing/template-layout"
 
 const BUCKET = "iso-documents"
@@ -507,7 +508,7 @@ async function stampPdfStep(
         const y = qrBox?.y ?? height - qrSize - margin
         const w = qrBox?.width ?? qrSize
         const h = qrBox?.height ?? qrSize
-        p.drawImage(qrImage, { x, y, width: w, height: h })
+        p.drawImage(qrImage, squareRect({ x, y, width: w, height: h }))
       }
     } catch { /* skip */ }
   }
@@ -1308,6 +1309,9 @@ export async function POST(req: NextRequest) {
 
     // ── tra_ve ────────────────────────────────────────────────────────────────
     if (action === "tra_ve") {
+      if (!String(ly_do ?? "").trim()) {
+        return NextResponse.json({ error: "Vui lòng nhập lý do trả về" }, { status: 400 })
+      }
       if (d.trang_thai !== "cho_ky_phong_ban" && d.trang_thai !== "cho_phe_duyet") {
         return NextResponse.json(
           { error: "Chỉ có thể trả về khi văn bản đang chờ ký" },
@@ -1321,7 +1325,12 @@ export async function POST(req: NextRequest) {
       let canReturn = isAdmin || d.phe_duyet_user_id === userId
       if (!canReturn && d.trang_thai === "cho_ky_phong_ban") {
         const step = (d.thu_tu_ky_json || [])[d.buoc_hien_tai]
-        if (step?.type === "phong_ban") {
+        // Bước ký đích danh (2026-09-05): chỉ đúng người được chỉ định trả về được,
+        // mirror canSignStep — người cùng phòng ban không còn quyền.
+        const designated = step?.user_id || step?.mat_recipient_user_id
+        if (designated) {
+          canReturn = designated === userId
+        } else if (step?.type === "phong_ban") {
           const deptCode = await getUserDeptCode(profile)
           canReturn = deptCode === step.phong_ban_code
         } else if (step?.type === "ca_nhan") {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { squareRect } from "@/lib/signing/template-layout"
 import { createClient } from "@supabase/supabase-js"
 import { PDFDocument, PDFFont, PDFPage, rgb } from "pdf-lib"
 import { jwtVerify } from "jose"
@@ -1382,14 +1383,14 @@ export async function POST(req: NextRequest) {
       typeof soanPlacement.qrWidth === "number" &&
       typeof soanPlacement.qrHeight === "number"
     )
-      ? {
+      ? squareRect({
           x: soanPlacement.qrX,
           y: soanPlacement.qrY,
           width: soanPlacement.qrWidth,
           height: soanPlacement.qrHeight,
           page: soanPlacement.qrPage || 1,
           allPages: Boolean(soanPlacement.qrAllPages),
-        }
+        })
       : null
 
     const [pSoan, pXem, pPhe] = await Promise.all([
@@ -1422,6 +1423,8 @@ export async function POST(req: NextRequest) {
     }
 
     const sigImgNullFor: string[] = []
+    // Vị trí ký nằm ngoài số trang PDF (mẫu cũ / file đổi) — báo ra thay vì bỏ qua im lặng.
+    const pageOutOfRangeFor: string[] = []
     const sigEmbedErrors: Array<{ userId: string; error: string }> = []
     let originalPages: PDFDocument | null = null
     let metaResult: MetaFillResult = { filled: [], notFound: [], mismatched: [], footerFilledPages: [] }
@@ -1571,7 +1574,10 @@ export async function POST(req: NextRequest) {
             for (const { signerUserId, placement } of allPlacements) {
               if (!signerUserId || !placement) continue
               const pageIndex = placement.page - 1
-              if (pageIndex < 0 || pageIndex >= originalPages.getPageCount()) continue
+              if (pageIndex < 0 || pageIndex >= originalPages.getPageCount()) {
+                pageOutOfRangeFor.push(signerUserId)
+                continue
+              }
 
               const sigImg = await getSignatureImage(factoryId, signerUserId)
               if (!sigImg) {
@@ -1809,7 +1815,10 @@ export async function POST(req: NextRequest) {
       for (const { signerUserId, placement } of allPlacements) {
         if (!signerUserId || !placement) continue
         const pageIndex = placement.page - 1
-        if (pageIndex < 0 || pageIndex >= originalPages.getPageCount()) continue
+        if (pageIndex < 0 || pageIndex >= originalPages.getPageCount()) {
+          pageOutOfRangeFor.push(signerUserId)
+          continue
+        }
 
         const sigImg = await getSignatureImage(factoryId, signerUserId)
         if (!sigImg) {
@@ -2189,6 +2198,8 @@ export async function POST(req: NextRequest) {
         signerNameResolved,
         signerImagePath,
         sigImgLoadFailed: sigImgNullFor,
+        sigImgMissingNames: [...new Set(sigImgNullFor)].map((id) => signerNames.get(id) || id),
+        pageOutOfRangeNames: [...new Set(pageOutOfRangeFor)].map((id) => signerNames.get(id) || id),
         sigEmbedErrors,
         metaFillError: metaResult.error ?? null,
       },

@@ -39,8 +39,6 @@ import {
   UserCog,
   Eye,
   EyeOff,
-  ChevronLeft,
-  ChevronRight,
   PenLine,
   Pencil,
   ShieldCheck,
@@ -92,6 +90,16 @@ import { StatusSummaryBar } from "@/app/dashboard/_components/doc-ui/inspector-c
 import { computeAutoFitFontSize } from "@/lib/signing/text-fit"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { PinDialog } from "@/app/dashboard/_components/doc-ui/pin-dialog"
+import {
+  SignCanvasArea,
+  SignFooterActions,
+  SignPageNav,
+  SignRail,
+  SignRailThumb,
+  SignToolbarButton,
+  SignWorkspaceShell,
+} from "@/app/dashboard/_components/doc-ui/sign-workspace-shell"
+import { ensurePdfjsWorker } from "@/app/dashboard/_components/doc-ui/pdfjs-worker"
 
 const STORAGE_BUCKET = "iso-documents"
 
@@ -528,13 +536,7 @@ function SignPlacementModal({
 
     const loadPdf = async () => {
       const pdfjsLib = await import("pdfjs-dist")
-      if ((globalThis as Record<string, unknown>).pdfjsWorker) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = ""
-      } else {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-          "pdfjs-dist/build/pdf.worker.mjs", import.meta.url
-        ).toString()
-      }
+      ensurePdfjsWorker(pdfjsLib)
 
       const task = pdfjsLib.getDocument(sourceFileUrl)
       const pdf = await task.promise
@@ -888,30 +890,88 @@ function SignPlacementModal({
   // mirror layout placementModal của iso/documents/[id]/page.tsx (fixed inset-0 flex-col,
   // vùng canvas flex-1 overflow-auto căn giữa) thay vì hộp thoại max-w-3xl/55vh cũ vốn
   // làm trang A4 phóng to tràn cả 2 chiều, sinh 2 thanh cuộn khó thao tác.
-  return (
-    <div className="fixed inset-0 bg-[#0f172a]/70 z-50 flex flex-col">
-      <div
-        className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 shrink-0"
-        style={{ background: "linear-gradient(135deg,#2f5d52,#1c3a32)" }}
-      >
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold text-white/60 uppercase tracking-wide">Ký số văn bản</p>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-extrabold text-white text-base truncate">{stepLabel}</h3>
-            {showCanvas && (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-white/15 border border-white/25 text-[11px] font-bold text-white">
-                <span
-                  className="w-2.5 h-2.5 rounded-sm shrink-0"
-                  style={{ background: myColor.fg, boxShadow: `0 0 0 2px ${myColor.fg}55` }}
-                />
-                {stepLabels[signStepKey] || "Khung của bạn"}
+  // Rail thumbnail các trang (Doc-UI GĐ5 — vỏ dùng chung) — khung của người đang ký sáng đúng màu vai trò
+  const rail = showCanvas && numPages > 0 ? (
+    <SignRail heading={`${numPages} trang`}>
+      {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => {
+        const boxes = previewByPage[p] || []
+        const hasMine = boxes.some((b) => b.tier === "mine")
+        const hasDone = boxes.some((b) => b.tier === "done")
+        return (
+          <SignRailThumb
+            key={p}
+            page={p}
+            src={thumbs[p]}
+            loading={thumbsLoading}
+            selected={p === currentPage}
+            accentColor={hasMine ? myColor.fg : null}
+            done={hasDone}
+            onClick={() => goToPage(p)}
+            title={hasMine ? `Trang ${p} — có khung ký của bạn` : `Trang ${p}`}
+          >
+            {/* Khung mẫu thu nhỏ: "của tôi" sáng đúng màu vai trò, khung khác mờ */}
+            {boxes.map((b, i) => (
+              <span
+                key={`${b.key}-${i}`}
+                className="absolute pointer-events-none rounded-[2px]"
+                style={{
+                  left: `${b.pct.x}%`,
+                  top: `${b.pct.y}%`,
+                  width: `${b.pct.w}%`,
+                  height: `${b.pct.h}%`,
+                  border:
+                    b.tier === "mine"
+                      ? `1.5px solid ${b.color.fg}`
+                      : b.tier === "done"
+                        ? `1px solid ${b.color.fg}`
+                        : `1px dashed ${b.color.fg}`,
+                  background: b.tier === "mine" ? b.color.bg : "transparent",
+                  boxShadow: b.tier === "mine" ? `0 0 0 1.5px ${b.color.fg}, 0 0 6px ${b.color.fg}` : undefined,
+                  opacity: b.tier === "mine" ? 1 : b.tier === "done" ? 0.55 : 0.35,
+                }}
+              />
+            ))}
+            {hasMine && (
+              <span
+                className="absolute top-0.5 right-0.5 px-1 rounded text-[7px] font-extrabold text-white shadow-2xs leading-tight uppercase"
+                style={{ background: myColor.fg }}
+                title="Trang có khung ký của bạn"
+              >
+                Của bạn
               </span>
             )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {hasDone && !hasMine && (
+              <span
+                className="absolute top-0.5 right-0.5 w-3.5 h-3.5 rounded-full bg-brand-600 text-white flex items-center justify-center text-[8px] font-bold shadow-2xs"
+                title="Đã có chữ ký hoàn thành"
+              >
+                ✓
+              </span>
+            )}
+          </SignRailThumb>
+        )
+      })}
+    </SignRail>
+  ) : null
+
+  return (
+    <SignWorkspaceShell
+      eyebrow="Ký số văn bản"
+      title={stepLabel}
+      badges={showCanvas ? (
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-white/15 border border-white/25 text-[11px] font-bold text-white">
+          <span
+            className="w-2.5 h-2.5 rounded-sm shrink-0"
+            style={{ background: myColor.fg, boxShadow: `0 0 0 2px ${myColor.fg}55` }}
+          />
+          {stepLabels[signStepKey] || "Khung của bạn"}
+        </span>
+      ) : null}
+      toolbar={
+        <>
           {showCanvas && !lockedEntry && (
-            <button
+            <SignToolbarButton
+              title="Nhân bản chữ ký"
               onClick={() => {
                 const offset = 30 * (extraSigBoxes.length + 1)
                 setExtraSigBoxes((prev) => [
@@ -936,52 +996,28 @@ function SignPlacementModal({
                   },
                 ])
               }}
-              className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-white transition-all font-bold text-xs flex items-center gap-1"
-              title="Nhân bản chữ ký"
             >
               <Plus size={14} /> <span className="hidden sm:inline">Nhân bản chữ ký</span>
-            </button>
+            </SignToolbarButton>
           )}
           {showCanvas && previewBoxes.some((b) => b.tier !== "mine") && (
-            <button
+            <SignToolbarButton
               onClick={() => setShowOtherBoxes((v) => !v)}
-              className={`px-2.5 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition-all ${
-                showOtherBoxes
-                  ? "bg-white/20 border-white/40 text-white"
-                  : "bg-white/5 border-white/20 text-white/60"
-              }`}
+              active={showOtherBoxes}
               title="Hiện/ẩn khung ký của các bước khác trên trang đang xem"
             >
               {showOtherBoxes ? <Eye size={13} /> : <EyeOff size={13} />}
               <span className="hidden sm:inline">Khung bước khác</span>
-            </button>
+            </SignToolbarButton>
           )}
-          {showCanvas && numPages > 1 && (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => goToPage(currentPage - 1)}
-                disabled={currentPage <= 1}
-                className="p-1.5 rounded-lg bg-white/10 border border-white/25 text-white hover:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <span className="text-xs font-bold text-white/90 whitespace-nowrap">{currentPage} / {numPages}</span>
-              <button
-                onClick={() => goToPage(currentPage + 1)}
-                disabled={currentPage >= numPages}
-                className="p-1.5 rounded-lg bg-white/10 border border-white/25 text-white hover:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed"
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          )}
-          <button onClick={onClose} className="p-1.5 rounded-lg text-white hover:bg-white/15"><X size={16} /></button>
-        </div>
-      </div>
-
-      {/* Dải hướng dẫn + chú giải màu — thay đoạn chữ xám dài dưới tiêu đề cũ */}
-      <div className="bg-mint-50 border-b border-mint-100 px-4 sm:px-5 py-2 shrink-0 flex items-center justify-between gap-4 flex-wrap">
-        <p className="text-xs text-[#1f6a58]">
+          {showCanvas && <SignPageNav page={currentPage} total={numPages} onChange={goToPage} />}
+        </>
+      }
+      onClose={onClose}
+      closeDisabled={acting}
+      notice={
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+        <p className="text-xs">
           {!showCanvas
             ? "Tag chữ ký trong file Office sẽ được thay tự động khi ký"
             : lockedEntry
@@ -1005,101 +1041,118 @@ function SignPlacementModal({
             </span>
           </div>
         )}
-      </div>
-
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-        {/* Rail thumbnail các trang — mirror màn cài đặt vị trí; khung của người đang ký sáng lên */}
-        {showCanvas && numPages > 0 && (
-          <div className="flex lg:flex-col shrink-0 gap-2 overflow-x-auto lg:overflow-y-auto overscroll-x-contain w-full lg:w-28 h-[92px] lg:h-auto px-2 py-2 bg-white border-b lg:border-b-0 lg:border-r border-slate-200">
-            <div className="hidden lg:block text-[10px] uppercase tracking-wide text-slate-400 font-bold text-center">
-              {numPages} trang
-            </div>
-            {Array.from({ length: numPages }, (_, i) => i + 1).map((p) => {
-              const boxes = previewByPage[p] || []
-              const hasMine = boxes.some((b) => b.tier === "mine")
-              const hasDone = boxes.some((b) => b.tier === "done")
-              const isSelected = p === currentPage
-              return (
-                <button
-                  key={p}
-                  onClick={() => goToPage(p)}
-                  title={hasMine ? `Trang ${p} — có khung ký của bạn` : `Trang ${p}`}
-                  className={`relative shrink-0 w-[52px] h-[72px] lg:w-20 lg:h-28 rounded-md overflow-hidden border-2 bg-white mx-auto transition-all ${
-                    isSelected
-                      ? "ring-2 ring-forest-600 border-[#2f5d52] shadow-md"
-                      : hasMine
-                        ? "ring-2 ring-amber-400/80 border-amber-500 shadow-xs"
-                        : hasDone
-                          ? "border-emerald-300"
-                          : "border-dashed border-slate-300 hover:border-slate-400"
-                  }`}
-                >
-                  {thumbs[p] ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumbs[p]} alt={`Trang ${p}`} className="w-full h-full object-contain" />
-                  ) : (
-                    <div className={`w-full h-full flex items-center justify-center bg-slate-100 text-[10px] font-bold text-slate-400 ${thumbsLoading ? "animate-pulse" : ""}`}>
-                      {p}
-                    </div>
-                  )}
-
-                  {/* Khung mẫu thu nhỏ: "của tôi" sáng đúng màu vai trò, khung khác mờ */}
-                  {boxes.map((b, i) => (
-                    <span
-                      key={`${b.key}-${i}`}
-                      className="absolute pointer-events-none rounded-[2px]"
-                      style={{
-                        left: `${b.pct.x}%`,
-                        top: `${b.pct.y}%`,
-                        width: `${b.pct.w}%`,
-                        height: `${b.pct.h}%`,
-                        border:
-                          b.tier === "mine"
-                            ? `1.5px solid ${b.color.fg}`
-                            : b.tier === "done"
-                              ? `1px solid ${b.color.fg}`
-                              : `1px dashed ${b.color.fg}`,
-                        background: b.tier === "mine" ? b.color.bg : "transparent",
-                        boxShadow: b.tier === "mine" ? `0 0 0 1.5px ${b.color.fg}, 0 0 6px ${b.color.fg}` : undefined,
-                        opacity: b.tier === "mine" ? 1 : b.tier === "done" ? 0.55 : 0.35,
-                      }}
+        </div>
+      }
+      rail={rail}
+      footer={
+        <div className="space-y-3">
+          {showSignAsPicker && (
+            <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
+              <label className="text-xs font-bold text-amber-800 block mb-1.5">Ký thay (tùy chọn)</label>
+              <div className="flex flex-wrap gap-3">
+                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="sign-as"
+                    checked={signAs === "none"}
+                    onChange={() => setSignAs("none")}
+                  />
+                  Ký trực tiếp
+                </label>
+                {SIGN_AS_OPTIONS.map((opt) => (
+                  <label key={opt} className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="sign-as"
+                      checked={signAs === opt}
+                      onChange={() => setSignAs(opt)}
                     />
-                  ))}
+                    {SIGN_AS_LABEL[opt]}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
 
-                  {/* Badges trạng thái */}
-                  {hasMine && (
-                    <span
-                      className="absolute top-0.5 right-0.5 px-1 py-0.2 rounded text-[7px] font-extrabold bg-amber-500 text-white shadow-2xs leading-tight uppercase"
-                      title="Trang có khung ký của bạn"
-                    >
-                      Của bạn
-                    </span>
-                  )}
-                  {hasDone && !hasMine && (
-                    <span
-                      className="absolute top-0.5 right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[8px] font-bold shadow-2xs"
-                      title="Đã có chữ ký hoàn thành"
-                    >
-                      ✓
-                    </span>
-                  )}
-                  <span className="absolute bottom-0 right-0 text-[9px] font-bold text-slate-500 bg-white/85 px-1 rounded-tl">
-                    {p}
-                  </span>
+          {/* Ô ý kiến chỉ đạo — chỉ hiện khi người soạn thảo CÓ đặt khung "Ghi chú" trong mẫu
+              (quy tắc 2 tầng: mẫu không đặt khung thì lãnh đạo không có ô này, và cũng không có
+              chữ ký nháy). Bắt buộc quyết định rõ: nhập nội dung, hoặc tắt hẳn. */}
+          {lockedGhiChuBox && (
+            <div className={`rounded-xl border px-3 py-2.5 ${ghiChuOff ? "border-slate-200 bg-slate-50" : "border-emerald-200 bg-emerald-50/60"}`}>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  Ý kiến chỉ đạo <span className="text-red-500">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => { setGhiChuOff((v) => !v); setConfirmError("") }}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-lg border ${ghiChuOff ? "bg-white border-emerald-300 text-emerald-800" : "bg-white border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+                >
+                  {ghiChuOff ? "Bật lại khung Ghi chú" : "Không ghi ý kiến"}
                 </button>
-              )
-            })}
-          </div>
-        )}
+              </div>
+              {ghiChuOff ? (
+                <p className="text-[11px] text-slate-500 italic">
+                  Khung Ghi chú sẽ bị bỏ trống — không đóng dấu ý kiến lẫn chữ ký nháy lên văn bản.
+                </p>
+              ) : (
+                <>
+                  <textarea
+                    value={ghiChuText}
+                    onChange={(e) => { setGhiChuText(e.target.value); setConfirmError("") }}
+                    rows={2}
+                    placeholder="VD: Phòng TCHC phối hợp Nhà máy chế biến tham mưu thực hiện, hạn chót 15/9/2026"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 resize-y"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Nội dung sẽ được đóng vào khung Ghi chú trên văn bản, kèm chữ ký nháy của bạn ở góc trên-phải khung.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
 
-      {/*
-        KHÔNG dùng `flex justify-center` (hay `items-center` với flex-col) ở vùng cuộn này.
-        Canvas render ở scale cố định 1.5 ⇒ trên mobile nó rộng hơn container. Với flex centering,
-        phần tràn ra ở phía ĐẦU (bên trái) nằm ngoài vùng cuộn được — người dùng chỉ kéo được sang
-        phải, mất hẳn mép trái tài liệu. Dùng block + `w-max mx-auto`: khi hẹp hơn thì margin auto
-        căn giữa như cũ, khi rộng hơn thì margin auto tự về 0 nên cuộn được đủ cả hai chiều.
-      */}
-      <div className="flex-1 min-h-0 overflow-auto p-4 bg-app-bg">
+          {confirmError && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              <AlertTriangle size={13} className="shrink-0 mt-0.5" /> <span>{confirmError}</span>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 justify-between flex-wrap">
+            <div className="flex items-center gap-2">
+              {/* Nhảy thẳng tới trang có khung của mình — tài liệu nhiều trang không phải lật tay */}
+              {showCanvas && myFirstPage != null && myFirstPage !== currentPage ? (
+                <button
+                  type="button"
+                  onClick={() => goToPage(myFirstPage)}
+                  className="text-xs font-bold px-3 py-2 rounded-xl border bg-white hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+                  style={{ color: myColor.fg, borderColor: `${myColor.fg}66` }}
+                >
+                  Đi đến vị trí chưa ký (trang {myFirstPage})
+                </button>
+              ) : null}
+              {showCanvas && myBoxes.length > 0 && (
+                <span className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
+                  {myPages.includes(currentPage) ? (
+                    <span className="text-emerald-700 font-bold">✓ Đang ở trang ký ({myBoxes.filter((b) => b.page === currentPage).length}/{myBoxes.length} khung)</span>
+                  ) : (
+                    <span className="text-amber-700 font-bold">⚠ Chưa xem khung ký ({myBoxes.length} khung trên trang {myPages.join(", ")})</span>
+                  )}
+                </span>
+              )}
+            </div>
+            <SignFooterActions
+              onCancel={onClose}
+              onConfirm={() => void handleConfirm()}
+              confirmLabel={acting ? "Đang xử lý..." : "Xác nhận ký"}
+              confirmIcon={<PenLine size={14} />}
+              busy={acting}
+            />
+          </div>
+        </div>
+      }
+    >
+      <SignCanvasArea>
         {showCanvas ? (
           <div ref={containerRef} className="relative w-max mx-auto shadow-2xl bg-white select-none">
             <canvas ref={canvasRef} className="block" />
@@ -1363,8 +1416,8 @@ function SignPlacementModal({
                           <Resizable
                             size={{ width: qrState.w, height: qrState.h }}
                             onResizeStop={(_, __, ___, delta) =>
-                              setQrState((p) => ({ ...p, w: p.w + delta.width, h: p.h + delta.height }))}
-                            enable={{ right: true, bottom: true, bottomRight: true }}
+                              setQrState((p) => { const n = Math.min(p.w + delta.width, p.h + delta.height); return { ...p, w: n, h: n } })}
+                            enable={{ bottomRight: true }}
                             lockAspectRatio
                             minWidth={30} minHeight={30}
                             handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn mã QR" /> }}
@@ -1818,8 +1871,8 @@ function SignPlacementModal({
                               <Resizable
                                 size={{ width: q.w, height: q.h }}
                                 onResizeStop={(_, __, ___, delta) =>
-                                  setQrRectFromCanvas(q.x, q.y, q.w + delta.width, q.h + delta.height)}
-                                enable={{ right: true, bottom: true, bottomRight: true }}
+                                  { const n = Math.min(q.w + delta.width, q.h + delta.height); setQrRectFromCanvas(q.x, q.y, n, n) }}
+                                enable={{ bottomRight: true }}
                                 lockAspectRatio
                                 minWidth={20} minHeight={20}
                                 handleComponent={{ bottomRight: <ResizeHandleIcon color="#7c3aed" title="Kéo để co giãn mã QR" /> }}
@@ -1856,118 +1909,8 @@ function SignPlacementModal({
               </div>
             </div>
           )}
-      </div>
-      </div>
-
-      <div className="border-t border-slate-200 bg-white px-4 sm:px-5 py-3.5 space-y-3 shrink-0">
-          {showSignAsPicker && (
-            <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2.5">
-              <label className="text-xs font-bold text-amber-800 block mb-1.5">Ký thay (tùy chọn)</label>
-              <div className="flex flex-wrap gap-3">
-                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="sign-as"
-                    checked={signAs === "none"}
-                    onChange={() => setSignAs("none")}
-                  />
-                  Ký trực tiếp
-                </label>
-                {SIGN_AS_OPTIONS.map((opt) => (
-                  <label key={opt} className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="sign-as"
-                      checked={signAs === opt}
-                      onChange={() => setSignAs(opt)}
-                    />
-                    {SIGN_AS_LABEL[opt]}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Ô ý kiến chỉ đạo — chỉ hiện khi người soạn thảo CÓ đặt khung "Ghi chú" trong mẫu
-              (quy tắc 2 tầng: mẫu không đặt khung thì lãnh đạo không có ô này, và cũng không có
-              chữ ký nháy). Bắt buộc quyết định rõ: nhập nội dung, hoặc tắt hẳn. */}
-          {lockedGhiChuBox && (
-            <div className={`rounded-xl border px-3 py-2.5 ${ghiChuOff ? "border-slate-200 bg-slate-50" : "border-emerald-200 bg-emerald-50/60"}`}>
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <label className="text-xs font-bold text-slate-700">
-                  Ý kiến chỉ đạo <span className="text-red-500">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => { setGhiChuOff((v) => !v); setConfirmError("") }}
-                  className={`text-[11px] font-bold px-2 py-1 rounded-lg border ${ghiChuOff ? "bg-white border-emerald-300 text-emerald-800" : "bg-white border-slate-300 text-slate-500 hover:bg-slate-50"}`}
-                >
-                  {ghiChuOff ? "Bật lại khung Ghi chú" : "Không ghi ý kiến"}
-                </button>
-              </div>
-              {ghiChuOff ? (
-                <p className="text-[11px] text-slate-500 italic">
-                  Khung Ghi chú sẽ bị bỏ trống — không đóng dấu ý kiến lẫn chữ ký nháy lên văn bản.
-                </p>
-              ) : (
-                <>
-                  <textarea
-                    value={ghiChuText}
-                    onChange={(e) => { setGhiChuText(e.target.value); setConfirmError("") }}
-                    rows={2}
-                    placeholder="VD: Phòng TCHC phối hợp Nhà máy chế biến tham mưu thực hiện, hạn chót 15/9/2026"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 resize-y"
-                  />
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Nội dung sẽ được đóng vào khung Ghi chú trên văn bản, kèm chữ ký nháy của bạn ở góc trên-phải khung.
-                  </p>
-                </>
-              )}
-            </div>
-          )}
-
-          {confirmError && (
-            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              <AlertTriangle size={13} className="shrink-0 mt-0.5" /> <span>{confirmError}</span>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 justify-between flex-wrap">
-            <div className="flex items-center gap-2">
-              {/* Nhảy thẳng tới trang có khung của mình — tài liệu nhiều trang không phải lật tay */}
-              {showCanvas && myFirstPage != null && myFirstPage !== currentPage ? (
-                <button
-                  type="button"
-                  onClick={() => goToPage(myFirstPage)}
-                  className="text-xs font-bold px-3 py-2 rounded-xl border bg-white hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
-                  style={{ color: myColor.fg, borderColor: `${myColor.fg}66` }}
-                >
-                  Đi đến vị trí chưa ký (trang {myFirstPage})
-                </button>
-              ) : null}
-              {showCanvas && myBoxes.length > 0 && (
-                <span className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
-                  {myPages.includes(currentPage) ? (
-                    <span className="text-emerald-700 font-bold">✓ Đang ở trang ký ({myBoxes.filter((b) => b.page === currentPage).length}/{myBoxes.length} khung)</span>
-                  ) : (
-                    <span className="text-amber-700 font-bold">⚠ Chưa xem khung ký ({myBoxes.length} khung trên trang {myPages.join(", ")})</span>
-                  )}
-                </span>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer">Hủy</button>
-              <button
-                onClick={handleConfirm}
-                disabled={acting}
-                className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-md cursor-pointer"
-              >
-                <PenLine size={14} /> {acting ? "Đang xử lý..." : "Xác nhận ký"}
-              </button>
-            </div>
-          </div>
-      </div>
-    </div>
+      </SignCanvasArea>
+    </SignWorkspaceShell>
   )
 }
 
@@ -3054,7 +2997,7 @@ export default function DocumentDetailPage() {
             <>
               <button
                 onClick={handleTraVe}
-                disabled={acting}
+                disabled={acting || !traVeLyDo.trim()}
                 className="flex-1 py-2.5 text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl transition-all"
               >
                 {acting ? "Đang xử lý..." : "Trả về"}
@@ -3070,9 +3013,9 @@ export default function DocumentDetailPage() {
           }
         >
             <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do trả về (tùy chọn)</label>
+              <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do trả về <span className="text-red-500">*</span></label>
               <textarea
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 resize-none"
                 rows={3}
                 placeholder="Nhập lý do hoặc yêu cầu chỉnh sửa..."
                 value={traVeLyDo}

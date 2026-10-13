@@ -1227,3 +1227,7 @@ Script tạm (`node --experimental-strip-types` + `module.register` map `@/`→`
 
 ⚠️ Script loại này phải chạy với `cwd` = gốc repo, nếu không `loadSignerNameFont()` trả `null` và
 mọi hàm vẽ text im lặng bỏ qua ⇒ test "pass" giả.
+
+## Trả về: lý do bắt buộc (2026-10-13)
+
+Modal Trả về khoá nút khi lý do rỗng; route `api/documents/sign` action `tra_ve` trả 400 nếu `ly_do` rỗng. Bước ký đích danh (`user_id`/`mat_recipient_user_id`) chỉ đúng người được chỉ định mới trả về được (mirror `canSignStep`). Không cần PIN.

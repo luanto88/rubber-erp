@@ -9,10 +9,10 @@ import { randomUUID } from "crypto"
 import { convertOfficeUrlToPdfDocumentWithRetry } from "@/app/api/sign/_lib/cloud-convert"
 import { mintSignedUrlForPath } from "@/lib/secure-file-url"
 import { SIGN_AS_OPTIONS, type SignAsType, type ThuTuKyStep, stepSignerUserId, type IsoFormInstanceStatus } from "@/app/dashboard/iso/_components/iso-types"
-import { clampRectToBox, findRoleBoxForStep } from "@/lib/signing/template-layout"
+import { clampRectToBox, findRoleBoxForStep, squareRect } from "@/lib/signing/template-layout"
 import { getSignatureImage } from "@/lib/signing/signature-image"
 import { computeIntegrityHash } from "@/lib/signing/hash"
-import { sealPdfWithVerifyLink, sealPdfWithVerifyLinks, type VerifyLinkGroup, type VerifyLinkTarget } from "@/lib/signing/verify-link"
+import { sealPdfWithVerifyLinks, type VerifyLinkGroup, type VerifyLinkTarget } from "@/lib/signing/verify-link"
 import {
   loadSignerNameFont,
   drawSignatureImage,
@@ -177,6 +177,7 @@ async function stampPdf(
       const qrImage = await pdfDoc.embedPng(qrBuffer)
 
       if (qrPlacementOverride) {
+        qrPlacementOverride = squareRect(qrPlacementOverride)
         if (qrPlacementOverride.allPages) {
           // Stamp QR ở vị trí người dùng đặt trên TẤT CẢ trang nếu được cấu hình
           for (const page of pdfDoc.getPages()) {

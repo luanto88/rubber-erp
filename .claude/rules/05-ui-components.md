@@ -394,3 +394,30 @@ Bố cục theo mẫu `previews/enterprise-iso-vanban-unified-preview.html`, **m
   về/từ chối), Hồ sơ thực hiện (bước 1 `SignPlacementModal`), ký hàng loạt ISO
   (`iso-batch-sign-modal.tsx`, `zIndexClassName="z-[60]"` vì nằm trên overlay z-50).
 - Code mới cần nhập PIN ở 2 module này dùng `PinDialog`, không tự dựng ô PIN.
+
+### Sửa sau test GĐ4 + GĐ5 vỏ màn ký chung (2026-10-13)
+
+- **Trả về / Từ chối / Không phê duyệt KHÔNG cần PIN, lý do BẮT BUỘC** ở cả 3 nơi (ISO tài liệu dùng
+  `ModalShell` riêng `returnModal` + `handleReturnConfirm`, Văn bản server trả 400 khi `ly_do` rỗng,
+  Hồ sơ thực hiện vốn đã bắt buộc). `doTransition(action, null, ...)` bỏ qua ký Office khi token null.
+- **Chức vụ LUÔN trên Tên**: `template-layout.ts` ép `chucVuPosition = "above"` (bỏ qua dữ liệu
+  `below` cũ); đã gỡ công tắc thứ tự ở `ky/mau-vi-tri` và modal ISO tài liệu. Mẫu tắt Tên/Chức vụ ⇒
+  khối mất hẳn trên màn ký (ISO tài liệu thêm `allowName/allowChucVu` vào `placementModal`).
+- **QR luôn vuông**: UI khoá tỉ lệ (`lockAspectRatio` + chỉ góc chéo; mau-vi-tri tính theo px trang),
+  server vẽ qua `squareRect()` (template-layout.ts) — khung cũ hình chữ nhật cũng in vuông, canh giữa.
+- **Đóng dấu PDF trước khi đổi trạng thái** (ISO `gui_xem_xet`/`gui_phe_duyet`/`gui_lai_phe_duyet`):
+  `generateSignedPdfs()` lỗi ⇒ dừng, không chuyển "chờ xem xét". Nguyên nhân bug NMCB-QT77: lượt ký của
+  Nguyễn Hữu Thọ ghi log `gui_xem_xet` nhưng KHÔNG có dòng `generate_pdf` (ảnh chữ ký vẫn đúng chỗ).
+  generate-pdf trả thêm `sigImgMissingNames` / `pageOutOfRangeNames` (trước đây bỏ qua im lặng).
+- **Khung xem tài liệu ISO** có tab cho từng hồ sơ con (`viewVariant = "child:<id>"`, endpoint theo id con).
+- **Không còn trang công khai khi chưa đăng nhập**: `dashboard/layout.tsx` luôn `/login?next=<path+query>`
+  (bỏ `isoPublicFallbackFor`). QR đã in vẫn chạy (URL không đổi) nhưng phải đăng nhập. `/iso-doc/[id]`
+  còn file nhưng không còn được chuyển hướng tới.
+- **GĐ5 — `doc-ui/sign-workspace-shell.tsx`**: `SignWorkspaceShell` (topbar brand + Đóng, `notice`,
+  `rail`, children, `footer`), `SignToolbarButton`, `SignPageNav`, `SignRail`, `SignRailThumb`
+  (`accentColor` = màu vai trò), `SignCanvasArea` (khung trang dùng `relative w-max mx-auto`, KHÔNG flex
+  căn giữa), `SignFooterActions`. Áp cho cả 4 màn: SignPlacementModal Văn bản + Hồ sơ thực hiện, modal
+  đặt vị trí ISO tài liệu (giờ có nút Đóng/Hủy, Xác nhận ở footer), màn ký hàng loạt ISO (rail nhóm theo
+  tài liệu + drawer mobile giữ nguyên bên trong). Chỉ đổi vỏ — toạ độ/kẹp khung/payload không đổi.
+- **`doc-ui/pdfjs-worker.ts` `ensurePdfjsWorker(pdfjsLib)`** — worker luôn từ gói đã cài; đã bỏ worker
+  CDN ở modal ISO tài liệu. (Màn ký hàng loạt còn `cMapUrl` CDN — chưa đổi.)
