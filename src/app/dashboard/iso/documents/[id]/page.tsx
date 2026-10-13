@@ -74,7 +74,6 @@ import {
 import {
   DetailCard,
   DetailFieldItem,
-  DetailFileCard,
   DetailQrBox,
 } from "@/app/dashboard/_components/detail-view-ui"
 import Link from "next/link"
@@ -87,6 +86,10 @@ import { DetailPageHeader, HeaderButton } from "@/app/dashboard/_components/doc-
 import { SignActionBox, type SignAction } from "@/app/dashboard/_components/doc-ui/sign-action-box"
 import { TimelineSteps, TimelineProgress, type TimelineStepItem } from "@/app/dashboard/_components/doc-ui/timeline-steps"
 import { InspectorCard, StatusSummaryBar } from "@/app/dashboard/_components/doc-ui/inspector-card"
+import { DocViewer } from "@/app/dashboard/_components/doc-ui/doc-viewer"
+import { HeaderQr } from "@/app/dashboard/_components/doc-ui/header-qr"
+import { useIsDesktop } from "@/app/dashboard/_components/doc-ui/use-is-desktop"
+import { extFromStorageUrl } from "@/lib/storage-download"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { DistributionManagement } from "../../_components/distribution-management"
 import { authFetch } from "@/lib/auth-fetch"
@@ -455,6 +458,9 @@ export default function IsoDocumentDetailPage() {
   const [isEditMode, setIsEditMode] = useState(isNew)
   // Doc-UI GĐ2: tab "Tài liệu / Thông tin" trên mobile ở chế độ xem
   const [mobilePane, setMobilePane] = useState<"doc" | "info">("info")
+  // Doc-UI GĐ3: file đang xem trong khung xem PDF nhúng (chế độ xem)
+  const [viewVariant, setViewVariant] = useState<"main" | "change_request" | "review_request">("main")
+  const isDesktop = useIsDesktop()
 
   // File upload
   const [fileUploading, setFileUploading] = useState(false)
@@ -3198,6 +3204,26 @@ export default function IsoDocumentDetailPage() {
     child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url
 
   const mainFileUrl = doc?.file_signed_pdf_url || doc?.file_signed_office_url || uploadedFileUrl
+  // Doc-UI GĐ3: nguồn file của từng variant — cùng thứ tự ưu tiên `resolveSourceUrl` của route /file-url
+  const variantSourceUrl = (v: "main" | "change_request" | "review_request"): string | null => {
+    if (!doc) return null
+    if (v === "change_request") return doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url || null
+    if (v === "review_request") return doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || null
+    return doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url || null
+  }
+  const activeVariant = variantSourceUrl(viewVariant) ? viewVariant : "main"
+  const viewerSourceUrl = variantSourceUrl(activeVariant)
+  const viewerExt = viewerSourceUrl ? extFromStorageUrl(viewerSourceUrl) : ""
+  const viewerVariants = [
+    { key: "main", label: "Tài liệu chính" },
+    ...(variantSourceUrl("change_request") ? [{ key: "change_request", label: "Phiếu yêu cầu thay đổi" }] : []),
+    ...(variantSourceUrl("review_request") ? [{ key: "review_request", label: "Đề nghị soát xét" }] : []),
+  ]
+  const viewerLabel = activeVariant === "change_request"
+    ? "Phiếu yêu cầu thay đổi"
+    : activeVariant === "review_request"
+      ? "Đề nghị soát xét"
+      : (doc?.file_signed_pdf_url || doc?.file_signed_office_url ? "Bản đã ký" : "File gốc")
   const mainFileName = doc?.file_signed_office_url
     ? `DOCX/XLSX \u0111\u00e3 c\u1eadp nh\u1eadt tag`
     : (uploadedFileName || "File t\u00e0i li\u1ec7u")
@@ -3509,20 +3535,21 @@ export default function IsoDocumentDetailPage() {
       .filter((s) => form.standard_ids.includes(s.id))
       .map((s) => s.tieu_chuan)
     const standardDisplay = selectedStandardsList.length > 0 ? selectedStandardsList.join(", ") : "—"
-    const isPdf = mainFileUrl ? mainFileUrl.split("?")[0].toLowerCase().endsWith(".pdf") : true
 
     return (
       <div className="flex flex-col gap-5">
-        {/* 1. TOP CARD - Tệp tài liệu đưa lên đầu view */}
-        {mainFileUrl && canOpenThisFile && (
-          <DetailFileCard
-            fileName={doc?.ten_tai_lieu || form.ten_tai_lieu || "Tài liệu ISO"}
-            fileType={isPdf ? "PDF" : "WORD/OFFICE"}
-            fileSize={doc?.lan_ban_hanh ? `Lần ban hành: ${doc.lan_ban_hanh}` : undefined}
-            statusLabel={TRANG_THAI_LABEL[trangThai]}
-            statusTone={trangThai === "co_hieu_luc" ? "emerald" : trangThai === "tra_ve" || trangThai === "bi_tu_choi_phe_duyet" ? "amber" : "blue"}
-            onView={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main`)}
-            onDownload={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main&download=1`)}
+        {/* 1. Khung xem tài liệu nhúng (Doc-UI GĐ3) — Xem/Tải ở header */}
+        {mainFileUrl && canOpenThisFile && viewerSourceUrl && (
+          <DocViewer
+            key={`${activeVariant}:${viewerSourceUrl}`}
+            active={(isDesktop || mobilePane === "doc") && !batchSignModal?.open && !placementModal?.show}
+            endpoint={`/api/iso/documents/${docId}/file-url?variant=${activeVariant}`}
+            kind={viewerExt === "pdf" ? "pdf" : "office"}
+            fileExt={viewerExt}
+            label={`${viewerLabel} · ${viewerExt.toUpperCase()}`}
+            variants={viewerVariants}
+            variant={activeVariant}
+            onVariantChange={(k) => setViewVariant(k as "main" | "change_request" | "review_request")}
           />
         )}
 
@@ -3539,13 +3566,6 @@ export default function IsoDocumentDetailPage() {
           }
         >
           <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
-            <DetailFieldItem
-              icon={<Tag size={15} />}
-              iconTone="slate"
-              label="Mã tài liệu"
-              value={doc?.ma_tai_lieu || form.ma_tai_lieu || "—"}
-              mono
-            />
             <DetailFieldItem
               icon={<Layers size={15} />}
               iconTone="slate"
@@ -4451,12 +4471,12 @@ export default function IsoDocumentDetailPage() {
                   <HeaderButton
                     icon={<Eye size={15} />}
                     label="Xem file"
-                    onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main`)}
+                    onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=${isViewMode ? activeVariant : "main"}`)}
                   />
                   <HeaderButton
                     icon={<Download size={15} />}
                     label="Tải file"
-                    onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main&download=1`)}
+                    onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=${isViewMode ? activeVariant : "main"}&download=1`)}
                   />
                 </>
               )}
@@ -4509,12 +4529,7 @@ export default function IsoDocumentDetailPage() {
               )}
 
               {!isNew && doc?.ma_tai_lieu && (
-                <div
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white p-1"
-                  title="Mã QR tra cứu tài liệu"
-                >
-                  <QRCodeSVG value={recordUrl} size={28} />
-                </div>
+                <HeaderQr value={recordUrl} code={doc.ma_tai_lieu} title={doc.ten_tai_lieu} />
               )}
             </>
           }
@@ -4751,10 +4766,12 @@ export default function IsoDocumentDetailPage() {
           >
             {isViewMode && doc && (
               <>
-                <StatusSummaryBar
-                  domain="iso"
-                  status={trangThai}
-                  meta={`${isoTimelineDone}/${isoTimeline.length} bước đã ký · ${isoCap2 ? "Cấp 2" : "Cấp 1"}`}
+                <StatusSummaryBar domain="iso" status={trangThai} />
+                <SignActionBox
+                  title="Hành động ký"
+                  primary={isoPrimary}
+                  secondary={isoSecondary}
+                  danger={isoDanger}
                 />
                 <InspectorCard title="Tiến trình ký duyệt" icon={ShieldCheck}>
                   <TimelineSteps steps={isoTimeline} formatTime={fmtDate} />
@@ -4762,12 +4779,6 @@ export default function IsoDocumentDetailPage() {
                     <TimelineProgress done={isoTimelineDone} total={isoTimeline.length} />
                   </div>
                 </InspectorCard>
-                <SignActionBox
-                  title="Hành động ký"
-                  primary={isoPrimary}
-                  secondary={isoSecondary}
-                  danger={isoDanger}
-                />
               </>
             )}
             {/* TH4: Soát xét nhiều hồ sơ con — right panel */}
@@ -5526,7 +5537,10 @@ export default function IsoDocumentDetailPage() {
                         {canOpenThisFile && (
                           <button
                             type="button"
-                            onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=change_request`)}
+                            onClick={isViewMode
+                              ? () => { setViewVariant("change_request"); setMobilePane("doc") }
+                              : () => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=change_request`)}
+                            title={isViewMode ? "Xem trong khung tài liệu" : "Mở file"}
                             className="shrink-0 p-1 hover:bg-amber-100 rounded-lg"
                           >
                             <Eye size={13} className="text-amber-600" />
@@ -5555,7 +5569,10 @@ export default function IsoDocumentDetailPage() {
                         {canOpenThisFile && (
                           <button
                             type="button"
-                            onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=review_request`)}
+                            onClick={isViewMode
+                              ? () => { setViewVariant("review_request"); setMobilePane("doc") }
+                              : () => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=review_request`)}
+                            title={isViewMode ? "Xem trong khung tài liệu" : "Mở file"}
                             className="shrink-0 p-1 hover:bg-sky-100 rounded-lg"
                           >
                             <Eye size={13} className="text-sky-600" />

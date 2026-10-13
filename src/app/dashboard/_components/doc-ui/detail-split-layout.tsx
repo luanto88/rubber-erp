@@ -15,14 +15,24 @@ export function DetailSplitLayout({
   document,
   inspector,
   defaultMobileTab = "info",
+  mobileTab,
+  onMobileTabChange,
 }: {
   header?: ReactNode
   banners?: ReactNode
   document: ReactNode
   inspector: ReactNode
   defaultMobileTab?: "doc" | "info"
+  /** Tuỳ chọn: điều khiển tab mobile từ trang (vd để biết khi nào mount khung xem PDF). */
+  mobileTab?: "doc" | "info"
+  onMobileTabChange?: (tab: "doc" | "info") => void
 }) {
-  const [tab, setTab] = useState<"doc" | "info">(defaultMobileTab)
+  const [innerTab, setInnerTab] = useState<"doc" | "info">(defaultMobileTab)
+  const tab = mobileTab ?? innerTab
+  const setTab = (t: "doc" | "info") => {
+    if (mobileTab === undefined) setInnerTab(t)
+    onMobileTabChange?.(t)
+  }
   return (
     <div className="font-doc space-y-4">
       {header}

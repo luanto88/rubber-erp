@@ -6,17 +6,20 @@ import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   Download, Upload, Eye, EyeOff, CheckCircle2, X,
   AlertTriangle, Loader2, FileText, Send, Pen,
-  RotateCcw, Clock, User, RefreshCcw,
+  RotateCcw, Clock, User,
   ChevronLeft, ChevronRight, ChevronDown, Plus, LayoutTemplate,
   ArrowUp, ArrowDown, Trash2, Save, UserCheck, Share2,
   ShieldCheck, Undo2,
-  Tag, Layers, Building, Calendar, MessageSquare, Award,
+  Layers, Building, Calendar, MessageSquare, Award,
 } from "lucide-react"
 import {
   DetailCard,
   DetailFieldItem,
-  DetailFileCard,
 } from "@/app/dashboard/_components/detail-view-ui"
+import { DocViewer } from "@/app/dashboard/_components/doc-ui/doc-viewer"
+import { HeaderQr } from "@/app/dashboard/_components/doc-ui/header-qr"
+import { useIsDesktop } from "@/app/dashboard/_components/doc-ui/use-is-desktop"
+import { extFromStorageUrl } from "@/lib/storage-download"
 import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
@@ -2286,6 +2289,9 @@ export default function IsoFormInstancePage() {
   const [recallReason, setRecallReason] = useState("")
   const [recalling, setRecalling] = useState(false)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
+  // Doc-UI GĐ3: tab mobile + màn hình rộng → biết khi nào được mount khung xem PDF
+  const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
+  const isDesktop = useIsDesktop()
   const [signModal, setSignModal] = useState<{
     action: "soan_thao" | "xem_xet" | "phe_duyet" | "ky_buoc"
     stepIndex?: number
@@ -3271,6 +3277,8 @@ export default function IsoFormInstancePage() {
     ? instance.draft_file_url
     : (instance.final_pdf_url || instance.final_office_url || instance.soan_thao_signed_url || instance.draft_file_url)
   const isNguoiTao = instance.nguoi_tao === userId
+  // Đuôi của ĐÚNG file route /file-url trả về (cùng thứ tự ưu tiên với `fileUrl`)
+  const viewerExt = fileUrl ? extFromStorageUrl(fileUrl) : ""
 
   // Kiểm tra vai trò soạn thảo / tạo lập / admin
   const firstStep = (isNStepRecord && Array.isArray(instance.thu_tu_ky_json) && instance.thu_tu_ky_json.length > 0)
@@ -3361,6 +3369,16 @@ export default function IsoFormInstancePage() {
   const signSecondary: SignAction[] = []
   if (canChangeSigner) {
     signSecondary.push({ key: "doi_nguoi_ky", label: "Đổi người ký", icon: <UserCheck size={14} />, onClick: () => setDoiNguoiKyOpen(true), title: "Thay đổi người ký nếu người ký hiện tại vắng mặt" })
+  }
+  if (canManageDraft && instance.draft_file_url) {
+    // Trước GĐ3 nằm trên thẻ file (DetailFileCard) — thẻ đó đã thay bằng khung xem PDF nhúng
+    signSecondary.push({
+      key: "replace",
+      label: uploading ? "Đang tải lên..." : "Thay file",
+      icon: <Upload size={14} />,
+      onClick: () => fileInputRef.current?.click(),
+      loading: uploading,
+    })
   }
   if (canRecall) {
     signSecondary.push({ key: "recall", label: "Thu hồi", icon: <Undo2 size={14} />, onClick: () => { setRecallReason(""); setRecallOpen(true) }, title: "Đưa hồ sơ đã gửi về bản nháp để sửa hoặc xoá" })
@@ -3463,6 +3481,13 @@ export default function IsoFormInstancePage() {
                   onClick={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
                 />
               )}
+              {fileUrl && (
+                <HeaderButton
+                  icon={<Download size={15} />}
+                  label="Tải file"
+                  onClick={() => void handleDownload()}
+                />
+              )}
               {isDone && (
                 <HeaderButton
                   tone="brand"
@@ -3490,14 +3515,12 @@ export default function IsoFormInstancePage() {
                   <LayoutTemplate size={15} /> {templateExists ? "Xem mẫu vị trí ký" : "Cài đặt vị trí ký"}
                 </button>
               )}
-              <button
-                onClick={() => factoryId && void loadInstance(factoryId)}
-                className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-brand-50 hover:text-brand-700"
-                title="Làm mới"
-                aria-label="Làm mới"
-              >
-                <RefreshCcw size={15} />
-              </button>
+              {/* Nút "Làm mới" đã bỏ: trang tự nạp lại sau mỗi thao tác ký/trả về/thu hồi */}
+              <HeaderQr
+                value={`${typeof window !== "undefined" ? window.location.origin : ""}/dashboard/iso/forms/${instanceId}`}
+                code={template?.ma_tai_lieu || null}
+                title={instance.tieu_de}
+              />
             </>
           }
         />
@@ -3544,6 +3567,8 @@ export default function IsoFormInstancePage() {
         )}
 
         <DetailSplitLayout
+          mobileTab={mobileTab}
+          onMobileTabChange={setMobileTab}
           document={<>
             {/* Banner hướng dẫn khi biểu mẫu gốc chỉ có PDF */}
             {!instance.draft_file_url && (template?.file_signed_pdf_url || template?.file_goc_url) && (
@@ -3563,59 +3588,47 @@ export default function IsoFormInstancePage() {
               </div>
             )}
 
-            {/* 1. TOP CARD - Tệp hồ sơ nổi bật (File-First) */}
-            {isDone && (instance.final_pdf_url || instance.final_office_url) ? (
-              <DetailFileCard
-                fileName={instance.tieu_de || "File đã ký duyệt"}
-                fileType={instance.final_pdf_url ? "PDF" : instance.draft_file_type?.toUpperCase()}
-                statusLabel="✓ Đã ký duyệt"
-                statusTone="emerald"
-                onView={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                onDownload={handleDownload}
-              />
-            ) : instance.draft_file_url && !uploading ? (
-              <DetailFileCard
-                fileName={instance.tieu_de || "File hồ sơ"}
-                fileType={instance.draft_file_type ?? "file"}
-                statusLabel="Đang xử lý"
-                statusTone="blue"
-                onView={() => void openSecureFile(`/api/iso/forms/${instanceId}/file-url`)}
-                onDownload={handleDownload}
-                onReplace={() => fileInputRef.current?.click()}
-                canReplace={canManageDraft}
-                replacing={uploading}
-                extra={
-                  instance.draft_file_type !== "pdf" ? (
-                    <label
-                      className={`flex items-start gap-2.5 p-2 rounded-xl border border-slate-200 bg-white shadow-2xs transition-all ${
-                        canManageDraft ? "cursor-pointer hover:bg-slate-50 hover:border-brand-300" : "cursor-default opacity-80"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={autoConvertPdf}
-                        disabled={!canManageDraft}
-                        onChange={async (e) => {
-                          if (!canManageDraft) return
-                          const val = e.target.checked
-                          setAutoConvertPdf(val)
-                          setInstance((prev) => prev ? { ...prev, auto_convert_pdf: val } : prev)
-                          await supabase.from("iso_form_instances").update({ auto_convert_pdf: val }).eq("id", instanceId)
-                        }}
-                        className="mt-0.5 rounded border-slate-300 text-brand-700 focus:ring-brand-500 disabled:cursor-default"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-xs font-bold text-slate-700">Tự động chuyển sang PDF sau khi phê duyệt</span>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          {autoConvertPdf
-                            ? "Đang bật — hồ sơ DOCX/XLSX sẽ tự động chuyển sang file PDF hoàn chỉnh sau khi ký duyệt."
-                            : "Đang tắt — giữ nguyên định dạng file Office gốc sau khi ký duyệt."}
-                        </p>
-                      </div>
-                    </label>
-                  ) : undefined
-                }
-              />
+            {/* 1. Khung xem tài liệu nhúng (Doc-UI GĐ3) — Xem/Tải ở header, Thay file ở "Hành động ký" */}
+            {fileUrl && !uploading ? (
+              <>
+                <DocViewer
+                  key={fileUrl}
+                  active={(isDesktop || mobileTab === "doc") && !signModal}
+                  endpoint={`/api/iso/forms/${instanceId}/file-url`}
+                  kind={viewerExt === "pdf" ? "pdf" : "office"}
+                  fileExt={viewerExt}
+                  label={`${isEditable ? "Bản nháp" : isDone ? "Bản đã ký duyệt" : "Bản đang ký"} · ${viewerExt.toUpperCase()}`}
+                />
+                {!isDone && instance.draft_file_url && instance.draft_file_type !== "pdf" && (
+                <label
+                  className={`flex items-start gap-2.5 p-2 rounded-xl border border-slate-200 bg-white shadow-2xs transition-all ${
+                    canManageDraft ? "cursor-pointer hover:bg-slate-50 hover:border-brand-300" : "cursor-default opacity-80"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={autoConvertPdf}
+                    disabled={!canManageDraft}
+                    onChange={async (e) => {
+                      if (!canManageDraft) return
+                      const val = e.target.checked
+                      setAutoConvertPdf(val)
+                      setInstance((prev) => prev ? { ...prev, auto_convert_pdf: val } : prev)
+                      await supabase.from("iso_form_instances").update({ auto_convert_pdf: val }).eq("id", instanceId)
+                    }}
+                    className="mt-0.5 rounded border-slate-300 text-brand-700 focus:ring-brand-500 disabled:cursor-default"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs font-bold text-slate-700">Tự động chuyển sang PDF sau khi phê duyệt</span>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {autoConvertPdf
+                        ? "Đang bật — hồ sơ DOCX/XLSX sẽ tự động chuyển sang file PDF hoàn chỉnh sau khi ký duyệt."
+                        : "Đang tắt — giữ nguyên định dạng file Office gốc sau khi ký duyệt."}
+                    </p>
+                  </div>
+                </label>
+                )}
+              </>
             ) : canManageDraft && !uploading && !instance.draft_file_url ? (
               <div className="bg-white rounded-2xl border-2 border-dashed border-brand-300 hover:border-brand-500 p-6 shadow-sm flex flex-col items-center justify-center text-center transition-all">
                 <div className="w-12 h-12 rounded-2xl bg-brand-50 text-brand-700 grid place-items-center mb-3">
@@ -3698,19 +3711,6 @@ export default function IsoFormInstancePage() {
             >
               <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
                 <DetailFieldItem
-                  icon={<Tag size={15} />}
-                  iconTone="slate"
-                  label="Mã biểu mẫu"
-                  value={template?.ma_tai_lieu || "—"}
-                  mono
-                />
-                <DetailFieldItem
-                  icon={<Layers size={15} />}
-                  iconTone="slate"
-                  label="Biểu mẫu gốc"
-                  value={template?.ten_tai_lieu || "—"}
-                />
-                <DetailFieldItem
                   icon={<Building size={15} />}
                   iconTone="slate"
                   label="Phòng ban"
@@ -3783,7 +3783,12 @@ export default function IsoFormInstancePage() {
               domain="form"
               status={instance.trang_thai}
               headline={<FormStatusBadge status={instance.trang_thai} inst={instance} size="sm" />}
-              meta={`${timelineDone}/${timelineTotal} bước đã ký`}
+            />
+            <SignActionBox
+              title="Hành động ký"
+              primary={signPrimary}
+              secondary={signSecondary}
+              danger={signDanger}
             />
             <div className="w-full flex flex-col bg-white rounded-[14px] border border-slate-200 shadow-sm overflow-hidden">
               {/* Header đồng bộ */}
@@ -4062,12 +4067,6 @@ export default function IsoFormInstancePage() {
                 </div>
               )}
             </div>
-            <SignActionBox
-              title="Hành động ký"
-              primary={signPrimary}
-              secondary={signSecondary}
-              danger={signDanger}
-            />
           </>}
         />
       </div>

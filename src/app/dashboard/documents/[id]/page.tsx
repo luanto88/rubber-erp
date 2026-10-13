@@ -48,18 +48,21 @@ import {
   Loader2,
   Upload,
   Plus,
-  Tag,
   Layers,
   Building,
   Calendar,
   User,
   MessageSquare,
+  Download,
 } from "lucide-react"
 import {
   DetailCard,
   DetailFieldItem,
-  DetailFileCard,
 } from "@/app/dashboard/_components/detail-view-ui"
+import { DocViewer } from "@/app/dashboard/_components/doc-ui/doc-viewer"
+import { HeaderQr } from "@/app/dashboard/_components/doc-ui/header-qr"
+import { useIsDesktop } from "@/app/dashboard/_components/doc-ui/use-is-desktop"
+import { extFromStorageUrl } from "@/lib/storage-download"
 import type { SessionUser } from "@/lib/auth"
 import { ResizeHandleIcon, RESIZE_HANDLE_CLASS, RESIZE_HANDLE_STYLE } from "@/app/dashboard/_components/resize-handle-icon"
 import {
@@ -2034,6 +2037,9 @@ export default function DocumentDetailPage() {
 
   // Modal ký duyệt (canvas PDF kéo-thả chữ ký hoặc info tag Office)
   const [signModal, setSignModal] = useState<"ky_buoc" | "phe_duyet" | null>(null)
+  // Doc-UI GĐ3: tab mobile + màn hình rộng → biết khi nào được mount khung xem PDF
+  const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
+  const isDesktop = useIsDesktop()
   // Vá bảo mật 2026-09-20: bucket iso-documents sẽ private — `SignPlacementModal` tự
   // `pdfjs.getDocument({url})` trong trình duyệt nên nguồn PDF đưa vào modal PHẢI là Signed
   // URL, không còn được là `docSourceUrl` (URL public thô) đọc thẳng từ DB.
@@ -2491,6 +2497,8 @@ export default function DocumentDetailPage() {
     !(doc.nguoi_ky || {})[String(doc.buoc_hien_tai + 1)]
 
   const fileUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
+  // Đuôi của ĐÚNG file route /file-url trả về (PDF-trước) — khác `docExt` (Office-trước, dùng cho ký)
+  const viewerExt = fileUrl ? extFromStorageUrl(fileUrl) : ""
 
   // Nguồn file sẽ được ký — PHẢI khớp đúng thứ tự ưu tiên sourceUrl trong performFileStamp()
   // của sign/route.ts, để canvas đặt chữ ký hiển thị đúng file thật sự bị stamp.
@@ -2710,6 +2718,8 @@ export default function DocumentDetailPage() {
       )}
 
       <DetailSplitLayout
+        mobileTab={mobileTab}
+        onMobileTabChange={setMobileTab}
         header={
           <DetailPageHeader
             onBack={() => router.push("/dashboard/documents")}
@@ -2737,6 +2747,13 @@ export default function DocumentDetailPage() {
                     onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
                   />
                 )}
+                {fileUrl && (
+                  <HeaderButton
+                    icon={<Download size={15} />}
+                    label="Tải file"
+                    onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url?download=1`)}
+                  />
+                )}
                 {canDistribute && (
                   <HeaderButton
                     tone="brand"
@@ -2745,21 +2762,25 @@ export default function DocumentDetailPage() {
                     onClick={() => void openDistModal()}
                   />
                 )}
+                <HeaderQr
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/dashboard/documents/${doc.id}`}
+                  code={doc.ma_van_ban}
+                  title={doc.ten_van_ban}
+                />
               </>
             }
           />
         }
         document={<>
-          {/* 1. TOP CARD - Tệp văn bản đưa lên đầu view */}
+          {/* 1. Khung xem tài liệu nhúng (Doc-UI GĐ3) — Xem/Tải nằm ở header, Thay file ở "Hành động ký" */}
           {fileUrl && (
-            <DetailFileCard
-              fileName={doc.ten_van_ban}
-              fileType={docExt ? docExt.toUpperCase() : "PDF"}
-              onView={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
-              onDownload={() => void openSecureFile(`/api/documents/${doc.id}/file-url?download=1`)}
-              onReplace={canGuiKy ? () => fileReplaceInputRef.current?.click() : undefined}
-              canReplace={canGuiKy}
-              replacing={replacingFile}
+            <DocViewer
+              key={fileUrl}
+              active={(isDesktop || mobileTab === "doc") && !signModal}
+              endpoint={`/api/documents/${doc.id}/file-url`}
+              kind={viewerExt === "pdf" ? "pdf" : "office"}
+              fileExt={viewerExt}
+              label={`${doc.file_signed_pdf_url || doc.file_signed_office_url ? "Bản đã ký" : "File gốc"} · ${viewerExt.toUpperCase() || "FILE"}`}
             />
           )}
 
@@ -2771,13 +2792,6 @@ export default function DocumentDetailPage() {
             subtitle="Số hiệu, phòng ban và phạm vi ban hành"
           >
             <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
-              <DetailFieldItem
-                icon={<Tag size={15} />}
-                iconTone="emerald"
-                label="Số hiệu văn bản"
-                value={doc.ma_van_ban || "Chưa có số"}
-                mono
-              />
               <DetailFieldItem
                 icon={<Layers size={15} />}
                 iconTone="slate"
@@ -2807,11 +2821,6 @@ export default function DocumentDetailPage() {
                 iconTone="emerald"
                 label="Người phê duyệt"
                 value={doc.phe_duyet || "—"}
-                extra={
-                  doc.trang_thai === "da_phe_duyet" ? (
-                    <span className="text-[10px] text-brand-700 bg-brand-50 px-1.5 py-0.5 rounded font-bold border border-brand-200">✓ Đã duyệt</span>
-                  ) : undefined
-                }
               />
               <DetailFieldItem
                 icon={<Calendar size={15} />}
@@ -2890,7 +2899,7 @@ export default function DocumentDetailPage() {
           <StatusSummaryBar
             domain="doc"
             status={doc.trang_thai}
-            meta={doc.is_uploaded ? "Văn bản ký tay (tải lên)" : `${timelineDone}/${timelineTotal} bước đã ký`}
+            meta={doc.is_uploaded ? "Văn bản ký tay (tải lên)" : undefined}
           />
           {/* Trả về info */}
           {doc.trang_thai === "tra_ve" && doc.tra_ve_ly_do && (
@@ -2907,6 +2916,12 @@ export default function DocumentDetailPage() {
               )}
             </div>
           )}
+          <SignActionBox
+            title="Hành động ký"
+            primary={signPrimary}
+            secondary={signSecondary}
+            danger={signDanger}
+          />
           <div className="w-full flex flex-col bg-white rounded-[14px] border border-slate-200 shadow-sm overflow-hidden">
             <div className="flex items-center gap-2.5 px-4 py-3 bg-slate-50/80 border-b border-slate-100">
               <span className="w-8 h-8 rounded-full bg-brand-100 grid place-items-center text-brand-800 shrink-0">
@@ -2930,12 +2945,6 @@ export default function DocumentDetailPage() {
               </div>
             )}
           </div>
-          <SignActionBox
-            title="Hành động ký"
-            primary={signPrimary}
-            secondary={signSecondary}
-            danger={signDanger}
-          />
         </>}
       />
 

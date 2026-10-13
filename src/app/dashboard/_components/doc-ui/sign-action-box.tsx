@@ -19,7 +19,7 @@ export type SignAction = {
  * Mọi `onClick`/cờ quyền do trang truyền vào — component không tự quyết định gì.
  */
 export function SignActionBox({
-  title = "Hành động",
+  title = "Hành động ký",
   primary,
   secondary = [],
   danger = [],
@@ -49,7 +49,7 @@ export function SignActionBox({
       <span className="truncate">{a.label}</span>
     </button>
   )
-  const otherBtn = (a: SignAction, isDanger: boolean, onDone?: () => void) => (
+  const otherBtn = (a: SignAction, isDanger: boolean, onDone?: () => void, extraCls = "") => (
     <button
       key={a.key}
       type="button"
@@ -59,7 +59,7 @@ export function SignActionBox({
       }}
       disabled={a.disabled || a.loading}
       title={a.title}
-      className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-[12.5px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-[12.5px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${extraCls} ${
         isDanger
           ? "border-red-200 bg-white text-red-600 hover:bg-red-50"
           : "border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800"
@@ -78,10 +78,19 @@ export function SignActionBox({
         </header>
         <div className="space-y-2.5 p-4">
           {primary && primaryBtn(primary)}
-          {secondary.length > 0 && (
-            <div className="grid grid-cols-2 gap-2">{secondary.map((a) => otherBtn(a, false))}</div>
+          {others.length > 0 && (
+            // Một lưới 2 cột cân đối: 1 nút → trải cả hàng; số lẻ → nút cuối trải cả hàng.
+            <div className="grid grid-cols-2 gap-2">
+              {others.map((a, i) =>
+                otherBtn(
+                  a,
+                  i >= secondary.length,
+                  undefined,
+                  others.length % 2 === 1 && i === others.length - 1 ? "col-span-2" : "",
+                ),
+              )}
+            </div>
           )}
-          {danger.length > 0 && <div className="grid grid-cols-2 gap-2">{danger.map((a) => otherBtn(a, true))}</div>}
           {hint && <div className="text-[11.5px] leading-relaxed text-slate-500">{hint}</div>}
         </div>
       </section>

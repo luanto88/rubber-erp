@@ -336,3 +336,33 @@ Bố cục theo mẫu `previews/enterprise-iso-vanban-unified-preview.html`, **m
   tạo/ký (`recipientId` bắt đầu `owner-`) hiện chip "Tài liệu của bạn", không gọi track.
 - Chưa làm: GĐ3 khung xem PDF nhúng, GĐ4 hộp PIN chung, GĐ5 vỏ màn ký chung, GĐ6 trang xác
   thực + mobile.
+
+### GĐ3 — khung xem PDF nhúng + sửa bố cục sau test tay (2026-10-13, chưa test tay)
+
+- `doc-ui/doc-viewer.tsx` (`DocViewer`, vỏ) nạp `doc-viewer-impl.tsx` bằng `next/dynamic` +
+  `ssr:false` — pdfjs chỉ có ở client. Props: `endpoint` (route `/file-url`), `kind`
+  (`pdf`|`office`|`none`), `label` (nhãn file, KHÔNG lặp tên tài liệu), `fileExt`, `variants`/
+  `variant`/`onVariantChange`, `active`.
+- `active=false` → chỉ khung giữ chỗ, KHÔNG mount phần thân. Trang tính
+  `active = (useIsDesktop() || tabMobile === "doc") && !<modal ký đang mở>` ⇒ không render pdfjs
+  2 lần cùng modal ký; ký xong khung tự nạp lại (thêm `key={fileUrl}`).
+- Phần thân tải TRỌN file 1 lần (`fetchSecureUrl` → `fetch` → `arrayBuffer` →
+  `getDocument({data})`) để Signed URL hết hạn không làm hỏng trang render sau; 400/401/403 → xin
+  URL mới đúng 1 lần. Worker local (`new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url)`).
+  Render dần bằng IntersectionObserver, hủy `RenderTask` khi đổi zoom. Toàn màn hình dùng
+  Fullscreen API, không có thì lớp phủ `fixed inset-0 z-[60]` (Esc đóng). DOCX/XLSX → thẻ "Mở file".
+- `doc-ui/use-is-desktop.ts` (`useIsDesktop`, ≥1024px). `DetailSplitLayout` nhận thêm
+  `mobileTab`/`onMobileTabChange` (tuỳ chọn).
+- Quy ước bố cục 3 trang chi tiết: Xem/Tải/Phân phối/QR CHỈ ở header (thanh công cụ khung xem không
+  có nút tải); `DetailFileCard` không còn dùng ở chế độ xem; inspector = thanh Trạng thái (không
+  `meta`, trừ "Văn bản ký tay") → Hành động ký → Tiến trình; thẻ Thông tin bỏ Số hiệu/Mã (đã ở
+  header) và chip "✓ Đã duyệt". Hồ sơ thực hiện: "Thay file" chuyển vào Hành động ký, ô "Tự chuyển
+  PDF" nằm dưới khung xem; bỏ thêm "Biểu mẫu gốc" (trùng dòng phụ header).
+- ISO tài liệu: state `viewVariant`; tab variant trên thanh công cụ; nút mắt ở thẻ "Tài liệu soát
+  xét" (chế độ xem) đổi file trong khung thay vì mở tab; Xem/Tải ở header theo variant đang xem.
+- `SignActionBox`: nút phụ + nút nguy hiểm chung 1 lưới 2 cột, số lẻ → nút cuối trải cả hàng.
+- Còn lại: modal đặt vị trí `iso/documents/[id]` nạp worker từ CDN (GĐ5); khung xem chưa xem trước DOCX.
+- QR header đồng bộ 3 trang: `doc-ui/header-qr.tsx` (`HeaderQr value code title`) — bấm phóng to,
+  tải PNG/JPG (QR nền trắng + mã tài liệu bên dưới). URL: Văn bản `/dashboard/documents/{id}`,
+  ISO tài liệu `recordUrl`, Hồ sơ `/dashboard/iso/forms/{id}` (khớp QR in trên PDF). Bỏ nút
+  "Làm mới" ở header Hồ sơ thực hiện (trang tự nạp lại sau mỗi thao tác).
