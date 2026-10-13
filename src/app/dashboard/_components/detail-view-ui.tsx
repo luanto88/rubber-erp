@@ -9,6 +9,7 @@ export type ColorTone =
   | "orange"
   | "amber"
   | "emerald"
+  | "brand"
   | "teal"
   | "blue"
   | "indigo"
@@ -20,7 +21,9 @@ const TONE_MAP: Record<ColorTone, { bg: string; text: string; border?: string }>
   rose: { bg: "bg-rose-50", text: "text-rose-600", border: "border-rose-200" },
   orange: { bg: "bg-orange-50", text: "text-orange-600", border: "border-orange-200" },
   amber: { bg: "bg-amber-50", text: "text-amber-600", border: "border-amber-200" },
-  emerald: { bg: "bg-emerald-50", text: "text-emerald-600", border: "border-emerald-200" },
+  // "emerald" giữ làm alias (các trang cũ còn truyền) — hiển thị theo token brand (Doc-UI GĐ2)
+  emerald: { bg: "bg-brand-50", text: "text-brand-600", border: "border-brand-200" },
+  brand: { bg: "bg-brand-50", text: "text-brand-600", border: "border-brand-200" },
   teal: { bg: "bg-teal-50", text: "text-teal-600", border: "border-teal-200" },
   blue: { bg: "bg-blue-50", text: "text-blue-600", border: "border-blue-200" },
   indigo: { bg: "bg-indigo-50", text: "text-indigo-600", border: "border-indigo-200" },
@@ -35,7 +38,7 @@ const TONE_MAP: Record<ColorTone, { bg: string; text: string; border?: string }>
  */
 export function DetailCard({
   icon,
-  iconTone = "blue",
+  iconTone = "emerald",
   title,
   subtitle,
   badge,
@@ -104,7 +107,7 @@ export function DetailFieldItem({
   const highlightCls = highlight
     ? {
         rose: "text-rose-700 font-bold",
-        emerald: "text-emerald-700 font-bold",
+        emerald: "text-brand-700 font-bold",
         blue: "text-blue-700 font-bold",
         amber: "text-amber-700 font-bold",
         violet: "text-violet-700 font-bold",
@@ -160,13 +163,13 @@ export function DetailFileCard({
   const isPdf = fileType.toLowerCase().includes("pdf")
   const isSheet = fileType.toLowerCase().includes("xls")
   const badgeTone = {
-    emerald: "bg-emerald-100 text-emerald-800",
+    emerald: "bg-brand-100 text-brand-800",
     amber: "bg-amber-100 text-amber-800",
     blue: "bg-blue-100 text-blue-800",
   }[statusTone]
 
   return (
-    <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-slate-50 via-white to-blue-50/30 border border-slate-200/90 shadow-2xs">
+    <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-slate-50/80 via-white to-brand-50/30 border border-slate-200/90 shadow-2xs">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <span
@@ -203,12 +206,12 @@ export function DetailFileCard({
         </div>
 
         {/* Nút hành động */}
-        <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
           {onView && (
             <button
               type="button"
               onClick={onView}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-all"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 hover:text-brand-800 border border-slate-200 hover:border-brand-300 rounded-xl transition-all shadow-2xs"
             >
               <Eye size={13} /> Xem
             </button>
@@ -217,7 +220,7 @@ export function DetailFileCard({
             <button
               type="button"
               onClick={onDownload}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-brand-800 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-xl transition-all shadow-2xs"
             >
               <Download size={13} /> Tải về
             </button>
@@ -227,7 +230,7 @@ export function DetailFileCard({
               type="button"
               onClick={onReplace}
               disabled={replacing}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl transition-all disabled:opacity-50 shadow-2xs"
             >
               <RotateCcw size={13} /> {replacing ? "Đang tải..." : "Thay file"}
             </button>

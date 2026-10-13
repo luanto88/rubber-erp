@@ -1,6 +1,6 @@
 "use client"
 
-import Link from "next/link"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
 import { FileText, LayoutDashboard, ClipboardCheck, FolderEdit, Archive, type LucideIcon } from "lucide-react"
@@ -172,34 +172,20 @@ export function IsoShell({ children }: IsoShellProps) {
   }, [])
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex gap-1 p-2 overflow-x-auto">
-          {visibleTabs.map((tab) => {
-            const active = isActive(pathname, tab)
-            const Icon = tab.icon
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                className={
-                  "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all " +
-                  (active
-                    ? "bg-violet-50 text-violet-700"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-700")
-                }
-              >
-                <Icon size={15} />
-                <span>{tab.label}</span>
-                {tab.href === "/dashboard/iso/my-tasks" && pendingTaskCount > 0 && (
-                  <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-extrabold leading-none text-white">
-                    {pendingTaskCount > 99 ? "99+" : pendingTaskCount}
-                  </span>
-                )}
-              </Link>
-            )
-          })}
-        </div>
+    <div className="font-doc space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
+        <SegmentedTabs
+          ariaLabel="Điều hướng module ISO"
+          value={visibleTabs.find((tab) => isActive(pathname, tab))?.href ?? null}
+          items={visibleTabs.map((tab) => ({
+            key: tab.href,
+            href: tab.href,
+            label: tab.label,
+            icon: tab.icon,
+            count: tab.href === "/dashboard/iso/my-tasks" ? pendingTaskCount : undefined,
+            alertCount: true,
+          }))}
+        />
       </div>
       {children}
     </div>

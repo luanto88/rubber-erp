@@ -9,8 +9,6 @@ import { FilterBar } from "../../_components/filter-bar"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { ModalShell } from "../../_components/modal-shell"
 import {
-  TRANG_THAI_LABEL,
-  TRANG_THAI_COLOR,
   LOAI_TAI_LIEU_OPTIONS,
   ISO_STANDARD_FALLBACK,
   isoDocumentTypeFallback,
@@ -21,7 +19,7 @@ import {
   type IsoTrangThai,
 } from "../_components/iso-types"
 import { canOpenIsoFile, EXPIRED_FILE_HINT } from "../_components/iso-file-access"
-import { Plus, Search, FileText, Eye, ChevronDown, CheckCircle2, XCircle, Pencil, Trash2, Share2, ChevronUp, Download, BadgeCheck, FileSignature, ShieldCheck } from "lucide-react"
+import { Plus, Search, FileText, Eye, ChevronDown, Pencil, Trash2, Share2, ChevronUp, Download, FileSignature, ShieldCheck } from "lucide-react"
 import Link from "next/link"
 import { DistributionModal } from "../_components/distribution-modal"
 import { DistributionManagement } from "../_components/distribution-management"
@@ -31,6 +29,8 @@ import { PageBackgroundMotif } from "../../_components/page-background-motif"
 // xác thực thay vì đọc thẳng cột file_*_url public.
 import { fetchSecureUrl, openSecureFile } from "../../_components/secure-file-open"
 import { canCreateIsoDocument, canSeeIsoDocInLibrary, canViewIsoLibrary, isIsoDocParticipant, readCachedIsoUser } from "../_components/iso-access"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
 
 export default function IsoDocumentsPage() {
   const router = useRouter()
@@ -213,7 +213,7 @@ export default function IsoDocumentsPage() {
     }
     if (cap === "Cấp 2") {
       return (
-        <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200/80">
+        <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
           Cấp 2
         </span>
       )
@@ -230,21 +230,21 @@ export default function IsoDocumentsPage() {
     const u = loai.toUpperCase()
     if (u === "F" || u === "BM" || u.includes("BIỂU MẪU")) {
       return (
-        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-brand-50 text-brand-700 border border-brand-200/80">
           {loai}
         </span>
       )
     }
     if (u === "QT" || u.includes("QUY TRÌNH")) {
       return (
-        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200/80">
+        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200">
           {loai}
         </span>
       )
     }
     if (u === "HD" || u.includes("HƯỚNG DẪN")) {
       return (
-        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200/80">
+        <span className="inline-flex px-2 py-0.5 rounded-md text-xs font-bold bg-brand-50 text-brand-800 border border-brand-200/80">
           {loai}
         </span>
       )
@@ -256,31 +256,8 @@ export default function IsoDocumentsPage() {
     )
   }
 
-  const renderStatusBadge = (status: IsoTrangThai) => {
-    if (status === "co_hieu_luc") {
-      return (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 shadow-2xs">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Có hiệu lực
-        </span>
-      )
-    }
-    if (status === "het_hieu_luc") {
-      return (
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 shadow-2xs">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Hết hiệu lực
-        </span>
-      )
-    }
-    return (
-      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[status]}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${
-          status === "cho_phe_duyet" || status === "cho_xem_xet" ? "bg-amber-500" :
-          status === "tra_ve" || status === "bi_tu_choi_phe_duyet" ? "bg-rose-500" : "bg-slate-400"
-        }`} />
-        {TRANG_THAI_LABEL[status]}
-      </span>
-    )
-  }
+  // Doc-UI: badge trạng thái dùng chung (status-registry.ts).
+  const renderStatusBadge = (status: IsoTrangThai) => <StatusBadge domain="iso" status={status} />
 
   const trangThaiOptions: { value: IsoTrangThai | ""; label: string }[] = [
     { value: "", label: "Tất cả trạng thái" },
@@ -297,11 +274,11 @@ export default function IsoDocumentsPage() {
   return (
     <IsoShell>
       <div className="space-y-4">
-        <PageBackgroundMotif theme="forest" />
+        <PageBackgroundMotif theme="rubber" />
         <PageHeaderBanner
           title="Tài liệu ISO"
           subtitle="Quy trình, hướng dẫn, biểu mẫu và tiêu chuẩn"
-          theme="forest"
+          theme="rubber"
           icon={ShieldCheck}
           collapsible={true}
           storageKey="banner_collapsed_iso_documents"
@@ -318,7 +295,7 @@ export default function IsoDocumentsPage() {
               {canCreate && (
                 <Link
                   href="/dashboard/iso/documents/new-doc"
-                  className="flex items-center gap-2 px-5 py-2.5 bg-white text-emerald-800 hover:bg-emerald-50 font-bold rounded-xl shadow-md transition-all active:scale-95"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-white text-brand-800 hover:bg-brand-50 font-bold rounded-xl shadow-md transition-all active:scale-95"
                 >
                   <Plus size={16} /> Tạo tài liệu
                 </Link>
@@ -336,13 +313,13 @@ export default function IsoDocumentsPage() {
               placeholder="Tìm mã, tên tài liệu..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+              className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
             />
           </div>
           <select
             value={filterStandard}
             onChange={(e) => setFilterStandard(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
           >
             <option value="">Tất cả tiêu chuẩn</option>
             {standards.map((standard) => (
@@ -352,7 +329,7 @@ export default function IsoDocumentsPage() {
           <select
             value={filterLoai}
             onChange={(e) => setFilterLoai(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
           >
             <option value="">Tất cả loại</option>
             {typeOptions.map((l) => (
@@ -362,7 +339,7 @@ export default function IsoDocumentsPage() {
           <select
             value={filterTrangThai}
             onChange={(e) => setFilterTrangThai(e.target.value as IsoTrangThai | "")}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
           >
             {trangThaiOptions.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -371,7 +348,7 @@ export default function IsoDocumentsPage() {
           <select
             value={filterCap}
             onChange={(e) => setFilterCap(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
           >
             <option value="">Tất cả cấp</option>
             <option value="Cấp 1">Cấp 1</option>
@@ -380,7 +357,7 @@ export default function IsoDocumentsPage() {
           <select
             value={filterPhongBan}
             onChange={(e) => setFilterPhongBan(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
           >
             <option value="">Tất cả phòng ban</option>
             {phongBanOptions.map((pb) => (
@@ -402,8 +379,8 @@ export default function IsoDocumentsPage() {
             </div>
           ) : (
             <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-100">
+            <table className="enterprise-table">
+              <thead>
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold">Mã tài liệu</th>
                   <th className="px-4 py-3 text-left font-semibold">Tên tài liệu</th>
@@ -416,20 +393,20 @@ export default function IsoDocumentsPage() {
                   <th className="px-4 py-3 text-right font-semibold">Hành động</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {parentRows.map((doc) => {
                   const childRows = childrenByParent[doc.id] || []
                   const isExpanded = !!expandedParents[doc.id]
                   return (
                   <Fragment key={doc.id}>
-                  <tr key={doc.id} className="hover:bg-emerald-50/40 transition-colors">
+                  <tr key={doc.id} className="hover:bg-brand-50/40 transition-colors">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {childRows.length > 0 ? (
                           <button
                             type="button"
                             onClick={() => setExpandedParents((prev) => ({ ...prev, [doc.id]: !prev[doc.id] }))}
-                            className="rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-violet-700"
+                            className="rounded-md p-1 text-slate-500 hover:bg-brand-50 hover:text-brand-800"
                             title="Xem hồ sơ"
                           >
                             <ChevronDown size={14} className={`transition-transform ${isExpanded ? "rotate-180" : ""}`} />
@@ -437,9 +414,7 @@ export default function IsoDocumentsPage() {
                         ) : (
                           <span className="w-6" />
                         )}
-                        <span className="font-mono text-xs text-violet-700 font-bold">
-                          {doc.ma_tai_lieu || "—"}
-                        </span>
+                        <DocCodePill code={doc.ma_tai_lieu} />
                       </div>
                       {doc.loai_vb === "Mật" && (
                         <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded">Mật</span>
@@ -509,7 +484,7 @@ export default function IsoDocumentsPage() {
                                   e.stopPropagation()
                                   void openSecureFile(`/api/iso/documents/${doc.id}/file-url?variant=main&download=1`)
                                 }}
-                                className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-600 transition-colors"
                               >
                                 <Download size={14} />
                               </button>
@@ -517,7 +492,7 @@ export default function IsoDocumentsPage() {
                               <Link
                                 href={`/dashboard/iso/documents/${doc.id}`}
                                 title="Tải xuống"
-                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-brand-600 transition-colors"
                               >
                                 <Download size={14} />
                               </Link>
@@ -526,7 +501,7 @@ export default function IsoDocumentsPage() {
                               <button
                                 title="Phân phối tài liệu này"
                                 onClick={() => { setDistributeDocId(doc.id); setShowDistributeModal(true) }}
-                                className="p-1.5 rounded-lg hover:bg-blue-100 text-slate-400 hover:text-blue-600 transition-colors"
+                                className="p-1.5 rounded-lg hover:bg-sky-50 text-slate-400 hover:text-sky-700 transition-colors"
                               >
                                 <Share2 size={14} />
                               </button>
@@ -535,7 +510,7 @@ export default function IsoDocumentsPage() {
                               <Link
                                 href={`/dashboard/iso/documents/${doc.id}`}
                                 title="Sửa"
-                                className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                                className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
                               >
                                 <Pencil size={14} />
                               </Link>
@@ -548,7 +523,7 @@ export default function IsoDocumentsPage() {
                                   void goToMauViTri(doc.id, doc.loai_tai_lieu || doc.ma_tai_lieu || "")
                                 }}
                                 title="Cài đặt mẫu vị trí ký"
-                                className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-700 transition-colors"
+                                className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
                               >
                                 <FileSignature size={14} />
                               </button>
@@ -568,9 +543,9 @@ export default function IsoDocumentsPage() {
                     </td>
                   </tr>
                   {isExpanded && childRows.map((child) => (
-                    <tr key={child.id} className="bg-emerald-50/20 hover:bg-emerald-50/50 transition-colors">
+                    <tr key={child.id} className="bg-brand-50/20 hover:bg-brand-50/50 transition-colors">
                       <td className="px-4 py-3 pl-12">
-                        <span className="font-mono text-xs font-bold text-sky-700">{child.ma_tai_lieu || "—"}</span>
+                        <DocCodePill code={child.ma_tai_lieu} muted />
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-700 line-clamp-1">{child.ten_tai_lieu}</div>
@@ -615,7 +590,7 @@ export default function IsoDocumentsPage() {
                                     e.stopPropagation()
                                     void openSecureFile(`/api/iso/documents/${child.id}/file-url?variant=main&download=1`)
                                   }}
-                                  className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-600 transition-colors"
                                 >
                                   <Download size={14} />
                                 </button>
@@ -623,7 +598,7 @@ export default function IsoDocumentsPage() {
                                 <Link
                                   href={`/dashboard/iso/documents/${child.id}`}
                                   title="Tải xuống"
-                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-brand-600 transition-colors"
                                 >
                                   <Download size={14} />
                                 </Link>
@@ -632,7 +607,7 @@ export default function IsoDocumentsPage() {
                                 <Link
                                   href={`/dashboard/iso/documents/${child.id}`}
                                   title="Sửa"
-                                  className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
                                 >
                                   <Pencil size={14} />
                                 </Link>
@@ -645,7 +620,7 @@ export default function IsoDocumentsPage() {
                                     void goToMauViTri(child.id, child.loai_tai_lieu || child.ma_tai_lieu || "")
                                   }}
                                   title="Cài đặt mẫu vị trí ký cho biểu mẫu này"
-                                  className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-700 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
                                 >
                                   <FileSignature size={14} />
                                 </button>
@@ -688,7 +663,7 @@ export default function IsoDocumentsPage() {
             className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-slate-50 transition-colors"
           >
             <span className="flex items-center gap-2 text-sm font-bold text-slate-700">
-              <Share2 size={14} className="text-emerald-600" />
+              <Share2 size={14} className="text-brand-600" />
               Quản lý phân phối tài liệu
             </span>
             <ChevronUp size={14} className={`text-slate-400 transition-transform ${showManagement ? "" : "rotate-180"}`} />

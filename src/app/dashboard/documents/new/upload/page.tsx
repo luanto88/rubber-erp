@@ -539,7 +539,7 @@ export default function UploadVanBanPage() {
   if (hasCreatePerm === false) {
     return (
       <DocumentsShell>
-        <PageBackgroundMotif theme="forest" />
+        <PageBackgroundMotif theme="rubber" />
         <div className="max-w-md mx-auto my-16 p-8 bg-white border border-slate-200 rounded-2xl shadow-sm text-center">
           <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Lock size={28} />
@@ -576,17 +576,17 @@ export default function UploadVanBanPage() {
       )}
 
       {saveOk && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-emerald-600 text-white rounded-2xl shadow-2xl">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-brand-600 text-white rounded-2xl shadow-2xl">
           <CheckCircle2 size={16} />
           <span className="text-sm font-bold">Đã lưu văn bản thành công!</span>
         </div>
       )}
 
-      <PageBackgroundMotif theme="forest" />
+      <PageBackgroundMotif theme="rubber" />
       <PageHeaderBanner
         title="Upload văn bản đã ký tay"
         subtitle="Tải lên văn bản đã ký tay, hệ thống tự sinh số và lưu vào hồ sơ"
-        theme="forest"
+        theme="rubber"
         icon={FileText}
         collapsible={true}
         storageKey="banner_collapsed_documents_upload"
@@ -597,7 +597,7 @@ export default function UploadVanBanPage() {
         <div className="lg:col-span-2 space-y-5">
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-6">
             <h2 className="text-base font-extrabold text-slate-800 mb-4 flex items-center gap-2">
-              <span className="w-2 h-5 rounded-full bg-emerald-600 inline-block" />
+              <span className="w-2 h-5 rounded-full bg-brand-600 inline-block" />
               Thông tin văn bản
             </h2>
             <div className="space-y-5">
@@ -607,8 +607,8 @@ export default function UploadVanBanPage() {
                   File văn bản đã ký <span className="text-red-500">*</span>
                 </label>
                 {file ? (
-                  <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl">
-                    <FileText size={18} className="text-emerald-700 shrink-0" />
+                  <div className="flex items-center gap-3 px-4 py-3 bg-brand-50/50 border border-brand-200/80 rounded-2xl">
+                    <FileText size={18} className="text-brand-700 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
                       <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB</p>
@@ -619,7 +619,7 @@ export default function UploadVanBanPage() {
                           href={previewUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all"
+                          className="px-3 py-1.5 text-xs font-bold text-brand-800 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-xl transition-all"
                         >
                           Xem
                         </a>
@@ -634,12 +634,12 @@ export default function UploadVanBanPage() {
                     </div>
                   </div>
                 ) : (
-                  <label className="flex flex-col items-center justify-center gap-2 px-4 py-8 border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/40 rounded-2xl cursor-pointer transition-all group">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <label className="flex flex-col items-center justify-center gap-2 px-4 py-8 border-2 border-dashed border-slate-300 hover:border-brand-500 hover:bg-brand-50/40 rounded-2xl cursor-pointer transition-all group">
+                    <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center group-hover:scale-105 transition-transform">
                       <Upload size={20} />
                     </div>
                     <span className="text-sm text-slate-600">
-                      Kéo thả file hoặc <span className="text-emerald-700 font-extrabold group-hover:underline">chọn từ máy tính</span>
+                      Kéo thả file hoặc <span className="text-brand-700 font-extrabold group-hover:underline">chọn từ máy tính</span>
                     </span>
                     <span className="text-xs text-slate-400 text-center max-w-md">
                       Hỗ trợ PDF, DOCX, XLSX (tối đa 20MB). Tên file định dạng &quot;01 ĐN-NMCB Tên văn bản&quot; sẽ tự điền tự động.
@@ -707,7 +707,7 @@ export default function UploadVanBanPage() {
                       Loại văn bản <span className="text-red-500">*</span>
                     </label>
                     <select
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                       value={form.loai_van_ban}
                       onChange={(e) => {
                         setForm((f) => ({ ...f, loai_van_ban: e.target.value }))
@@ -730,7 +730,7 @@ export default function UploadVanBanPage() {
                     Phòng ban <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                     value={form.phong_ban}
                     onChange={(e) => {
                       setForm((f) => ({ ...f, phong_ban: e.target.value }))
@@ -753,7 +753,7 @@ export default function UploadVanBanPage() {
                       Mã văn bản <span className="text-red-500">*</span>
                     </label>
                     <input
-                      className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 ${maVanBanExists ? "border-red-400 bg-red-50" : "border-slate-300"}`}
+                      className={`w-full px-3 py-2 border rounded-xl text-sm font-mono outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30 ${maVanBanExists ? "border-red-400 bg-red-50" : "border-slate-300"}`}
                       placeholder="Ví dụ: 01/BC-NMCB"
                       value={maVanBan}
                       onChange={(e) => {
@@ -783,7 +783,7 @@ export default function UploadVanBanPage() {
                   Tên / Trích yếu văn bản <span className="text-red-500">*</span>
                 </label>
                 <input
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                   placeholder="Nhập tên hoặc trích yếu nội dung văn bản..."
                   value={form.ten_van_ban}
                   onChange={(e) => setForm((f) => ({ ...f, ten_van_ban: e.target.value }))}
@@ -795,7 +795,7 @@ export default function UploadVanBanPage() {
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày ký / Ngày phê duyệt</label>
                 <input
                   type="date"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                   value={form.ngay_phe_duyet}
                   onChange={(e) => setForm((f) => ({ ...f, ngay_phe_duyet: e.target.value }))}
                 />
@@ -805,7 +805,7 @@ export default function UploadVanBanPage() {
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30 resize-none"
                   rows={2}
                   placeholder="Ghi chú thêm (nếu có)..."
                   value={form.ghi_chu}
@@ -822,7 +822,7 @@ export default function UploadVanBanPage() {
           {/* Người phê duyệt */}
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
             <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
-              <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+              <span className="w-2 h-4 rounded-full bg-brand-600 inline-block" />
               Người phê duyệt <span className="text-red-500">*</span>
             </h2>
 
@@ -834,7 +834,7 @@ export default function UploadVanBanPage() {
                   </p>
                 ) : deptLeaderLoading ? (
                   <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                    <span className="w-3 h-3 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
+                    <span className="w-3 h-3 border-2 border-slate-300 border-t-brand-600 rounded-full animate-spin" />
                     Đang xác định người phê duyệt...
                   </p>
                 ) : deptLeaderQueried && deptLeaderCandidates.length === 0 ? (
@@ -848,20 +848,20 @@ export default function UploadVanBanPage() {
                     </span>
                   </div>
                 ) : deptLeaderCandidates.length === 1 ? (
-                  <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-brand-50 border border-brand-200 rounded-xl">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-slate-700 truncate">
                         {deptLeaderCandidates[0].full_name || deptLeaderCandidates[0].username}
                       </p>
                       <p className="text-xs text-slate-500">{deptLeaderCandidates[0].chuc_vu}</p>
                     </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700 shrink-0">
                       Tự động xác định
                     </span>
                   </div>
                 ) : (
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                     value={form.phe_duyet_user_id}
                     onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
                   >
@@ -877,7 +877,7 @@ export default function UploadVanBanPage() {
             ) : (
               <>
                 <select
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                   value={form.phe_duyet_user_id}
                   onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
                 >
@@ -911,7 +911,7 @@ export default function UploadVanBanPage() {
                     name="upload-sign-as"
                     checked={pheDuyetSignAs === "none"}
                     onChange={() => setPheDuyetSignAs("none")}
-                    className="accent-emerald-600"
+                    className="accent-brand-600"
                   />
                   Ký trực tiếp
                 </label>
@@ -922,7 +922,7 @@ export default function UploadVanBanPage() {
                       name="upload-sign-as"
                       checked={pheDuyetSignAs === opt}
                       onChange={() => setPheDuyetSignAs(opt)}
-                      className="accent-emerald-600"
+                      className="accent-brand-600"
                     />
                     {SIGN_AS_LABEL[opt]}
                   </label>
@@ -935,7 +935,7 @@ export default function UploadVanBanPage() {
           {form.pham_vi === "Don_vi" && (
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
-                <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+                <span className="w-2 h-4 rounded-full bg-brand-600 inline-block" />
                 Ký xác nhận
                 <span className="ml-1 text-xs font-normal text-slate-400">(tùy chọn)</span>
               </h2>
@@ -943,7 +943,7 @@ export default function UploadVanBanPage() {
                 <p className="text-xs text-amber-600">Chọn phòng ban trước để hiện danh sách người ký.</p>
               ) : unitSignUsersLoading ? (
                 <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                  <span className="w-3 h-3 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
+                  <span className="w-3 h-3 border-2 border-slate-300 border-t-brand-600 rounded-full animate-spin" />
                   Đang tải danh sách...
                 </p>
               ) : unitSignUsers.length === 0 ? (
@@ -961,7 +961,7 @@ export default function UploadVanBanPage() {
                         <label
                           key={u.id}
                           className={`flex items-center gap-2.5 p-2 rounded-xl border cursor-pointer transition-all ${
-                            selected ? "border-emerald-300 bg-emerald-50/60" : "border-slate-200 hover:bg-slate-50"
+                            selected ? "border-brand-300 bg-brand-50/60" : "border-slate-200 hover:bg-slate-50"
                           }`}
                         >
                           <input
@@ -972,10 +972,10 @@ export default function UploadVanBanPage() {
                                 e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
                               )
                             }}
-                            className="rounded text-emerald-600 focus:ring-emerald-500"
+                            className="rounded text-brand-600 focus:ring-brand-500"
                           />
                           {selected && (
-                            <span className="w-5 h-5 rounded-full bg-emerald-700 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                            <span className="w-5 h-5 rounded-full bg-brand-700 text-white text-xs flex items-center justify-center font-bold shrink-0">
                               {idx + 1}
                             </span>
                           )}
@@ -994,13 +994,13 @@ export default function UploadVanBanPage() {
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                  <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+                  <span className="w-2 h-4 rounded-full bg-brand-600 inline-block" />
                   Phòng ban đã ký
                 </h2>
                 <button
                   type="button"
                   onClick={addStep}
-                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-all"
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-brand-800 bg-brand-50 hover:bg-brand-100 rounded-xl transition-all"
                 >
                   <Plus size={13} /> Thêm bước
                 </button>
@@ -1022,12 +1022,12 @@ export default function UploadVanBanPage() {
                     const loadingUsers = s.phong_ban_code ? !!stepUsersLoading[s.phong_ban_code] : false
                     return (
                       <div key={s.id} className="flex items-start gap-2">
-                        <span className="mt-2 w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold shrink-0">
+                        <span className="mt-2 w-5 h-5 flex items-center justify-center rounded-full bg-brand-100 text-brand-800 text-[10px] font-bold shrink-0">
                           {i + 1}
                         </span>
                         <div className="flex-1 space-y-1.5">
                           <select
-                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                             value={s.phong_ban_code}
                             onChange={(e) => updateStepDept(s.id, e.target.value)}
                           >
@@ -1037,7 +1037,7 @@ export default function UploadVanBanPage() {
                             ))}
                           </select>
                           <select
-                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 disabled:bg-slate-50 disabled:text-slate-400"
+                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30 disabled:bg-slate-50 disabled:text-slate-400"
                             value={s.user_id}
                             disabled={!s.phong_ban_code}
                             onChange={(e) => updateStepUser(s.id, e.target.value)}
@@ -1069,20 +1069,20 @@ export default function UploadVanBanPage() {
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
               <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
-                <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+                <span className="w-2 h-4 rounded-full bg-brand-600 inline-block" />
                 Người lập <span className="text-red-500">*</span>
               </h2>
               {!form.phong_ban ? (
                 <p className="text-xs text-amber-600">Chọn phòng ban trước để chọn người lập.</p>
               ) : donViUsersLoading ? (
                 <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                  <span className="w-3 h-3 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
+                  <span className="w-3 h-3 border-2 border-slate-300 border-t-brand-600 rounded-full animate-spin" />
                   Đang tải danh sách...
                 </p>
               ) : (
                 <>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                     value={form.soan_thao_user_id}
                     onChange={(e) => setForm((f) => ({ ...f, soan_thao_user_id: e.target.value }))}
                   >
@@ -1092,7 +1092,7 @@ export default function UploadVanBanPage() {
                     ))}
                   </select>
                   {form.soan_thao_user_id && form.soan_thao_user_id === userId && (
-                    <p className="text-xs text-emerald-600 mt-1.5">
+                    <p className="text-xs text-brand-600 mt-1.5">
                       Mặc định: bạn — người đang tải lên. Có thể đổi nếu nhập hộ người khác.
                     </p>
                   )}
@@ -1109,7 +1109,7 @@ export default function UploadVanBanPage() {
             <button
               onClick={handleSave}
               disabled={saving || uploading || maVanBanExists || (form.pham_vi === "Don_vi" && deptLeaderLoading)}
-              className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-[0.99]"
+              className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-brand-700 hover:bg-brand-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-[0.99]"
             >
               {saving || uploading ? (
                 <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

@@ -60,3 +60,14 @@ export function getPlacementKeyColor(key: string): TemplateRoleColor {
   }
   return ROLE_COLORS.ky_buoc
 }
+
+/**
+ * Màu 3 vai trò ký của tài liệu ISO (Soạn thảo → Xem xét → Phê duyệt) — BẢN SAO CÓ CHỦ ĐÍCH của
+ * `ISO_ROLE_COLORS` trong `src/lib/signing/templates.ts` (file đó dùng supabase-admin, không
+ * import được ở client). Đổi màu ở đó thì sửa đồng bộ tại đây. Dùng cho timeline trang chi tiết.
+ */
+export const ISO_STEP_COLORS: Record<"soan_thao" | "xem_xet" | "phe_duyet", TemplateRoleColor> = {
+  soan_thao: { fg: "#0284c7", bg: "rgba(2,132,199,.14)" },
+  xem_xet: { fg: "#d97706", bg: "rgba(217,119,6,.14)" },
+  phe_duyet: { fg: "#059669", bg: "rgba(5,150,105,.14)" },
+}

@@ -281,3 +281,58 @@ Hai khu vuc dung ky thuat drag-and-drop HTML5 chua duoc lam mobile-friendly, the
 - Dat chu ky/QR tren PDF cho ISO — `SignPlacementModal` trong `iso/forms/[id]/page.tsx` va inline tuong duong trong `iso/documents/[id]/page.tsx` (dung `react-draggable` + `re-resizable` + pdfjs canvas).
 
 Khong tu y dung guard "chi desktop" hay dau tu touch-drag khi chua hoi lai nguoi dung huong xu ly cu the.
+
+## Doc-UI (ISO + Văn bản + màn ký số) — 2026-10-13
+
+Kế hoạch đầy đủ 7 giai đoạn: `C:\Users\Software\.claude\plans\nh-gi-k-ho-ch-scalable-dahl.md`.
+Bố cục theo mẫu `previews/enterprise-iso-vanban-unified-preview.html`, **màu theo token brand**
+(không dùng thang xanh Tailwind của mẫu). Đã xong GĐ0 (nền tảng) + GĐ1 (shell + trang danh sách).
+
+- Token: thang `brand-50…900` trong `@theme` (600 = brand #2f5d52, 800 = brand-deep #1c3a32),
+  `--font-doc` (Plus Jakarta Sans) / `--font-code` (JetBrains Mono). Font chỉ áp qua class
+  `font-doc` ở `documents-shell.tsx` / `iso-shell.tsx`, không đổi `body`.
+- Banner 2 module: `PageHeaderBanner theme="rubber"`. **Không** sửa theme `forest`
+  (#093719→#166534, Sản lượng/Thành phẩm đang dùng).
+- Bảng: `<table className="enterprise-table">` (CSS ở globals.css) — `<thead>`/`<th>` không cần class.
+- Component dùng chung `src/app/dashboard/_components/doc-ui/`:
+  - `status-registry.ts` — nguồn DUY NHẤT nhãn + tông trạng thái (`DOC_STATUS`, `ISO_STATUS`,
+    `FORM_STATUS`). `TRANG_THAI_LABEL/COLOR` (documents-types, iso-types) và
+    `FORM_INSTANCE_STATUS_*` giờ là alias đọc từ đây — sửa nhãn/màu ở registry.
+  - `StatusBadge` (`domain`+`status` hoặc `tone`+`label`), `DocCodePill`, `SegmentedTabs`
+    (tab module dạng link, tab lọc, bộ chọn), `IconAction`/`IconActionGroup` (32px, xám khi
+    nghỉ, màu theo tone khi hover, luôn có `aria-label`), `TimelineSteps` + `TimelineProgress`,
+    `InspectorCard` / `MetaRow` / `MetaList` / `StatusSummaryBar`.
+  - Hồ sơ thực hiện ISO: `iso/_components/form-status-badge.tsx` (`FormStatusBadge`, nhãn động
+    theo luồng N bước) — thay 3 bản `StatusBadge` copy cũ.
+- Màu trạng thái giữ đúng mẫu (valid xanh lá, pending amber có chấm nhấp nháy, draft xám, danger
+  đỏ, returned hồng). Mọi chỗ còn lại của 2 module dùng `brand-*`, không dùng `emerald-*`.
+- Code mới ở 2 module: không viết span trạng thái tay, không tô màu nút icon khi nghỉ.
+### GĐ2 — trang chi tiết 70/30 (2026-10-13, đã xong)
+
+- Component mới trong `doc-ui/`:
+  - `DetailSplitLayout({ header, banners, document, inspector })` — cột tài liệu ~70% + bảng điều
+    khiển ~30% (`lg:grid-cols-[minmax(0,7fr)_minmax(320px,3fr)]`, inspector sticky). Dưới `lg`
+    là tab "Tài liệu / Thông tin" (mặc định Thông tin), ẩn bằng `hidden`, KHÔNG unmount.
+  - `DetailPageHeader` + `HeaderButton` — nút quay lại, tiêu đề, `DocCodePill`, chip phụ, nút file.
+    Cố ý không có badge trạng thái: trạng thái chỉ hiện 1 lần ở `StatusSummaryBar`.
+  - `SignActionBox({ primary, secondary, danger })` — nút chính gradient brand, nút phụ, nút đỏ;
+    mobile thêm thanh cố định ở đáy (nút chính + "…" mở bottom-sheet các nút còn lại).
+- Áp dụng: `documents/[id]`, `iso/forms/[id]` dùng `DetailSplitLayout`. `iso/documents/[id]` CHỈ
+  chế độ xem (`!isNew && !isEditMode`) dùng 70/30 (tự dựng tab mobile bằng state `mobilePane`
+  vì cột phải còn nhiều khối nhập liệu); tạo mới / chỉnh sửa giữ bố cục `lg:grid-cols-3` cũ và
+  hành động ký hiện trên header.
+- Hành động ký được gom thành mảng `SignAction` ngay trước `return` của từng trang — **giữ nguyên
+  onClick và cờ quyền cũ**. Thêm nút mới thì thêm vào mảng, không viết nút tay.
+- Timeline: cả 3 trang dùng `TimelineSteps` + `TimelineProgress` (đã xoá 2 bản `TimelineStep`,
+  `InfoRow`, `WorkflowStepper` local). Màu bước: Văn bản / hồ sơ thực hiện dùng `getKyBuocColor`
+  + `ROLE_COLORS.phe_duyet`; tài liệu ISO dùng `ISO_STEP_COLORS` (`template-colors.ts`, bản sao có
+  chủ đích của `ISO_ROLE_COLORS` trong `templates.ts` — file đó không import được ở client).
+- `detail-view-ui.tsx`: tone `emerald` giờ hiển thị theo brand (giữ làm alias), thêm tone `brand`;
+  highlight `rose`/`violet` đã ra đúng màu. File này chỉ 3 trang chi tiết dùng.
+- Thân 3 trang đã đổi `emerald-*` → `brand-*`. Còn lại có chủ đích: các modal ký / đặt vị trí
+  (GĐ5), icon file Excel, màu trạng thái.
+- Kho của tôi: route `api/iso/distribute/track` nhận `itemType` ("document"|"form"), trả mốc
+  `first_viewed_at`/`first_downloaded_at`; trang cập nhật ngay dòng đó. Mục do chính người xem
+  tạo/ký (`recipientId` bắt đầu `owner-`) hiện chip "Tài liệu của bạn", không gọi track.
+- Chưa làm: GĐ3 khung xem PDF nhúng, GĐ4 hộp PIN chung, GĐ5 vỏ màn ký chung, GĐ6 trang xác
+  thực + mobile.

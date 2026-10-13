@@ -258,7 +258,7 @@ export function IsoFormVerifyModal({ instance, onClose }: IsoFormVerifyModalProp
         <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3 shadow-xs">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <h4 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <User size={13} className="text-violet-600" /> Tiến trình ký duyệt theo bước
+              <User size={13} className="text-brand-700" /> Tiến trình ký duyệt theo bước
             </h4>
             <span className="text-[11px] font-semibold text-slate-500">
               {stepsList.filter((s) => s.isDone).length}/{stepsList.length} bước hoàn tất
@@ -315,7 +315,7 @@ export function IsoFormVerifyModal({ instance, onClose }: IsoFormVerifyModalProp
               <button
                 type="button"
                 onClick={handleCopyHash}
-                className="flex items-center gap-1 text-xs text-violet-700 hover:text-violet-900 font-bold"
+                className="flex items-center gap-1 text-xs text-brand-700 hover:text-brand-900 font-bold"
               >
                 {copied ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
                 {copied ? "Đã sao chép" : "Sao chép mã hash"}

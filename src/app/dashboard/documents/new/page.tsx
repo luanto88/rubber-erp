@@ -545,7 +545,7 @@ export default function NewDocumentPage() {
   if (hasCreatePerm === false) {
     return (
       <DocumentsShell>
-        <PageBackgroundMotif theme="cyan" />
+        <PageBackgroundMotif theme="rubber" />
         <div className="max-w-md mx-auto my-16 p-8 bg-white border border-slate-200 rounded-2xl shadow-sm text-center">
           <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Lock size={28} />
@@ -599,11 +599,11 @@ export default function NewDocumentPage() {
         </div>
       )}
 
-      <PageBackgroundMotif theme="forest" />
+      <PageBackgroundMotif theme="rubber" />
       <PageHeaderBanner
         title="Soạn thảo văn bản mới"
         subtitle="Tạo văn bản và cấu hình vòng ký phòng ban"
-        theme="forest"
+        theme="rubber"
         icon={FileText}
         collapsible={true}
         storageKey="banner_collapsed_documents_new"
@@ -614,7 +614,7 @@ export default function NewDocumentPage() {
         <div className="lg:col-span-2 space-y-5">
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-6">
             <h2 className="text-base font-extrabold text-slate-800 mb-4 flex items-center gap-2">
-              <span className="w-2 h-5 rounded-full bg-emerald-600 inline-block" />
+              <span className="w-2 h-5 rounded-full bg-brand-600 inline-block" />
               Thông tin văn bản
             </h2>
             <div className="space-y-4">
@@ -625,8 +625,8 @@ export default function NewDocumentPage() {
                   File đính kèm (tùy chọn)
                 </label>
                 {file ? (
-                  <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl">
-                    <FileText size={18} className="text-emerald-700 shrink-0" />
+                  <div className="flex items-center gap-3 px-4 py-3 bg-brand-50/50 border border-brand-200/80 rounded-2xl">
+                    <FileText size={18} className="text-brand-700 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-slate-800 truncate">{file.name}</p>
                       <p className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB</p>
@@ -640,12 +640,12 @@ export default function NewDocumentPage() {
                     </button>
                   </div>
                 ) : (
-                  <label className="flex flex-col sm:flex-row items-center justify-center gap-2.5 px-4 py-5 border-2 border-dashed border-slate-300 hover:border-emerald-500 hover:bg-emerald-50/40 rounded-2xl cursor-pointer transition-all text-center sm:text-left group">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+                  <label className="flex flex-col sm:flex-row items-center justify-center gap-2.5 px-4 py-5 border-2 border-dashed border-slate-300 hover:border-brand-500 hover:bg-brand-50/40 rounded-2xl cursor-pointer transition-all text-center sm:text-left group">
+                    <div className="w-9 h-9 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
                       <Plus size={18} />
                     </div>
                     <div>
-                      <span className="text-sm font-bold text-slate-700 group-hover:text-emerald-800">
+                      <span className="text-sm font-bold text-slate-700 group-hover:text-brand-800">
                         Đính kèm file nháp (.pdf, .docx, .xlsx)
                       </span>
                       <p className="text-xs text-slate-400 mt-0.5">
@@ -711,7 +711,7 @@ export default function NewDocumentPage() {
                       Loại văn bản <span className="text-red-500">*</span>
                     </label>
                     <select
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
                       value={form.loai_van_ban}
                       onChange={(e) => {
                         setForm((f) => ({ ...f, loai_van_ban: e.target.value }))
@@ -732,7 +732,7 @@ export default function NewDocumentPage() {
                     Phòng ban soạn thảo <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                     value={form.phong_ban}
                     onChange={(e) => {
                       setForm((f) => ({ ...f, phong_ban: e.target.value }))
@@ -761,7 +761,7 @@ export default function NewDocumentPage() {
                             ? "border-red-400 bg-red-50 focus:border-red-500"
                             : hasGapWarning
                             ? "border-amber-400 bg-amber-50 focus:border-amber-500"
-                            : "border-slate-300 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                            : "border-slate-300 focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                         }`}
                         value={maVanBan}
                         onChange={(e) => {
@@ -776,7 +776,7 @@ export default function NewDocumentPage() {
                       />
                       {maVanBanChecking && (
                         <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                          <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
+                          <div className="w-3.5 h-3.5 border-2 border-slate-300 border-t-brand-600 rounded-full animate-spin" />
                         </div>
                       )}
                     </div>
@@ -805,7 +805,7 @@ export default function NewDocumentPage() {
                   Tên / Trích yếu nội dung <span className="text-red-500">*</span>
                 </label>
                 <input
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                   placeholder="Nhập tên hoặc trích yếu nội dung văn bản..."
                   value={form.ten_van_ban}
                   onChange={(e) => setForm((f) => ({ ...f, ten_van_ban: e.target.value }))}
@@ -815,7 +815,7 @@ export default function NewDocumentPage() {
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
                 <textarea
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30 resize-none"
                   rows={2}
                   placeholder="Ghi chú thêm (nếu có)..."
                   value={form.ghi_chu}
@@ -826,12 +826,12 @@ export default function NewDocumentPage() {
               {/* Bug 6e: Mô tả tìm kiếm AI */}
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                  <Sparkles size={12} className="inline mr-1 text-emerald-600" />
+                  <Sparkles size={12} className="inline mr-1 text-brand-600" />
                   Mô tả tìm kiếm AI
                   <span className="ml-1.5 text-xs font-normal text-slate-400">(tùy chọn)</span>
                 </label>
                 <textarea
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30 resize-none"
                   rows={2}
                   placeholder="Mô tả ngắn gọn nội dung để AI tìm kiếm chính xác hơn (VD: kế hoạch sản xuất quý 3 NMCB)..."
                   value={form.mo_ta_tim_kiem}
@@ -847,7 +847,7 @@ export default function NewDocumentPage() {
           {/* Người phê duyệt cuối — đặt trước vòng ký để approverDept luôn được chọn trước */}
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5">
             <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
-              <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+              <span className="w-2 h-4 rounded-full bg-brand-600 inline-block" />
               Người phê duyệt cuối <span className="text-red-500">*</span>
             </h2>
 
@@ -860,7 +860,7 @@ export default function NewDocumentPage() {
                   </p>
                 ) : deptLeaderLoading ? (
                   <p className="text-xs text-slate-400 flex items-center gap-1.5">
-                    <span className="w-3 h-3 border-2 border-slate-300 border-t-emerald-600 rounded-full animate-spin" />
+                    <span className="w-3 h-3 border-2 border-slate-300 border-t-brand-600 rounded-full animate-spin" />
                     Đang xác định người phê duyệt...
                   </p>
                 ) : deptLeaderQueried && deptLeaderCandidates.length === 0 ? (
@@ -874,20 +874,20 @@ export default function NewDocumentPage() {
                     </span>
                   </div>
                 ) : deptLeaderCandidates.length === 1 ? (
-                  <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <div className="flex items-center gap-2 px-3 py-2 bg-brand-50 border border-brand-200 rounded-xl">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold text-slate-700 truncate">
                         {deptLeaderCandidates[0].full_name || deptLeaderCandidates[0].username}
                       </p>
                       <p className="text-xs text-slate-500">{deptLeaderCandidates[0].chuc_vu}</p>
                     </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-brand-100 text-brand-700 shrink-0">
                       Tự động xác định
                     </span>
                   </div>
                 ) : (
                   <select
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                     value={form.phe_duyet_user_id}
                     onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
                   >
@@ -904,7 +904,7 @@ export default function NewDocumentPage() {
               /* --- Nội bộ công ty: chọn tay từ danh sách toàn nhà máy --- */
               <>
                 <select
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600/30"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-600 focus:ring-1 focus:ring-brand-600/30"
                   value={form.phe_duyet_user_id}
                   onChange={(e) => setForm((f) => ({ ...f, phe_duyet_user_id: e.target.value }))}
                 >
@@ -937,7 +937,7 @@ export default function NewDocumentPage() {
               /* --- Nội bộ đơn vị: chọn người ký xác nhận --- */
               <>
                 <h2 className="text-sm font-extrabold text-slate-800 mb-3 flex items-center gap-2">
-                  <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+                  <span className="w-2 h-4 rounded-full bg-brand-600 inline-block" />
                   Ký xác nhận (Nội bộ đơn vị)
                   <span className="ml-1 text-xs font-normal text-slate-400">(tùy chọn)</span>
                 </h2>
@@ -962,7 +962,7 @@ export default function NewDocumentPage() {
                             key={u.id}
                             className={`flex items-center gap-2.5 p-2 rounded-xl border cursor-pointer transition-all ${
                               selected
-                                ? "border-emerald-300 bg-emerald-50/60"
+                                ? "border-brand-300 bg-brand-50/60"
                                 : "border-slate-200 hover:bg-slate-50"
                             }`}
                           >
@@ -976,10 +976,10 @@ export default function NewDocumentPage() {
                                     : prev.filter((id) => id !== u.id),
                                 )
                               }}
-                              className="rounded text-emerald-600 focus:ring-emerald-500"
+                              className="rounded text-brand-600 focus:ring-brand-500"
                             />
                             {selected && (
-                              <span className="w-5 h-5 rounded-full bg-emerald-700 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                              <span className="w-5 h-5 rounded-full bg-brand-700 text-white text-xs flex items-center justify-center font-bold shrink-0">
                                 {idx + 1}
                               </span>
                             )}
@@ -994,7 +994,7 @@ export default function NewDocumentPage() {
                 )}
                 {selectedUnitUserIds.length > 0 && selectedApprover && (
                   <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-400">
-                    <div className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold shrink-0">
+                    <div className="w-5 h-5 flex items-center justify-center rounded-full bg-brand-100 text-brand-700 font-bold shrink-0">
                       ✓
                     </div>
                     <span>
@@ -1011,12 +1011,12 @@ export default function NewDocumentPage() {
               <>
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                    <span className="w-2 h-4 rounded-full bg-emerald-600 inline-block" />
+                    <span className="w-2 h-4 rounded-full bg-brand-600 inline-block" />
                     Vòng ký phòng ban
                   </h2>
                   <button
                     onClick={addStep}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-all"
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-brand-800 bg-brand-50 hover:bg-brand-100 rounded-xl transition-all"
                   >
                     <Plus size={13} />
                     Thêm bước
@@ -1027,7 +1027,7 @@ export default function NewDocumentPage() {
                   <div className="text-sm text-slate-400 text-center py-4 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
                     Chưa có bước ký — văn bản sẽ được gửi thẳng lên người phê duyệt.
                     <br />
-                    Nhấn <span className="font-bold text-emerald-700">+ Thêm bước</span> nếu cần ký qua
+                    Nhấn <span className="font-bold text-brand-700">+ Thêm bước</span> nếu cần ký qua
                     các phòng ban trước.
                   </div>
                 ) : (
@@ -1045,14 +1045,14 @@ export default function NewDocumentPage() {
                             <div className="flex items-center gap-1.5 w-5 shrink-0 text-slate-300">
                               <GripVertical size={14} />
                             </div>
-                            <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold shrink-0">
+                            <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-brand-100 text-brand-800 text-xs font-bold shrink-0">
                               {i + 1}
                             </div>
                             <select
                               className={`flex-1 px-2.5 py-1.5 border rounded-xl text-sm outline-none ${
                                 isApproverDept
                                   ? "border-amber-400 bg-amber-50 focus:border-amber-500"
-                                  : "border-slate-300 focus:border-emerald-600"
+                                  : "border-slate-300 focus:border-brand-600"
                               }`}
                               value={s.phong_ban_code}
                               onChange={(e) => updateStepPhongBan(s.id, e.target.value)}
@@ -1085,7 +1085,7 @@ export default function NewDocumentPage() {
                               className={`w-full px-2.5 py-1.5 text-xs border rounded-xl outline-none ${
                                 !s.user_id && s.phong_ban_code
                                   ? "border-amber-300 bg-amber-50 focus:border-amber-400"
-                                  : "border-slate-300 focus:border-emerald-600"
+                                  : "border-slate-300 focus:border-brand-600"
                               }`}
                               value={s.user_id}
                               onChange={(e) => updateStepSigner(s.id, e.target.value)}
@@ -1115,7 +1115,7 @@ export default function NewDocumentPage() {
                 {steps.length > 0 && selectedApprover && (
                   <div className="mt-3 pt-3 border-t border-slate-100">
                     <div className="flex items-center gap-2 text-xs text-slate-400">
-                      <div className="w-5 h-5 flex items-center justify-center rounded-full bg-emerald-100 text-emerald-700 font-bold shrink-0">
+                      <div className="w-5 h-5 flex items-center justify-center rounded-full bg-brand-100 text-brand-700 font-bold shrink-0">
                         ✓
                       </div>
                       <span>
@@ -1143,7 +1143,7 @@ export default function NewDocumentPage() {
                 maVanBanExists ||
                 (form.pham_vi === "Don_vi" && deptLeaderQueried && deptLeaderCandidates.length === 0)
               }
-              className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-[0.99]"
+              className="flex items-center justify-center gap-2 w-full px-6 py-3 bg-brand-700 hover:bg-brand-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold rounded-2xl shadow-md transition-all active:scale-[0.99]"
             >
               {saving ? (
                 <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

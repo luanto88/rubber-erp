@@ -2,6 +2,7 @@
 
 import type { ThuTuKyStep } from "@/app/dashboard/documents/_components/documents-types"
 import { stepSignerUserId, canSignStep, stepDisplayLabel } from "@/app/dashboard/documents/_components/documents-types"
+import { FORM_STATUS, ISO_STATUS, colorMap, labelMap } from "@/app/dashboard/_components/doc-ui/status-registry"
 
 export type { ThuTuKyStep }
 export { stepSignerUserId, canSignStep, stepDisplayLabel }
@@ -202,25 +203,10 @@ export function isoDocumentTypeFallback(): IsoDocumentTypeMaster[] {
   }))
 }
 
-export const TRANG_THAI_LABEL: Record<IsoTrangThai, string> = {
-  draft: "Nháp",
-  cho_xem_xet: "Chờ xem xét",
-  cho_phe_duyet: "Chờ phê duyệt",
-  co_hieu_luc: "Có hiệu lực",
-  het_hieu_luc: "Hết hiệu lực",
-  tra_ve: "Trả về",
-  bi_tu_choi_phe_duyet: "Phê duyệt từ chối",
-}
+// Alias đọc từ registry dùng chung (Doc-UI, 2026-10-13) — sửa nhãn/màu ở status-registry.ts.
+export const TRANG_THAI_LABEL: Record<IsoTrangThai, string> = labelMap<IsoTrangThai>(ISO_STATUS)
 
-export const TRANG_THAI_COLOR: Record<IsoTrangThai, string> = {
-  draft: "bg-slate-100 text-slate-600",
-  cho_xem_xet: "bg-amber-100 text-amber-700",
-  cho_phe_duyet: "bg-orange-100 text-orange-700",
-  co_hieu_luc: "bg-emerald-100 text-emerald-700",
-  het_hieu_luc: "bg-red-100 text-red-600",
-  tra_ve: "bg-rose-100 text-rose-700",
-  bi_tu_choi_phe_duyet: "bg-red-100 text-red-700",
-}
+export const TRANG_THAI_COLOR: Record<IsoTrangThai, string> = colorMap<IsoTrangThai>(ISO_STATUS)
 
 // Auto-generate mã tài liệu Cha: PB-LOAISOSO (VD: NMCB-QT01)
 export function buildMaTaiLieu(pb: string, loai: string, so: string): string {
@@ -333,8 +319,8 @@ export const ISO_LOG_ACTION_CONFIG: Record<string, IsoLogActionMeta> = {
   },
   gui_phe_duyet: {
     label: "Gửi phê duyệt",
-    badgeCls: "bg-indigo-50 text-indigo-700 border-indigo-200",
-    dotCls: "bg-indigo-500",
+    badgeCls: "bg-blue-50 text-blue-700 border-blue-200",
+    dotCls: "bg-blue-500",
   },
   xem_xet: {
     label: "Ký xem xét",
@@ -343,8 +329,8 @@ export const ISO_LOG_ACTION_CONFIG: Record<string, IsoLogActionMeta> = {
   },
   phe_duyet: {
     label: "Ký phê duyệt",
-    badgeCls: "bg-teal-50 text-teal-700 border-teal-200 font-semibold",
-    dotCls: "bg-teal-600",
+    badgeCls: "bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold",
+    dotCls: "bg-emerald-600",
   },
   tra_ve: {
     label: "Trả về hồ sơ",
@@ -473,23 +459,11 @@ export interface IsoFormInstance {
   updated_at: string
 }
 
-export const FORM_INSTANCE_STATUS_LABEL: Record<IsoFormInstanceStatus, string> = {
-  draft: "Nháp",
-  cho_xem_xet: "Chờ xem xét",
-  cho_phe_duyet: "Chờ phê duyệt",
-  da_phe_duyet: "Đã phê duyệt",
-  tra_ve: "Trả về",
-  tu_choi: "Từ chối",
-}
+export const FORM_INSTANCE_STATUS_LABEL: Record<IsoFormInstanceStatus, string> =
+  labelMap<IsoFormInstanceStatus>(FORM_STATUS)
 
-export const FORM_INSTANCE_STATUS_COLOR: Record<IsoFormInstanceStatus, string> = {
-  draft: "bg-slate-100 text-slate-600",
-  cho_xem_xet: "bg-amber-100 text-amber-700",
-  cho_phe_duyet: "bg-orange-100 text-orange-700",
-  da_phe_duyet: "bg-emerald-100 text-emerald-700",
-  tra_ve: "bg-rose-100 text-rose-700",
-  tu_choi: "bg-red-100 text-red-700",
-}
+export const FORM_INSTANCE_STATUS_COLOR: Record<IsoFormInstanceStatus, string> =
+  colorMap<IsoFormInstanceStatus>(FORM_STATUS)
 
 // Vá bảo mật 2026-09-20: type này trước đây mang cả 3 cột URL file thật của `iso_documents`
 // (`file_signed_office_url`/`file_goc_url`/`file_signed_pdf_url`) — route `/api/iso/forms/search`

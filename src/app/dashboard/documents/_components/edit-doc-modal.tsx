@@ -272,7 +272,7 @@ export function EditDocModal({
           <button
             onClick={() => void handleSave()}
             disabled={saving}
-            className="flex-1 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl transition-all flex items-center justify-center gap-2 shadow-md"
+            className="flex-1 py-2.5 text-sm font-bold text-white bg-brand-700 hover:bg-brand-800 disabled:opacity-50 rounded-xl transition-all flex items-center justify-center gap-2 shadow-xs"
           >
             {saving ? (
               <>
@@ -318,7 +318,7 @@ export function EditDocModal({
             Tên / Trích yếu nội dung <span className="text-red-500">*</span>
           </label>
           <input
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
             value={tenVanBan}
             onChange={(e) => setTenVanBan(e.target.value)}
           />
@@ -350,17 +350,17 @@ export function EditDocModal({
           />
 
           {newFile ? (
-            <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl space-y-2">
+            <div className="p-3 bg-brand-50 border border-brand-300 rounded-xl space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-brand-600 text-white flex items-center justify-center shrink-0">
                     <Upload size={16} />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-emerald-900 truncate">
+                    <p className="text-xs font-bold text-brand-900 truncate">
                       {newFile.name}
                     </p>
-                    <p className="text-[11px] text-emerald-700">
+                    <p className="text-[11px] text-brand-700">
                       {(newFile.size / 1024).toFixed(1)} KB — Tệp mới sẵn sàng thay thế khi bấm Lưu
                     </p>
                   </div>
@@ -374,14 +374,14 @@ export function EditDocModal({
                   <X size={15} />
                 </button>
               </div>
-              <p className="text-[11px] text-emerald-800 leading-relaxed font-normal">
+              <p className="text-[11px] text-brand-800 leading-relaxed font-normal">
                 💡 Tệp mới này sẽ thay thế tệp hiện tại khi bạn nhấn <strong>Lưu thay đổi</strong>. Các dữ liệu ký của vòng trước (nếu có) sẽ được dọn sạch để chuẩn bị cho lượt ký lại.
               </p>
             </div>
           ) : currentDisplayFile ? (
             <div className="flex items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-brand-100 text-brand-700 flex items-center justify-center shrink-0">
                   <FileText size={16} />
                 </div>
                 <div className="min-w-0">
@@ -397,7 +397,7 @@ export function EditDocModal({
                 <button
                   type="button"
                   onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-all"
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-all"
                 >
                   <Eye size={12} />
                   Xem file
@@ -416,7 +416,7 @@ export function EditDocModal({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl text-xs font-bold text-slate-600 hover:text-blue-600 hover:bg-blue-50/50 transition-all"
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 border-2 border-dashed border-slate-300 hover:border-brand-500 rounded-xl text-xs font-bold text-slate-600 hover:text-brand-600 hover:bg-brand-50/50 transition-all"
             >
               <Upload size={15} />
               Đính kèm tệp văn bản (PDF, DOCX, XLSX)
@@ -436,7 +436,7 @@ export function EditDocModal({
         <div>
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
           <textarea
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-blue-500 resize-none"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 resize-none"
             rows={2}
             value={ghiChu}
             onChange={(e) => setGhiChu(e.target.value)}
@@ -445,7 +445,7 @@ export function EditDocModal({
         <div>
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Mô tả tìm kiếm AI</label>
           <textarea
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-400 resize-none"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 resize-none"
             rows={2}
             value={moTaTimKiem}
             onChange={(e) => setMoTaTimKiem(e.target.value)}
@@ -470,7 +470,7 @@ export function EditDocModal({
                       <label
                         key={u.id}
                         className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all ${
-                          selected ? "border-blue-300 bg-blue-50" : "border-slate-200 hover:bg-slate-50"
+                          selected ? "border-brand-300 bg-brand-50" : "border-slate-200 hover:bg-slate-50"
                         }`}
                       >
                         <input
@@ -484,7 +484,7 @@ export function EditDocModal({
                           className="rounded"
                         />
                         {selected && (
-                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                          <span className="w-5 h-5 rounded-full bg-brand-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
                             {idx + 1}
                           </span>
                         )}
@@ -501,7 +501,7 @@ export function EditDocModal({
               <label className="text-xs font-bold text-slate-600">Các bước ký phòng ban</label>
               <button
                 onClick={addStep}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all"
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200/60 rounded-lg transition-all"
               >
                 <Plus size={12} /> Thêm bước
               </button>
@@ -513,11 +513,11 @@ export function EditDocModal({
                 {steps.map((s, i) => (
                   <div key={s.id} className={`rounded-lg border p-2.5 space-y-2 ${isGioiHan ? "border-amber-200 bg-amber-50/40" : "border-slate-200"}`}>
                     <div className="flex items-center gap-2">
-                      <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0">
+                      <div className="flex-none w-6 h-6 flex items-center justify-center rounded-full bg-brand-100 text-brand-800 text-xs font-bold shrink-0">
                         {i + 1}
                       </div>
                       <select
-                        className="flex-1 px-2 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-blue-500"
+                        className="flex-1 px-2 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:border-brand-500"
                         value={s.phong_ban_code}
                         onChange={(e) => updateStepPhongBan(s.id, e.target.value)}
                       >
@@ -538,7 +538,7 @@ export function EditDocModal({
                         className={`w-full px-2 py-1.5 text-xs border rounded-lg outline-none ${
                           !s.user_id && s.phong_ban_code
                             ? "border-amber-300 bg-amber-50 focus:border-amber-400"
-                            : "border-slate-300 focus:border-blue-400"
+                            : "border-slate-300 focus:border-brand-500"
                         }`}
                         value={s.user_id}
                         onChange={(e) => updateStepSigner(s.id, e.target.value)}

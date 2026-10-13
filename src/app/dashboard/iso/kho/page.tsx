@@ -18,6 +18,9 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import { authFetch } from "@/lib/auth-fetch"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { IconAction } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
 
 type KhoItem = {
   recipientId: string
@@ -64,12 +67,35 @@ function fileUrlEndpoint(item: Pick<KhoItem, "docId" | "itemType">, download?: b
   return `${base}${base.includes("?") ? "&" : "?"}download=1`
 }
 
-async function trackAction(docId: string, action: "view" | "download") {
-  await authFetch("/api/iso/distribute/track", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ docId, action }),
-  }).catch(() => {})
+type TrackResult =
+  | { ok: true; first_viewed_at: string | null; first_downloaded_at: string | null }
+  | { ok: false; error: string }
+
+/**
+ * Ghi mốc "đã xem / đã tải" của lượt PHÂN PHỐI. Chỉ áp dụng cho dòng có bản ghi người nhận thật
+ * (recipientId không bắt đầu bằng "owner-"). Trả về mốc mới nhất để cập nhật giao diện ngay.
+ */
+async function trackAction(item: Pick<KhoItem, "docId" | "itemType">, action: "view" | "download"): Promise<TrackResult> {
+  try {
+    const res = await authFetch("/api/iso/distribute/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ docId: item.docId, action, itemType: item.itemType }),
+    })
+    const json = (await res.json().catch(() => ({}))) as {
+      error?: string
+      first_viewed_at?: string | null
+      first_downloaded_at?: string | null
+    }
+    if (!res.ok) return { ok: false, error: json.error || "Không ghi nhận được lượt xem/tải" }
+    return { ok: true, first_viewed_at: json.first_viewed_at ?? null, first_downloaded_at: json.first_downloaded_at ?? null }
+  } catch {
+    return { ok: false, error: "Lỗi kết nối khi ghi nhận lượt xem/tải" }
+  }
+}
+
+function isDistributedItem(item: Pick<KhoItem, "recipientId">): boolean {
+  return !item.recipientId.startsWith("owner-")
 }
 
 export default function KhoPage() {
@@ -81,6 +107,31 @@ export default function KhoPage() {
   const [user, setUser] = useState<SessionUser | null>(null)
   const [items, setItems] = useState<KhoItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [trackError, setTrackError] = useState<string | null>(null)
+
+  // Ghi mốc xem/tải rồi cập nhật NGAY dòng đó (không tải lại trang). Mục "của bạn" (owner-…)
+  // không có bản ghi người nhận nên không theo dõi.
+  const handleTrack = useCallback(async (item: KhoItem, action: "view" | "download") => {
+    if (!isDistributedItem(item)) return
+    const already = action === "view" ? item.first_viewed_at : item.first_downloaded_at
+    if (already) return
+    const result = await trackAction(item, action)
+    if (!result.ok) {
+      setTrackError(result.error)
+      return
+    }
+    setItems((prev) =>
+      prev.map((row) =>
+        row.recipientId === item.recipientId
+          ? {
+              ...row,
+              first_viewed_at: result.first_viewed_at ?? row.first_viewed_at,
+              first_downloaded_at: result.first_downloaded_at ?? row.first_downloaded_at,
+            }
+          : row,
+      ),
+    )
+  }, [])
 
   // Filters — Mặc định lọc "co_hieu_luc" để người dùng tập trung vào tài liệu đang vận hành
   const [filterLoai, setFilterLoai] = useState<string[]>([])
@@ -382,12 +433,22 @@ export default function KhoPage() {
   return (
     <IsoShell>
       <div className="space-y-4">
-        <PageBackgroundMotif theme="indigo" />
+        {trackError && (
+          <div className="fixed left-1/2 top-4 z-50 flex max-w-xl -translate-x-1/2 items-center gap-3 rounded-2xl bg-red-600 px-5 py-3 text-white shadow-2xl">
+            <span className="text-sm font-bold">{trackError}</span>
+            <button type="button" onClick={() => setTrackError(null)} className="text-xs font-bold underline">
+              Đóng
+            </button>
+          </div>
+        )}
+        <PageBackgroundMotif theme="rubber" />
         <PageHeaderBanner
           title="Kho của tôi"
           subtitle="Tài liệu ISO đã được phân phối đến bạn"
-          theme="indigo"
+          theme="rubber"
           icon={BadgeCheck}
+          collapsible={true}
+          storageKey="banner_collapsed_iso_kho"
           action={
             <span className="rounded-full bg-white/15 border border-white/40 px-3 py-1 text-xs font-bold text-white">
               {items.length} tài liệu & hồ sơ
@@ -425,7 +486,7 @@ export default function KhoPage() {
                   className={
                     "text-xs font-semibold px-2.5 py-1 rounded-lg transition-all " +
                     (active
-                      ? "bg-violet-600 text-white shadow-xs"
+                      ? "bg-brand-700 text-white shadow-xs"
                       : "bg-slate-100 hover:bg-slate-200 text-slate-600")
                   }
                 >
@@ -469,7 +530,7 @@ export default function KhoPage() {
         </FilterBar>
 
         {/* Table */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
           {loading ? (
             <div className="p-12 text-center text-slate-400">Đang tải...</div>
           ) : filtered.length === 0 ? (
@@ -479,16 +540,16 @@ export default function KhoPage() {
             </div>
           ) : (
             <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-            <table className="w-full text-sm">
+            <table className="enterprise-table">
               <thead>
-                <tr className="border-b border-slate-100 bg-slate-50 text-left">
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs">Mã</th>
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs">Tên / Tiêu đề</th>
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs hidden md:table-cell">Phân loại</th>
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs hidden md:table-cell">Ngày nhận</th>
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs">Tình trạng</th>
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs">Trạng thái</th>
-                  <th className="px-4 py-3 font-bold text-slate-600 text-xs text-right">Thao tác</th>
+                <tr>
+                  <th>Mã</th>
+                  <th>Tên / Tiêu đề</th>
+                  <th className="hidden md:table-cell">Phân loại</th>
+                  <th className="hidden md:table-cell">Ngày nhận</th>
+                  <th>Tình trạng</th>
+                  <th>Trạng thái</th>
+                  <th className="!text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -498,14 +559,14 @@ export default function KhoPage() {
                     <tr
                       key={item.recipientId}
                       className={
-                        "border-b border-slate-50 transition-colors hover:bg-slate-50 " +
+                        "" +
                         (isHetHieuLuc ? "opacity-70" : "")
                       }
                     >
                       <td className="px-4 py-3 font-bold text-slate-800">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {item.itemType === "form" && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded border border-indigo-200 shrink-0">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 bg-brand-50 text-brand-800 rounded border border-brand-200 shrink-0">
                               Hồ sơ
                             </span>
                           )}
@@ -514,7 +575,7 @@ export default function KhoPage() {
                               Của bạn
                             </span>
                           )}
-                          <span>{item.ma_tai_lieu || "—"}</span>
+                          <DocCodePill code={item.ma_tai_lieu} />
                         </div>
                       </td>
                       <td className="px-4 py-3 text-slate-700 max-w-xs truncate">
@@ -527,49 +588,53 @@ export default function KhoPage() {
                         {new Date(item.ngay_nhan).toLocaleDateString("vi-VN")}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex flex-col gap-0.5">
+                        {!isDistributedItem(item) ? (
                           <span
-                            className={
-                              "flex items-center gap-1 text-xs " +
-                              (item.first_viewed_at
-                                ? "text-emerald-600"
-                                : "text-slate-400")
-                            }
+                            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand-800"
+                            title="Tài liệu bạn tham gia tạo/soạn/xem xét/phê duyệt — không qua phân phối nên không theo dõi lượt xem/tải"
                           >
-                            <Eye size={11} />
-                            {item.first_viewed_at
-                              ? `Đã xem ${new Date(item.first_viewed_at).toLocaleDateString("vi-VN")}`
-                              : "Chưa xem"}
-                          </span>
-                          <span
-                            className={
-                              "flex items-center gap-1 text-xs " +
-                              (item.first_downloaded_at
-                                ? "text-blue-600"
-                                : "text-slate-400")
-                            }
-                          >
-                            <Download size={11} />
-                            {item.first_downloaded_at
-                              ? `Đã tải ${new Date(item.first_downloaded_at).toLocaleDateString("vi-VN")}`
-                              : "Chưa tải"}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        {isHetHieuLuc ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-xs font-bold">
-                            <AlertTriangle size={10} />
-                            Hết hiệu lực
+                            Tài liệu của bạn
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">
-                            Đang hiệu lực
-                          </span>
+                          <div className="flex flex-col gap-0.5">
+                            <span
+                              className={
+                                "flex items-center gap-1 text-xs " +
+                                (item.first_viewed_at
+                                  ? "text-brand-600"
+                                  : "text-slate-400")
+                              }
+                            >
+                              <Eye size={11} />
+                              {item.first_viewed_at
+                                ? `Đã xem ${new Date(item.first_viewed_at).toLocaleDateString("vi-VN")}`
+                                : "Chưa xem"}
+                            </span>
+                            <span
+                              className={
+                                "flex items-center gap-1 text-xs " +
+                                (item.first_downloaded_at
+                                  ? "text-sky-700"
+                                  : "text-slate-400")
+                              }
+                            >
+                              <Download size={11} />
+                              {item.first_downloaded_at
+                                ? `Đã tải ${new Date(item.first_downloaded_at).toLocaleDateString("vi-VN")}`
+                                : "Chưa tải"}
+                            </span>
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2 justify-end flex-wrap">
+                        {isHetHieuLuc ? (
+                          <StatusBadge tone="danger" label="Hết hiệu lực" />
+                        ) : (
+                          <StatusBadge tone="valid" label="Đang hiệu lực" />
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 justify-end flex-wrap">
                           {!item.file_url ? (
                             <span className="text-xs text-slate-400">
                               Chưa có file
@@ -588,7 +653,7 @@ export default function KhoPage() {
                               {item.new_doc_id && (
                                 <Link
                                   href={`/dashboard/iso/documents/${item.new_doc_id}`}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-all"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-bold rounded-lg transition-all"
                                   title={`Xem bản mới có hiệu lực (${item.new_doc_ma || ""})`}
                                 >
                                   Xem bản mới <ArrowUpRight size={12} />
@@ -597,34 +662,26 @@ export default function KhoPage() {
                             </div>
                           ) : (
                             <>
-                              <button
-                                type="button"
+                              <IconAction
+                                icon={Eye}
+                                label="Xem tài liệu"
                                 onClick={() => {
                                   void openSecureFile(fileUrlEndpoint(item))
-                                  void trackAction(item.docId, "view")
+                                  void handleTrack(item, "view")
                                 }}
-                                className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
-                                title="Xem"
-                              >
-                                <Eye size={12} />
-                                Xem
-                              </button>
-                              <button
-                                type="button"
+                              />
+                              <IconAction
+                                icon={Download}
+                                label="Tải xuống"
                                 onClick={() => {
                                   void openSecureFile(fileUrlEndpoint(item, true))
-                                  void trackAction(item.docId, "download")
+                                  void handleTrack(item, "download")
                                 }}
-                                className="flex items-center gap-1 px-2.5 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded-lg transition-all"
-                                title="Tải xuống"
-                              >
-                                <Download size={12} />
-                                Tải
-                              </button>
+                              />
                               {isHetHieuLuc && item.new_doc_id && (
                                 <Link
                                   href={`/dashboard/iso/documents/${item.new_doc_id}`}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-all"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-bold rounded-lg transition-all"
                                   title={`Xem bản mới có hiệu lực (${item.new_doc_ma || ""})`}
                                 >
                                   Bản mới <ArrowUpRight size={12} />

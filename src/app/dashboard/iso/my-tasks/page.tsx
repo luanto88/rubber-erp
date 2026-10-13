@@ -5,66 +5,20 @@ import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession } from "@/lib/auth"
 import { IsoShell } from "../_components/iso-shell"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
-import { TRANG_THAI_LABEL, TRANG_THAI_COLOR, fmtDate, type IsoDocument } from "../_components/iso-types"
+import { fmtDate, type IsoDocument } from "../_components/iso-types"
 import { ClipboardCheck, ClipboardList, Eye, FileText, BadgeCheck, History } from "lucide-react"
 import Link from "next/link"
 import {
-  FORM_INSTANCE_STATUS_COLOR,
-  FORM_INSTANCE_STATUS_LABEL,
   type IsoFormInstance,
-  type IsoFormInstanceStatus,
   stepSignerUserId,
 } from "../_components/iso-types"
 import { PageHeaderBanner } from "../../_components/page-header-banner"
 import { PageBackgroundMotif } from "../../_components/page-background-motif"
+import { FormStatusBadge } from "../_components/form-status-badge"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status, inst }: { status: IsoFormInstanceStatus; inst?: IsoFormInstance | null }) {
-  let label = FORM_INSTANCE_STATUS_LABEL[status] ?? status
-  let color = FORM_INSTANCE_STATUS_COLOR[status] ?? "bg-slate-100 text-slate-600"
-
-  if (inst) {
-    const steps = Array.isArray(inst.thu_tu_ky_json) && inst.thu_tu_ky_json.length > 0 ? inst.thu_tu_ky_json : null
-    const cur = inst.buoc_hien_tai ?? 0
-
-    if (status === "da_phe_duyet") {
-      const lastStepTen = steps ? steps[steps.length - 1]?.ten?.trim() : undefined
-      label = lastStepTen
-        ? (lastStepTen.toLowerCase().startsWith("phê duyệt") ? "Đã phê duyệt" : `Đã ${lastStepTen.toLowerCase()}`)
-        : "Đã phê duyệt"
-      color = "bg-emerald-100 text-emerald-700"
-    } else if (status === "tra_ve") {
-      label = "Bị trả về"
-      color = "bg-rose-100 text-rose-700"
-    } else if (status === "draft") {
-      label = "Bản nháp"
-      color = "bg-slate-100 text-slate-600"
-    } else if (steps) {
-      const currentStep = steps[cur]
-      const stepName = currentStep?.ten?.trim()
-      const isLast = cur >= steps.length - 1
-      if (isLast) {
-        label = stepName ? `Chờ ${stepName.toLowerCase()}` : "Chờ phê duyệt"
-        color = "bg-emerald-100 text-emerald-800 border border-emerald-200"
-      } else {
-        label = stepName ? `Chờ ${stepName}` : `Chờ ký bước ${cur + 1}`
-        color = "bg-amber-100 text-amber-800 border border-amber-200"
-      }
-    } else if (status === "cho_xem_xet") {
-      label = "Chờ xem xét"
-      color = "bg-amber-100 text-amber-800"
-    } else if (status === "cho_phe_duyet") {
-      label = "Chờ phê duyệt"
-      color = "bg-emerald-100 text-emerald-800"
-    }
-  }
-
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${color}`}>
-      {label}
-    </span>
-  )
-}
 
 type IsoTaskGroup = {
   doc: IsoDocument
@@ -241,15 +195,17 @@ export default function IsoMyTasksPage() {
   return (
     <IsoShell>
       <div className="space-y-4">
-        <PageBackgroundMotif theme="indigo" />
+        <PageBackgroundMotif theme="rubber" />
         <PageHeaderBanner
           title="Việc của tôi"
           subtitle="Tài liệu ISO đang chờ bạn xem xét hoặc phê duyệt"
-          theme="indigo"
+          theme="rubber"
           icon={BadgeCheck}
+          collapsible={true}
+          storageKey="banner_collapsed_iso_my_tasks"
         />
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
           {loading ? (
             <div className="p-10 text-center text-slate-400 text-sm">Đang tải...</div>
           ) : taskGroups.length === 0 ? (
@@ -259,12 +215,12 @@ export default function IsoMyTasksPage() {
             </div>
           ) : (
             <>
-              <div className="px-5 py-3 bg-amber-50 border-b border-amber-100 text-sm text-amber-700 font-medium">
+              <div className="px-5 py-3 bg-brand-50 border-b border-brand-100 text-sm text-brand-800 font-semibold">
                 Có {taskGroups.length} đầu việc đang chờ bạn xử lý
               </div>
               <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-100">
+              <table className="enterprise-table">
+                <thead>
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold">Mã tài liệu</th>
                     <th className="px-4 py-3 text-left font-semibold">Tên tài liệu</th>
@@ -287,16 +243,16 @@ export default function IsoMyTasksPage() {
                         ? `Bộ tài liệu + ${group.childCount} hồ sơ`
                         : "Tài liệu riêng"
                     return (
-                    <tr key={doc.parent_doc_id || doc.id} className="hover:bg-amber-50/50 transition-colors">
+                    <tr key={doc.parent_doc_id || doc.id}>
                       <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-violet-700 font-bold">{doc.ma_tai_lieu || "—"}</span>
+                        <DocCodePill code={doc.ma_tai_lieu} />
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-700 line-clamp-1">{doc.ten_tai_lieu}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
                           <span className="text-[10px] text-slate-400">{doc.loai_tai_lieu || "ISO"} · {doc.cap_tl}</span>
-                          {/* Badge quy trình: Soát xét (amber) hoặc Soạn thảo (violet) */}
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${isSoatXet ? "bg-amber-100 text-amber-700" : "bg-violet-100 text-violet-700"}`}>
+                          {/* Badge quy trình: Soát xét (amber) hoặc Soạn thảo (emerald) */}
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${isSoatXet ? "bg-amber-100 text-amber-700" : "bg-brand-100 text-brand-800"}`}>
                             {quyTrinhLabel}
                           </span>
                           {/* Badge mô tả loại đầu việc */}
@@ -311,16 +267,14 @@ export default function IsoMyTasksPage() {
                           doc.trang_thai === "tra_ve"
                             ? "bg-rose-100 text-rose-700"
                             : doc.trang_thai === "draft"
-                            ? "bg-indigo-100 text-indigo-700"
+                            ? "bg-slate-100 text-slate-700"
                             : "bg-amber-100 text-amber-700"
                         }`}>
                           {getMyRole(doc)}
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai]}`}>
-                          {TRANG_THAI_LABEL[doc.trang_thai]}
-                        </span>
+                        <StatusBadge domain="iso" status={doc.trang_thai} />
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">
                         {fmtDate(doc.updated_at)}
@@ -328,7 +282,7 @@ export default function IsoMyTasksPage() {
                       <td className="px-4 py-3 text-right">
                         <Link
                           href={`/dashboard/iso/documents/${doc.id}`}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-lg transition-all"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-brand-700 hover:bg-brand-800 text-white text-xs font-bold rounded-xl shadow-xs transition-all"
                         >
                           <Eye size={12} /> {doc.trang_thai === "draft" ? "Soạn thảo" : isBundle ? "Xử lý bộ" : isStandaloneChild ? "Xử lý hồ sơ" : "Xử lý"}
                         </Link>
@@ -345,10 +299,10 @@ export default function IsoMyTasksPage() {
         {/* ── Hồ sơ thực hiện cần xử lý ── */}
         <div>
           <h2 className="text-base font-extrabold text-slate-700 mb-2 flex items-center gap-2">
-            <ClipboardList size={16} className="text-emerald-600" />
+            <ClipboardList size={16} className="text-brand-600" />
             Hồ sơ thực hiện cần xử lý
           </h2>
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
             {formTasksLoading ? (
               <div className="p-10 text-center text-slate-400 text-sm">Đang tải...</div>
             ) : formTasks.length === 0 ? (
@@ -358,12 +312,12 @@ export default function IsoMyTasksPage() {
               </div>
             ) : (
               <>
-                <div className="px-5 py-3 bg-emerald-50 border-b border-emerald-100 text-sm text-emerald-700 font-medium">
+                <div className="px-5 py-3 bg-brand-50 border-b border-brand-100 text-sm text-brand-800 font-semibold">
                   Có {formTasks.length} hồ sơ đang chờ bạn xử lý
                 </div>
                 <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-100">
+                <table className="enterprise-table">
+                  <thead>
                     <tr>
                       <th className="px-4 py-3 text-left font-semibold">Tiêu đề</th>
                       <th className="px-4 py-3 text-left font-semibold hidden md:table-cell">Vai trò</th>
@@ -391,7 +345,7 @@ export default function IsoMyTasksPage() {
                         roleLabel = "Cần phê duyệt"
                       }
                       return (
-                        <tr key={inst.id} className="hover:bg-emerald-50/40 transition-colors">
+                        <tr key={inst.id}>
                           <td className="px-4 py-3">
                             <div className="font-medium text-slate-700 line-clamp-1">{inst.tieu_de}</div>
                             {inst.trang_thai === "tra_ve" && inst.ly_do_tra_ve && (
@@ -399,12 +353,12 @@ export default function IsoMyTasksPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 hidden md:table-cell">
-                            <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${inst.trang_thai === "tra_ve" ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+                            <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${inst.trang_thai === "tra_ve" ? "bg-rose-100 text-rose-700" : "bg-brand-100 text-brand-700"}`}>
                               {roleLabel}
                             </span>
                           </td>
                           <td className="px-4 py-3">
-                            <StatusBadge status={inst.trang_thai} inst={inst} />
+                            <FormStatusBadge status={inst.trang_thai} inst={inst} />
                           </td>
                           <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">
                             {fmtDate(inst.created_at)}
@@ -412,7 +366,7 @@ export default function IsoMyTasksPage() {
                           <td className="px-4 py-3 text-right">
                             <Link
                               href={`/dashboard/iso/forms/${inst.id}`}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-all"
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-brand-700 hover:bg-brand-800 text-white text-xs font-bold rounded-xl shadow-xs transition-all"
                             >
                               <Eye size={12} /> Xử lý
                             </Link>
@@ -435,10 +389,10 @@ export default function IsoMyTasksPage() {
               <History size={16} className="text-sky-600" />
               Hồ sơ tôi đã tham gia tạo hoặc ký ({participatedForms.length})
             </h2>
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
               <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-100">
+                <table className="enterprise-table">
+                  <thead>
                     <tr>
                       <th className="px-4 py-3 text-left font-semibold">Tiêu đề</th>
                       <th className="px-4 py-3 text-left font-semibold hidden md:table-cell">Tiến độ ký</th>
@@ -454,13 +408,13 @@ export default function IsoMyTasksPage() {
                       const curStep = Array.isArray(inst.thu_tu_ky_json) ? inst.thu_tu_ky_json[curStepIdx] : null
                       const curStepTitle = curStep?.ten || `Bước ${curStepIdx + 1}`
                       return (
-                        <tr key={inst.id} className="hover:bg-slate-50/70 transition-colors">
+                        <tr key={inst.id}>
                           <td className="px-4 py-3">
                             <div className="font-medium text-slate-700 line-clamp-1">{inst.tieu_de}</div>
                           </td>
                           <td className="px-4 py-3 hidden md:table-cell text-xs text-slate-600">
                             {inst.trang_thai === "da_phe_duyet" ? (
-                              <span className="text-emerald-600 font-semibold">Hoàn tất ({totalSteps > 0 ? `${totalSteps}/${totalSteps} bước` : "Đã duyệt"})</span>
+                              <span className="text-brand-600 font-semibold">Hoàn tất ({totalSteps > 0 ? `${totalSteps}/${totalSteps} bước` : "Đã duyệt"})</span>
                             ) : totalSteps > 0 ? (
                               <span>Đang chờ bước {curStepIdx + 1}/{totalSteps}: <strong>{curStepTitle}</strong></span>
                             ) : (
@@ -468,7 +422,7 @@ export default function IsoMyTasksPage() {
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <StatusBadge status={inst.trang_thai} inst={inst} />
+                            <FormStatusBadge status={inst.trang_thai} inst={inst} />
                           </td>
                           <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">
                             {fmtDate(inst.updated_at)}
@@ -476,7 +430,7 @@ export default function IsoMyTasksPage() {
                           <td className="px-4 py-3 text-right">
                             <Link
                               href={`/dashboard/iso/forms/${inst.id}`}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all"
+                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-slate-100 hover:bg-brand-50 hover:text-brand-800 text-slate-700 text-xs font-bold rounded-xl transition-all border border-slate-200/60"
                             >
                               <Eye size={12} /> Xem hồ sơ
                             </Link>

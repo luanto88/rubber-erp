@@ -242,11 +242,11 @@ export function DistributionManagement({
                   <Users size={12} />
                   {totalCount} người
                 </span>
-                <span className="flex items-center gap-1 text-xs text-emerald-600">
+                <span className="flex items-center gap-1 text-xs text-brand-600">
                   <Eye size={12} />
                   {viewedCount}
                 </span>
-                <span className="flex items-center gap-1 text-xs text-blue-600">
+                <span className="flex items-center gap-1 text-xs text-sky-700">
                   <Download size={12} />
                   {downloadedCount}
                 </span>
@@ -290,7 +290,7 @@ export function DistributionManagement({
                       <div className="flex items-center gap-1 text-xs">
                         {r.first_viewed_at ? (
                           <span
-                            className="flex items-center gap-1 text-emerald-700"
+                            className="flex items-center gap-1 text-brand-700"
                             title={`Đã xem lúc ${fmtDate(r.first_viewed_at) || ""}`}
                           >
                             <Eye size={12} />
@@ -310,7 +310,7 @@ export function DistributionManagement({
                       <div className="flex items-center gap-1 text-xs">
                         {r.first_downloaded_at ? (
                           <span
-                            className="flex items-center gap-1 text-blue-600"
+                            className="flex items-center gap-1 text-sky-700"
                             title={`Đã tải lúc ${fmtDate(r.first_downloaded_at) || ""}`}
                           >
                             <Download size={12} />

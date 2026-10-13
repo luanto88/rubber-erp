@@ -28,12 +28,13 @@ import {
 import {
   fmtDate,
   FORM_INSTANCE_STATUS_LABEL,
-  FORM_INSTANCE_STATUS_COLOR,
   LOAI_TAI_LIEU_LABEL,
   type IsoFormInstance,
   type IsoFormInstanceStatus,
   type TemplateSearchResult,
 } from "../_components/iso-types"
+import { FormStatusBadge } from "../_components/form-status-badge"
+import { SegmentedTabs } from "../../_components/doc-ui/segmented-tabs"
 
 // ─── Clone dialog ────────────────────────────────────────────────────────────
 function CloneDialog({
@@ -92,7 +93,7 @@ function CloneDialog({
           <button
             onClick={handleCreate}
             disabled={saving || !tieu_de.trim()}
-            className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
+            className="flex items-center gap-2 px-5 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             Tạo hồ sơ
@@ -100,16 +101,16 @@ function CloneDialog({
         </>
       }
     >
-      <div className="mb-4 p-3 bg-violet-50 rounded-xl text-sm text-violet-800 border border-violet-100">
+      <div className="mb-4 p-3 bg-brand-50 rounded-xl text-sm text-brand-800 border border-brand-100">
         <div className="font-bold truncate">{template.ten_tai_lieu}</div>
-        <div className="text-xs mt-0.5 text-violet-500">
+        <div className="text-xs mt-0.5 text-brand-700 font-medium">
           {template.ma_tai_lieu} &middot; {LOAI_TAI_LIEU_LABEL[template.loai_tai_lieu ?? ""] ?? template.loai_tai_lieu} &middot; {template.phong_ban}
         </div>
       </div>
 
       <label className="text-xs font-bold text-slate-600 block mb-1.5">Tiêu đề hồ sơ thực hiện</label>
       <input
-        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 mb-4"
+        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 mb-4"
         value={tieu_de}
         onChange={(e) => setTieuDe(e.target.value)}
         placeholder="Nhập tiêu đề..."
@@ -138,13 +139,13 @@ function TemplateCard({
   const ext = tmpl.file_ext
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-emerald-300 hover:shadow-md transition-all">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-brand-300 hover:shadow-md transition-all">
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex-1 min-w-0">
           <div className="font-bold text-slate-800 text-sm leading-snug line-clamp-2">{tmpl.ten_tai_lieu}</div>
           <div className="text-xs text-slate-400 mt-0.5">{tmpl.ma_tai_lieu} &middot; {tmpl.phong_ban} &middot; LBH: {tmpl.lan_ban_hanh}</div>
         </div>
-        <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
+        <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-brand-100 text-brand-800">
           {pct}%
         </span>
       </div>
@@ -155,7 +156,7 @@ function TemplateCard({
         </span>
         <button
           onClick={onSelect}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold rounded-lg"
         >
           <Plus size={12} />
           Tạo bản thực hiện
@@ -166,58 +167,6 @@ function TemplateCard({
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status, inst }: { status: IsoFormInstanceStatus; inst?: IsoFormInstance }) {
-  let label = FORM_INSTANCE_STATUS_LABEL[status] ?? status
-  let color = FORM_INSTANCE_STATUS_COLOR[status] ?? "bg-slate-100 text-slate-600"
-
-  if (inst) {
-    const steps = Array.isArray(inst.thu_tu_ky_json) && inst.thu_tu_ky_json.length > 0 ? inst.thu_tu_ky_json : null
-    const cur = inst.buoc_hien_tai ?? 0
-
-    if (status === "da_phe_duyet") {
-      const lastStepTen = steps ? steps[steps.length - 1]?.ten?.trim() : undefined
-      label = lastStepTen
-        ? (lastStepTen.toLowerCase().startsWith("phê duyệt") ? "Đã phê duyệt" : `Đã ${lastStepTen.toLowerCase()}`)
-        : "Đã phê duyệt"
-      color = "bg-emerald-100 text-emerald-700"
-    } else if (status === "tra_ve") {
-      label = "Bị trả về"
-      color = "bg-rose-100 text-rose-700"
-    } else if (status === "draft") {
-      label = "Bản nháp"
-      color = "bg-slate-100 text-slate-600"
-    } else if (steps) {
-      const currentStep = steps[cur]
-      const stepName = currentStep?.ten?.trim()
-      const isLast = cur >= steps.length - 1
-      if (isLast) {
-        label = stepName ? `Chờ ${stepName.toLowerCase()}` : "Chờ phê duyệt"
-        color = "bg-emerald-100 text-emerald-800 border border-emerald-200"
-      } else {
-        label = stepName ? `Chờ ${stepName}` : `Chờ ký bước ${cur + 1}`
-        color = "bg-amber-100 text-amber-800 border border-amber-200"
-      }
-    } else if (status === "cho_xem_xet") {
-      label = "Chờ xem xét"
-      color = "bg-amber-100 text-amber-800"
-    } else if (status === "cho_phe_duyet") {
-      label = "Chờ phê duyệt"
-      color = "bg-emerald-100 text-emerald-800"
-    }
-  }
-
-  const dotColor =
-    status === "da_phe_duyet" ? "bg-emerald-500" :
-    status === "tra_ve" ? "bg-rose-500" :
-    status === "draft" ? "bg-slate-400" : "bg-amber-500"
-
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${color}`}>
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
-      {label}
-    </span>
-  )
-}
 
 // ─── Lập hồ sơ quick dialog ──────────────────────────────────────────────────
 interface QuickDoc {
@@ -326,7 +275,7 @@ function LapHoSoDialog({
       <button
         onClick={handleCreate}
         disabled={saving || !selectedDocId || !tieuDe.trim()}
-        className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
+        className="flex items-center gap-2 px-5 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
       >
         {saving ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
         Lập hồ sơ ngay
@@ -338,7 +287,7 @@ function LapHoSoDialog({
     <ModalShell
       title={
         <span className="flex items-center gap-2">
-          <ClipboardList size={18} className="text-emerald-600" />
+          <ClipboardList size={18} className="text-brand-600" />
           Lập hồ sơ
         </span>
       }
@@ -354,7 +303,7 @@ function LapHoSoDialog({
             </div>
           ) : (
             <select
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
               value={phongBan}
               onChange={(e) => setPhongBan(e.target.value)}
               autoFocus
@@ -378,7 +327,7 @@ function LapHoSoDialog({
               <p className="text-sm text-slate-400 py-2">Không có biểu mẫu đang có hiệu lực</p>
             ) : (
               <select
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
                 value={selectedDocId}
                 onChange={(e) => handleSelectDoc(e.target.value)}
               >
@@ -395,7 +344,7 @@ function LapHoSoDialog({
           <div className="mb-4">
             <label className="text-xs font-bold text-slate-600 block mb-1.5">Tiêu đề hồ sơ</label>
             <input
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
               value={tieuDe}
               onChange={(e) => setTieuDe(e.target.value)}
               placeholder="Nhập tiêu đề hồ sơ..."
@@ -608,11 +557,11 @@ export default function IsoFormsPage() {
     <IsoShell>
       <div className="space-y-6">
 
-        <PageBackgroundMotif theme="forest" />
+        <PageBackgroundMotif theme="rubber" />
         <PageHeaderBanner
           title="Thực hiện hồ sơ ISO"
           subtitle="Tìm biểu mẫu bằng AI, tạo bản thực hiện và gửi phê duyệt"
-          theme="forest"
+          theme="rubber"
           icon={ClipboardCheck}
           collapsible={true}
           storageKey="banner_collapsed_iso_forms"
@@ -634,7 +583,7 @@ export default function IsoFormsPage() {
                 <button
                   onClick={() => setLapHoSoOpen(true)}
                   disabled={!factoryId}
-                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-emerald-800 bg-white hover:bg-emerald-50 disabled:opacity-50 rounded-xl shadow-md transition-all active:scale-95"
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-brand-800 bg-white hover:bg-brand-50 disabled:opacity-50 rounded-xl shadow-md transition-all active:scale-95"
                 >
                   <ClipboardList size={15} />
                   Lập hồ sơ
@@ -652,13 +601,13 @@ export default function IsoFormsPage() {
         {canLapHoSo && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-3">
-            <Sparkles size={16} className="text-emerald-600" />
+            <Sparkles size={16} className="text-brand-600" />
             <span className="text-sm font-bold text-slate-700">Tìm kiếm biểu mẫu bằng AI</span>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
               ref={searchInputRef}
-              className="flex-1 min-w-0 px-4 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 transition-colors"
+              className="flex-1 min-w-0 px-4 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 transition-colors"
               placeholder="Ví dụ: biểu mẫu mục tiêu chất lượng, phiếu kiểm tra sản phẩm..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -667,7 +616,7 @@ export default function IsoFormsPage() {
             <button
               onClick={handleSearch}
               disabled={searching || !searchQuery.trim() || !factoryId}
-              className="flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
+              className="flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 bg-brand-700 hover:bg-brand-800 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-all shadow-sm"
             >
             </button>
           </div>
@@ -715,7 +664,7 @@ export default function IsoFormsPage() {
         {/* Thẻ trạng thái quy trình (Process Stats Cards) */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center gap-3">
-            <span className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 grid place-items-center shrink-0">
+            <span className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 grid place-items-center shrink-0">
               <FileText size={18} />
             </span>
             <div className="min-w-0">
@@ -733,12 +682,12 @@ export default function IsoFormsPage() {
             </div>
           </div>
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center gap-3">
-            <span className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 grid place-items-center shrink-0">
+            <span className="w-10 h-10 rounded-xl bg-brand-50 text-brand-600 grid place-items-center shrink-0">
               <CheckCircle2 size={18} />
             </span>
             <div className="min-w-0">
               <p className="text-xs text-slate-400 font-medium truncate">Đã hoàn thành</p>
-              <p className="text-lg sm:text-xl font-extrabold text-emerald-600">{statCounts.completed}</p>
+              <p className="text-lg sm:text-xl font-extrabold text-brand-600">{statCounts.completed}</p>
             </div>
           </div>
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs p-4 flex items-center gap-3">
@@ -761,23 +710,18 @@ export default function IsoFormsPage() {
                 <p className="text-[11px] text-slate-400">Đang hiển thị hồ sơ bạn lập hoặc có tên trong luồng ký</p>
               )}
             </div>
-            {/* Status filter chips */}
-            <div className="flex gap-1 flex-wrap">
-              {(["all", "draft", "cho_xem_xet", "cho_phe_duyet", "da_phe_duyet", "tra_ve"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setFilterStatus(s)}
-                  className={
-                    "px-3 py-1 rounded-xl text-xs font-bold transition-all " +
-                    (filterStatus === s
-                      ? "bg-emerald-100 text-emerald-800 shadow-2xs ring-1 ring-emerald-300"
-                      : "text-slate-500 hover:bg-slate-100")
-                  }
-                >
-                  {s === "all" ? "Tất cả" : (FORM_INSTANCE_STATUS_LABEL[s as IsoFormInstanceStatus] ?? s)}
-                </button>
-              ))}
-            </div>
+            {/* Status filter — Doc-UI SegmentedTabs */}
+            <SegmentedTabs
+              size="sm"
+              ariaLabel="Lọc theo trạng thái"
+              value={filterStatus}
+              onChange={(k) => setFilterStatus(k)}
+              items={(["all", "draft", "cho_xem_xet", "cho_phe_duyet", "da_phe_duyet", "tra_ve"] as const).map((s) => ({
+                key: s,
+                label: s === "all" ? "Tất cả" : (FORM_INSTANCE_STATUS_LABEL[s as IsoFormInstanceStatus] ?? s),
+                count: s === "all" ? instances.length : instances.filter((x) => x.trang_thai === s).length,
+              }))}
+            />
           </div>
 
           {instLoading ? (
@@ -793,14 +737,14 @@ export default function IsoFormsPage() {
             </div>
           ) : (
             <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-            <table className="w-full text-sm">
+            <table className="enterprise-table">
               <thead>
-                <tr className="bg-slate-50 text-left">
-                  <th className="px-4 py-2.5 text-xs font-bold text-slate-500 max-w-[220px]">Tiêu đề</th>
-                  <th className="px-4 py-2.5 text-xs font-bold text-slate-500">Trạng thái</th>
-                  <th className="px-4 py-2.5 text-xs font-bold text-slate-500">Ngày tạo</th>
-                  <th className="px-4 py-2.5 text-xs font-bold text-slate-500">Tiến độ</th>
-                  <th className="px-4 py-2.5 text-xs font-bold text-slate-500 w-32"></th>
+                <tr>
+                  <th className="max-w-[220px]">Tiêu đề</th>
+                  <th>Trạng thái</th>
+                  <th>Ngày tạo</th>
+                  <th>Luồng ký</th>
+                  <th className="w-32 !text-right">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -816,7 +760,7 @@ export default function IsoFormsPage() {
                     <tr
                       key={inst.id}
                       onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
-                      className="border-t border-slate-100 hover:bg-emerald-50/40 cursor-pointer transition-colors"
+                      className="cursor-pointer"
                     >
                       <td className="px-4 py-3 max-w-[260px]">
                         <div className="font-semibold text-slate-800 truncate">{inst.tieu_de}</div>
@@ -829,15 +773,14 @@ export default function IsoFormsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={inst.trang_thai} inst={inst} />
+                        <FormStatusBadge status={inst.trang_thai} inst={inst} />
                         {inst.trang_thai === "tra_ve" && inst.ly_do_tra_ve && (
                           <div className="text-[10px] text-rose-500 mt-0.5 line-clamp-1">{inst.ly_do_tra_ve}</div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(inst.created_at)}</td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/70">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
                           {(inst.so_buoc_tong ?? 0) > 0 ? `${inst.so_buoc_tong} bước` : inst.cap_tl || "—"}
                         </span>
                       </td>
@@ -863,7 +806,7 @@ export default function IsoFormsPage() {
                                     e.stopPropagation()
                                     void openSecureFile(`/api/iso/forms/${inst.id}/file-url?download=1`)
                                   }}
-                                  className="p-1.5 rounded-lg hover:bg-emerald-100 text-slate-400 hover:text-emerald-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-600 transition-colors"
                                 >
                                   <Download size={14} />
                                 </button>
@@ -878,7 +821,7 @@ export default function IsoFormsPage() {
                                       title: inst.tieu_de || "Hồ sơ ISO",
                                     })
                                   }}
-                                  className="p-1.5 rounded-lg hover:bg-teal-100 text-slate-400 hover:text-teal-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
                                 >
                                   <Share2 size={14} />
                                 </button>
@@ -887,7 +830,7 @@ export default function IsoFormsPage() {
                                 <button
                                   title="Sửa"
                                   onClick={() => router.push(`/dashboard/iso/forms/${inst.id}`)}
-                                  className="p-1.5 rounded-lg hover:bg-violet-100 text-slate-400 hover:text-violet-600 transition-colors"
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
                                 >
                                   <Pencil size={14} />
                                 </button>

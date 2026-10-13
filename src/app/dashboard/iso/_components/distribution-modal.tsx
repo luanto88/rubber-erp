@@ -264,7 +264,7 @@ export function DistributionModal({
           <button
             onClick={() => setStep(2)}
             disabled={selectedDocIds.length === 0}
-            className="flex items-center gap-1.5 px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-all"
+            className="flex items-center gap-1.5 px-5 py-2 bg-brand-700 hover:bg-brand-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-all"
           >
             Tiếp theo
             <ChevronRight size={14} />
@@ -274,7 +274,7 @@ export function DistributionModal({
           <button
             onClick={handleSubmit}
             disabled={saving || selectedUserIds.length === 0}
-            className="flex items-center gap-1.5 px-5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-all"
+            className="flex items-center gap-1.5 px-5 py-2 bg-brand-700 hover:bg-brand-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-xl text-sm transition-all"
           >
             {saving ? (
               "Đang phân phối..."
@@ -301,7 +301,7 @@ export function DistributionModal({
           <p className="text-xs text-slate-500 -mt-2 mb-4">
             {isForm ? (
               formTitle ? (
-                <span className="inline-block py-1 px-2.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                <span className="inline-block py-1 px-2.5 rounded-lg bg-brand-50 text-brand-800 border border-brand-200 font-semibold">
                   📋 Hồ sơ: {formCode ? `[${formCode}] ` : ""}{formTitle}
                 </span>
               ) : "Chọn người hoặc phòng ban nhận phân phối hồ sơ"
@@ -313,14 +313,14 @@ export function DistributionModal({
           {/* ─── Thành công ─── */}
           {saveSuccess && result && (
             <div className="flex flex-col items-center py-8 gap-4">
-              <CheckCircle2 size={48} className="text-emerald-500" />
+              <CheckCircle2 size={48} className="text-brand-500" />
               <div className="text-center">
                 <p className="text-base font-bold text-slate-800">
                   Đã phân phối thành công!
                 </p>
                 <p className="text-sm text-slate-500 mt-1">
                   Đã gửi cho{" "}
-                  <span className="font-bold text-emerald-700">
+                  <span className="font-bold text-brand-700">
                     {result.distributed}
                   </span>{" "}
                   người
@@ -332,7 +332,7 @@ export function DistributionModal({
               </div>
               <button
                 onClick={onClose}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm"
+                className="px-5 py-2 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl text-sm"
               >
                 Đóng
               </button>
@@ -357,8 +357,8 @@ export function DistributionModal({
                     className={
                       "px-3 py-1 rounded-full text-xs font-bold border transition-all " +
                       (docFilterLoai.includes(loai!)
-                        ? "bg-violet-600 text-white border-violet-600"
-                        : "bg-white text-slate-600 border-slate-300 hover:border-violet-400")
+                        ? "bg-brand-700 text-white border-brand-700"
+                        : "bg-white text-slate-600 border-slate-300 hover:border-brand-400")
                     }
                   >
                     {loai}
@@ -376,7 +376,7 @@ export function DistributionModal({
                   value={docSearch}
                   onChange={(e) => setDocSearch(e.target.value)}
                   placeholder="Tìm mã hoặc tên tài liệu..."
-                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                  className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
                 />
               </div>
 
@@ -415,7 +415,7 @@ export function DistributionModal({
                           )
                         }
                       }}
-                      className="accent-violet-600"
+                      className="accent-brand-600"
                     />
                     <span className="text-xs font-bold text-slate-500">
                       Chọn tất cả ({filteredDocs.length})
@@ -436,7 +436,7 @@ export function DistributionModal({
                               : prev.filter((id) => id !== doc.id),
                           )
                         }
-                        className="mt-0.5 accent-violet-600"
+                        className="mt-0.5 accent-brand-600"
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-slate-800 truncate">
@@ -481,8 +481,8 @@ export function DistributionModal({
                       className={
                         "px-3 py-1 rounded-full text-xs font-bold border transition-all " +
                         (deptFilter.includes(dept)
-                          ? "bg-violet-600 text-white border-violet-600"
-                          : "bg-white text-slate-600 border-slate-300 hover:border-violet-400")
+                          ? "bg-brand-700 text-white border-brand-700"
+                          : "bg-white text-slate-600 border-slate-300 hover:border-brand-400")
                       }
                     >
                       {dept}
@@ -502,7 +502,7 @@ export function DistributionModal({
                     value={recipientSearch}
                     onChange={(e) => setRecipientSearch(e.target.value)}
                     placeholder="Tìm tên hoặc phòng ban..."
-                    className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500"
+                    className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500"
                   />
                 </div>
                 <button
@@ -551,7 +551,7 @@ export function DistributionModal({
                               : prev.filter((id) => id !== r.id),
                           )
                         }
-                        className="accent-violet-600"
+                        className="accent-brand-600"
                       />
                       <span className="flex-1 text-sm text-slate-800">
                         {r.displayName}
@@ -568,13 +568,13 @@ export function DistributionModal({
 
               {/* Preview summary */}
               {selectedUserIds.length > 0 && (
-                <p className="text-xs text-slate-500 bg-violet-50 rounded-xl px-3 py-2">
+                <p className="text-xs text-slate-500 bg-brand-50 rounded-xl px-3 py-2 border border-brand-100">
                   Sẽ phân phối{" "}
-                  <span className="font-bold text-violet-700">
+                  <span className="font-bold text-brand-800">
                     {selectedDocIds.length} {isForm ? "hồ sơ" : "tài liệu"}
                   </span>{" "}
                   cho{" "}
-                  <span className="font-bold text-violet-700">
+                  <span className="font-bold text-brand-800">
                     {selectedUserIds.length} người
                   </span>
                   {alreadyReceivedInView.length > 0 && (
@@ -596,7 +596,7 @@ export function DistributionModal({
                   onChange={(e) => setGhiChu(e.target.value)}
                   rows={2}
                   placeholder="Ghi chú về đợt phân phối này..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 resize-none"
                 />
               </div>
 

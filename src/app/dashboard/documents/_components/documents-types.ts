@@ -1,6 +1,7 @@
 // Types và constants cho module Văn bản Nội bộ
 
 import { supabase } from "@/lib/supabase"
+import { DOC_STATUS, colorMap, labelMap } from "@/app/dashboard/_components/doc-ui/status-registry"
 
 export type VanBanTrangThai =
   | "draft"
@@ -208,21 +209,10 @@ export const PHONG_BAN_VAN_BAN_OPTIONS = [
   "PHK", "KTNN", "QLCL", "KHXD", "TCKT", "TCHC", "TTBV", "NMCB", "CS",
 ] as const
 
-export const TRANG_THAI_LABEL: Record<VanBanTrangThai, string> = {
-  draft: "Nháp",
-  cho_ky_phong_ban: "Chờ ký phòng ban",
-  cho_phe_duyet: "Chờ phê duyệt",
-  da_phe_duyet: "Đã phê duyệt",
-  tra_ve: "Trả về",
-}
+// Alias đọc từ registry dùng chung (Doc-UI, 2026-10-13) — sửa nhãn/màu ở status-registry.ts.
+export const TRANG_THAI_LABEL: Record<VanBanTrangThai, string> = labelMap<VanBanTrangThai>(DOC_STATUS)
 
-export const TRANG_THAI_COLOR: Record<VanBanTrangThai, string> = {
-  draft: "bg-slate-100 text-slate-600",
-  cho_ky_phong_ban: "bg-amber-100 text-amber-700",
-  cho_phe_duyet: "bg-orange-100 text-orange-700",
-  da_phe_duyet: "bg-emerald-100 text-emerald-700",
-  tra_ve: "bg-rose-100 text-rose-700",
-}
+export const TRANG_THAI_COLOR: Record<VanBanTrangThai, string> = colorMap<VanBanTrangThai>(DOC_STATUS)
 
 // Xây dựng mã văn bản: 01/ĐN-KTNN
 export function buildMaVanBan(so: number | string, kyHieu: string, phongBan: string): string {

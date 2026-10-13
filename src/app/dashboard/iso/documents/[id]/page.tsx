@@ -37,7 +37,6 @@ import { IsoBatchSignModal } from "../../_components/iso-batch-sign-modal"
 import { findRoleBoxForStep } from "@/lib/signing/template-layout"
 import { computeSnugBoxSize } from "@/lib/signing/text-fit"
 import {
-  ArrowLeft,
   Save,
   Upload,
   FileText,
@@ -83,6 +82,12 @@ import { QRCodeSVG } from "qrcode.react"
 import Draggable from "react-draggable"
 import { Resizable } from "re-resizable"
 import { DistributionModal } from "../../_components/distribution-modal"
+import { ISO_STEP_COLORS } from "@/lib/signing/template-colors"
+import { DetailPageHeader, HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
+import { SignActionBox, type SignAction } from "@/app/dashboard/_components/doc-ui/sign-action-box"
+import { TimelineSteps, TimelineProgress, type TimelineStepItem } from "@/app/dashboard/_components/doc-ui/timeline-steps"
+import { InspectorCard, StatusSummaryBar } from "@/app/dashboard/_components/doc-ui/inspector-card"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { DistributionManagement } from "../../_components/distribution-management"
 import { authFetch } from "@/lib/auth-fetch"
 import { canCreateIsoDocument, canViewIsoLibrary, readCachedIsoUser } from "../../_components/iso-access"
@@ -448,6 +453,8 @@ export default function IsoDocumentDetailPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isEditMode, setIsEditMode] = useState(isNew)
+  // Doc-UI GĐ2: tab "Tài liệu / Thông tin" trên mobile ở chế độ xem
+  const [mobilePane, setMobilePane] = useState<"doc" | "info">("info")
 
   // File upload
   const [fileUploading, setFileUploading] = useState(false)
@@ -3288,7 +3295,7 @@ export default function IsoDocumentDetailPage() {
                       type="checkbox"
                       checked={!!child.auto_convert_pdf}
                       disabled={!canToggleAutoConvert}
-                      className="rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-default"
+                      className="rounded border-slate-300 text-emerald-700 focus:ring-emerald-500 disabled:cursor-default"
                       onChange={async (e) => {
                         if (!canToggleAutoConvert) return
                         const val = e.target.checked
@@ -3298,7 +3305,7 @@ export default function IsoDocumentDetailPage() {
                     />
                     <span className="text-[10px] text-slate-600">Tự động chuyển sang PDF sau phê duyệt</span>
                     {!canToggleAutoConvert && child.auto_convert_pdf && (
-                      <span className="text-[10px] font-bold text-violet-600">Đã bật</span>
+                      <span className="text-[10px] font-bold text-emerald-700">Đã bật</span>
                     )}
                   </label>
                 )}
@@ -3420,14 +3427,14 @@ export default function IsoDocumentDetailPage() {
           type="button"
           onClick={() => isEditable && setStandardsOpen((open) => !open)}
           disabled={!isEditable}
-          className="w-full min-h-11 px-3 py-2 border border-slate-300 rounded-xl text-sm text-left outline-none focus:border-violet-500 disabled:bg-slate-50"
+          className="w-full min-h-11 px-3 py-2 border border-slate-300 rounded-xl text-sm text-left outline-none focus:border-emerald-500 disabled:bg-slate-50"
         >
           {selectedNames.length > 0 ? selectedNames.join(", ") : "— Chọn tiêu chuẩn —"}
         </button>
         {standardsOpen && isEditable && (
           <div className="absolute z-30 mt-1 w-full max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white shadow-xl p-2">
             {standards.map((standard) => (
-              <label key={standard.id} className="flex items-start gap-2 rounded-lg px-2 py-2 text-xs hover:bg-violet-50 cursor-pointer">
+              <label key={standard.id} className="flex items-start gap-2 rounded-lg px-2 py-2 text-xs hover:bg-emerald-50 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={form.standard_ids.includes(standard.id)}
@@ -3437,7 +3444,7 @@ export default function IsoDocumentDetailPage() {
                       ? [...f.standard_ids, standard.id].sort((a, b) => a - b)
                       : f.standard_ids.filter((id) => id !== standard.id),
                   }))}
-                  className="mt-0.5 accent-violet-600"
+                  className="mt-0.5 accent-emerald-600"
                 />
                 <span>
                   <span className="font-bold text-slate-700">{standard.tieu_chuan}</span>
@@ -3522,7 +3529,7 @@ export default function IsoDocumentDetailPage() {
         {/* 2. CARD - Thông tin văn bản */}
         <DetailCard
           icon={<FileText size={18} />}
-          iconTone="violet"
+          iconTone="emerald"
           title="Thông tin văn bản"
           subtitle="Mã số, phân loại và hiệu lực"
           badge={
@@ -3534,31 +3541,30 @@ export default function IsoDocumentDetailPage() {
           <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
             <DetailFieldItem
               icon={<Tag size={15} />}
-              iconTone="rose"
+              iconTone="slate"
               label="Mã tài liệu"
               value={doc?.ma_tai_lieu || form.ma_tai_lieu || "—"}
               mono
-              highlight="rose"
             />
             <DetailFieldItem
               icon={<Layers size={15} />}
-              iconTone="amber"
+              iconTone="slate"
               label="Cấp tài liệu"
               value={
-                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-brand-50 text-brand-800 border border-brand-200">
                   {form.cap_tl || "Cấp 1"}
                 </span>
               }
             />
             <DetailFieldItem
               icon={<Building size={15} />}
-              iconTone="blue"
+              iconTone="slate"
               label="Phòng ban"
               value={doc?.phong_ban || form.phong_ban || "—"}
             />
             <DetailFieldItem
               icon={<Layers size={15} />}
-              iconTone="teal"
+              iconTone="slate"
               label="Loại tài liệu"
               value={form.loai_tai_lieu ? `${form.loai_tai_lieu} — ${docTypeLabelMap[form.loai_tai_lieu] || form.loai_tai_lieu}` : "—"}
             />
@@ -3570,26 +3576,26 @@ export default function IsoDocumentDetailPage() {
             />
             <DetailFieldItem
               icon={<Clock size={15} />}
-              iconTone="indigo"
+              iconTone="slate"
               label="Lần ban hành"
               value={doc?.lan_ban_hanh || form.lan_ban_hanh || "00"}
               mono
             />
             <DetailFieldItem
               icon={<Calendar size={15} />}
-              iconTone="emerald"
+              iconTone="slate"
               label="Ngày hiệu lực"
               value={fmtDate(doc?.ngay_hieu_luc) || "—"}
             />
             <DetailFieldItem
               icon={<Clock size={15} />}
-              iconTone="amber"
+              iconTone="slate"
               label="Ngày hết hiệu lực"
               value={fmtDate(doc?.ngay_het_hieu_luc) || "—"}
             />
             <DetailFieldItem
               icon={<GitBranch size={15} />}
-              iconTone="violet"
+              iconTone="slate"
               label="Quy trình"
               value={form.chon_quy_trinh || "Soạn thảo mới"}
             />
@@ -3602,7 +3608,7 @@ export default function IsoDocumentDetailPage() {
             {isCon && form.ma_tai_lieu_cha && (
               <DetailFieldItem
                 icon={<Tag size={15} />}
-                iconTone="rose"
+                iconTone="slate"
                 label="Mã tài liệu cha"
                 value={form.ma_tai_lieu_cha}
                 colSpan={2}
@@ -3625,11 +3631,11 @@ export default function IsoDocumentDetailPage() {
         {/* 3. CARD - Ban hành & Phê duyệt */}
         <DetailCard
           icon={<Users size={18} />}
-          iconTone="blue"
+          iconTone="emerald"
           title="Thông tin Phê duyệt & Nhân sự"
           subtitle="Người phụ trách và trạng thái ký duyệt"
           badge={
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-violet-50 text-violet-700">
+            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-800">
               {form.cap_tl === "Cấp 2" ? "2 bước" : "3 bước"}
             </span>
           }
@@ -3637,12 +3643,12 @@ export default function IsoDocumentDetailPage() {
           <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
             <DetailFieldItem
               icon={<User size={15} />}
-              iconTone="pink"
+              iconTone="slate"
               label="Người soạn thảo"
               value={profileName(form.soan_thao_user_id) || doc?.soan_thao || "—"}
               extra={
                 doc?.ky_soan_thao_at ? (
-                  <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                  <span className="text-[10px] text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
                     <CheckCircle2 size={11} /> {fmtDate(doc.ky_soan_thao_at)}
                   </span>
                 ) : undefined
@@ -3651,12 +3657,12 @@ export default function IsoDocumentDetailPage() {
             {form.cap_tl === "Cấp 1" && (
               <DetailFieldItem
                 icon={<UserCheck size={15} />}
-                iconTone="teal"
+                iconTone="slate"
                 label="Người xem xét"
                 value={profileName(form.xem_xet_user_id) || doc?.xem_xet || "—"}
                 extra={
                   doc?.ky_xem_xet_at ? (
-                    <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                    <span className="text-[10px] text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
                       <CheckCircle2 size={11} /> {fmtDate(doc.ky_xem_xet_at)}
                     </span>
                   ) : undefined
@@ -3671,7 +3677,7 @@ export default function IsoDocumentDetailPage() {
               value={profileName(form.phe_duyet_user_id) || doc?.phe_duyet || "—"}
               extra={
                 doc?.ky_phe_duyet_at ? (
-                  <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                  <span className="text-[10px] text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
                     <CheckCircle2 size={11} /> {fmtDate(doc.ky_phe_duyet_at)}
                   </span>
                 ) : undefined
@@ -3686,7 +3692,7 @@ export default function IsoDocumentDetailPage() {
   const renderAdditionalDetailsCard = () => (
     <DetailCard
       icon={<MessageSquare size={18} />}
-      iconTone="teal"
+      iconTone="emerald"
       title="Ghi chú & Chi tiết bổ sung"
       subtitle="Nội dung ghi chú và mô tả tài liệu"
       className="h-full flex flex-col justify-between"
@@ -3694,7 +3700,7 @@ export default function IsoDocumentDetailPage() {
       <div className="space-y-4">
         <DetailFieldItem
           icon={<MessageSquare size={15} />}
-          iconTone="teal"
+          iconTone="slate"
           label="Nội dung ghi chú"
           value={<p className="text-sm font-semibold text-slate-800 whitespace-pre-wrap leading-relaxed">{form.ghi_chu || doc?.ghi_chu || "(Không có ghi chú thêm)"}</p>}
           colSpan={2}
@@ -3702,7 +3708,7 @@ export default function IsoDocumentDetailPage() {
         {(form.mo_ta_tim_kiem || doc?.mo_ta_tim_kiem) && (
           <DetailFieldItem
             icon={<FileText size={15} />}
-            iconTone="blue"
+            iconTone="slate"
             label="Mô tả tìm kiếm AI"
             value={<p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{form.mo_ta_tim_kiem || doc?.mo_ta_tim_kiem}</p>}
             colSpan={2}
@@ -3725,25 +3731,25 @@ export default function IsoDocumentDetailPage() {
         <div className="grid grid-cols-2 gap-3 text-xs">
           <DetailFieldItem
             icon={<Calendar size={14} />}
-            iconTone="emerald"
+            iconTone="slate"
             label="Ngày hiệu lực"
             value={fmtDate(doc.ngay_hieu_luc) || "—"}
           />
           <DetailFieldItem
             icon={<Clock size={14} />}
-            iconTone="amber"
+            iconTone="slate"
             label="Hết hiệu lực"
             value={fmtDate(doc.ngay_het_hieu_luc) || "—"}
           />
           <DetailFieldItem
             icon={<Layers size={14} />}
-            iconTone="amber"
+            iconTone="slate"
             label="Cấp tài liệu"
             value={doc.cap_tl || "—"}
           />
           <DetailFieldItem
             icon={<Tag size={14} />}
-            iconTone="indigo"
+            iconTone="slate"
             label="Lần ban hành"
             value={doc.lan_ban_hanh || "00"}
             mono
@@ -3807,7 +3813,7 @@ export default function IsoDocumentDetailPage() {
               })
             }}
             disabled={!isEditable}
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50"
           >
             <option value="Soạn thảo">Soạn thảo mới</option>
             <option value="Soát xét">Soát xét</option>
@@ -3826,7 +3832,7 @@ export default function IsoDocumentDetailPage() {
                 setReviewParentDocId("")
                 patchDraftForm({ phan_loai_tl: "cha", loai_tai_lieu: newLoai, ma_tai_lieu_cha: "", ma_tai_lieu: "", ma_tai_lieu_cu: "", ten_tai_lieu_cu: "" })
               }}
-              className={`flex-1 py-2 text-sm font-bold transition-all ${!isCon ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              className={`flex-1 py-2 text-sm font-bold transition-all ${!isCon ? "bg-brand-700 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
             >
               Tài liệu (Cha)
             </button>
@@ -3841,7 +3847,7 @@ export default function IsoDocumentDetailPage() {
                 // thuộc mã cha, không có khái niệm hồ sơ con đứng độc lập không mã.
                 patchDraftForm({ phan_loai_tl: "con", loai_tai_lieu: newLoai, ma_tai_lieu: "", ma_tai_lieu_cu: "", ten_tai_lieu_cu: "", khong_co_ma: false })
               }}
-              className={`flex-1 py-2 text-sm font-bold transition-all ${isCon ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+              className={`flex-1 py-2 text-sm font-bold transition-all ${isCon ? "bg-brand-700 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50"} ${!isEditable ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
             >
               Hồ sơ (Con)
             </button>
@@ -3860,7 +3866,7 @@ export default function IsoDocumentDetailPage() {
               value={form.khong_co_ma ? "" : form.ma_tai_lieu}
               readOnly
               placeholder={form.khong_co_ma ? "Không áp dụng mã cho tài liệu này" : "Tự sinh sau khi chọn đủ thông tin"}
-              className="w-full px-4 py-3 bg-violet-50 border border-violet-200 rounded-xl font-mono text-lg font-bold text-violet-700 outline-none"
+              className="w-full px-4 py-3 bg-brand-50 border border-brand-200 rounded-xl font-mono text-lg font-bold text-brand-800 outline-none"
             />
           </div>
         )}
@@ -3882,7 +3888,7 @@ export default function IsoDocumentDetailPage() {
               }
             }}
             disabled={!isEditable}
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50"
           >
             <option value="">— Chọn phòng ban —</option>
             {departmentOptions.map((p) => <option key={p} value={p}>{p}</option>)}
@@ -3908,7 +3914,7 @@ export default function IsoDocumentDetailPage() {
                 }
               }}
               disabled={!isEditable || (isReviewForm && !form.phong_ban)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50"
             >
               <option value="">— Chọn loại tài liệu —</option>
               {(isReviewForm ? reviewTypeOptions : parentTypeOptions).map((l) => (
@@ -3936,7 +3942,7 @@ export default function IsoDocumentDetailPage() {
             {!form.khong_co_ma && (
               <>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hiệu <span className="text-red-500">*</span></label>
-                <input type="number" min="1" value={form.so_hieu} onChange={(e) => patchDraftForm({ so_hieu: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+                <input type="number" min="1" value={form.so_hieu} onChange={(e) => patchDraftForm({ so_hieu: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50" />
               </>
             )}
           </div>
@@ -3946,7 +3952,7 @@ export default function IsoDocumentDetailPage() {
           <>
             <div className="sm:col-span-2">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã tài liệu có hiệu lực <span className="text-red-500">*</span></label>
-              <select value={selectedParentDocId} onChange={(e) => applyParentDocumentForChild(e.target.value)} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
+              <select value={selectedParentDocId} onChange={(e) => applyParentDocumentForChild(e.target.value)} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50">
                 <option value="">-- Chọn tài liệu --</option>
                 {parentDocOptions.map((parent) => (
                   <option key={parent.id} value={parent.id}>{parent.ma_tai_lieu} - {parent.ten_tai_lieu}</option>
@@ -3956,23 +3962,23 @@ export default function IsoDocumentDetailPage() {
             </div>
             <div className="hidden">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại tài liệu <span className="text-red-500">*</span></label>
-              <select value={form.loai_tai_lieu_cha} onChange={(e) => patchDraftForm({ loai_tai_lieu_cha: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
+              <select value={form.loai_tai_lieu_cha} onChange={(e) => patchDraftForm({ loai_tai_lieu_cha: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50">
                 {parentTypeOptions.map((l) => <option key={l} value={l}>{l} — {docTypeLabelMap[l]}</option>)}
               </select>
             </div>
             <div className="hidden">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hiệu tài liệu <span className="text-red-500">*</span></label>
-              <input type="number" min="1" value={form.so_hieu_cha} onChange={(e) => patchDraftForm({ so_hieu_cha: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+              <input type="number" min="1" value={form.so_hieu_cha} onChange={(e) => patchDraftForm({ so_hieu_cha: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50" />
             </div>
             <div className="hidden">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại hồ sơ <span className="text-red-500">*</span></label>
-              <select value={form.loai_tai_lieu} onChange={(e) => patchDraftForm({ loai_tai_lieu: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
+              <select value={form.loai_tai_lieu} onChange={(e) => patchDraftForm({ loai_tai_lieu: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50">
                 {childTypeOptions.map((l) => <option key={l} value={l}>{l} - {childTypeLabelMap[l]}</option>)}
               </select>
             </div>
             <div className="hidden">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Số hiệu hồ sơ <span className="text-red-500">*</span></label>
-              <input type="number" min="1" value={form.so_hieu} onChange={(e) => patchDraftForm({ so_hieu: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+              <input type="number" min="1" value={form.so_hieu} onChange={(e) => patchDraftForm({ so_hieu: e.target.value })} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50" />
             </div>
           </>
         )}
@@ -3991,7 +3997,7 @@ export default function IsoDocumentDetailPage() {
                     setForm((f) => ({ ...f, ma_tai_lieu_cu: "", ten_tai_lieu_cu: "" }))
                   }}
                   disabled={!isEditable}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50"
                 >
                   <option value="">— Chọn tài liệu có hiệu lực —</option>
                   {reviewParentOptions.map((p) => (
@@ -4010,7 +4016,7 @@ export default function IsoDocumentDetailPage() {
                     value={reviewDocId || parentReviewSourceDocId}
                     onChange={(e) => applyReviewDocument(e.target.value)}
                     disabled={!isEditable || !form.phong_ban}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50"
                   >
                     <option value="">— Chọn {codeLabel.toLowerCase()} có hiệu lực —</option>
                     {reviewCodeOptions.map((item) => (
@@ -4024,11 +4030,11 @@ export default function IsoDocumentDetailPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Lần sửa đổi <span className="text-red-500">*</span></label>
-                  <input type="text" value={form.lan_ban_hanh} onChange={(e) => setForm((f) => ({ ...f, lan_ban_hanh: e.target.value }))} disabled={!isEditable} placeholder="VD: 01 hoặc 01/01" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 font-mono" />
+                  <input type="text" value={form.lan_ban_hanh} onChange={(e) => setForm((f) => ({ ...f, lan_ban_hanh: e.target.value }))} disabled={!isEditable} placeholder="VD: 01 hoặc 01/01" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 font-mono" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Thay đổi {codeLabel.toLowerCase()} <span className="text-red-500">*</span></label>
-                  <select value={form.doi_ma_tai_lieu ? "co" : "khong"} onChange={(e) => setForm((f) => ({ ...f, doi_ma_tai_lieu: e.target.value === "co", ma_tai_lieu_moi: e.target.value === "co" ? f.ma_tai_lieu_moi : "" }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
+                  <select value={form.doi_ma_tai_lieu ? "co" : "khong"} onChange={(e) => setForm((f) => ({ ...f, doi_ma_tai_lieu: e.target.value === "co", ma_tai_lieu_moi: e.target.value === "co" ? f.ma_tai_lieu_moi : "" }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50">
                     <option value="khong">Không</option>
                     <option value="co">Có</option>
                   </select>
@@ -4036,23 +4042,23 @@ export default function IsoDocumentDetailPage() {
                 {form.doi_ma_tai_lieu && (
                   <div>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">{codeLabel} mới <span className="text-red-500">*</span></label>
-                    <input type="text" value={form.ma_tai_lieu_moi} onChange={(e) => setForm((f) => ({ ...f, ma_tai_lieu_moi: e.target.value.toUpperCase() }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 font-mono" />
+                    <input type="text" value={form.ma_tai_lieu_moi} onChange={(e) => setForm((f) => ({ ...f, ma_tai_lieu_moi: e.target.value.toUpperCase() }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 font-mono" />
                   </div>
                 )}
                 <div className="sm:col-span-2">
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">{titleLabel} mới <span className="text-red-500">*</span></label>
-                  <input type="text" value={form.ten_tai_lieu} onChange={(e) => setForm((f) => ({ ...f, ten_tai_lieu: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+                  <input type="text" value={form.ten_tai_lieu} onChange={(e) => setForm((f) => ({ ...f, ten_tai_lieu: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50" />
                 </div>
               </>
             )}
             {/* Lý do + Nội dung soát xét: dùng chung TH3 và TH4 */}
             <div className="sm:col-span-2">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Lý do soát xét <span className="text-red-500">*</span></label>
-              <textarea value={form.ly_do_soat_xet} onChange={(e) => setForm((f) => ({ ...f, ly_do_soat_xet: e.target.value }))} disabled={!isEditable} rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 resize-none" />
+              <textarea value={form.ly_do_soat_xet} onChange={(e) => setForm((f) => ({ ...f, ly_do_soat_xet: e.target.value }))} disabled={!isEditable} rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 resize-none" />
             </div>
             <div className="sm:col-span-2">
               <label className="text-xs font-bold text-slate-600 block mb-1.5">Nội dung soát xét <span className="text-red-500">*</span></label>
-              <textarea value={form.noi_dung_soat_xet} onChange={(e) => setForm((f) => ({ ...f, noi_dung_soat_xet: e.target.value }))} disabled={!isEditable} rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 resize-none" />
+              <textarea value={form.noi_dung_soat_xet} onChange={(e) => setForm((f) => ({ ...f, noi_dung_soat_xet: e.target.value }))} disabled={!isEditable} rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 resize-none" />
             </div>
           </>
         )}
@@ -4061,20 +4067,20 @@ export default function IsoDocumentDetailPage() {
         {!isReviewForm && !isCon && (
           <div>
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Lần ban hành <span className="text-red-500">*</span></label>
-          <input type="text" value={form.lan_ban_hanh} onChange={(e) => setForm((f) => ({ ...f, lan_ban_hanh: e.target.value }))} disabled={!isEditable} placeholder="VD: 00 hoặc 01/01" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 font-mono" />
+          <input type="text" value={form.lan_ban_hanh} onChange={(e) => setForm((f) => ({ ...f, lan_ban_hanh: e.target.value }))} disabled={!isEditable} placeholder="VD: 00 hoặc 01/01" className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 font-mono" />
           </div>
         )}
 
         {!isReviewForm && !isCon && (
           <div className="sm:col-span-2">
             <label className="text-xs font-bold text-slate-600 block mb-1.5">{titleLabel} <span className="text-red-500">*</span></label>
-            <input type="text" value={form.ten_tai_lieu} onChange={(e) => setForm((f) => ({ ...f, ten_tai_lieu: e.target.value }))} disabled={!isEditable} placeholder={`Nhập ${titleLabel.toLowerCase()}...`} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50" />
+            <input type="text" value={form.ten_tai_lieu} onChange={(e) => setForm((f) => ({ ...f, ten_tai_lieu: e.target.value }))} disabled={!isEditable} placeholder={`Nhập ${titleLabel.toLowerCase()}...`} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50" />
           </div>
         )}
 
         <div className="sm:col-span-2">
           <label className="text-xs font-bold text-slate-600 block mb-1.5">{levelLabel} <span className="text-red-500">*</span></label>
-          <select value={form.cap_tl} onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50">
+          <select value={form.cap_tl} onChange={(e) => setForm((f) => ({ ...f, cap_tl: e.target.value }))} disabled={!isEditable} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50">
             <option value="Cấp 1">Cấp 1 (3 bước: Soạn thảo → Xem xét → Phê duyệt)</option>
             <option value="Cấp 2">Cấp 2 (2 bước: Gửi phê duyệt → Phê duyệt)</option>
           </select>
@@ -4084,7 +4090,7 @@ export default function IsoDocumentDetailPage() {
         {!isCon && (
           <div className="sm:col-span-2">
           <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
-          <textarea value={form.ghi_chu} onChange={(e) => setForm((f) => ({ ...f, ghi_chu: e.target.value }))} disabled={!isEditable} rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 resize-none" />
+          <textarea value={form.ghi_chu} onChange={(e) => setForm((f) => ({ ...f, ghi_chu: e.target.value }))} disabled={!isEditable} rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 resize-none" />
           </div>
         )}
 
@@ -4101,7 +4107,7 @@ export default function IsoDocumentDetailPage() {
               rows={2}
               maxLength={500}
               placeholder="Mô tả ngắn về nội dung, mục đích, phạm vi áp dụng của tài liệu này..."
-              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50 resize-none"
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 resize-none"
             />
           </div>
         )}
@@ -4130,11 +4136,11 @@ export default function IsoDocumentDetailPage() {
           </p>
           <div className="flex flex-wrap justify-center gap-2 pt-1">
             {accessDenied.expired && accessDenied.replacementId && canViewIsoLibrary(readCachedIsoUser()) && (
-              <Link href={`/dashboard/iso/documents/${accessDenied.replacementId}`} className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold">
+              <Link href={`/dashboard/iso/documents/${accessDenied.replacementId}`} className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-bold">
                 Xem bản đang có hiệu lực
               </Link>
             )}
-            <Link href="/dashboard/iso/my-tasks" className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold">
+            <Link href="/dashboard/iso/my-tasks" className="px-4 py-2 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold">
               Về Việc của tôi
             </Link>
             <Link href={`/iso-doc/${docId}`} className="px-4 py-2 rounded-xl border border-slate-300 text-slate-600 hover:bg-slate-50 text-sm font-bold">
@@ -4165,7 +4171,7 @@ export default function IsoDocumentDetailPage() {
       <button
         onClick={() => void handlePinConfirm()}
         disabled={pinLoading || !pin}
-        className="flex items-center gap-2 px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
+        className="flex items-center gap-2 px-5 py-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
       >
         {pinLoading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
         {pinLoading ? "Đang xử lý..." : "Xác nhận"}
@@ -4173,12 +4179,132 @@ export default function IsoDocumentDetailPage() {
     </>
   )
 
+  // ── Doc-UI GĐ2: hành động ký — GIỮ NGUYÊN onClick + cờ quyền cũ, chỉ đổi chỗ hiển thị ──
+  const isViewMode = !isNew && !isEditMode
+  const signStepsReadyIso = form.cap_tl === "Cấp 2" ? !!form.phe_duyet_user_id : (!!form.xem_xet_user_id && !!form.phe_duyet_user_id)
+  const hasAnySourceFile = !!(doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl)
+  let isoPrimary: SignAction | null = null
+  const isoSecondary: SignAction[] = []
+  const isoDanger: SignAction[] = []
+  if (!isNew && (trangThai === "draft" || trangThai === "tra_ve") && canManageDraft) {
+    if (hasAnySourceFile && !templateConfirmed) {
+      isoPrimary = {
+        key: "setup_template",
+        label: "Cài đặt vị trí ký",
+        icon: <FileSignature size={16} />,
+        onClick: () => void goToTemplateSetup(),
+        disabled: !signStepsReadyIso,
+        title: "Cài đặt mẫu vị trí ký cho quy trình và các biểu mẫu trước khi gửi duyệt",
+      }
+    } else {
+      if (hasAnySourceFile) {
+        isoSecondary.push({
+          key: "edit_template",
+          label: "Chỉnh sửa vị trí ký",
+          icon: <FileSignature size={14} />,
+          onClick: () => void goToTemplateSetup(),
+          title: "Chỉnh sửa lại vị trí ký đã cài đặt",
+        })
+      }
+      isoPrimary = canSignStep1
+        ? {
+            key: "gui_xem_xet",
+            label: form.cap_tl === "Cấp 2"
+              ? (trangThai === "tra_ve" ? "Ký & Gửi phê duyệt lại" : "Ký & Gửi phê duyệt")
+              : (trangThai === "tra_ve" ? "Ký & Gửi xem xét lại" : "Ký & Gửi xem xét"),
+            icon: <Send size={16} />,
+            onClick: () => {
+              const label = form.cap_tl === "Cấp 2"
+                ? (trangThai === "tra_ve" ? "Xác nhận ký & gửi phê duyệt lại" : "Xác nhận ký & gửi phê duyệt")
+                : (trangThai === "tra_ve" ? "Xác nhận ký & gửi xem xét lại" : "Xác nhận ký & gửi xem xét")
+              setPinModal({ action: "gui_xem_xet", label })
+              setPin("")
+              setPinError("")
+            },
+            disabled: !signStepsReadyIso,
+          }
+        : {
+            key: "wait_drafter",
+            label: "Chờ người soạn thảo ký",
+            icon: <Send size={16} />,
+            onClick: () => {},
+            disabled: true,
+            title: "Chỉ người soạn thảo được chỉ định mới có quyền ký và gửi bước này",
+          }
+    }
+  }
+  if (!isNew && trangThai === "cho_xem_xet" && canXemXet) {
+    isoPrimary = { key: "gui_phe_duyet", label: "Ký xem xét & Gửi phê duyệt", icon: <Send size={16} />, onClick: () => setBatchSignModal({ open: true, action: "gui_phe_duyet" }) }
+    isoDanger.push({ key: "khong_xem_xet", label: "Từ chối", icon: <X size={14} />, onClick: () => { setPinModal({ action: "khong_xem_xet", label: "Từ chối xem xét" }); setPin(""); setPinError("") } })
+  }
+  if (!isNew && trangThai === "cho_phe_duyet" && canApprove) {
+    isoPrimary = { key: "phe_duyet", label: "Phê duyệt & Ban hành", icon: <CheckCircle2 size={16} />, onClick: () => setBatchSignModal({ open: true, action: "phe_duyet" }) }
+    isoDanger.push({ key: "tu_choi_phe_duyet", label: "Không phê duyệt", icon: <X size={14} />, onClick: () => { setPinModal({ action: "tu_choi_phe_duyet", label: "Không phê duyệt" }); setPin(""); setPinError(""); setLyDoTraVe("") } })
+  }
+  if (!isNew && trangThai === "bi_tu_choi_phe_duyet" && canXemXet) {
+    isoPrimary = { key: "gui_lai_phe_duyet", label: "Ký xem xét & Gửi phê duyệt lại", icon: <Send size={16} />, onClick: () => setBatchSignModal({ open: true, action: "gui_lai_phe_duyet" }) }
+    isoDanger.push({ key: "tra_ve_nhap", label: "Trả về Nháp", icon: <RotateCcw size={14} />, onClick: () => { setPinModal({ action: "tra_ve_nhap", label: "Trả về Nháp" }); setPin(""); setPinError(""); setLyDoTraVe("") } })
+  }
+  if (canRecall) {
+    isoSecondary.push({ key: "recall", label: "Thu hồi", icon: <Undo2 size={14} />, onClick: () => { setRecallReason(""); setRecallOpen(true) }, title: "Đưa tài liệu đã gửi về bản nháp để sửa hoặc xoá" })
+  }
+  const isoAllActions: { a: SignAction; kind: "primary" | "secondary" | "danger" }[] = [
+    ...(isoPrimary ? [{ a: isoPrimary, kind: "primary" as const }] : []),
+    ...isoSecondary.map((a) => ({ a, kind: "secondary" as const })),
+    ...isoDanger.map((a) => ({ a, kind: "danger" as const })),
+  ]
+
+  // ── Doc-UI GĐ2: tiến trình ký tài liệu ISO (Soạn thảo → [Xem xét] → Phê duyệt) ──
+  const isoCap2 = (form.cap_tl || doc?.cap_tl) === "Cấp 2"
+  const isoTimeline: TimelineStepItem[] = []
+  if (!isNew && doc) {
+    const signedDone = trangThai === "co_hieu_luc" || trangThai === "het_hieu_luc"
+    isoTimeline.push({
+      key: "soan_thao",
+      role: "Bước 1",
+      title: "Soạn thảo",
+      actor: profileName(form.soan_thao_user_id) || doc.soan_thao || "—",
+      time: doc.ky_soan_thao_at || null,
+      state: doc.ky_soan_thao_at || signedDone ? "done" : (trangThai === "draft" || trangThai === "tra_ve") ? "current" : "waiting",
+      isMine: (trangThai === "draft" || trangThai === "tra_ve") && canSignStep1,
+      stepNo: 1,
+      accentColor: ISO_STEP_COLORS.soan_thao.fg,
+    })
+    if (!isoCap2) {
+      isoTimeline.push({
+        key: "xem_xet",
+        role: "Bước 2",
+        title: "Xem xét",
+        actor: profileName(form.xem_xet_user_id) || doc.xem_xet || "—",
+        time: doc.ky_xem_xet_at || null,
+        state: doc.ky_xem_xet_at || signedDone ? "done" : (trangThai === "cho_xem_xet" || trangThai === "bi_tu_choi_phe_duyet") ? "current" : "waiting",
+        isMine: (trangThai === "cho_xem_xet" || trangThai === "bi_tu_choi_phe_duyet") && canXemXet,
+        stepNo: 2,
+        accentColor: ISO_STEP_COLORS.xem_xet.fg,
+      })
+    }
+    isoTimeline.push({
+      key: "phe_duyet",
+      role: "Phê duyệt",
+      title: "Phê duyệt & Ban hành",
+      actor: `${signAsPrefixLabel(doc.phe_duyet_sign_as)}${profileName(form.phe_duyet_user_id) || doc.phe_duyet || "—"}`,
+      time: doc.ky_phe_duyet_at || null,
+      state: trangThai === "bi_tu_choi_phe_duyet"
+        ? "rejected"
+        : doc.ky_phe_duyet_at || signedDone ? "done" : trangThai === "cho_phe_duyet" ? "current" : "waiting",
+      isMine: trangThai === "cho_phe_duyet" && canApprove,
+      stepNo: isoCap2 ? 2 : 3,
+      accentColor: ISO_STEP_COLORS.phe_duyet.fg,
+    })
+  }
+  const isoTimelineDone = isoTimeline.filter((t) => t.state === "done").length
+
   return (
     <IsoShell>
       <div className="space-y-4">
         {/* Toast */}
         {toast && (
-          <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl max-w-xl ${toast.ok ? "bg-emerald-600" : "bg-red-600"} text-white`}>
+          <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl max-w-xl ${toast.ok ? "bg-brand-600" : "bg-red-600"} text-white`}>
             {toast.ok ? <CheckCircle2 size={16} className="shrink-0" /> : <AlertTriangle size={16} className="shrink-0" />}
             <span className="text-sm font-bold">{toast.text}</span>
             <button onClick={() => setToast(null)} className="ml-2 hover:opacity-70"><X size={14} /></button>
@@ -4305,276 +4431,149 @@ export default function IsoDocumentDetailPage() {
           </div>
         )}
 
-        {/* Header */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3 min-w-0">
-            <Link href="/dashboard/iso/documents" className="p-2 hover:bg-slate-100 rounded-xl transition-all shrink-0">
-              <ArrowLeft size={18} className="text-slate-600" />
-            </Link>
-            <div className="min-w-0">
-              <h1 className="text-xl font-extrabold text-slate-800 break-words">
-                {isNew ? "Tạo tài liệu ISO mới" : (doc?.ten_tai_lieu || "Chi tiết tài liệu")}
-              </h1>
-              {!isNew && doc && (
-                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                  <span className="font-mono text-xs text-violet-700 break-all">{doc.ma_tai_lieu || "(chưa có mã)"}</span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[trangThai]}`}>
-                    {TRANG_THAI_LABEL[trangThai]}
-                  </span>
+        <DetailPageHeader
+          backHref="/dashboard/iso/documents"
+          backLabel="Quay lại danh sách"
+          eyebrow={isNew ? "Tài liệu ISO" : form.phan_loai_tl === "con" ? "Hồ sơ ISO" : "Tài liệu ISO"}
+          title={isNew ? "Tạo tài liệu ISO mới" : (doc?.ten_tai_lieu || "Chi tiết tài liệu")}
+          code={!isNew && doc ? (doc.ma_tai_lieu || "(chưa có mã)") : null}
+          tags={
+            !isNew && doc && isEditMode ? (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                Chế độ chỉnh sửa
+              </span>
+            ) : undefined
+          }
+          actions={
+            <>
+              {!isNew && mainFileUrl && canOpenThisFile && (
+                <>
+                  <HeaderButton
+                    icon={<Eye size={15} />}
+                    label="Xem file"
+                    onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main`)}
+                  />
+                  <HeaderButton
+                    icon={<Download size={15} />}
+                    label="Tải file"
+                    onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main&download=1`)}
+                  />
+                </>
+              )}
+              {!isNew && mainFileUrl && !canOpenThisFile && <ExpiredFileNotice />}
+
+              {/* Chế độ tạo mới / chỉnh sửa: hành động ký hiển thị ngay trên header (không có
+                  bảng điều khiển bên phải ở chế độ này) */}
+              {!isViewMode && isoAllActions.map(({ a, kind }) => (
+                <button
+                  key={a.key}
+                  type="button"
+                  onClick={a.onClick}
+                  disabled={a.disabled || a.loading}
+                  title={a.title}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    kind === "primary"
+                      ? "border-brand-600 bg-brand-600 text-white hover:bg-brand-700"
+                      : kind === "danger"
+                        ? "border-red-200 bg-white text-red-600 hover:bg-red-50"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800"
+                  }`}
+                >
+                  {a.icon}
+                  {a.label}
+                </button>
+              ))}
+
+              {!isNew && canDistribute && doc?.trang_thai === "co_hieu_luc" && (
+                <HeaderButton tone="brand" icon={<Share2 size={15} />} label="Phân phối" onClick={() => setShowDistributeModal(true)} />
+              )}
+
+              {!isNew && isEditable && (
+                <HeaderButton
+                  icon={isEditMode ? <X size={15} /> : <Edit3 size={15} />}
+                  label={isEditMode ? "Hủy sửa" : "Chỉnh sửa"}
+                  onClick={() => setIsEditMode((prev) => !prev)}
+                />
+              )}
+
+              {isEditable && (isNew || isEditMode) && (
+                <button
+                  type="button"
+                  onClick={() => void handleSave()}
+                  disabled={saving}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-brand-600 bg-brand-600 px-4 text-[13px] font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
+                >
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  <span>{saving ? "Đang lưu..." : "Lưu"}</span>
+                </button>
+              )}
+
+              {!isNew && doc?.ma_tai_lieu && (
+                <div
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white p-1"
+                  title="Mã QR tra cứu tài liệu"
+                >
+                  <QRCodeSVG value={recordUrl} size={28} />
                 </div>
               )}
-            </div>
+            </>
+          }
+        />
+
+        {isViewMode && (
+          <div className="lg:hidden">
+            <SegmentedTabs
+              fullWidth
+              ariaLabel="Chuyển giữa tài liệu và thông tin"
+              value={mobilePane}
+              onChange={setMobilePane}
+              items={[
+                { key: "doc", label: "Tài liệu", icon: FileText },
+                { key: "info", label: "Thông tin", icon: ShieldCheck },
+              ]}
+            />
           </div>
-
-          {/* Cụm thao tác header: trên mobile các nút co giãn đều, desktop kích thước chuẩn h-10 đồng bộ */}
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
-            {/* Xem / Tải file */}
-            {!isNew && mainFileUrl && canOpenThisFile && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main`)}
-                  title="Xem file"
-                  className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-sm font-semibold shadow-2xs transition-all"
-                >
-                  <Eye size={15} /> <span className="hidden sm:inline">Xem file</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void openSecureFile(`/api/iso/documents/${docId}/file-url?variant=main&download=1`)}
-                  title="Tải file"
-                  className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 text-sm font-semibold shadow-2xs transition-all"
-                >
-                  <Download size={15} /> <span className="hidden sm:inline">Tải file</span>
-                </button>
-              </>
-            )}
-
-            {/* Bản hết hiệu lực + không có quyền xem file */}
-            {!isNew && mainFileUrl && !canOpenThisFile && (
-              <div className="flex min-w-full items-center justify-center sm:min-w-0">
-                <ExpiredFileNotice />
-              </div>
-            )}
-
-            {/* Luồng Soạn thảo: draft hoặc tra_ve */}
-            {!isNew && (trangThai === "draft" || trangThai === "tra_ve") && canManageDraft && (
-              <>
-                {/* Nếu chưa xác nhận vị trí trên màn mau-vi-tri (và có file PDF/upload) */}
-                {(doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl) && !templateConfirmed ? (
-                  <button
-                    type="button"
-                    onClick={() => void goToTemplateSetup()}
-                    disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
-                    className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 text-sm font-semibold shadow-2xs transition-all disabled:opacity-50"
-                    title="Cài đặt mẫu vị trí ký cho quy trình và các biểu mẫu trước khi gửi duyệt"
-                  >
-                    <FileSignature size={15} className="text-amber-700" />
-                    <span>Cài đặt vị trí ký</span>
-                  </button>
-                ) : (
-                  <>
-                    {(doc?.file_signed_pdf_url || doc?.file_goc_url || uploadedFileUrl) && (
-                      <button
-                        type="button"
-                        onClick={() => void goToTemplateSetup()}
-                        className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 text-sm font-semibold shadow-2xs transition-all"
-                        title="Chỉnh sửa lại vị trí ký đã cài đặt"
-                      >
-                        <FileSignature size={15} className="text-slate-600" />
-                        <span>Chỉnh sửa vị trí ký</span>
-                      </button>
-                    )}
-                    {canSignStep1 ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const label = form.cap_tl === "Cấp 2"
-                            ? (trangThai === "tra_ve" ? "Xác nhận ký & gửi phê duyệt lại" : "Xác nhận ký & gửi phê duyệt")
-                            : (trangThai === "tra_ve" ? "Xác nhận ký & gửi xem xét lại" : "Xác nhận ký & gửi xem xét")
-                          setPinModal({ action: "gui_xem_xet", label })
-                          setPin("")
-                          setPinError("")
-                        }}
-                        disabled={form.cap_tl === "Cấp 2" ? !form.phe_duyet_user_id : (!form.xem_xet_user_id || !form.phe_duyet_user_id)}
-                        className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-sm font-bold shadow-sm disabled:opacity-50 transition-all active:scale-[0.98]"
-                      >
-                        <Send size={14} />
-                        <span>
-                          {form.cap_tl === "Cấp 2"
-                            ? (trangThai === "tra_ve" ? "Ký & Gửi phê duyệt lại" : "Ký & Gửi phê duyệt")
-                            : (trangThai === "tra_ve" ? "Ký & Gửi xem xét lại" : "Ký & Gửi xem xét")}
-                        </span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled
-                        className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-slate-200 bg-slate-100 text-slate-400 text-sm font-semibold shadow-2xs cursor-not-allowed opacity-70"
-                        title="Chỉ người soạn thảo được chỉ định mới có quyền ký và gửi bước này"
-                      >
-                        <Send size={14} />
-                        <span>Chờ người soạn thảo ký</span>
-                      </button>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-
-            {/* GĐ4: Thu hồi về nháp (người tạo/soạn thảo hoặc admin, chưa có ký bước sau) */}
-            {canRecall && (
-              <button
-                type="button"
-                onClick={() => { setRecallReason(""); setRecallOpen(true) }}
-                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-amber-300 bg-white text-amber-700 hover:bg-amber-50 text-sm font-semibold shadow-2xs transition-all active:scale-[0.98]"
-                title="Đưa tài liệu đã gửi về bản nháp để sửa hoặc xoá"
-              >
-                <Undo2 size={14} /> Thu hồi
-              </button>
-            )}
-
-            {/* Xem xét → gửi phê duyệt */}
-            {!isNew && trangThai === "cho_xem_xet" && canXemXet && (
-              <button
-                type="button"
-                onClick={() => setBatchSignModal({ open: true, action: "gui_phe_duyet" })}
-                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-sm font-bold shadow-sm transition-all active:scale-[0.98]"
-              >
-                <Send size={14} /> Ký xem xét & Gửi phê duyệt
-              </button>
-            )}
-
-            {/* Từ chối xem xét */}
-            {!isNew && trangThai === "cho_xem_xet" && canXemXet && (
-              <button
-                type="button"
-                onClick={() => { setPinModal({ action: "khong_xem_xet", label: "Từ chối xem xét" }); setPin(""); setPinError("") }}
-                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-sm font-semibold shadow-2xs transition-all active:scale-[0.98]"
-              >
-                <X size={14} /> Từ chối
-              </button>
-            )}
-
-            {/* Phê duyệt */}
-            {!isNew && (trangThai === "cho_phe_duyet") && canApprove && (
-              <button
-                type="button"
-                onClick={() => setBatchSignModal({ open: true, action: "phe_duyet" })}
-                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-sm font-bold shadow-sm transition-all active:scale-[0.98]"
-              >
-                <CheckCircle2 size={14} /> Phê duyệt & Ban hành
-              </button>
-            )}
-
-            {/* Không phê duyệt */}
-            {!isNew && trangThai === "cho_phe_duyet" && canApprove && (
-              <button
-                type="button"
-                onClick={() => { setPinModal({ action: "tu_choi_phe_duyet", label: "Không phê duyệt" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
-                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-sm font-semibold shadow-2xs transition-all active:scale-[0.98]"
-              >
-                <X size={14} /> Không phê duyệt
-              </button>
-            )}
-
-            {/* Xem xét xử lý sau khi phê duyệt từ chối */}
-            {!isNew && trangThai === "bi_tu_choi_phe_duyet" && canXemXet && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setBatchSignModal({ open: true, action: "gui_lai_phe_duyet" })}
-                  className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-sm font-bold shadow-sm transition-all active:scale-[0.98]"
-                >
-                  <Send size={14} /> Ký xem xét & Gửi phê duyệt lại
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setPinModal({ action: "tra_ve_nhap", label: "Trả về Nháp" }); setPin(""); setPinError(""); setLyDoTraVe("") }}
-                  className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-semibold shadow-2xs transition-all"
-                >
-                  <RotateCcw size={14} /> Trả về Nháp
-                </button>
-              </>
-            )}
-
-            {/* Nút phân phối — chỉ khi tài liệu đã có hiệu lực */}
-            {!isNew && canDistribute && doc?.trang_thai === "co_hieu_luc" && (
-              <button
-                type="button"
-                onClick={() => setShowDistributeModal(true)}
-                className="inline-flex items-center gap-2 h-10 px-4 rounded-xl border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 text-sm font-semibold shadow-2xs transition-all"
-              >
-                <Share2 size={14} /> Phân phối
-              </button>
-            )}
-
-            {/* Nút Chỉnh sửa / Hủy sửa khi xem chi tiết */}
-            {!isNew && isEditable && (
-              <button
-                type="button"
-                onClick={() => setIsEditMode((prev) => !prev)}
-                className={`inline-flex items-center gap-1.5 h-10 px-4 rounded-xl border text-sm font-semibold shadow-2xs transition-all ${
-                  isEditMode
-                    ? "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200"
-                    : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
-                }`}
-              >
-                {isEditMode ? <X size={15} /> : <Edit3 size={15} />}
-                <span>{isEditMode ? "Hủy sửa" : "Chỉnh sửa"}</span>
-              </button>
-            )}
-
-            {/* Nút lưu */}
-            {isEditable && (isNew || isEditMode) && (
-              <button
-                type="button"
-                onClick={() => void handleSave()}
-                disabled={saving}
-                className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-sm font-bold shadow-sm disabled:opacity-50 transition-all active:scale-[0.98]"
-              >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                <span>{saving ? "Đang lưu..." : "Lưu"}</span>
-              </button>
-            )}
-
-            {/* QR code khi đã có mã */}
-            {!isNew && doc?.ma_tai_lieu && (
-              <div
-                className="h-10 w-10 shrink-0 rounded-xl border border-slate-200 bg-white p-1 shadow-2xs flex items-center justify-center hover:border-slate-300 transition-all"
-                title="Mã QR tra cứu tài liệu"
-              >
-                <QRCodeSVG value={recordUrl} size={32} />
-              </div>
-            )}
-          </div>
-        </div>
+        )}
 
         {!isNew && doc && childDocs.length > 0 && (
-          <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+          <div className="rounded-2xl border border-brand-200/90 bg-brand-50/60 p-4 text-sm text-brand-950 shadow-2xs">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full !bg-sky-600 px-2.5 py-1 text-xs font-extrabold !text-white">{form.phan_loai_tl === "con" ? "Lô hồ sơ" : "Bộ tài liệu"}</span>
-              <span className="font-bold">{form.phan_loai_tl === "con" ? (form.ma_tai_lieu_cha || "Quy trình") : (doc.ma_tai_lieu || "Tài liệu")}</span>
-              <span>{form.phan_loai_tl === "con" ? `có ${childDocs.length + 1} hồ sơ cùng cấp đang xử lý.` : `đang được xử lý cùng ${childDocs.length} hồ sơ kèm theo.`}</span>
+              <span className="rounded-full bg-brand-700 px-2.5 py-1 text-xs font-extrabold text-white">
+                {form.phan_loai_tl === "con" ? "Lô hồ sơ" : "Bộ tài liệu"}
+              </span>
+              <span className="font-extrabold">{form.phan_loai_tl === "con" ? (form.ma_tai_lieu_cha || "Quy trình") : (doc.ma_tai_lieu || "Tài liệu")}</span>
+              <span className="font-medium text-brand-900">{form.phan_loai_tl === "con" ? `có ${childDocs.length + 1} hồ sơ cùng cấp đang xử lý.` : `đang được xử lý cùng ${childDocs.length} hồ sơ kèm theo.`}</span>
             </div>
-            <p className="mt-1 text-xs text-sky-700">
+            <p className="mt-1.5 text-xs text-brand-800/80 font-medium">
               {form.phan_loai_tl === "con" ? "Khi ký, hệ thống xử lý lần lượt các hồ sơ trong lô cùng người soạn/xem xét/phê duyệt." : "Người xem xét/phê duyệt xử lý một bộ duy nhất; khi ký, hệ thống sẽ mở lần lượt file chính và từng hồ sơ cần ký."}
             </p>
           </div>
         )}
 
-        <div className={`grid grid-cols-1 gap-4 lg:grid-cols-3`}>
-          {/* Form chính */}
-          <div className="lg:col-span-2 flex flex-col gap-5">
-            {!isNew && !isEditMode ? (
-              renderReadOnlyView()
+        <div
+          className={isViewMode
+            ? "grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,7fr)_minmax(320px,3fr)] lg:items-start"
+            : "grid grid-cols-1 gap-4 lg:grid-cols-3"}
+        >
+          {/* Form chính / cột tài liệu */}
+          <div
+            className={isViewMode
+              ? `min-w-0 flex-col gap-5 ${mobilePane === "doc" ? "flex" : "hidden"} lg:flex`
+              : "lg:col-span-2 flex flex-col gap-5"}
+          >
+            {isViewMode ? (
+              <>
+                {renderReadOnlyView()}
+                {renderAdditionalDetailsCard()}
+                {renderValidityInfoCard()}
+              </>
             ) : (
               <>
                 {/* Thông tin cơ bản */}
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
                     <h2 className="text-base font-extrabold text-slate-800">Thông tin tài liệu</h2>
-                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-violet-50 text-violet-700">
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-800">
                       Chế độ chỉnh sửa
                     </span>
                   </div>
@@ -4609,7 +4608,7 @@ export default function IsoDocumentDetailPage() {
                             }))
                           }}
                           disabled={!isEditable || !!doc?.ky_soan_thao_at}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50"
                         >
                           <option value="">— Chọn người —</option>
                           {profilesAll.map((p) => (
@@ -4618,7 +4617,7 @@ export default function IsoDocumentDetailPage() {
                         </select>
                       </div>
                       {doc?.ky_soan_thao_at && (
-                        <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+                        <p className="text-xs text-brand-600 mt-1 flex items-center gap-1">
                           <CheckCircle2 size={10} /> Đã ký {fmtDate(doc.ky_soan_thao_at)}
                         </p>
                       )}
@@ -4641,7 +4640,7 @@ export default function IsoDocumentDetailPage() {
                             }))
                           }}
                           disabled={!isEditable}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50"
                         >
                           <option value="">— Chọn người —</option>
                           {profilesXemXet
@@ -4651,7 +4650,7 @@ export default function IsoDocumentDetailPage() {
                             ))}
                         </select>
                         {doc?.ky_xem_xet_at && (
-                          <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+                          <p className="text-xs text-brand-600 mt-1 flex items-center gap-1">
                             <CheckCircle2 size={10} /> Đã ký {fmtDate(doc.ky_xem_xet_at)}
                           </p>
                         )}
@@ -4663,7 +4662,7 @@ export default function IsoDocumentDetailPage() {
                       <label className="text-xs font-bold text-slate-600 block mb-1.5 flex items-center gap-1.5">
                         Người phê duyệt
                         {signAsPrefixLabel(doc?.phe_duyet_sign_as) && (
-                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                          <span className="text-[10px] font-bold text-brand-700 bg-brand-50 border border-brand-200 rounded px-1.5 py-0.5">
                             {signAsPrefixLabel(doc?.phe_duyet_sign_as)}
                           </span>
                         )}
@@ -4675,7 +4674,7 @@ export default function IsoDocumentDetailPage() {
                           setForm((f) => ({ ...f, phe_duyet_user_id: uid, phe_duyet: profileName(uid) }))
                         }}
                         disabled={!isEditable}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 disabled:bg-slate-50"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 disabled:bg-slate-50"
                       >
                         <option value="">— Chọn người —</option>
                         {profilesPheDuyet
@@ -4685,7 +4684,7 @@ export default function IsoDocumentDetailPage() {
                           ))}
                       </select>
                       {doc?.ky_phe_duyet_at && (
-                        <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+                        <p className="text-xs text-brand-600 mt-1 flex items-center gap-1">
                           <CheckCircle2 size={10} /> Đã duyệt {fmtDate(doc.ky_phe_duyet_at)}
                         </p>
                       )}
@@ -4745,15 +4744,40 @@ export default function IsoDocumentDetailPage() {
             }}
           />
 
-          <div className="space-y-4">
+          <div
+            className={isViewMode
+              ? `min-w-0 space-y-4 ${mobilePane === "info" ? "" : "hidden"} lg:block`
+              : "space-y-4"}
+          >
+            {isViewMode && doc && (
+              <>
+                <StatusSummaryBar
+                  domain="iso"
+                  status={trangThai}
+                  meta={`${isoTimelineDone}/${isoTimeline.length} bước đã ký · ${isoCap2 ? "Cấp 2" : "Cấp 1"}`}
+                />
+                <InspectorCard title="Tiến trình ký duyệt" icon={ShieldCheck}>
+                  <TimelineSteps steps={isoTimeline} formatTime={fmtDate} />
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <TimelineProgress done={isoTimelineDone} total={isoTimeline.length} />
+                  </div>
+                </InspectorCard>
+                <SignActionBox
+                  title="Hành động ký"
+                  primary={isoPrimary}
+                  secondary={isoSecondary}
+                  danger={isoDanger}
+                />
+              </>
+            )}
             {/* TH4: Soát xét nhiều hồ sơ con — right panel */}
             {isNew && form.phan_loai_tl === "con" && form.chon_quy_trinh === "Soát xét" && (
               <div className="space-y-3">
                 {/* Section 1: Hồ sơ cần soát xét */}
-                <div className="bg-white rounded-xl border border-emerald-200 shadow-sm p-4">
+                <div className="bg-white rounded-xl border border-brand-200 shadow-sm p-4">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-extrabold text-emerald-800">Hồ sơ cần soát xét</p>
+                      <p className="text-sm font-extrabold text-brand-800">Hồ sơ cần soát xét</p>
                       <p className="text-[11px] text-slate-500">Mỗi dòng là một hồ sơ. Chọn hồ sơ cũ và upload file phiên bản mới.</p>
                       {!reviewParentDocId && (
                         <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu (bộ quy trình) trước.</p>
@@ -4763,7 +4787,7 @@ export default function IsoDocumentDetailPage() {
                       type="button"
                       onClick={addChildReviewRow}
                       disabled={!reviewParentDocId}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-bold shadow-sm transition-all ${reviewParentDocId ? "border-emerald-500 !bg-emerald-600 !text-white hover:!bg-emerald-700" : "cursor-not-allowed border-slate-300 !bg-slate-200 !text-slate-400 opacity-60"}`}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-bold shadow-sm transition-all ${reviewParentDocId ? "border-brand-500 !bg-brand-600 !text-white hover:!bg-brand-700" : "cursor-not-allowed border-slate-300 !bg-slate-200 !text-slate-400 opacity-60"}`}
                     >
                       Thêm hồ sơ
                     </button>
@@ -4775,7 +4799,7 @@ export default function IsoDocumentDetailPage() {
                           item.parent_doc_id === reviewParentDocId
                       )
                       return (
-                        <div key={row.id} className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
+                        <div key={row.id} className="rounded-xl bg-brand-50 p-3 ring-1 ring-brand-100">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <label className="col-span-2 text-[11px] font-bold text-slate-600">
                               Mã hồ sơ cũ <span className="text-red-500">*</span>
@@ -4816,7 +4840,7 @@ export default function IsoDocumentDetailPage() {
                             </label>
                             <div className="col-span-2 text-[11px] font-bold text-slate-600">
                               File hồ sơ mới <span className="text-red-500">*</span>
-                              <label className="mt-1 flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-dashed border-emerald-300 px-2 py-1.5 text-left text-xs text-emerald-700 hover:border-emerald-500">
+                              <label className="mt-1 flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-dashed border-brand-300 px-2 py-1.5 text-left text-xs text-brand-700 hover:border-brand-500">
                                 <span className="truncate">{row.file_name ? stripFileExtension(row.file_name) : "Chọn file"}</span>
                                 <Upload size={13} />
                                 <input
@@ -4839,7 +4863,7 @@ export default function IsoDocumentDetailPage() {
                       )
                     })}
                     {childReviewRows.length === 0 && (
-                      <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">Chưa có hồ sơ nào. Bấm &quot;Thêm hồ sơ&quot; để bắt đầu.</p>
+                      <p className="rounded-lg bg-brand-50 px-3 py-2 text-[11px] text-brand-700">Chưa có hồ sơ nào. Bấm &quot;Thêm hồ sơ&quot; để bắt đầu.</p>
                     )}
                   </div>
                 </div>
@@ -5045,7 +5069,7 @@ export default function IsoDocumentDetailPage() {
                               type="checkbox"
                               checked={!!sib.auto_convert_pdf}
                               disabled={!canToggleAutoConvert}
-                              className="rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-default"
+                              className="rounded border-slate-300 text-brand-700 focus:ring-brand-500 disabled:cursor-default"
                               onChange={async (e) => {
                                 if (!canToggleAutoConvert) return
                                 const val = e.target.checked
@@ -5056,7 +5080,7 @@ export default function IsoDocumentDetailPage() {
                             />
                             <span className="text-[10px] text-slate-600">Tự động chuyển sang PDF sau phê duyệt</span>
                             {!canToggleAutoConvert && sib.auto_convert_pdf && (
-                              <span className="text-[10px] font-bold text-violet-600">Đã bật</span>
+                              <span className="text-[10px] font-bold text-brand-700">Đã bật</span>
                             )}
                           </label>
                         )}
@@ -5075,14 +5099,14 @@ export default function IsoDocumentDetailPage() {
               <p className="text-xs text-slate-500 mb-3">PDF, DOCX hoặc XLSX</p>
 
               {doc?.file_signed_pdf_url ? (
-                <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-teal-200 bg-teal-50 p-3.5 shadow-2xs">
+                <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50 p-3.5 shadow-2xs">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <CheckCircle2 size={18} className="text-teal-600 shrink-0" />
+                    <CheckCircle2 size={18} className="text-brand-700 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-teal-950 truncate">
+                      <p className="text-xs font-bold text-brand-950 truncate">
                         {mainFileName || `${doc.ma_tai_lieu || "tai-lieu"}.pdf`}
                       </p>
-                      <p className="text-[11px] text-teal-700 font-medium">Đã ký điện tử phê duyệt (PAdES)</p>
+                      <p className="text-[11px] text-brand-800 font-medium">Đã ký điện tử phê duyệt (PAdES)</p>
                     </div>
                   </div>
                   {isEditable && (
@@ -5090,18 +5114,18 @@ export default function IsoDocumentDetailPage() {
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={fileUploading}
-                      className="shrink-0 rounded-lg border border-dashed border-teal-400 bg-white px-2.5 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-50 disabled:opacity-50 transition-all"
+                      className="shrink-0 rounded-lg border border-dashed border-brand-300 bg-white px-2.5 py-1 text-xs font-semibold text-brand-800 hover:bg-brand-50 disabled:opacity-50 transition-all"
                     >
                       {fileUploading ? "Đang tải..." : "Thay file"}
                     </button>
                   )}
                 </div>
               ) : (
-                <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <div className="mb-3 rounded-xl border border-brand-200 bg-brand-50 p-3">
                   {mainFileUrl ? (
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 rounded-xl bg-white/80 p-3">
-                        <FileText size={16} className="text-violet-600 shrink-0" />
+                        <FileText size={16} className="text-brand-700 shrink-0" />
                         <span className="text-xs text-slate-700 flex-1 truncate">{mainFileName}</span>
                       </div>
                       {isEditable && (
@@ -5109,7 +5133,7 @@ export default function IsoDocumentDetailPage() {
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
                           disabled={fileUploading}
-                          className="w-full px-3 py-2 border border-dashed border-violet-300 hover:border-violet-500 text-violet-700 text-xs font-medium rounded-xl transition-all"
+                          className="w-full px-3 py-2 border border-dashed border-brand-300 hover:border-brand-500 text-brand-800 text-xs font-medium rounded-xl transition-all"
                         >
                           {fileUploading ? "Đang tải..." : "Thay file"}
                         </button>
@@ -5126,14 +5150,14 @@ export default function IsoDocumentDetailPage() {
                               setDoc((prev) => prev ? { ...prev, auto_convert_pdf: val } : prev)
                               if (!isNew) await supabase.from("iso_documents").update({ auto_convert_pdf: val }).eq("id", docId)
                             }}
-                            className="rounded border-slate-300 text-violet-600 focus:ring-violet-500 disabled:cursor-default"
+                            className="rounded border-slate-300 text-brand-700 focus:ring-brand-500 disabled:cursor-default"
                           />
                           <div>
                             <span className="text-[11px] font-medium text-slate-700">Tự động chuyển sang PDF sau phê duyệt</span>
                             {canToggleAutoConvert
                               ? <p className="text-[10px] text-slate-500 mt-0.5">Chỉ người soạn thảo chọn được, trước khi gửi xem xét.</p>
                               : doc?.auto_convert_pdf
-                                ? <p className="text-[10px] font-bold text-violet-600 mt-0.5">Đã bật — sẽ tự động chuyển sau phê duyệt</p>
+                                ? <p className="text-[10px] font-bold text-brand-700 mt-0.5">Đã bật — sẽ tự động chuyển sau phê duyệt</p>
                                 : <p className="text-[10px] text-slate-400 mt-0.5">Không bật</p>
                             }
                           </div>
@@ -5146,7 +5170,7 @@ export default function IsoDocumentDetailPage() {
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
                         disabled={fileUploading}
-                        className="w-full flex flex-col items-center justify-center gap-2 p-5 border-2 border-dashed border-violet-200 hover:border-violet-400 rounded-xl text-violet-500 hover:text-violet-700 bg-white/70 transition-all"
+                        className="w-full flex flex-col items-center justify-center gap-2 p-5 border-2 border-dashed border-brand-200 hover:border-brand-400 rounded-xl text-brand-600 hover:text-brand-800 bg-white/70 transition-all"
                       >
                         <Upload size={20} />
                         <span className="text-xs font-medium">
@@ -5272,11 +5296,11 @@ export default function IsoDocumentDetailPage() {
             )}
 
             {form.chon_quy_trinh === "Soát xét" && form.phan_loai_tl !== "con" && (isEditable || childDocs.length > 0 || childReviewRows.length > 0 || childDraftRows.length > 0) && (
-              <div className="mb-3 space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
-                <div className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 space-y-3 rounded-xl border border-brand-200 bg-brand-50/70 p-3">
+                <div className="rounded-xl border border-brand-200 bg-white p-4 shadow-sm">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-extrabold text-emerald-800">Soát xét hồ sơ hiện có</p>
+                      <p className="text-sm font-extrabold text-brand-800">Soát xét hồ sơ hiện có</p>
                       <p className="text-[11px] text-slate-500">Chọn các hồ sơ đang có hiệu lực thuộc tài liệu này và upload phiên bản mới cho từng hồ sơ cần sửa.</p>
                       {!canAddParentReviewChild && (
                         <p className="mt-1 text-[11px] font-medium text-amber-600">Chọn tài liệu đang có hiệu lực trước khi thêm hồ sơ cần soát xét.</p>
@@ -5287,7 +5311,7 @@ export default function IsoDocumentDetailPage() {
                         type="button"
                         onClick={addChildReviewRow}
                         disabled={!canAddParentReviewChild}
-                        className={`rounded-lg border px-3 py-1.5 text-xs font-bold shadow-sm transition-all ${canAddParentReviewChild ? "border-emerald-500 !bg-emerald-600 !text-white hover:!bg-emerald-700" : "cursor-not-allowed border-slate-300 !bg-slate-200 !text-slate-400 opacity-60"}`}
+                        className={`rounded-lg border px-3 py-1.5 text-xs font-bold shadow-sm transition-all ${canAddParentReviewChild ? "border-brand-500 !bg-brand-600 !text-white hover:!bg-brand-700" : "cursor-not-allowed border-slate-300 !bg-slate-200 !text-slate-400 opacity-60"}`}
                       >
                         Thêm hồ sơ
                       </button>
@@ -5299,7 +5323,7 @@ export default function IsoDocumentDetailPage() {
                       return (
                       <div
                         key={row.id}
-                        className="rounded-xl bg-emerald-50 p-3 ring-1 ring-emerald-100"
+                        className="rounded-xl bg-brand-50 p-3 ring-1 ring-brand-100"
                         data-testid="child-review-row"
                         data-row-id={row.id}
                       >
@@ -5348,7 +5372,7 @@ export default function IsoDocumentDetailPage() {
                               htmlFor={reviewFileInputId}
                               data-testid="child-review-file-trigger"
                               data-row-id={row.id}
-                              className={`mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-emerald-300 px-2 py-1.5 text-left text-xs text-emerald-700 ${isEditable ? "cursor-pointer hover:border-emerald-500" : "cursor-default opacity-70"}`}
+                              className={`mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-brand-300 px-2 py-1.5 text-left text-xs text-brand-700 ${isEditable ? "cursor-pointer hover:border-brand-500" : "cursor-default opacity-70"}`}
                             >
                               <span className="truncate">{row.file_name ? stripFileExtension(row.file_name) : "Chọn file"}</span>
                               <Upload size={13} />
@@ -5378,7 +5402,7 @@ export default function IsoDocumentDetailPage() {
                       </div>
                     )})}
                     {childReviewRows.length === 0 && (
-                      <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">Chưa có hồ sơ nào cần soát xét trong đợt này.</p>
+                      <p className="rounded-lg bg-brand-50 px-3 py-2 text-[11px] text-brand-700">Chưa có hồ sơ nào cần soát xét trong đợt này.</p>
                     )}
                   </div>
                 </div>
@@ -5560,18 +5584,6 @@ export default function IsoDocumentDetailPage() {
             {(isNew || isEditMode) && renderValidityInfoCard()}
           </div>
         </div>
-
-        {/* Tier 2: Chi tiết bổ sung & Thông tin hiệu lực — Căn bằng tuyệt đối độ cao */}
-        {!isNew && !isEditMode && (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 items-stretch mt-4">
-            <div className="lg:col-span-2">
-              {renderAdditionalDetailsCard()}
-            </div>
-            <div className="lg:col-span-1">
-              {renderValidityInfoCard()}
-            </div>
-          </div>
-        )}
 
         {/* Signature Placement Modal */}
         {placementModal?.show && (
@@ -6286,7 +6298,7 @@ export default function IsoDocumentDetailPage() {
           <ModalShell
             title={
               <span className="flex items-center gap-3">
-                <span className="p-2 bg-violet-100 rounded-xl"><KeyRound size={18} className="text-violet-600" /></span>
+                <span className="p-2 bg-emerald-100 rounded-xl"><KeyRound size={18} className="text-emerald-700" /></span>
                 <span>
                   <span className="font-extrabold text-slate-800 block">{pinModal.label}</span>
                   <span className="text-xs text-slate-500 font-normal">Nhập PIN ký duyệt để xác nhận</span>
@@ -6307,7 +6319,7 @@ export default function IsoDocumentDetailPage() {
                     onChange={(e) => setLyDoTraVe(e.target.value)}
                     rows={3}
                     placeholder="Nhập lý do..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 resize-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 resize-none"
                   />
                 </div>
               )}
@@ -6324,7 +6336,7 @@ export default function IsoDocumentDetailPage() {
                     value={pin}
                     onChange={(e) => { setPin(e.target.value.replace(/\D/g, "")); setPinError("") }}
                     placeholder="4–6 chữ số"
-                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-violet-500 pr-9 font-mono tracking-widest text-center text-lg"
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 pr-9 font-mono tracking-widest text-center text-lg"
                     onKeyDown={(e) => { if (e.key === "Enter") void handlePinConfirm() }}
                   />
                   <button

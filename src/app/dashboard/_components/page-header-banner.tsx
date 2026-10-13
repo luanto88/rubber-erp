@@ -23,6 +23,7 @@ export type PageBannerTheme =
   | "teal"
   | "indigo"
   | "cyan"
+  | "rubber"
 
 // Màu "from"/"to" ghi literal hex, KHÔNG dùng `var(--color-X)` — đã xác nhận bằng lỗi thật
 // (banner render trắng/mờ trên trình duyệt) rằng đọc custom property của Tailwind `@theme`
@@ -109,6 +110,14 @@ const PAGE_THEME_BANNER: Record<PageBannerTheme, { pattern: string; from: string
     pattern: "repeating-linear-gradient(0deg, rgba(255,255,255,0.14) 0 2px, transparent 2px 16px)",
     from: "#0891b2",
     to: "#164e63",
+  },
+  // Doc-UI (ISO + Văn bản), 2026-10-13 — đúng token brand (#2f5d52 → #1c3a32), KHÁC `forest`
+  // (#093719 → #166534, đang dùng cho Sản lượng/Thành phẩm — không được đổi).
+  rubber: {
+    pattern:
+      "repeating-linear-gradient(52deg, rgba(255,255,255,0.08) 0 2px, transparent 2px 18px), repeating-radial-gradient(circle at 100% 100%, rgba(255,255,255,0.1) 0 2px, transparent 2px 16px)",
+    from: "#2f5d52",
+    to: "#1c3a32",
   },
 }
 

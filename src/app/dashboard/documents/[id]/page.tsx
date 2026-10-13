@@ -13,8 +13,6 @@ import { DocumentsShell } from "../_components/documents-shell"
 import { EditDocModal } from "../_components/edit-doc-modal"
 import {
   LOAI_VAN_BAN_LABEL,
-  TRANG_THAI_COLOR,
-  TRANG_THAI_LABEL,
   CHE_DO_XEM_COLOR,
   CHE_DO_XEM_DESC,
   CHE_DO_XEM_LABEL,
@@ -43,11 +41,9 @@ import {
   EyeOff,
   ChevronLeft,
   ChevronRight,
-  ArrowLeft,
   PenLine,
   Pencil,
   ShieldCheck,
-  Bell,
   Share2,
   Loader2,
   Upload,
@@ -63,7 +59,6 @@ import {
   DetailCard,
   DetailFieldItem,
   DetailFileCard,
-  DetailQrBox,
 } from "@/app/dashboard/_components/detail-view-ui"
 import type { SessionUser } from "@/lib/auth"
 import { ResizeHandleIcon, RESIZE_HANDLE_CLASS, RESIZE_HANDLE_STYLE } from "@/app/dashboard/_components/resize-handle-icon"
@@ -86,6 +81,11 @@ import {
 } from "@/lib/signing/template-layout"
 import { collectPreviewBoxes, groupPreviewBoxesByPage } from "@/lib/signing/placement-preview"
 import { getKyBuocColor, getPlacementKeyColor, ROLE_COLORS } from "@/lib/signing/template-colors"
+import { DetailSplitLayout } from "@/app/dashboard/_components/doc-ui/detail-split-layout"
+import { DetailPageHeader, HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
+import { SignActionBox, type SignAction } from "@/app/dashboard/_components/doc-ui/sign-action-box"
+import { TimelineSteps, TimelineProgress, type TimelineStepItem } from "@/app/dashboard/_components/doc-ui/timeline-steps"
+import { StatusSummaryBar } from "@/app/dashboard/_components/doc-ui/inspector-card"
 import { computeAutoFitFontSize } from "@/lib/signing/text-fit"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 
@@ -1759,10 +1759,10 @@ function SignPlacementModal({
                       const kyNhayCan = noteLayout.ky_nhay ? toCanvas(noteLayout.ky_nhay) : null
                       return (
                         <div
-                          className={`absolute border-2 border-dashed rounded ${off ? "border-slate-300 bg-slate-100/50" : "border-teal-500 bg-teal-50/25"}`}
+                          className={`absolute border-2 border-dashed rounded ${off ? "border-slate-300 bg-slate-100/50" : "border-emerald-500 bg-emerald-50/25"}`}
                           style={{ left: g.x, top: g.y, width: g.w, height: g.h, zIndex: 8 }}
                         >
-                          <span className="absolute -top-5 left-0 text-[10px] font-bold text-teal-700 bg-white/90 px-1 rounded whitespace-nowrap">
+                          <span className="absolute -top-5 left-0 text-[10px] font-bold text-emerald-700 bg-white/90 px-1 rounded whitespace-nowrap">
                             Vùng ý kiến chỉ đạo
                           </span>
 
@@ -1781,14 +1781,14 @@ function SignPlacementModal({
                                     setNoteRect("text", textCan.x, textCan.y, textCan.w + delta.width, textCan.h + delta.height)}
                                   enable={{ right: true, bottom: true, bottomRight: true }}
                                   minWidth={40} minHeight={12}
-                                  handleComponent={{ bottomRight: <ResizeHandleIcon color="#0d9488" title="Kéo để co giãn ô ý kiến chỉ đạo" /> }}
+                                  handleComponent={{ bottomRight: <ResizeHandleIcon color="#059669" title="Kéo để co giãn ô ý kiến chỉ đạo" /> }}
                                   handleClasses={{ bottomRight: RESIZE_HANDLE_CLASS }}
                                   handleStyles={{ bottomRight: RESIZE_HANDLE_STYLE }}
                                 >
                                   {/* Xem trước wrap bằng CSS nên XẤP XỈ vị trí xuống dòng thật của
                                       drawTextWrapped (pdf-lib đo theo font TimesNewRoman) — đủ để
                                       né chữ, không cam kết khớp từng dòng. */}
-                                  <div className="w-full h-full border border-teal-600 bg-teal-50/90 rounded overflow-hidden px-0.5">
+                                  <div className="w-full h-full border border-emerald-600 bg-emerald-50/90 rounded overflow-hidden px-0.5">
                                     <p className="text-[9px] leading-tight text-slate-800 whitespace-pre-wrap break-words">
                                       {ghiChuText}
                                     </p>
@@ -1934,7 +1934,7 @@ function SignPlacementModal({
               (quy tắc 2 tầng: mẫu không đặt khung thì lãnh đạo không có ô này, và cũng không có
               chữ ký nháy). Bắt buộc quyết định rõ: nhập nội dung, hoặc tắt hẳn. */}
           {lockedGhiChuBox && (
-            <div className={`rounded-xl border px-3 py-2.5 ${ghiChuOff ? "border-slate-200 bg-slate-50" : "border-teal-200 bg-teal-50/60"}`}>
+            <div className={`rounded-xl border px-3 py-2.5 ${ghiChuOff ? "border-slate-200 bg-slate-50" : "border-emerald-200 bg-emerald-50/60"}`}>
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <label className="text-xs font-bold text-slate-700">
                   Ý kiến chỉ đạo <span className="text-red-500">*</span>
@@ -1942,7 +1942,7 @@ function SignPlacementModal({
                 <button
                   type="button"
                   onClick={() => { setGhiChuOff((v) => !v); setConfirmError("") }}
-                  className={`text-[11px] font-bold px-2 py-1 rounded-lg border ${ghiChuOff ? "bg-white border-teal-300 text-teal-700" : "bg-white border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+                  className={`text-[11px] font-bold px-2 py-1 rounded-lg border ${ghiChuOff ? "bg-white border-emerald-300 text-emerald-800" : "bg-white border-slate-300 text-slate-500 hover:bg-slate-50"}`}
                 >
                   {ghiChuOff ? "Bật lại khung Ghi chú" : "Không ghi ý kiến"}
                 </button>
@@ -1958,7 +1958,7 @@ function SignPlacementModal({
                     onChange={(e) => { setGhiChuText(e.target.value); setConfirmError("") }}
                     rows={2}
                     placeholder="VD: Phòng TCHC phối hợp Nhà máy chế biến tham mưu thực hiện, hạn chót 15/9/2026"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500 resize-y"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 resize-y"
                   />
                   <p className="text-[11px] text-slate-500 mt-1">
                     Nội dung sẽ được đóng vào khung Ghi chú trên văn bản, kèm chữ ký nháy của bạn ở góc trên-phải khung.
@@ -2568,6 +2568,116 @@ export default function DocumentDetailPage() {
       ? `${signLockedEntry.sign_as}.`
       : ""
 
+  // ── Doc-UI GĐ2: hành động ký — GIỮ NGUYÊN onClick + cờ quyền cũ, chỉ đổi chỗ hiển thị ──
+  let signPrimary: SignAction | null = null
+  if (canGuiKy) {
+    // Nguồn PDF: bấm là VÀO MÀN CÀI ĐẶT VỊ TRÍ (gửi ký chỉ xảy ra sau khi xác nhận vị trí ở màn
+    // đó). File Office đi thẳng (dùng tag {{…}}, không có màn vị trí).
+    signPrimary = {
+      key: "gui_ky",
+      label: docExt === "pdf" ? "Vào cài đặt vị trí" : "Gửi ký",
+      icon: <Send size={16} />,
+      onClick: () => void handleGuiKy(),
+      loading: acting,
+    }
+  } else if (canKyBuoc) {
+    signPrimary = {
+      key: "ky_buoc",
+      label: currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban",
+      icon: <PenLine size={16} />,
+      onClick: () => void openSignModal("ky_buoc"),
+      loading: acting,
+    }
+  } else if (canPheDuyet) {
+    signPrimary = {
+      key: "phe_duyet",
+      label: "Phê duyệt",
+      icon: <ShieldCheck size={16} />,
+      onClick: () => void openSignModal("phe_duyet"),
+      loading: acting,
+    }
+  }
+  const signSecondary: SignAction[] = []
+  if (canGuiKy) {
+    signSecondary.push({ key: "edit", label: "Sửa thông tin", icon: <Pencil size={14} />, onClick: () => setEditModalOpen(true) })
+    signSecondary.push({
+      key: "replace",
+      label: replacingFile ? "Đang tải lên..." : "Thay file",
+      icon: <Upload size={14} />,
+      onClick: () => fileReplaceInputRef.current?.click(),
+      loading: replacingFile,
+    })
+  }
+  if (canDoiNguoiKy) {
+    signSecondary.push({
+      key: "doi_nguoi_ky",
+      label: "Đổi người ký",
+      icon: <UserCog size={14} />,
+      onClick: () => void openDoiNguoiKyModal(),
+      disabled: acting,
+      title: "Chỉ định người khác ký thay bước đang chờ (khi người ký đi vắng)",
+    })
+  }
+  const signDanger: SignAction[] = canTraVe
+    ? [{ key: "tra_ve", label: "Trả về", icon: <RotateCcw size={14} />, onClick: () => { setTraVeModal(true); setTraVeLyDo("") }, disabled: acting }]
+    : []
+
+  // ── Doc-UI GĐ2: dữ liệu timeline — cùng công thức với bản TimelineStep cũ ──
+  const timelineItems: TimelineStepItem[] = []
+  if (!doc.is_uploaded || doc.nguoi_soan_thao_display) {
+    timelineItems.push({
+      key: "soan_thao",
+      role: "Soạn thảo",
+      title: "Soạn thảo",
+      actor: doc.nguoi_soan_thao_display || undefined,
+      time: doc.created_at,
+      state: "done",
+    })
+  }
+  ;(doc.thu_tu_ky_json || []).forEach((step: ThuTuKyStep, i) => {
+    const nguoiKyEntry = (doc.nguoi_ky as Record<string, NguoiKyEntry>)[String(i + 1)]
+    const isCurrentStep = doc.trang_thai === "cho_ky_phong_ban" && doc.buoc_hien_tai === i
+    const otherWaitLabel =
+      step.type === "ca_nhan"
+        ? `Chờ ${step.ten || "người được chỉ định"} ký`
+        : `Chờ phòng ${step.phong_ban_name || step.phong_ban_code || ""} ký`
+    timelineItems.push({
+      key: `buoc_${i}`,
+      role: `Bước ${i + 1}`,
+      title: stepDisplayLabel(step),
+      actor: nguoiKyEntry?.ten
+        ? `${signAsPrefixLabel(nguoiKyEntry.sign_as, nguoiKyEntry.is_kt)}${nguoiKyEntry.ten}`
+        : isCurrentStep
+          ? (canKyBuoc ? "Chờ BẠN ký" : otherWaitLabel)
+          : "Chờ",
+      time: nguoiKyEntry?.ky_at,
+      state: nguoiKyEntry ? "done" : isCurrentStep ? "current" : "waiting",
+      isMine: isCurrentStep && canKyBuoc,
+      stepNo: i + 1,
+      // Cùng màu với khung ký của bước đó trên PDF (modal ký + màn cài đặt vị trí)
+      accentColor: getKyBuocColor(i + 1).fg,
+    })
+  })
+  timelineItems.push({
+    key: "phe_duyet",
+    role: "Phê duyệt",
+    title: "Phê duyệt",
+    actor:
+      doc.trang_thai === "da_phe_duyet"
+        ? `${signAsPrefixLabel(doc.phe_duyet_sign_as as SignAsType | null, doc.phe_duyet_is_kt)}${doc.phe_duyet || "Đã phê duyệt"}`
+        : doc.trang_thai === "cho_phe_duyet"
+          ? (canPheDuyet ? "Chờ BẠN phê duyệt" : "Đang chờ phê duyệt...")
+          : doc.phe_duyet || "Chờ phê duyệt",
+    time: doc.ngay_phe_duyet || null,
+    state: doc.trang_thai === "da_phe_duyet" ? "done" : doc.trang_thai === "cho_phe_duyet" ? "current" : "waiting",
+    isMine: doc.trang_thai === "cho_phe_duyet" && canPheDuyet,
+    accentColor: ROLE_COLORS.phe_duyet.fg,
+  })
+  const timelineTotal = (doc.thu_tu_ky_json || []).length + 1 // + bước phê duyệt cuối
+  const timelineDone =
+    Object.keys((doc.nguoi_ky as Record<string, NguoiKyEntry> | null) || {}).length +
+    (doc.trang_thai === "da_phe_duyet" ? 1 : 0)
+
   return (
     <DocumentsShell>
       {/* Toasts */}
@@ -2579,28 +2689,36 @@ export default function DocumentDetailPage() {
         </div>
       )}
       {actionOk && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-emerald-600 text-white rounded-2xl shadow-2xl">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-brand-600 text-white rounded-2xl shadow-2xl">
           <CheckCircle2 size={16} />
           <span className="text-sm font-bold">{actionOk}</span>
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-5">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <button
-            onClick={() => router.push("/dashboard/documents")}
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all shrink-0"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl font-extrabold text-slate-800 break-words">{doc.ten_van_ban}</h1>
-              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai]}`}>
-                {TRANG_THAI_LABEL[doc.trang_thai]}
-              </span>
-              {doc.che_do_xem === "gioi_han" && (
+      {/* Input ẩn dùng chung cho "Thay file" (nút nằm trong hộp hành động + thẻ file) */}
+      {canGuiKy && (
+        <input
+          ref={fileReplaceInputRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            e.target.value = ""
+            if (f) void handleReplaceFile(f)
+          }}
+        />
+      )}
+
+      <DetailSplitLayout
+        header={
+          <DetailPageHeader
+            onBack={() => router.push("/dashboard/documents")}
+            backLabel="Quay lại danh sách"
+            eyebrow="Văn bản nội bộ"
+            title={doc.ten_van_ban}
+            code={doc.ma_van_ban || "Chưa có số văn bản"}
+            tags={
+              doc.che_do_xem === "gioi_han" ? (
                 <span
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold ${CHE_DO_XEM_COLOR.gioi_han}`}
                   title={CHE_DO_XEM_DESC.gioi_han}
@@ -2608,123 +2726,30 @@ export default function DocumentDetailPage() {
                   <Lock size={10} />
                   {CHE_DO_XEM_LABEL.gioi_han}
                 </span>
-              )}
-            </div>
-            <p className="text-sm text-slate-400 mt-0.5 font-mono">{doc.ma_van_ban || "Chưa có số văn bản"}</p>
-          </div>
-        </div>
-        {/* Action buttons */}
-        <div className="flex items-center gap-2 flex-wrap sm:flex-shrink-0 sm:justify-end">
-          {fileUrl && (
-            <button
-              type="button"
-              onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all shadow-2xs"
-            >
-              <Eye size={15} />
-              Xem file
-            </button>
-          )}
-          {canGuiKy && (
-            <>
-              <button
-                onClick={() => setEditModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-all"
-              >
-                <Pencil size={15} />
-                Sửa thông tin
-              </button>
-              <input
-                ref={fileReplaceInputRef}
-                type="file"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  e.target.value = ""
-                  if (f) void handleReplaceFile(f)
-                }}
-              />
-              <button
-                onClick={() => fileReplaceInputRef.current?.click()}
-                disabled={replacingFile}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-all disabled:opacity-50"
-              >
-                {replacingFile ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
-                {replacingFile ? "Đang tải lên..." : "Thay file"}
-              </button>
-            </>
-          )}
-          {canDistribute && (
-            <button
-              onClick={() => void openDistModal()}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-xl shadow-md transition-all"
-            >
-              <Share2 size={15} />
-              Phân phối
-            </button>
-          )}
-          {canGuiKy && (
-            <button
-              onClick={handleGuiKy}
-              disabled={acting}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 rounded-xl shadow-md transition-all"
-            >
-              <Send size={15} />
-              {/* Văn bản nguồn PDF: bấm vào là VÀO MÀN CÀI ĐẶT VỊ TRÍ, việc gửi ký chỉ xảy ra
-                  sau khi xác nhận vị trí ở màn đó — nhãn phải mô tả đúng hành động ngay lập tức.
-                  File Office đi thẳng (dùng tag {{…}}, không có màn vị trí). */}
-              {docExt === "pdf" ? "Vào cài đặt vị trí" : "Gửi ký"}
-            </button>
-          )}
-          {canKyBuoc && (
-            <button
-              onClick={() => void openSignModal("ky_buoc")}
-              disabled={acting}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
-            >
-              <PenLine size={15} />
-              {currentStep?.type === "ca_nhan" ? "Ký xác nhận" : "Ký phòng ban"}
-            </button>
-          )}
-          {canPheDuyet && (
-            <button
-              onClick={() => void openSignModal("phe_duyet")}
-              disabled={acting}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
-            >
-              <ShieldCheck size={15} />
-              Phê duyệt
-            </button>
-          )}
-          {canDoiNguoiKy && (
-            <button
-              onClick={() => void openDoiNguoiKyModal()}
-              disabled={acting}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-amber-700 border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 rounded-xl transition-all"
-              title="Chỉ định người khác ký thay bước đang chờ (khi người ký đi vắng)"
-            >
-              <UserCog size={15} />
-              Đổi người ký
-            </button>
-          )}
-          {canTraVe && (
-            <button
-              onClick={() => { setTraVeModal(true); setTraVeLyDo("") }}
-              disabled={acting}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl shadow-md transition-all"
-            >
-              <RotateCcw size={15} />
-              Trả về
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Cột trái 3/5 — cột phải 2/5, `items-stretch` + `flex-1` để 2 card LUÔN cao bằng nhau
-          (trước đây grid 2+1 và card con không giãn nên bên cao bên thấp). */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-stretch">
-        {/* Thông tin văn bản */}
-        <div className="lg:col-span-3 flex flex-col gap-5">
+              ) : undefined
+            }
+            actions={
+              <>
+                {fileUrl && (
+                  <HeaderButton
+                    icon={<Eye size={15} />}
+                    label="Xem file"
+                    onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url`)}
+                  />
+                )}
+                {canDistribute && (
+                  <HeaderButton
+                    tone="brand"
+                    icon={<Share2 size={15} />}
+                    label="Phân phối"
+                    onClick={() => void openDistModal()}
+                  />
+                )}
+              </>
+            }
+          />
+        }
+        document={<>
           {/* 1. TOP CARD - Tệp văn bản đưa lên đầu view */}
           {fileUrl && (
             <DetailFileCard
@@ -2748,33 +2773,32 @@ export default function DocumentDetailPage() {
             <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
               <DetailFieldItem
                 icon={<Tag size={15} />}
-                iconTone="rose"
+                iconTone="emerald"
                 label="Số hiệu văn bản"
                 value={doc.ma_van_ban || "Chưa có số"}
                 mono
-                highlight="rose"
               />
               <DetailFieldItem
                 icon={<Layers size={15} />}
-                iconTone="amber"
+                iconTone="slate"
                 label="Loại văn bản"
                 value={doc.loai_van_ban ? (LOAI_VAN_BAN_LABEL[doc.loai_van_ban] || doc.loai_van_ban) : "—"}
               />
               <DetailFieldItem
                 icon={<Building size={15} />}
-                iconTone="blue"
+                iconTone="slate"
                 label="Phòng ban"
                 value={doc.phong_ban || "—"}
               />
               <DetailFieldItem
                 icon={<Lock size={15} />}
-                iconTone={doc.che_do_xem === "gioi_han" ? "amber" : "teal"}
+                iconTone={doc.che_do_xem === "gioi_han" ? "amber" : "slate"}
                 label="Phạm vi hiển thị"
                 value={CHE_DO_XEM_LABEL[doc.che_do_xem] || CHE_DO_XEM_LABEL.cong_khai}
               />
               <DetailFieldItem
                 icon={<User size={15} />}
-                iconTone="pink"
+                iconTone="slate"
                 label="Người soạn thảo"
                 value={doc.nguoi_soan_thao_display || "—"}
               />
@@ -2785,19 +2809,19 @@ export default function DocumentDetailPage() {
                 value={doc.phe_duyet || "—"}
                 extra={
                   doc.trang_thai === "da_phe_duyet" ? (
-                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">✓ Đã duyệt</span>
+                    <span className="text-[10px] text-brand-700 bg-brand-50 px-1.5 py-0.5 rounded font-bold border border-brand-200">✓ Đã duyệt</span>
                   ) : undefined
                 }
               />
               <DetailFieldItem
                 icon={<Calendar size={15} />}
-                iconTone="emerald"
+                iconTone="slate"
                 label="Ngày tạo"
                 value={fmtDate(doc.created_at)}
               />
               <DetailFieldItem
                 icon={<Clock size={15} />}
-                iconTone="blue"
+                iconTone="slate"
                 label="Ngày phê duyệt"
                 value={fmtDate(doc.ngay_phe_duyet) || "—"}
               />
@@ -2805,11 +2829,11 @@ export default function DocumentDetailPage() {
               {!!doc.phong_ban_ky_display?.length && (
                 <div className="col-span-2 rounded-xl bg-slate-50/80 border border-slate-100 p-2.5">
                   <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1.5 flex items-center gap-1">
-                    <Building size={12} className="text-blue-500" /> Phòng ban đã ký
+                    <Building size={12} className="text-brand-500" /> Phòng ban đã ký
                   </dt>
                   <dd className="flex flex-wrap gap-1.5">
                     {doc.phong_ban_ky_display.map((pb) => (
-                      <span key={pb} className="px-2 py-0.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-lg">
+                      <span key={pb} className="px-2 py-0.5 text-xs font-bold bg-brand-50 text-brand-800 border border-brand-200 rounded-lg">
                         {pb}
                       </span>
                     ))}
@@ -2852,7 +2876,7 @@ export default function DocumentDetailPage() {
                 <div className="col-span-2 pt-2 border-t border-slate-100">
                   <DetailFieldItem
                     icon={<MessageSquare size={15} />}
-                    iconTone="teal"
+                    iconTone="emerald"
                     label="Ghi chú văn bản"
                     value={<p className="text-slate-800 whitespace-pre-wrap">{doc.ghi_chu}</p>}
                     colSpan={2}
@@ -2861,7 +2885,13 @@ export default function DocumentDetailPage() {
               )}
             </div>
           </DetailCard>
-
+        </>}
+        inspector={<>
+          <StatusSummaryBar
+            domain="doc"
+            status={doc.trang_thai}
+            meta={doc.is_uploaded ? "Văn bản ký tay (tải lên)" : `${timelineDone}/${timelineTotal} bước đã ký`}
+          />
           {/* Trả về info */}
           {doc.trang_thai === "tra_ve" && doc.tra_ve_ly_do && (
             <div className="bg-rose-50 border border-rose-200 rounded-xl p-4">
@@ -2877,13 +2907,9 @@ export default function DocumentDetailPage() {
               )}
             </div>
           )}
-        </div>
-
-        {/* Timeline ký */}
-        <div className="lg:col-span-2 flex">
-          <div className="flex-1 w-full flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2.5 px-5 py-3.5 bg-emerald-50/70 border-b border-emerald-100/80">
-              <span className="w-8 h-8 rounded-full bg-emerald-100 grid place-items-center text-emerald-800 shrink-0">
+          <div className="w-full flex flex-col bg-white rounded-[14px] border border-slate-200 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-2.5 px-4 py-3 bg-slate-50/80 border-b border-slate-100">
+              <span className="w-8 h-8 rounded-full bg-brand-100 grid place-items-center text-brand-800 shrink-0">
                 <ShieldCheck size={16} />
               </span>
               <h2 className="text-sm font-extrabold text-slate-800">
@@ -2894,96 +2920,24 @@ export default function DocumentDetailPage() {
                     : "Tiến trình ký duyệt"}
               </h2>
             </div>
-            <ol className="relative p-5 pb-2">
-              {/* Soạn thảo — ẩn nếu là văn bản upload ký tay không có tên người soạn */}
-              {(!doc.is_uploaded || doc.nguoi_soan_thao_display) && (
-                <TimelineStep
-                  label="Soạn thảo"
-                  sublabel={doc.nguoi_soan_thao_display || ""}
-                  done={true}
-                  at={doc.created_at}
-                  accentColor="#94a3b8"
-                />
-              )}
+            <div className="p-4 pb-2">
+              <TimelineSteps steps={timelineItems} formatTime={fmtDate} />
+            </div>
 
-              {/* Từng bước ký phòng ban */}
-              {(doc.thu_tu_ky_json || []).map((step: ThuTuKyStep, i) => {
-                const nguoiKyEntry = (doc.nguoi_ky as Record<string, NguoiKyEntry>)[String(i + 1)]
-                const isCurrentStep = doc.trang_thai === "cho_ky_phong_ban" && doc.buoc_hien_tai === i
-                const otherWaitLabel =
-                  step.type === "ca_nhan"
-                    ? `Chờ ${step.ten || "người được chỉ định"} ký`
-                    : `Chờ phòng ${step.phong_ban_name || step.phong_ban_code || ""} ký`
-                return (
-                  <TimelineStep
-                    key={i}
-                    label={`Bước ${i + 1}: ${stepDisplayLabel(step)}`}
-                    sublabel={
-                      nguoiKyEntry?.ten
-                        ? `${signAsPrefixLabel(nguoiKyEntry.sign_as, nguoiKyEntry.is_kt)}${nguoiKyEntry.ten}`
-                        : isCurrentStep
-                          ? (canKyBuoc ? "Chờ BẠN ký" : otherWaitLabel)
-                          : "Chờ"
-                    }
-                    done={!!nguoiKyEntry}
-                    pending={isCurrentStep}
-                    isMyTurn={isCurrentStep && canKyBuoc}
-                    at={nguoiKyEntry?.ky_at}
-                    stepNo={i + 1}
-                    // Cùng màu với khung ký của bước đó trên PDF (modal ký + màn cài đặt vị trí)
-                    accentColor={getKyBuocColor(i + 1).fg}
-                  />
-                )
-              })}
-
-              {/* Phê duyệt cuối */}
-              <TimelineStep
-                label="Phê duyệt"
-                sublabel={
-                  doc.trang_thai === "da_phe_duyet"
-                    ? `${signAsPrefixLabel(doc.phe_duyet_sign_as as SignAsType | null, doc.phe_duyet_is_kt)}${doc.phe_duyet || "Đã phê duyệt"}`
-                    : doc.trang_thai === "cho_phe_duyet"
-                      ? (canPheDuyet ? "Chờ BẠN phê duyệt" : "Đang chờ phê duyệt...")
-                      : doc.phe_duyet || "Chờ phê duyệt"
-                }
-                done={doc.trang_thai === "da_phe_duyet"}
-                pending={doc.trang_thai === "cho_phe_duyet"}
-                isMyTurn={doc.trang_thai === "cho_phe_duyet" && canPheDuyet}
-                at={doc.ngay_phe_duyet || undefined}
-                accentColor={ROLE_COLORS.phe_duyet.fg}
-                isLast
-              />
-            </ol>
-
-            {/* Khối tiến độ ở đáy — vừa cho biết còn bao nhiêu bước, vừa lấp khoảng trắng khi
-                timeline ngắn hơn cột trái (2 card đã cao bằng nhau nhờ flex-1). */}
-            {!doc.is_uploaded && (() => {
-              const totalSteps = (doc.thu_tu_ky_json || []).length + 1 // + bước phê duyệt cuối
-              const doneSteps =
-                Object.keys((doc.nguoi_ky as Record<string, NguoiKyEntry> | null) || {}).length +
-                (doc.trang_thai === "da_phe_duyet" ? 1 : 0)
-              const pct = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0
-              const allDone = doc.trang_thai === "da_phe_duyet"
-              return (
-                <div className="mt-auto px-5 py-4 border-t border-slate-100 bg-slate-50/60">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tiến độ ký</span>
-                    <span className={`text-xs font-extrabold ${allDone ? "text-emerald-600" : "text-amber-600"}`}>
-                      {doneSteps}/{totalSteps} bước
-                    </span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${allDone ? "bg-emerald-500" : "bg-amber-500"}`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-              )
-            })()}
+            {!doc.is_uploaded && (
+              <div className="mt-auto border-t border-slate-100 bg-slate-50/60 px-4 py-3">
+                <TimelineProgress done={timelineDone} total={timelineTotal} />
+              </div>
+            )}
           </div>
-        </div>
-      </div>
+          <SignActionBox
+            title="Hành động ký"
+            primary={signPrimary}
+            secondary={signSecondary}
+            danger={signDanger}
+          />
+        </>}
+      />
 
       {/* Modal ký duyệt — canvas PDF kéo-thả chữ ký/tên (PDF) hoặc info tag (Office) */}
       {signModal && (
@@ -3031,7 +2985,7 @@ export default function DocumentDetailPage() {
               <button
                 onClick={() => void handleDistSend()}
                 disabled={distSending || distSelected.size === 0}
-                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl transition-all"
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white bg-brand-700 hover:bg-brand-800 disabled:opacity-50 rounded-xl transition-all shadow-xs"
               >
                 {distSending ? (
                   <><Loader2 size={14} className="animate-spin" />Đang gửi...</>
@@ -3101,7 +3055,7 @@ export default function DocumentDetailPage() {
                             <p className="text-xs text-slate-400">{u.department || u.role}</p>
                           </div>
                           {hasAlready && (
-                            <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold shrink-0">Đã nhận</span>
+                            <span className="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full font-bold shrink-0">Đã nhận</span>
                           )}
                         </label>
                       )
@@ -3260,127 +3214,5 @@ export default function DocumentDetailPage() {
         />
       )}
     </DocumentsShell>
-  )
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-slate-50/80 border border-slate-100 px-3 py-2">
-      <dt className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-0.5">{label}</dt>
-      <dd className="text-sm font-semibold text-slate-800 break-words">{value || "—"}</dd>
-    </div>
-  )
-}
-
-function TimelineStep({
-  label,
-  sublabel,
-  done,
-  pending,
-  isMyTurn,
-  at,
-  stepNo,
-  accentColor,
-  isLast,
-}: {
-  label: string
-  sublabel: string
-  done: boolean
-  pending?: boolean
-  // true khi bước đang "pending" này chính là lượt của người đang xem — tái dùng nguyên
-  // canKyBuoc/canPheDuyet đã có sẵn ở component cha, chỉ đổi phần hiển thị ở đây.
-  isMyTurn?: boolean
-  at?: string | null
-  /** Số thứ tự hiện trong badge khi bước chưa ký (bước phê duyệt/soạn thảo không truyền). */
-  stepNo?: number
-  /**
-   * Màu vai trò của bước — CÙNG màu với khung ký của bước đó trên PDF (modal ký) và trên màn cài
-   * đặt vị trí, để người dùng nối được "dòng này trên timeline = khung màu kia trên văn bản".
-   */
-  accentColor?: string
-  isLast?: boolean
-}) {
-  const accent = accentColor || "#94a3b8"
-  const connector = done
-    ? "#a7f3d0"
-    : pending
-      ? "repeating-linear-gradient(to bottom,#fcd34d 0 4px,transparent 4px 8px)"
-      : "#e2e8f0"
-
-  return (
-    <li className="relative flex gap-3 pb-4 last:pb-0">
-      {!isLast && (
-        <span
-          className="absolute left-4 top-9 bottom-0 w-0.5 -translate-x-1/2 rounded"
-          style={done || !pending ? { background: connector } : { backgroundImage: connector }}
-        />
-      )}
-
-      <span
-        className={`relative z-10 w-8 h-8 shrink-0 rounded-full grid place-items-center ring-4 ${
-          done
-            ? "bg-emerald-500 text-white ring-emerald-100"
-            : isMyTurn
-              ? "bg-amber-500 text-white ring-amber-200 animate-pulse"
-              : pending
-                ? "bg-white text-slate-500 border-2 border-slate-300 ring-slate-100"
-                : "bg-white text-slate-300 border-2 border-dashed border-slate-200 ring-transparent"
-        }`}
-      >
-        {done ? (
-          <CheckCircle2 size={16} />
-        ) : isMyTurn ? (
-          <Bell size={14} />
-        ) : stepNo ? (
-          <span className="text-[11px] font-extrabold">{stepNo}</span>
-        ) : (
-          <Clock size={14} />
-        )}
-      </span>
-
-      <div
-        className={`min-w-0 flex-1 rounded-xl border px-3 py-2.5 ${
-          done
-            ? "border-emerald-100 bg-emerald-50/60"
-            : isMyTurn
-              ? "border-amber-200 bg-amber-50 shadow-sm"
-              : pending
-                ? "border-slate-200 bg-white"
-                : "border-slate-200 border-dashed bg-slate-50/60"
-        }`}
-        style={{ borderLeft: `3px solid ${done || pending ? accent : `${accent}55`}` }}
-        title="Màu tương ứng khung ký trên văn bản"
-      >
-        <div className="flex items-start justify-between gap-2">
-          <p className={`text-sm font-bold ${done || isMyTurn ? "text-slate-800" : "text-slate-500"}`}>
-            {label}
-          </p>
-          {done && (
-            <span className="shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
-              Đã ký
-            </span>
-          )}
-          {pending && (
-            <span
-              className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                isMyTurn ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-500"
-              }`}
-            >
-              {isMyTurn ? "🔔 Đến lượt bạn" : "Đang chờ"}
-            </span>
-          )}
-        </div>
-        {sublabel && (
-          <p className={`text-[13px] mt-0.5 ${done ? "text-slate-600" : isMyTurn ? "text-amber-700 font-semibold" : "text-slate-400"}`}>
-            {sublabel}
-          </p>
-        )}
-        {at && (
-          <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-            <Clock size={11} /> {fmtDate(at)}
-          </p>
-        )}
-      </div>
-    </li>
   )
 }

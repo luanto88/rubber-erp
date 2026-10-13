@@ -7,8 +7,6 @@ import { getActiveFactoryId, hydrateActiveSession, hasPermission } from "@/lib/a
 import { DocumentsShell } from "../_components/documents-shell"
 import {
   LOAI_VAN_BAN_LABEL,
-  TRANG_THAI_COLOR,
-  TRANG_THAI_LABEL,
   canSignStep,
   fmtDate,
   type VanBanDocument,
@@ -19,6 +17,8 @@ import type { SessionUser } from "@/lib/auth"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
 
 type TaskItem = {
   doc: VanBanDocument
@@ -74,7 +74,7 @@ export default function MyTasksPage() {
               doc,
               role: "soan_thao",
               action_label: doc.trang_thai === "tra_ve" ? "Xử lý trả về" : "Gửi ký",
-              action_color: "bg-blue-100 text-blue-700",
+              action_color: "bg-sky-100 text-sky-800",
             })
           }
           continue
@@ -105,7 +105,7 @@ export default function MyTasksPage() {
               doc,
               role: "phe_duyet",
               action_label: "Phê duyệt",
-              action_color: "bg-emerald-100 text-emerald-700",
+              action_color: "bg-brand-100 text-brand-700",
             })
           }
           continue
@@ -144,7 +144,7 @@ export default function MyTasksPage() {
   if (hasViewPerm === false) {
     return (
       <DocumentsShell>
-        <PageBackgroundMotif theme="cyan" />
+        <PageBackgroundMotif theme="rubber" />
         <div className="max-w-md mx-auto my-16 p-8 bg-white border border-slate-200 rounded-2xl shadow-sm text-center">
           <div className="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Lock size={28} />
@@ -166,15 +166,17 @@ export default function MyTasksPage() {
 
   return (
     <DocumentsShell>
-      <PageBackgroundMotif theme="cyan" />
+      <PageBackgroundMotif theme="rubber" />
       <PageHeaderBanner
         title="Việc của tôi"
         subtitle={`Văn bản cần bạn xử lý${userDeptCode ? ` — Phòng ban: ${userDeptCode}` : ""}`}
-        theme="cyan"
+        theme="rubber"
         icon={FileSignature}
+        collapsible={true}
+        storageKey="banner_collapsed_documents_my_tasks"
       />
 
-      <ResponsiveTableWrapper>
+      <ResponsiveTableWrapper className="rounded-2xl border-slate-200/90 shadow-sm">
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
         ) : tasks.length === 0 ? (
@@ -184,15 +186,15 @@ export default function MyTasksPage() {
             <p className="text-xs mt-1">Các văn bản cần bạn ký hoặc phê duyệt sẽ hiện ở đây</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+          <table className="enterprise-table">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Số văn bản</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Tên văn bản</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Loại</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Trạng thái</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Việc cần làm</th>
-                <th className="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Cập nhật</th>
+                <th>Số văn bản</th>
+                <th>Tên văn bản</th>
+                <th>Loại</th>
+                <th>Trạng thái</th>
+                <th>Việc cần làm</th>
+                <th>Cập nhật</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -200,16 +202,16 @@ export default function MyTasksPage() {
               {tasks.map(({ doc, action_label, action_color }) => (
                 <tr
                   key={doc.id}
-                  className="hover:bg-slate-50 transition-colors cursor-pointer"
+                  className="cursor-pointer"
                   onClick={() => window.location.href = `/dashboard/documents/${doc.id}`}
                 >
-                  <td className="px-4 py-3 font-mono text-xs text-slate-700">
-                    {doc.ma_van_ban || <span className="text-slate-300 italic">—</span>}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <DocCodePill code={doc.ma_van_ban} />
                   </td>
                   <td className="px-4 py-3 font-semibold text-slate-800 max-w-xs truncate">
                     <Link
                       href={`/dashboard/documents/${doc.id}`}
-                      className="hover:text-blue-700"
+                      className="hover:text-brand-700"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {doc.ten_van_ban}
@@ -219,9 +221,7 @@ export default function MyTasksPage() {
                     {doc.loai_van_ban ? (LOAI_VAN_BAN_LABEL[doc.loai_van_ban] || doc.loai_van_ban) : <span className="text-slate-300">—</span>}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-bold ${TRANG_THAI_COLOR[doc.trang_thai] || "bg-slate-100 text-slate-600"}`}>
-                      {TRANG_THAI_LABEL[doc.trang_thai] || doc.trang_thai}
-                    </span>
+                    <StatusBadge domain="doc" status={doc.trang_thai} />
                   </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-bold ${action_color}`}>
@@ -235,7 +235,7 @@ export default function MyTasksPage() {
                     <Link
                       href={`/dashboard/documents/${doc.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all whitespace-nowrap"
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-200/60 rounded-xl transition-all whitespace-nowrap"
                     >
                       Xử lý
                       <ArrowRight size={12} />

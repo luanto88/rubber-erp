@@ -40,6 +40,7 @@ const MOTIF_COLOR: Record<PageBannerTheme, string> = {
   teal: "#0d9488",
   indigo: "#4f46e5",
   cyan: "#0891b2",
+  rubber: "#2f5d52",
 }
 
 const TILE_SIZE: Record<PageBannerTheme, { width: number; height: number }> = {
@@ -55,6 +56,7 @@ const TILE_SIZE: Record<PageBannerTheme, { width: number; height: number }> = {
   teal: { width: 190, height: 190 },
   indigo: { width: 170, height: 170 },
   cyan: { width: 190, height: 190 },
+  rubber: { width: 160, height: 160 },
 }
 
 export function PageBackgroundMotif({ theme }: { theme: PageBannerTheme }) {
@@ -71,7 +73,7 @@ export function PageBackgroundMotif({ theme }: { theme: PageBannerTheme }) {
       <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <pattern id={patternId} patternUnits="userSpaceOnUse" width={width} height={height}>
-            {theme === "forest" && (
+            {(theme === "forest" || theme === "rubber") && (
               <g fill="none" stroke={color} strokeWidth={1.4}>
                 {/* Rãnh cạo mủ — đường chéo lặp lại, mirror motif-tap (Sản lượng) */}
                 <path d="M20 -10 L60 170 M60 -10 L100 170 M100 -10 L140 170" />

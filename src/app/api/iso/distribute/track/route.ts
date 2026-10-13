@@ -21,27 +21,33 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { docId, action } = (await req.json()) as {
+    const { docId, action, itemType } = (await req.json()) as {
       docId: string
       action: "view" | "download"
+      /** "form" = hồ sơ thực hiện (iso_form_instance_id); mặc định tài liệu (iso_document_id). */
+      itemType?: "document" | "form"
     }
 
     if (!docId || !["view", "download"].includes(action)) {
       return NextResponse.json({ error: "Thiếu tham số" }, { status: 400 })
     }
 
-    // Tìm recipient row của user này cho doc này
+    // Tìm recipient row của user này cho tài liệu / hồ sơ này. Trước 2026-10-13 route chỉ lọc
+    // theo iso_document_id nên hồ sơ thực hiện được phân phối không bao giờ ghi được mốc.
     const { data: recipient, error: fetchErr } = await supabaseAdmin
       .from("iso_distribution_recipients")
       .select("id, first_viewed_at, first_downloaded_at")
-      .eq("iso_document_id", docId)
+      .eq(itemType === "form" ? "iso_form_instance_id" : "iso_document_id", docId)
       .eq("recipient_user_id", uid)
       .order("created_at", { ascending: true })
       .limit(1)
-      .single()
+      .maybeSingle()
 
-    if (fetchErr || !recipient) {
-      // Không có recipient row — không phải lỗi, chỉ không làm gì
+    if (fetchErr) {
+      return NextResponse.json({ error: fetchErr.message }, { status: 500 })
+    }
+    if (!recipient) {
+      // Không có recipient row (vd tài liệu "của bạn", không do phân phối) — không phải lỗi
       return NextResponse.json({ ok: true, noRecord: true })
     }
 
@@ -56,7 +62,12 @@ export async function POST(req: NextRequest) {
       updatePayload.first_downloaded_at = new Date().toISOString()
     } else {
       // Đã track rồi — idempotent no-op
-      return NextResponse.json({ ok: true, alreadyTracked: true })
+      return NextResponse.json({
+        ok: true,
+        alreadyTracked: true,
+        first_viewed_at: recipient.first_viewed_at,
+        first_downloaded_at: recipient.first_downloaded_at,
+      })
     }
 
     const { error: updateErr } = await supabaseAdmin
@@ -68,7 +79,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 })
     }
 
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({
+      ok: true,
+      first_viewed_at: updatePayload.first_viewed_at ?? recipient.first_viewed_at,
+      first_downloaded_at: updatePayload.first_downloaded_at ?? recipient.first_downloaded_at,
+    })
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Lỗi server" },
