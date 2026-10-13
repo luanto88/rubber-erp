@@ -68,11 +68,14 @@ export function StatusSummaryBar({
   status,
   headline,
   meta,
+  badge,
 }: {
   domain: StatusDomain
   status: string | null | undefined
   headline?: ReactNode
   meta?: ReactNode
+  /** Thay badge mặc định (vd nhãn động theo luồng N bước của hồ sơ thực hiện). Không dùng kèm headline cùng ý. */
+  badge?: ReactNode
 }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-[14px] border border-brand-200 bg-brand-50 px-4 py-3">
@@ -81,7 +84,7 @@ export function StatusSummaryBar({
         {headline && <p className="mt-0.5 text-[13px] font-semibold text-slate-800">{headline}</p>}
         {meta && <div className="mt-0.5 text-[12px] text-slate-500">{meta}</div>}
       </div>
-      <StatusBadge domain={domain} status={status} size="md" />
+      {badge ?? <StatusBadge domain={domain} status={status} size="md" />}
     </div>
   )
 }

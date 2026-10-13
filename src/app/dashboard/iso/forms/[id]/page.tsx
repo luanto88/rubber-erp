@@ -48,6 +48,7 @@ import { IsoShell } from "../../_components/iso-shell"
 import { canSeeAllIsoForms, isFormInstanceRelated, readCachedIsoUser } from "../../_components/iso-access"
 import { DistributionModal } from "../../_components/distribution-modal"
 import { ModalShell } from "../../../_components/modal-shell"
+import { PinDialog } from "../../../_components/doc-ui/pin-dialog"
 import { authFetch } from "@/lib/auth-fetch"
 import {
   fmtDate,
@@ -480,7 +481,6 @@ function SignPlacementModal({
   const [step, setStep] = useState<"pin" | "placement">("pin")
   const [pin, setPin] = useState("")
   const [pinError, setPinError] = useState("")
-  const [showPin, setShowPin] = useState(false)
   const [pinVerifying, setPinVerifying] = useState(false)
   const [signAs, setSignAs] = useState<SignAsType>("none")
   // Cờ ghi nhận mẫu đã định vị vai trò này hay chưa. Khi ĐÃ CÓ MẪU: tiền tố ký thay do mẫu
@@ -1331,62 +1331,17 @@ function SignPlacementModal({
   // Bước 1: chỉ hiện PIN, chưa tải/hiện PDF. Đúng PIN mới chuyển sang bước 2.
   if (step === "pin") {
     return (
-      <ModalShell
-        title={
-          <span className="flex items-center gap-3">
-            <span className="p-2 bg-emerald-100 rounded-xl"><Pen size={18} className="text-emerald-700" /></span>
-            <span>
-              <span className="font-extrabold text-slate-800 block">{stepLabel}</span>
-              <span className="text-xs text-slate-500 font-normal">Nhập PIN chữ ký để xác nhận</span>
-            </span>
-          </span>
-        }
+      <PinDialog
+        title={stepLabel}
+        icon={Pen}
+        pin={pin}
+        onPinChange={(v) => { setPin(v); setPinError("") }}
+        error={pinError}
+        busy={pinVerifying}
+        busyLabel="Đang xác thực..."
+        onConfirm={() => void handleVerifyPin()}
         onClose={onClose}
-        maxWidth="sm"
-        footer={
-          <>
-            <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-            <button
-              onClick={() => void handleVerifyPin()}
-              disabled={pinVerifying}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-sm font-bold rounded-xl shadow-xs"
-            >
-              {pinVerifying ? <Loader2 size={13} className="animate-spin" /> : <Pen size={13} />}
-              {pinVerifying ? "Đang xác thực..." : "Xác nhận"}
-            </button>
-          </>
-        }
-      >
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN chữ ký</label>
-          <div className="relative">
-            <input
-              type={showPin ? "text" : "password"}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              autoFocus
-              value={pin}
-              onChange={(e) => { setPin(e.target.value.replace(/\D/g, "")); setPinError("") }}
-              onKeyDown={(e) => e.key === "Enter" && void handleVerifyPin()}
-              placeholder="4–6 chữ số"
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 pr-9 font-mono tracking-widest text-center text-lg"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPin((v) => !v)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            >
-              {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-          </div>
-          {pinError && (
-            <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
-              <AlertTriangle size={11} /> {pinError}
-            </p>
-          )}
-        </div>
-      </ModalShell>
+      />
     )
   }
 
@@ -3471,7 +3426,12 @@ export default function IsoFormInstancePage() {
           eyebrow="Hồ sơ thực hiện ISO"
           title={instance.tieu_de}
           code={template?.ma_tai_lieu || null}
-          subtitle={template?.ten_tai_lieu || undefined}
+          subtitle={
+            template?.ten_tai_lieu &&
+            template.ten_tai_lieu.trim().toLowerCase() !== (instance.tieu_de || "").trim().toLowerCase()
+              ? template.ten_tai_lieu
+              : undefined
+          }
           actions={
             <>
               {fileUrl && (
@@ -3501,7 +3461,7 @@ export default function IsoFormInstancePage() {
                 <button
                   onClick={() => void goToTemplateSetup()}
                   disabled={!signStepsReady || saving}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[13px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
+                  className={`inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border px-3 text-[13px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto ${
                     mustSetupTemplate
                       ? "border-brand-600 bg-brand-600 text-white shadow-md ring-2 ring-brand-200 animate-pulse"
                       : !templateConfirmed
@@ -3597,7 +3557,7 @@ export default function IsoFormInstancePage() {
                   endpoint={`/api/iso/forms/${instanceId}/file-url`}
                   kind={viewerExt === "pdf" ? "pdf" : "office"}
                   fileExt={viewerExt}
-                  label={`${isEditable ? "Bản nháp" : isDone ? "Bản đã ký duyệt" : "Bản đang ký"} · ${viewerExt.toUpperCase()}`}
+                  label={`${isEditable ? "Tệp hồ sơ" : isDone ? "Bản đã ký duyệt" : "Bản đang ký"} · ${viewerExt.toUpperCase()}`}
                 />
                 {!isDone && instance.draft_file_url && instance.draft_file_type !== "pdf" && (
                 <label
@@ -3782,7 +3742,7 @@ export default function IsoFormInstancePage() {
             <StatusSummaryBar
               domain="form"
               status={instance.trang_thai}
-              headline={<FormStatusBadge status={instance.trang_thai} inst={instance} size="sm" />}
+              badge={<FormStatusBadge status={instance.trang_thai} inst={instance} size="md" />}
             />
             <SignActionBox
               title="Hành động ký"
@@ -3792,8 +3752,8 @@ export default function IsoFormInstancePage() {
             />
             <div className="w-full flex flex-col bg-white rounded-[14px] border border-slate-200 shadow-sm overflow-hidden">
               {/* Header đồng bộ */}
-              <div className="flex items-center justify-between gap-2.5 px-4 py-3 bg-slate-50/80 border-b border-slate-100">
-                <div className="flex items-center gap-2.5">
+              <div className="flex flex-col gap-2.5 px-4 py-3 bg-slate-50/80 border-b border-slate-100 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-2.5">
                   <span className="w-8 h-8 rounded-full bg-brand-100 grid place-items-center text-brand-800 shrink-0">
                     <ShieldCheck size={16} />
                   </span>
@@ -3804,20 +3764,20 @@ export default function IsoFormInstancePage() {
                   </h2>
                 </div>
                 {canManageDraft && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-row-reverse items-center justify-between gap-2 sm:flex-row sm:justify-end">
                     {rightTab === "config" && (
                       <button
                         type="button"
                         onClick={handleManualSaveConfig}
                         disabled={saving}
-                        className="flex items-center gap-1.5 px-3 py-1 bg-brand-700 hover:bg-brand-800 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors disabled:opacity-50"
+                        className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1 bg-brand-700 hover:bg-brand-800 text-white text-xs font-bold rounded-lg shadow-2xs transition-colors disabled:opacity-50"
                         title="Lưu cấu hình phê duyệt"
                       >
                         {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                         Lưu cấu hình
                       </button>
                     )}
-                    <div className="flex items-center gap-1 bg-brand-100/70 p-0.5 rounded-lg text-xs font-bold">
+                    <div className="flex shrink-0 items-center gap-1 whitespace-nowrap bg-brand-100/70 p-0.5 rounded-lg text-xs font-bold">
                       <button
                         type="button"
                         onClick={() => setRightTab("timeline")}

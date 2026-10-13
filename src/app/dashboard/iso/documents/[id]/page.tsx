@@ -10,6 +10,7 @@ import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUse
 import { fetchSecureUrl, openSecureFile } from "../../../_components/secure-file-open"
 import { IsoShell } from "../../_components/iso-shell"
 import { ModalShell } from "../../../_components/modal-shell"
+import { PinDialog } from "../../../_components/doc-ui/pin-dialog"
 import {
   TRANG_THAI_LABEL,
   TRANG_THAI_COLOR,
@@ -46,7 +47,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
-  KeyRound,
   EyeOff,
   Loader2,
   RotateCcw,
@@ -63,13 +63,10 @@ import {
   Building,
   Calendar,
   Clock,
-  User,
-  Users,
-  UserCheck,
   ShieldCheck,
-  MessageSquare,
   Award,
   GitBranch,
+  PenLine,
 } from "lucide-react"
 import {
   DetailCard,
@@ -503,7 +500,6 @@ export default function IsoDocumentDetailPage() {
     label: string
   } | null>(null)
   const [pin, setPin] = useState("")
-  const [showPin, setShowPin] = useState(false)
   const [pinError, setPinError] = useState("")
   const [pinLoading, setPinLoading] = useState(false)
   const [lyDoTraVe, setLyDoTraVe] = useState("")
@@ -3553,11 +3549,11 @@ export default function IsoDocumentDetailPage() {
           />
         )}
 
-        {/* 2. CARD - Thông tin văn bản */}
+        {/* 2. CARD - Thông tin tài liệu / hồ sơ */}
         <DetailCard
           icon={<FileText size={18} />}
           iconTone="emerald"
-          title="Thông tin văn bản"
+          title={form.phan_loai_tl === "con" ? "Thông tin hồ sơ" : "Thông tin tài liệu"}
           subtitle="Mã số, phân loại và hiệu lực"
           badge={
             <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
@@ -3648,95 +3644,9 @@ export default function IsoDocumentDetailPage() {
           </div>
         </DetailCard>
 
-        {/* 3. CARD - Ban hành & Phê duyệt */}
-        <DetailCard
-          icon={<Users size={18} />}
-          iconTone="emerald"
-          title="Thông tin Phê duyệt & Nhân sự"
-          subtitle="Người phụ trách và trạng thái ký duyệt"
-          badge={
-            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-800">
-              {form.cap_tl === "Cấp 2" ? "2 bước" : "3 bước"}
-            </span>
-          }
-        >
-          <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
-            <DetailFieldItem
-              icon={<User size={15} />}
-              iconTone="slate"
-              label="Người soạn thảo"
-              value={profileName(form.soan_thao_user_id) || doc?.soan_thao || "—"}
-              extra={
-                doc?.ky_soan_thao_at ? (
-                  <span className="text-[10px] text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
-                    <CheckCircle2 size={11} /> {fmtDate(doc.ky_soan_thao_at)}
-                  </span>
-                ) : undefined
-              }
-            />
-            {form.cap_tl === "Cấp 1" && (
-              <DetailFieldItem
-                icon={<UserCheck size={15} />}
-                iconTone="slate"
-                label="Người xem xét"
-                value={profileName(form.xem_xet_user_id) || doc?.xem_xet || "—"}
-                extra={
-                  doc?.ky_xem_xet_at ? (
-                    <span className="text-[10px] text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
-                      <CheckCircle2 size={11} /> {fmtDate(doc.ky_xem_xet_at)}
-                    </span>
-                  ) : undefined
-                }
-              />
-            )}
-            <DetailFieldItem
-              icon={<ShieldCheck size={15} />}
-              iconTone="emerald"
-              label="Người phê duyệt"
-              colSpan={form.cap_tl === "Cấp 2" ? 1 : 2}
-              value={profileName(form.phe_duyet_user_id) || doc?.phe_duyet || "—"}
-              extra={
-                doc?.ky_phe_duyet_at ? (
-                  <span className="text-[10px] text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
-                    <CheckCircle2 size={11} /> {fmtDate(doc.ky_phe_duyet_at)}
-                  </span>
-                ) : undefined
-              }
-            />
-          </div>
-        </DetailCard>
       </div>
     )
   }
-
-  const renderAdditionalDetailsCard = () => (
-    <DetailCard
-      icon={<MessageSquare size={18} />}
-      iconTone="emerald"
-      title="Ghi chú & Chi tiết bổ sung"
-      subtitle="Nội dung ghi chú và mô tả tài liệu"
-      className="h-full flex flex-col justify-between"
-    >
-      <div className="space-y-4">
-        <DetailFieldItem
-          icon={<MessageSquare size={15} />}
-          iconTone="slate"
-          label="Nội dung ghi chú"
-          value={<p className="text-sm font-semibold text-slate-800 whitespace-pre-wrap leading-relaxed">{form.ghi_chu || doc?.ghi_chu || "(Không có ghi chú thêm)"}</p>}
-          colSpan={2}
-        />
-        {(form.mo_ta_tim_kiem || doc?.mo_ta_tim_kiem) && (
-          <DetailFieldItem
-            icon={<FileText size={15} />}
-            iconTone="slate"
-            label="Mô tả tìm kiếm AI"
-            value={<p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{form.mo_ta_tim_kiem || doc?.mo_ta_tim_kiem}</p>}
-            colSpan={2}
-          />
-        )}
-      </div>
-    </DetailCard>
-  )
 
   const renderValidityInfoCard = () => {
     if (isNew || !doc) return null
@@ -4180,25 +4090,6 @@ export default function IsoDocumentDetailPage() {
     )
   }
 
-  const pinModalFooter = (
-    <>
-      <button
-        onClick={() => { setPinModal(null); setPin(""); setPinError(""); setLyDoTraVe("") }}
-        className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-      >
-        Hủy
-      </button>
-      <button
-        onClick={() => void handlePinConfirm()}
-        disabled={pinLoading || !pin}
-        className="flex items-center gap-2 px-5 py-2 bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold rounded-xl disabled:opacity-50 transition-all"
-      >
-        {pinLoading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
-        {pinLoading ? "Đang xử lý..." : "Xác nhận"}
-      </button>
-    </>
-  )
-
   // ── Doc-UI GĐ2: hành động ký — GIỮ NGUYÊN onClick + cờ quyền cũ, chỉ đổi chỗ hiển thị ──
   const isViewMode = !isNew && !isEditMode
   const signStepsReadyIso = form.cap_tl === "Cấp 2" ? !!form.phe_duyet_user_id : (!!form.xem_xet_user_id && !!form.phe_duyet_user_id)
@@ -4491,7 +4382,7 @@ export default function IsoDocumentDetailPage() {
                   onClick={a.onClick}
                   disabled={a.disabled || a.loading}
                   title={a.title}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border px-3 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto ${
                     kind === "primary"
                       ? "border-brand-600 bg-brand-600 text-white hover:bg-brand-700"
                       : kind === "danger"
@@ -4521,7 +4412,7 @@ export default function IsoDocumentDetailPage() {
                   type="button"
                   onClick={() => void handleSave()}
                   disabled={saving}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-brand-600 bg-brand-600 px-4 text-[13px] font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50"
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-brand-600 bg-brand-600 px-4 text-[13px] font-bold text-white transition-colors hover:bg-brand-700 disabled:opacity-50 sm:w-auto"
                 >
                   {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                   <span>{saving ? "Đang lưu..." : "Lưu"}</span>
@@ -4539,12 +4430,12 @@ export default function IsoDocumentDetailPage() {
           <div className="lg:hidden">
             <SegmentedTabs
               fullWidth
-              ariaLabel="Chuyển giữa tài liệu và thông tin"
+              ariaLabel="Chuyển giữa tài liệu và ký duyệt"
               value={mobilePane}
               onChange={setMobilePane}
               items={[
                 { key: "doc", label: "Tài liệu", icon: FileText },
-                { key: "info", label: "Thông tin", icon: ShieldCheck },
+                { key: "info", label: "Ký duyệt", icon: PenLine },
               ]}
             />
           </div>
@@ -4579,8 +4470,6 @@ export default function IsoDocumentDetailPage() {
             {isViewMode ? (
               <>
                 {renderReadOnlyView()}
-                {renderAdditionalDetailsCard()}
-                {renderValidityInfoCard()}
               </>
             ) : (
               <>
@@ -6312,65 +6201,31 @@ export default function IsoDocumentDetailPage() {
 
         {/* PIN Modal */}
         {pinModal && (
-          <ModalShell
-            title={
-              <span className="flex items-center gap-3">
-                <span className="p-2 bg-emerald-100 rounded-xl"><KeyRound size={18} className="text-emerald-700" /></span>
-                <span>
-                  <span className="font-extrabold text-slate-800 block">{pinModal.label}</span>
-                  <span className="text-xs text-slate-500 font-normal">Nhập PIN ký duyệt để xác nhận</span>
-                </span>
-              </span>
-            }
+          <PinDialog
+            title={pinModal.label}
+            pin={pin}
+            onPinChange={(v) => { setPin(v); setPinError("") }}
+            error={pinError}
+            busy={pinLoading}
+            confirmDisabled={!pin}
+            onConfirm={() => void handlePinConfirm()}
             onClose={() => { setPinModal(null); setPin(""); setPinError(""); setLyDoTraVe("") }}
-            maxWidth="sm"
-            footer={pinModalFooter}
           >
-              {(pinModal.action === "tra_ve" || pinModal.action === "khong_xem_xet" || pinModal.action === "tu_choi_phe_duyet" || pinModal.action === "tra_ve_nhap") && (
-                <div className="mb-4">
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">
-                    {pinModal.action === "khong_xem_xet" ? "Lý do từ chối xem xét" : pinModal.action === "tu_choi_phe_duyet" ? "Lý do không phê duyệt" : "Lý do trả về"}
-                  </label>
-                  <textarea
-                    value={lyDoTraVe}
-                    onChange={(e) => setLyDoTraVe(e.target.value)}
-                    rows={3}
-                    placeholder="Nhập lý do..."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 resize-none"
-                  />
-                </div>
-              )}
-
-              <div className="mb-4">
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN ký duyệt</label>
-                <div className="relative">
-                  <input
-                    type={showPin ? "text" : "password"}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    autoFocus
-                    value={pin}
-                    onChange={(e) => { setPin(e.target.value.replace(/\D/g, "")); setPinError("") }}
-                    placeholder="4–6 chữ số"
-                    className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 pr-9 font-mono tracking-widest text-center text-lg"
-                    onKeyDown={(e) => { if (e.key === "Enter") void handlePinConfirm() }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPin((v) => !v)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-                {pinError && (
-                  <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
-                    <AlertTriangle size={11} /> {pinError}
-                  </p>
-                )}
+            {(pinModal.action === "tra_ve" || pinModal.action === "khong_xem_xet" || pinModal.action === "tu_choi_phe_duyet" || pinModal.action === "tra_ve_nhap") && (
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  {pinModal.action === "khong_xem_xet" ? "Lý do từ chối xem xét" : pinModal.action === "tu_choi_phe_duyet" ? "Lý do không phê duyệt" : "Lý do trả về"}
+                </label>
+                <textarea
+                  value={lyDoTraVe}
+                  onChange={(e) => setLyDoTraVe(e.target.value)}
+                  rows={3}
+                  placeholder="Nhập lý do..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-brand-500 resize-none"
+                />
               </div>
-          </ModalShell>
+            )}
+          </PinDialog>
         )}
       </div>
 

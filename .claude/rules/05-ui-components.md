@@ -366,3 +366,31 @@ Bố cục theo mẫu `previews/enterprise-iso-vanban-unified-preview.html`, **m
   tải PNG/JPG (QR nền trắng + mã tài liệu bên dưới). URL: Văn bản `/dashboard/documents/{id}`,
   ISO tài liệu `recordUrl`, Hồ sơ `/dashboard/iso/forms/{id}` (khớp QR in trên PDF). Bỏ nút
   "Làm mới" ở header Hồ sơ thực hiện (trang tự nạp lại sau mỗi thao tác).
+
+### Sửa sau test bản 18304ec (2026-10-13)
+
+- `HeaderQr`: `QRCodeCanvas` tự gắn inline `width/height = size` (thắng mọi class) ⇒ phải ghi đè bằng
+  `style={{ width: "100%", height: "100%" }}` trong khung `aspect-square`. Canvas gốc vẫn 512px cho ảnh tải về.
+  Trên mobile nút QR là nút đầy đủ "Mã QR" (từ `sm:` là ô vuông 36px).
+- `DetailPageHeader`: cụm actions mobile = lưới 2 cột đều, số nút lẻ thì nút cuối trải 2 cột; từ `sm:` 1 hàng
+  căn phải. Nút tự viết đặt trong `actions` phải có `w-full justify-center sm:w-auto` (như `HeaderButton`).
+- `SignActionBox`: **đã bỏ thanh cố định ở đáy mobile** (trùng nút + spacer `h-16` để lại khoảng trống giữa
+  các thẻ inspector). Thẻ "Hành động ký" là nơi duy nhất có nút ký. Prop `mobileBar` không còn.
+- `StatusSummaryBar` có prop `badge` thay badge mặc định — hồ sơ thực hiện truyền `FormStatusBadge` (nhãn động
+  N bước), không dùng thêm `headline` cùng ý (từng ra "Bản nháp" + "Nháp").
+- Tab mobile của trang chi tiết: **"Tài liệu / Ký duyệt"** (không còn "Thông tin" — trùng chữ với thẻ
+  "Thông tin hồ sơ/văn bản" nằm ở tab Tài liệu).
+- `iso/documents/[id]` chế độ XEM: đã bỏ 3 thẻ "Thông tin Phê duyệt & Nhân sự", "Ghi chú & Chi tiết bổ sung",
+  "Thông tin hiệu lực" (trùng Tiến trình ký / thẻ Trạng thái). `renderValidityInfoCard` vẫn dùng ở sidebar
+  tạo mới/chỉnh sửa. Thẻ thông tin đổi tên "Thông tin tài liệu" / "Thông tin hồ sơ" (trước ghi nhầm "văn bản").
+
+### GĐ4 — hộp nhập PIN dùng chung (2026-10-13)
+
+- `doc-ui/pin-dialog.tsx` (`PinDialog`) — CHỈ trình bày: không gọi API, không giữ PIN. Trang gọi giữ
+  `pin`/`pinError`/cờ bận và truyền `onConfirm` (logic xác thực/ký không đổi). Ô PIN tự lọc chữ số,
+  tối đa 6, nút ẩn/hiện (state nội bộ), Enter = xác nhận; `busy` khoá nút và chặn đóng hộp.
+  `children` = nội dung TRÊN ô PIN (vd ô lý do), `after` = DƯỚI ô PIN (ghi chú, tiến độ ký).
+- 4 nơi đã chuyển: Văn bản (bước 1 `SignPlacementModal`), Tài liệu ISO (`pinModal` + ô lý do trả
+  về/từ chối), Hồ sơ thực hiện (bước 1 `SignPlacementModal`), ký hàng loạt ISO
+  (`iso-batch-sign-modal.tsx`, `zIndexClassName="z-[60]"` vì nằm trên overlay z-50).
+- Code mới cần nhập PIN ở 2 module này dùng `PinDialog`, không tự dựng ô PIN.

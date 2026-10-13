@@ -91,6 +91,7 @@ import { TimelineSteps, TimelineProgress, type TimelineStepItem } from "@/app/da
 import { StatusSummaryBar } from "@/app/dashboard/_components/doc-ui/inspector-card"
 import { computeAutoFitFontSize } from "@/lib/signing/text-fit"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { PinDialog } from "@/app/dashboard/_components/doc-ui/pin-dialog"
 
 const STORAGE_BUCKET = "iso-documents"
 
@@ -389,7 +390,6 @@ function SignPlacementModal({
   const [step, setStep] = useState<"pin" | "placement">("pin")
   const [pin, setPin] = useState("")
   const [pinError, setPinError] = useState("")
-  const [showPin, setShowPin] = useState(false)
   const [pinVerifying, setPinVerifying] = useState(false)
   const [signAs, setSignAs] = useState<SignAsType>("none")
 
@@ -859,73 +859,28 @@ function SignPlacementModal({
     onConfirm(pin, placementObj, signAs)
   }
 
-  // Bước 1: chỉ hiện PIN, chưa tải/hiện PDF — mirror pinModal của
-  // iso/documents/[id]/page.tsx (icon + tiêu đề + phụ đề, ô PIN có nút ẩn/hiện, footer
-  // Hủy/Xác nhận). Đúng PIN mới chuyển sang bước 2.
+  // Bước 1: chỉ hiện PIN, chưa tải/hiện PDF. Hộp PIN dùng chung Doc-UI (GĐ4); logic xác
+  // thực vẫn là handleVerifyPin ở trên. Đúng PIN mới chuyển sang bước 2.
   if (step === "pin") {
     return (
-      <ModalShell
-        title={
-          <span className="flex items-center gap-3">
-            <span className="p-2 bg-amber-100 rounded-xl"><ShieldCheck size={18} className="text-amber-600" /></span>
-            <span>
-              <span className="font-extrabold text-slate-800 block">{stepLabel}</span>
-              <span className="text-xs text-slate-500 font-normal">Nhập PIN ký duyệt để xác nhận</span>
-            </span>
-          </span>
-        }
+      <PinDialog
+        title={stepLabel}
+        icon={ShieldCheck}
+        pin={pin}
+        onPinChange={(v) => { setPin(v); setPinError("") }}
+        error={pinError}
+        busy={pinVerifying || acting}
+        busyLabel={pinVerifying ? "Đang xác thực..." : "Đang ký..."}
+        confirmLabel={lockedPlacement ? "Xác nhận ký" : "Xác nhận"}
+        onConfirm={() => void handleVerifyPin()}
         onClose={onClose}
-        maxWidth="sm"
-        footer={
-          <>
-            <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-            <button
-              onClick={() => void handleVerifyPin()}
-              disabled={pinVerifying || acting}
-              className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-bold rounded-xl"
-            >
-              {pinVerifying || acting ? <Loader2 size={13} className="animate-spin" /> : <PenLine size={13} />}
-              {pinVerifying ? "Đang xác thực..." : acting ? "Đang ký..." : lockedPlacement ? "Xác nhận ký" : "Xác nhận"}
-            </button>
-          </>
-        }
-      >
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">PIN ký duyệt</label>
-          <div className="relative">
-            <input
-              type={showPin ? "text" : "password"}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              autoFocus
-              value={pin}
-              onChange={(e) => { setPin(e.target.value.replace(/\D/g, "")); setPinError("") }}
-              onKeyDown={(e) => e.key === "Enter" && void handleVerifyPin()}
-              placeholder="4–6 chữ số"
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-amber-500 pr-9 font-mono tracking-widest text-center text-lg"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPin((v) => !v)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            >
-              {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
-          </div>
-          {pinError && (
-            <p className="mt-1.5 text-xs text-red-600 flex items-center gap-1">
-              <AlertTriangle size={11} /> {pinError}
-            </p>
-          )}
-          {lockedPlacement && (
-            <p className="mt-3 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 leading-snug">
-              Vị trí khung ký đã được cố định theo mẫu do người soạn thảo cài đặt. Nhập PIN xong
-              bạn sẽ xem được nội dung văn bản và xê dịch chữ ký trong khung trước khi ký.
-            </p>
-          )}
-        </div>
-      </ModalShell>
+        after={lockedPlacement ? (
+          <p className="text-xs text-brand-800 bg-brand-50 border border-brand-200 rounded-xl px-3 py-2 leading-snug">
+            Vị trí khung ký đã được cố định theo mẫu do người soạn thảo cài đặt. Nhập PIN xong
+            bạn sẽ xem được nội dung văn bản và xê dịch chữ ký trong khung trước khi ký.
+          </p>
+        ) : undefined}
+      />
     )
   }
 

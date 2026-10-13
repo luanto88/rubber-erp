@@ -58,7 +58,13 @@ export function DetailPageHeader({
           {subtitle && <div className="mt-1 text-[12.5px] text-slate-500">{subtitle}</div>}
         </div>
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
+      {actions && (
+        // Mobile: lưới 2 cột đều nhau, trải trọn bề ngang card (số nút lẻ → nút cuối trải cả hàng).
+        // Từ sm: 1 hàng căn phải như cũ.
+        <div className="grid grid-cols-2 gap-2 [&>*:last-child:nth-child(odd)]:col-span-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
+          {actions}
+        </div>
+      )}
     </div>
   )
 }
@@ -83,7 +89,7 @@ export function HeaderButton({
   title?: string
   tone?: "neutral" | "brand"
 }) {
-  const cls = `inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+  const cls = `inline-flex h-9 w-full items-center justify-center gap-1.5 sm:w-auto rounded-xl border px-3 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
     tone === "brand"
       ? "border-brand-600 bg-brand-600 text-white hover:bg-brand-700"
       : "border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800"

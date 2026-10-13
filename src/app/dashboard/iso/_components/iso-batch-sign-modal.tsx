@@ -12,7 +12,6 @@ import {
   EyeOff,
   FileCheck,
   FileText,
-  KeyRound,
   Layers,
   Loader2,
   Lock,
@@ -32,6 +31,7 @@ import {
 } from "./iso-types"
 import { findRoleBoxForStep } from "@/lib/signing/template-layout"
 import { computeSnugBoxSize } from "@/lib/signing/text-fit"
+import { PinDialog } from "../../_components/doc-ui/pin-dialog"
 
 function toTitleCase(str: string | null | undefined): string {
   if (!str) return ""
@@ -2122,76 +2122,31 @@ export function IsoBatchSignModal({
 
       {/* ── MODAL NHẬP MÃ PIN 1 LẦN ── */}
       {showPinModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2 font-extrabold text-slate-800 text-sm">
-                <KeyRound size={18} className="text-emerald-600" />
-                Xác thực mã PIN ký số
-              </div>
-              <button
-                onClick={() => !pinLoading && setShowPinModal(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X size={16} />
-              </button>
+        <PinDialog
+          title="Xác thực mã PIN ký số"
+          subtitle="Một lần PIN ký cho toàn bộ tài liệu trong bộ hồ sơ này"
+          icon={Lock}
+          pin={pin}
+          onPinChange={(v) => { setPin(v); setPinError("") }}
+          error={pinError}
+          busy={pinLoading}
+          busyLabel="Đang ký số..."
+          confirmLabel="Xác nhận ký"
+          confirmDisabled={pin.length < 4}
+          cancelLabel="Đóng"
+          onConfirm={() => void handlePinConfirm()}
+          onClose={() => setShowPinModal(false)}
+          zIndexClassName="z-[60]"
+          after={signingProgress ? (
+            <div className="rounded-xl bg-slate-50 p-3 border border-slate-200 text-center">
+              <Loader2 size={18} className="animate-spin text-brand-600 mx-auto mb-1.5" />
+              <p className="text-xs font-bold text-slate-700">
+                Đang ký số file ({signingProgress.current}/{signingProgress.total})
+              </p>
+              <p className="text-[10px] text-slate-400 truncate">{signingProgress.title}</p>
             </div>
-
-            <p className="text-xs text-slate-500 mb-4">
-              Nhập mã PIN cá nhân 6 số của bạn để ký số hàng loạt cho toàn bộ các tài liệu trong bộ hồ sơ này.
-            </p>
-
-            <div className="mb-4">
-              <input
-                type="password"
-                maxLength={6}
-                autoFocus
-                disabled={pinLoading}
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value)
-                  setPinError("")
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handlePinConfirm()
-                }}
-                placeholder="Nhập mã PIN (6 số)"
-                className="w-full text-center tracking-widest text-lg font-mono rounded-xl border border-slate-300 p-2.5 font-bold text-slate-800 outline-hidden focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-              />
-              {pinError && <p className="mt-1.5 text-xs text-red-600 font-semibold">{pinError}</p>}
-            </div>
-
-            {signingProgress && (
-              <div className="mb-4 rounded-xl bg-slate-50 p-3 border border-slate-200 text-center">
-                <Loader2 size={18} className="animate-spin text-emerald-600 mx-auto mb-1.5" />
-                <p className="text-xs font-bold text-slate-700">
-                  Đang ký số file ({signingProgress.current}/{signingProgress.total})
-                </p>
-                <p className="text-[10px] text-slate-400 truncate">{signingProgress.title}</p>
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={pinLoading}
-                onClick={() => setShowPinModal(false)}
-                className="flex-1 rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
-              >
-                Đóng
-              </button>
-              <button
-                type="button"
-                disabled={pinLoading || pin.length < 4}
-                onClick={() => void handlePinConfirm()}
-                className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {pinLoading ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
-                Xác nhận ký
-              </button>
-            </div>
-          </div>
-        </div>
+          ) : undefined}
+        />
       )}
     </div>
   )

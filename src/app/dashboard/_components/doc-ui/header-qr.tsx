@@ -49,11 +49,12 @@ export function HeaderQr({ value, code, title }: { value: string; code?: string 
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white p-1 transition-colors hover:border-brand-300 hover:bg-brand-50"
+        className="inline-flex h-9 w-full shrink-0 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 text-[13px] font-semibold text-slate-700 transition-colors hover:border-brand-300 hover:bg-brand-50 sm:w-9 sm:p-1"
         title="Mã QR tra cứu — bấm để phóng to / tải ảnh"
         aria-label="Phóng to mã QR"
       >
-        <QRCodeSVG value={value} size={28} />
+        <QRCodeSVG value={value} size={26} />
+        <span className="sm:hidden">Mã QR</span>
       </button>
       {open && (
         <ModalShell
@@ -80,14 +81,18 @@ export function HeaderQr({ value, code, title }: { value: string; code?: string 
           }
         >
           <div className="flex flex-col items-center gap-3 py-2">
-            <QRCodeCanvas
-              ref={canvasRef}
-              value={value}
-              size={512}
-              marginSize={2}
-              level="M"
-              className="h-auto w-full max-w-[280px] rounded-lg border border-slate-200"
-            />
+            {/* QRCodeCanvas tự gắn inline style width/height = size (512px), thắng mọi class CSS.
+                Phải ghi đè bằng style để ô hiển thị co theo khung vuông; canvas gốc vẫn 512px nên ảnh tải về nét. */}
+            <div className="aspect-square w-full max-w-[280px] overflow-hidden rounded-lg border border-slate-200 bg-white">
+              <QRCodeCanvas
+                ref={canvasRef}
+                value={value}
+                size={512}
+                marginSize={2}
+                level="M"
+                style={{ width: "100%", height: "100%", display: "block" }}
+              />
+            </div>
             {code && <p className="font-code text-sm font-bold text-slate-800">{code}</p>}
             {title && <p className="text-center text-xs text-slate-500 [overflow-wrap:anywhere]">{title}</p>}
           </div>

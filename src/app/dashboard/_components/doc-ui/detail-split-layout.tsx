@@ -1,12 +1,12 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
-import { FileText, PanelRight } from "lucide-react"
+import { FileText, PenLine } from "lucide-react"
 import { SegmentedTabs } from "./segmented-tabs"
 
 /**
  * Khung trang chi tiết dùng chung (Doc-UI, GĐ2): cột tài liệu ~70% + bảng điều khiển ~30%.
- * Dưới `lg` chuyển sang tab "Tài liệu / Thông tin". Ẩn bằng `hidden`, KHÔNG unmount — giữ
+ * Dưới `lg` chuyển sang tab "Tài liệu / Ký duyệt". Ẩn bằng `hidden`, KHÔNG unmount — giữ
  * nguyên state form/modal của trang.
  */
 export function DetailSplitLayout({
@@ -40,12 +40,12 @@ export function DetailSplitLayout({
       <div className="lg:hidden">
         <SegmentedTabs
           fullWidth
-          ariaLabel="Chuyển giữa tài liệu và thông tin"
+          ariaLabel="Chuyển giữa tài liệu và ký duyệt"
           value={tab}
           onChange={setTab}
           items={[
             { key: "doc", label: "Tài liệu", icon: FileText },
-            { key: "info", label: "Thông tin", icon: PanelRight },
+            { key: "info", label: "Ký duyệt", icon: PenLine },
           ]}
         />
       </div>
