@@ -736,3 +736,8 @@ Từ chối xem xét / Không phê duyệt / Trả về Nháp của tài liệu 
 
 Nút "Ký & Gửi xem xét/phê duyệt" mở `IsoBatchSignModal` (action `gui_xem_xet`) khi bộ có PDF — không
 còn mở modal đặt vị trí cũ từng file một. Bộ chỉ Office → hộp PIN. Xem rule 05 mục "Vá sau test GĐ5 + GĐ6".
+
+## Modal đặt vị trí cũ đã xoá (2026-10-13)
+
+Trang `iso/documents/[id]` không còn modal đặt vị trí từng file (`placementModal`). Mọi bước ký có PDF
+đi qua `IsoBatchSignModal`; bộ chỉ DOCX/XLSX đi qua `PinDialog` → `doTransition`.

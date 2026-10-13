@@ -63,6 +63,7 @@ import {
 import { computeAutoFitFontSize } from "@/lib/signing/text-fit"
 import { ResizeHandleIcon } from "@/app/dashboard/_components/resize-handle-icon"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { ensurePdfjsWorker } from "@/app/dashboard/_components/doc-ui/pdfjs-worker"
 
 // ── Vai trò gốc — cấu hình cho module "documents" (Văn bản) và "iso" (ISO). Vai trò khác free-text,
 // người dùng có thể "Nhân bản" (duplicate) bất kỳ vai trò đã đặt nào để tạo thêm vị trí
@@ -466,6 +467,102 @@ function reconcileForDoc(
   return [...finalFamily, ...others]
 }
 
+// Đối chiếu khung của mẫu ISO với N bước ký thật: giữ khung chính + bản sao của từng bước và
+// 3 vai trò phụ (QR, Ngày ký, Ghi chú). Hàm thuần — dùng khi mở màn và mỗi lần nạp mẫu của tài
+// liệu khác trong "Bộ hồ sơ" (trước đây chỉ chạy 1 lần lúc mở màn).
+function reconcileIsoRoles(
+  prev: EditorRole[],
+  steps: Array<{ user_id?: string; ten?: string }> | null,
+  totalSteps: number,
+  isExemptIsoDoc: boolean,
+  cloneSeqRef: { current: Record<string, number> },
+): EditorRole[] {
+  const nextRoles: EditorRole[] = []
+  const usedRoleIds = new Set<string>()
+
+  // 1. Quét qua N bước thật của quy trình
+  for (let i = 0; i < totalSteps; i++) {
+    const stepKey = `buoc_${i + 1}`
+    const defaultLabel = i === 0 ? "Người lập" : i === totalSteps - 1 ? "Phê duyệt" : (totalSteps === 3 && i === 1 ? "Xem xét" : `Bước ${i + 1}`)
+    const stepLabel = steps?.[i]?.ten?.trim() || defaultLabel
+
+    // Tìm khung chính trong prev:
+    // Ưu tiên 1: khung chính không phải clone khớp đúng stepKey
+    let mainRole = prev.find((r) => !usedRoleIds.has(r.id) && !r.isClone && !r.id.includes("__ban") && (r.id === stepKey || r.baseId === stepKey))
+    // Ưu tiên 2: fallback legacy (soan_thao cho bước 1, phe_duyet cho bước cuối, xem_xet cho bước 2)
+    if (!mainRole) {
+      mainRole = prev.find((r) => {
+        if (usedRoleIds.has(r.id) || r.isClone || r.id.includes("__ban")) return false
+        if (i === 0 && (r.id === "soan_thao" || r.baseId === "soan_thao")) return true
+        if (i === totalSteps - 1 && (r.id === "phe_duyet" || r.baseId === "phe_duyet")) return true
+        if (totalSteps === 3 && i === 1 && (r.id === "xem_xet" || r.baseId === "xem_xet")) return true
+        return false
+      })
+    }
+    // Ưu tiên 3: khung theo nhãn (nếu có nhãn trùng)
+    if (!mainRole) {
+      mainRole = prev.find((r) => !usedRoleIds.has(r.id) && !r.isClone && !r.id.includes("__ban") && r.label === stepLabel)
+    }
+
+    if (mainRole) {
+      usedRoleIds.add(mainRole.id)
+      nextRoles.push({
+        ...mainRole,
+        id: stepKey,
+        baseId: stepKey as BaseRoleId,
+        label: stepLabel,
+        batBuoc: isExemptIsoDoc ? false : true,
+        isClone: false,
+        hiddenForDoc: false,
+      })
+    } else {
+      nextRoles.push(makeBaseRole(stepKey, true, isExemptIsoDoc, stepLabel, i + 1, totalSteps))
+    }
+
+    // Bảo lưu toàn bộ các khung BẢN SAO THẬT SỰ của bước này (chỉ r.isClone hoặc r.id có __ban)
+    const genuineClones = prev.filter((r) => {
+      if (usedRoleIds.has(r.id)) return false
+      if (!r.isClone && !r.id.includes("__ban")) return false
+      if (r.baseId === stepKey || r.id.startsWith(`${stepKey}__`)) return true
+      if (mainRole && (r.baseId === mainRole.id || r.id.startsWith(`${mainRole.id}__`))) return true
+      return false
+    })
+
+    let cloneSeq = 1
+    genuineClones.forEach((cloneRole) => {
+      usedRoleIds.add(cloneRole.id)
+      const cIdx = roleCloneIndex(cloneRole)
+      cloneSeq = Math.max(cloneSeq, cIdx)
+      nextRoles.push({
+        ...cloneRole,
+        baseId: stepKey as BaseRoleId,
+        label: `${stepLabel} · bản ${cIdx}`,
+        isClone: true,
+        hiddenForDoc: false,
+      })
+    })
+    cloneSeqRef.current[stepKey] = Math.max(cloneSeqRef.current[stepKey] || 1, cloneSeq)
+  }
+
+  // 2. Thêm các vai trò phụ (QR, Ngày ký, Ghi chú)
+  const auxOrder: BaseRoleId[] = ["qr", "ngay_ky", "ghi_chu"]
+  for (const auxId of auxOrder) {
+    const matchedAux = prev.filter((r) => (r.baseId === auxId || r.id === auxId || r.id.startsWith(`${auxId}__`)) && !usedRoleIds.has(r.id))
+    if (matchedAux.length > 0) {
+      matchedAux.forEach((r) => {
+        usedRoleIds.add(r.id)
+        nextRoles.push({ ...r, hiddenForDoc: false })
+      })
+    } else {
+      nextRoles.push(makeBaseRole(auxId, true, isExemptIsoDoc))
+    }
+  }
+
+  // ⚠️ TUYỆT ĐỐI KHÔNG lưu lại các khung dư (remainingPlaced) từ các mẫu cũ không tương thích (vd mẫu 5 bước sang quy trình 2 bước).
+  // Chỉ lưu giữ chính xác N bước của quy trình hiện tại + clone hợp lệ + vai trò phụ.
+  return nextRoles
+}
+
 // % tương ứng GRID_STEP_PX theo 1 trục cụ thể — trục ngang/dọc có tỉ lệ px/% khác nhau khi
 // container không vuông, nên phải tính riêng cho từng trục tại thời điểm kéo/resize (dùng
 // rectW/rectH đo thật lúc bắt đầu thao tác), không dùng 1 hằng số % chung cho cả 2 trục.
@@ -506,7 +603,11 @@ export default function SignTemplateEditorPage() {
   const [isoChildDocs, setIsoChildDocs] = useState<
     Array<{ id: string; ma_tai_lieu: string | null; ten_tai_lieu: string | null; loai_tai_lieu: string | null; url: string }>
   >([])
-  const [docTemplateStatus, setDocTemplateStatus] = useState<Record<string, boolean>>({})
+  /**
+   * Trạng thái mẫu vị trí theo PHIÊN BẢN MỚI NHẤT của từng tài liệu trong bộ hồ sơ:
+   * "co_khung" = đã đặt khung · "rong" = đã lưu là không cần khung · không có khoá = chưa có mẫu.
+   */
+  const [docTemplateStatus, setDocTemplateStatus] = useState<Record<string, "co_khung" | "rong">>({})
   const [isoDocData, setIsoDocData] = useState<{
     id: string
     ma_tai_lieu: string | null
@@ -583,6 +684,15 @@ export default function SignTemplateEditorPage() {
   const [pageDims, setPageDims] = useState<Record<number, { w: number; h: number }>>({})
   const [pageImages, setPageImages] = useState<Record<number, string>>({})
   const [currentPage, setCurrentPage] = useState(1)
+  /** URL PDF mà `pageDims` hiện tại thuộc về — nạp mẫu chỉ khi khớp `activePdfUrl` (chống lẫn toạ độ khi chuyển thẻ). */
+  const [dimsForUrl, setDimsForUrl] = useState("")
+  const pdfCacheRef = useRef<Map<string, { numPages: number; dims: Record<number, { w: number; h: number }>; images: Record<number, string> }>>(new Map())
+  /** Đang chuyển sang tài liệu khác trong "Bộ hồ sơ" (che canvas tới khi mẫu nạp xong). */
+  const [switchingDoc, setSwitchingDoc] = useState(false)
+  /** Hộp xác nhận khi chuyển thẻ lúc còn thay đổi chưa lưu. */
+  const [pendingSwitch, setPendingSwitch] = useState<{ id: string; url: string; loai: string; label: string } | null>(null)
+  /** Xác nhận lưu biểu mẫu KHÔNG có khung nào (biểu mẫu không cần ký). */
+  const [emptySaveConfirm, setEmptySaveConfirm] = useState(false)
 
   const [roles, setRoles] = useState<EditorRole[]>(() => {
     const order = isIso ? ISO_ROLE_ORDER : ROLE_ORDER
@@ -686,24 +796,29 @@ export default function SignTemplateEditorPage() {
   }, [activeLoai, activePdfUrl, docId])
 
   // ── Render PDF tham chiếu thành ảnh (mirror ky/[id]/page.tsx) ──
+  // Kích thước trang có trước (nhanh) để nạp mẫu ngay; ảnh trang dựng dần từng trang (JPEG nền
+  // trắng). Kết quả lưu đệm theo tài liệu ⇒ quay lại thẻ cũ trong "Bộ hồ sơ" không dựng lại.
   useEffect(() => {
     if (!activePdfUrl) return
     let cancelled = false
+    const cacheKey = activeDocId || activePdfUrl
     const run = async () => {
       try {
+        setCurrentPage(1)
+        const cached = pdfCacheRef.current.get(cacheKey)
+        if (cached) {
+          setNumPages(cached.numPages)
+          setPageDims(cached.dims)
+          setPageImages(cached.images)
+          setDimsForUrl(activePdfUrl)
+          return
+        }
         setNumPages(0)
         setPageDims({})
         setPageImages({})
-        setCurrentPage(1)
+        setDimsForUrl("")
         const pdfjsLib = await import("pdfjs-dist")
-        if ((globalThis as Record<string, unknown>).pdfjsWorker) {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = ""
-        } else {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-            "pdfjs-dist/build/pdf.worker.mjs",
-            import.meta.url,
-          ).toString()
-        }
+        ensurePdfjsWorker(pdfjsLib)
         const freshFetchUrl = activePdfUrl.includes("?")
           ? `${activePdfUrl}&_nocache=${Date.now()}`
           : `${activePdfUrl}?_nocache=${Date.now()}`
@@ -715,28 +830,40 @@ export default function SignTemplateEditorPage() {
           },
         }).promise
         if (cancelled) return
-        setNumPages(pdf.numPages)
         const dims: Record<number, { w: number; h: number }> = {}
-        const images: Record<number, string> = {}
-        const scale = 2
         for (let p = 1; p <= pdf.numPages; p++) {
           const page = await pdf.getPage(p)
           const dimVp = page.getViewport({ scale: 1 })
           dims[p] = { w: dimVp.width, h: dimVp.height }
+          if (cancelled) return
+        }
+        setNumPages(pdf.numPages)
+        setPageDims(dims)
+        setDimsForUrl(activePdfUrl)
+        const images: Record<number, string> = {}
+        const scale = 1.5
+        for (let p = 1; p <= pdf.numPages; p++) {
+          const page = await pdf.getPage(p)
           const viewport = page.getViewport({ scale })
           const canvas = document.createElement("canvas")
           canvas.width = Math.floor(viewport.width)
           canvas.height = Math.floor(viewport.height)
           const ctx = canvas.getContext("2d")
           if (ctx) {
+            // JPEG không có kênh alpha — phải tô nền trắng, nếu không trang thành nền đen.
+            ctx.fillStyle = "#ffffff"
+            ctx.fillRect(0, 0, canvas.width, canvas.height)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await page.render({ canvasContext: ctx, viewport } as any).promise
-            images[p] = canvas.toDataURL("image/png")
+            if (cancelled) return
+            images[p] = canvas.toDataURL("image/jpeg", 0.85)
+            const img = images[p]
+            setPageImages((prev) => ({ ...prev, [p]: img }))
           }
+          await new Promise((r) => setTimeout(r, 0))
         }
         if (cancelled) return
-        setPageDims(dims)
-        setPageImages(images)
+        pdfCacheRef.current.set(cacheKey, { numPages: pdf.numPages, dims, images })
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Lỗi đọc file PDF tham chiếu")
@@ -746,6 +873,8 @@ export default function SignTemplateEditorPage() {
     }
     void run()
     return () => { cancelled = true }
+    // activeDocId chỉ dùng làm khoá đệm — luôn đổi cùng lượt với activePdfUrl khi chuyển thẻ.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePdfUrl])
 
   // ── Nạp mẫu vị trí đã lưu (nếu có), quy đổi pt -> % theo đúng trang của từng khung ──
@@ -777,10 +906,48 @@ export default function SignTemplateEditorPage() {
     [],
   )
 
+  // Giá trị phụ thuộc tài liệu đang mở, đọc qua ref để effect nạp mẫu KHÔNG chạy lại mỗi khi
+  // chúng đổi (trước đây deps có isoChildDocs/isExemptIsoDoc ⇒ nạp chồng 3-4 lần khi chuyển thẻ).
+  const docCtxRef = useRef({ isoChildDocs, isExemptIsoDoc, isoDocData, paramStepsJson, paramSoBuocTong, docLoaded, docFetchOk })
   useEffect(() => {
-    if (!factoryId || !activeLoai || numPages === 0 || Object.keys(pageDims).length === 0) return
+    docCtxRef.current = { isoChildDocs, isExemptIsoDoc, isoDocData, paramStepsJson, paramSoBuocTong, docLoaded, docFetchOk }
+  })
+
+  useEffect(() => {
+    // Chỉ nạp khi kích thước trang thuộc ĐÚNG file PDF đang mở — tránh quy đổi toạ độ mẫu của tài
+    // liệu mới theo khổ giấy của tài liệu cũ trong lúc chuyển thẻ.
+    if (!factoryId || !activeLoai || numPages === 0 || !pageDims[1] || dimsForUrl !== activePdfUrl) return
     let cancelled = false
     const run = async () => {
+      const ctx = docCtxRef.current
+      const isoChildDocs = ctx.isoChildDocs
+      const isExemptIsoDoc = ctx.isExemptIsoDoc
+      const isoDocData = ctx.isoDocData
+      const paramStepsJson = ctx.paramStepsJson
+      const paramSoBuocTong = ctx.paramSoBuocTong
+      const isoSteps = paramStepsJson
+        || (Array.isArray(isoDocData?.thu_tu_ky_json) && isoDocData.thu_tu_ky_json.length > 0 ? isoDocData.thu_tu_ky_json : null)
+      const isoTotalSteps = isoSteps
+        ? isoSteps.length
+        : (paramSoBuocTong || (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3)))
+      const canReconcileIso = isIso && ctx.docLoaded && ctx.docFetchOk && (!!isoDocData || !!paramStepsJson)
+      const commit = (list: EditorRole[], existed: boolean, hasBoxes: boolean) => {
+        if (cancelled) return
+        const final = canReconcileIso
+          ? reconcileIsoRoles(list, isoSteps, isoTotalSteps, isExemptIsoDoc, cloneSeqRef)
+          : list
+        setRoles(final)
+        setInitialSnapshot(JSON.stringify(final))
+        setTemplateExisted(existed)
+        if (isIso && activeDocId) {
+          setDocTemplateStatus((prev) => {
+            const next = { ...prev }
+            if (!existed) delete next[activeDocId]
+            else next[activeDocId] = hasBoxes ? "co_khung" : "rong"
+            return next
+          })
+        }
+      }
       try {
         const { data: sessionData } = await supabase.auth.getSession()
         const token = sessionData.session?.access_token || ""
@@ -834,13 +1001,10 @@ export default function SignTemplateEditorPage() {
           } else {
             fresh = roleOrder.map((id) => makeBaseRole(id as BaseRoleId, isIso, isExemptIsoDoc))
           }
-          setRoles(fresh)
-          setInitialSnapshot(JSON.stringify(fresh))
-          setLoading(false)
-          setTemplateLoaded(true)
+          // Mẫu có tồn tại nhưng rỗng = biểu mẫu đã được lưu là "không cần ký".
+          commit(fresh, !!template, false)
           return
         }
-        setTemplateExisted(true)
         if (isIso) {
           const loadedRoles: EditorRole[] = []
           const seq: Record<string, number> = {}
@@ -879,8 +1043,7 @@ export default function SignTemplateEditorPage() {
             loadedRoles.push(role)
           }
           cloneSeqRef.current = seq
-          setRoles(loadedRoles)
-          setInitialSnapshot(JSON.stringify(loadedRoles))
+          commit(loadedRoles, true, loadedRoles.length > 0)
         } else {
           const byBase = new Map<string, EditorRole[]>()
           const seq: Record<string, number> = {}
@@ -937,19 +1100,21 @@ export default function SignTemplateEditorPage() {
               result.push(...bRoles)
             }
           }
-          setRoles(result)
-          setInitialSnapshot(JSON.stringify(result))
+          commit(result, true, true)
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Lỗi tải mẫu vị trí")
+        if (!cancelled) setError(err instanceof Error ? err.message : "Lỗi tải mẫu vị trí")
       } finally {
-        setLoading(false)
-        setTemplateLoaded(true)
+        if (!cancelled) {
+          setLoading(false)
+          setTemplateLoaded(true)
+          setSwitchingDoc(false)
+        }
       }
     }
     void run()
     return () => { cancelled = true }
-  }, [factoryId, activeLoai, numPages, pageDims, boxPctFromTemplate, isIso, isExemptIsoDoc, activeDocId, isoChildDocs])
+  }, [factoryId, activeLoai, activeDocId, activePdfUrl, numPages, pageDims, dimsForUrl, boxPctFromTemplate, isIso])
 
   // ── Nạp dữ liệu người ký thật của văn bản đang mở (chỉ khi có docId hoặc formInstanceId) ──
   useEffect(() => {
@@ -1071,28 +1236,45 @@ export default function SignTemplateEditorPage() {
               setIsoChildDocs(validChildren)
             }
 
-            // Kiểm tra trạng thái mẫu đã lưu cho toàn bộ bộ tài liệu
+            // Trạng thái mẫu của cả bộ tài liệu — đọc PHIÊN BẢN MỚI NHẤT mỗi khoá (trước đây chỉ kiểm
+            // "có dòng nào", nên phiên bản mới nhất bị ghi rỗng vẫn báo "Đã đặt").
             const { data: tmplRows } = await supabase
               .from("mau_vi_tri")
-              .select("loai_tai_lieu")
+              .select("loai_tai_lieu, phien_ban, khung")
               .eq("factory_id", factoryId)
               .like("loai_tai_lieu", "iso:%")
+              .order("phien_ban", { ascending: false })
             if (!cancelled) {
-              const tmplKeySet = new Set((tmplRows || []).map((t) => t.loai_tai_lieu))
-              const checkHasTmpl = (item: { ma_tai_lieu: string | null; loai_tai_lieu: string | null }) => {
-                if (item.ma_tai_lieu && tmplKeySet.has(`iso:code:${item.ma_tai_lieu}`)) return true
-                if (item.loai_tai_lieu && tmplKeySet.has(`iso:loai:${item.loai_tai_lieu}`)) return true
-                return false
+              const latestByKey = new Map<string, number>()
+              for (const t of (tmplRows || []) as Array<{ loai_tai_lieu: string; khung: unknown }>) {
+                if (!latestByKey.has(t.loai_tai_lieu)) {
+                  latestByKey.set(t.loai_tai_lieu, Array.isArray(t.khung) ? t.khung.length : 0)
+                }
               }
-              const statusMap: Record<string, boolean> = {
-                [data.id]: checkHasTmpl(data),
+              // Cùng thứ tự khoá mà màn này dùng khi nạp mẫu (formatIsoTemplateKey của mã, rồi loại).
+              const statusOf = (item: { ma_tai_lieu: string | null; loai_tai_lieu: string | null }) => {
+                const keys = [
+                  item.ma_tai_lieu ? `iso:loai:${item.ma_tai_lieu}` : "",
+                  item.ma_tai_lieu ? `iso:code:${item.ma_tai_lieu}` : "",
+                  item.loai_tai_lieu ? `iso:loai:${item.loai_tai_lieu}` : "",
+                ].filter(Boolean)
+                for (const k of keys) {
+                  const n = latestByKey.get(k)
+                  if (n !== undefined) return n > 0 ? ("co_khung" as const) : ("rong" as const)
+                }
+                return null
               }
+              const statusMap: Record<string, "co_khung" | "rong"> = {}
+              const mainStatus = statusOf(data)
+              if (mainStatus) statusMap[data.id] = mainStatus
               if (children) {
                 children.forEach((c) => {
-                  statusMap[c.id] = checkHasTmpl(c)
+                  const st = statusOf(c)
+                  if (st) statusMap[c.id] = st
                 })
               }
-              setDocTemplateStatus(statusMap)
+              // Gộp, không ghi đè trạng thái mà bộ nạp mẫu đã xác định cho thẻ đang mở.
+              setDocTemplateStatus((prev) => ({ ...statusMap, ...prev }))
             }
           }
 
@@ -1228,90 +1410,7 @@ export default function SignTemplateEditorPage() {
         : (paramSoBuocTong || (isoDocData?.cap_tl === "Cấp 2" || isoDocData?.so_buoc_tong === 2 ? 2 : (isoDocData?.so_buoc_tong || 3)))
 
       setRoles((prev) => {
-        const nextRoles: EditorRole[] = []
-        const usedRoleIds = new Set<string>()
-
-        // 1. Quét qua N bước thật của quy trình
-        for (let i = 0; i < totalSteps; i++) {
-          const stepKey = `buoc_${i + 1}`
-          const defaultLabel = i === 0 ? "Người lập" : i === totalSteps - 1 ? "Phê duyệt" : (totalSteps === 3 && i === 1 ? "Xem xét" : `Bước ${i + 1}`)
-          const stepLabel = steps?.[i]?.ten?.trim() || defaultLabel
-
-          // Tìm khung chính trong prev:
-          // Ưu tiên 1: khung chính không phải clone khớp đúng stepKey
-          let mainRole = prev.find((r) => !usedRoleIds.has(r.id) && !r.isClone && !r.id.includes("__ban") && (r.id === stepKey || r.baseId === stepKey))
-          // Ưu tiên 2: fallback legacy (soan_thao cho bước 1, phe_duyet cho bước cuối, xem_xet cho bước 2)
-          if (!mainRole) {
-            mainRole = prev.find((r) => {
-              if (usedRoleIds.has(r.id) || r.isClone || r.id.includes("__ban")) return false
-              if (i === 0 && (r.id === "soan_thao" || r.baseId === "soan_thao")) return true
-              if (i === totalSteps - 1 && (r.id === "phe_duyet" || r.baseId === "phe_duyet")) return true
-              if (totalSteps === 3 && i === 1 && (r.id === "xem_xet" || r.baseId === "xem_xet")) return true
-              return false
-            })
-          }
-          // Ưu tiên 3: khung theo nhãn (nếu có nhãn trùng)
-          if (!mainRole) {
-            mainRole = prev.find((r) => !usedRoleIds.has(r.id) && !r.isClone && !r.id.includes("__ban") && r.label === stepLabel)
-          }
-
-          if (mainRole) {
-            usedRoleIds.add(mainRole.id)
-            nextRoles.push({
-              ...mainRole,
-              id: stepKey,
-              baseId: stepKey as BaseRoleId,
-              label: stepLabel,
-              batBuoc: isExemptIsoDoc ? false : true,
-              isClone: false,
-              hiddenForDoc: false,
-            })
-          } else {
-            nextRoles.push(makeBaseRole(stepKey, true, isExemptIsoDoc, stepLabel, i + 1, totalSteps))
-          }
-
-          // Bảo lưu toàn bộ các khung BẢN SAO THẬT SỰ của bước này (chỉ r.isClone hoặc r.id có __ban)
-          const genuineClones = prev.filter((r) => {
-            if (usedRoleIds.has(r.id)) return false
-            if (!r.isClone && !r.id.includes("__ban")) return false
-            if (r.baseId === stepKey || r.id.startsWith(`${stepKey}__`)) return true
-            if (mainRole && (r.baseId === mainRole.id || r.id.startsWith(`${mainRole.id}__`))) return true
-            return false
-          })
-
-          let cloneSeq = 1
-          genuineClones.forEach((cloneRole) => {
-            usedRoleIds.add(cloneRole.id)
-            const cIdx = roleCloneIndex(cloneRole)
-            cloneSeq = Math.max(cloneSeq, cIdx)
-            nextRoles.push({
-              ...cloneRole,
-              baseId: stepKey as BaseRoleId,
-              label: `${stepLabel} · bản ${cIdx}`,
-              isClone: true,
-              hiddenForDoc: false,
-            })
-          })
-          cloneSeqRef.current[stepKey] = Math.max(cloneSeqRef.current[stepKey] || 1, cloneSeq)
-        }
-
-        // 2. Thêm các vai trò phụ (QR, Ngày ký, Ghi chú)
-        const auxOrder: BaseRoleId[] = ["qr", "ngay_ky", "ghi_chu"]
-        for (const auxId of auxOrder) {
-          const matchedAux = prev.filter((r) => (r.baseId === auxId || r.id === auxId || r.id.startsWith(`${auxId}__`)) && !usedRoleIds.has(r.id))
-          if (matchedAux.length > 0) {
-            matchedAux.forEach((r) => {
-              usedRoleIds.add(r.id)
-              nextRoles.push({ ...r, hiddenForDoc: false })
-            })
-          } else {
-            nextRoles.push(makeBaseRole(auxId, true, isExemptIsoDoc))
-          }
-        }
-
-        // ⚠️ TUYỆT ĐỐI KHÔNG lưu lại các khung dư (remainingPlaced) từ các mẫu cũ không tương thích (vd mẫu 5 bước sang quy trình 2 bước).
-        // Chỉ lưu giữ chính xác N bước của quy trình hiện tại + clone hợp lệ + vai trò phụ.
-
+        const nextRoles = reconcileIsoRoles(prev, steps, totalSteps, isExemptIsoDoc, cloneSeqRef)
         setInitialSnapshot(JSON.stringify(nextRoles))
         return nextRoles
       })
@@ -1323,64 +1422,40 @@ export default function SignTemplateEditorPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateLoaded, docLoaded, docId, formInstanceId, docFetchOk, docSteps, isIso, isoDocData])
 
-  const handleSwitchIsoDoc = async (
+  // Chuyển thẻ trong "Bộ hồ sơ": lấy Signed URL TRƯỚC rồi mới đổi cả 4 giá trị cùng một lượt — đổi
+  // activeDocId trước (như bản cũ) khiến bộ nạp mẫu chạy với loại/khổ giấy của tài liệu cũ.
+  // KHÔNG tự lưu mẫu khi chuyển thẻ (bản cũ tự lưu ⇒ ghi đè hàng chục phiên bản rỗng).
+  const doSwitchIsoDoc = async (target: { id: string; url: string; loai: string; label: string }) => {
+    setPendingSwitch(null)
+    setSwitchingDoc(true)
+    setTemplateLoaded(false)
+    setInitialSnapshot("")
+    setTemplateExisted(false)
+    setSelectedRoleId(null)
+    setArmedRoleId(null)
+    let url = target.url
+    const fileRes = await fetchSecureUrl(`/api/iso/documents/${target.id}/file-url?variant=main`)
+    if (fileRes.ok) url = fileRes.url
+    setRoles([])
+    setActiveDocId(target.id)
+    setActivePdfUrl(url)
+    setActiveLoai(target.loai)
+    setActiveDocLabel(target.label)
+  }
+
+  const handleSwitchIsoDoc = (
     targetDocId: string,
     targetUrl: string,
     targetLoai: string,
     targetLabel: string,
   ) => {
-    if (targetDocId === activeDocId) return
-
-    // Tự động lưu tài liệu hiện tại nếu có thay đổi HOẶC tài liệu con chưa có mẫu
-    if ((dirty || (!templateExisted && isExemptIsoDoc)) && factoryId && me) {
-      const placedBoxes = buildKhungPayload()
-      if (placedBoxes.length > 0 || isExemptIsoDoc) {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession()
-          const token = sessionData.session?.access_token || ""
-          const keyToSave = isIso ? formatIsoTemplateKey(activeLoai) : activeLoai
-          const res = await fetch("/api/signing/templates", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-              factoryId,
-              loaiTaiLieu: keyToSave,
-              khung: placedBoxes,
-              modun: isIso ? "iso" : "van_ban",
-              allowEmpty: isExemptIsoDoc,
-            }),
-          })
-          if (res.ok) {
-            setDocTemplateStatus((prev) => ({ ...prev, [activeDocId]: true }))
-            showToast(`Đã tự động lưu vị trí cho ${activeDocLabel}`)
-          }
-        } catch {
-          // ignore auto-save error non-blocking
-        }
-      }
+    if (targetDocId === activeDocId || switchingDoc) return
+    const target = { id: targetDocId, url: targetUrl, loai: targetLoai, label: targetLabel }
+    if (dirty && templateLoaded) {
+      setPendingSwitch(target)
+      return
     }
-
-    setActiveDocId(targetDocId)
-    // Mint Signed URL cho tài liệu con khi chuyển tab thay vì truyền URL public thô từ DB
-    const fileRes = await fetchSecureUrl(`/api/iso/documents/${targetDocId}/file-url?variant=main`)
-    if (fileRes.ok) {
-      setActivePdfUrl(fileRes.url)
-    } else {
-      setActivePdfUrl(targetUrl)
-    }
-    setActiveLoai(targetLoai)
-    setActiveDocLabel(targetLabel)
-    setTemplateLoaded(false)
-    const roleOrder = isIso ? ISO_ROLE_ORDER : ROLE_ORDER
-    const targetIsExempt = isIso && (
-      targetDocId !== docId ||
-      isoChildDocs.some((c) => c.id === targetDocId) ||
-      ["F", "HD", "PL"].includes(targetLoai.toUpperCase().trim().replace(/^ISO:(LOAI|CODE):/, "")) ||
-      /-F\d+/i.test(targetLoai) || /-HD\d+/i.test(targetLoai) || /-PL\d+/i.test(targetLoai)
-    )
-    setRoles(roleOrder.map((id) => makeBaseRole(id as BaseRoleId, isIso, targetIsExempt)))
-    setSelectedRoleId(null)
-    setArmedRoleId(null)
+    void doSwitchIsoDoc(target)
   }
 
   const dirty = useMemo(() => {
@@ -2016,7 +2091,36 @@ export default function SignTemplateEditorPage() {
       .filter((b): b is SignTemplateBox => !!b)
   }
 
-  const handleConfirmAndSend = async () => {
+  /** Lưu mẫu của tài liệu đang mở thành phiên bản mới. Mẫu rỗng chỉ khi `allowEmpty` tường minh. */
+  const saveCurrentTemplate = async (allowEmpty = false) => {
+    if (!factoryId || !me) throw new Error("Phiên đăng nhập đã hết hạn.")
+    if (!templateLoaded) throw new Error("Mẫu vị trí đang tải — vui lòng thử lại.")
+    const khung = buildKhungPayload()
+    if (!khung.length && !allowEmpty) throw new Error("Chưa đặt khung nào — cần ít nhất 1 khung trước khi lưu mẫu vị trí.")
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData.session?.access_token || ""
+    const keyToSave = isIso ? formatIsoTemplateKey(activeLoai) : (activeLoai || "KHONG_MA")
+    const res = await fetch("/api/signing/templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        factoryId,
+        loaiTaiLieu: keyToSave,
+        khung,
+        modun: isIso ? "iso" : "van_ban",
+        allowEmpty: khung.length === 0,
+      }),
+    })
+    const json = (await res.json()) as { template?: unknown; error?: string }
+    if (!res.ok) throw new Error(json.error || "Lỗi lưu mẫu vị trí")
+    setInitialSnapshot(JSON.stringify(roles))
+    setTemplateExisted(true)
+    if (isIso && activeDocId) {
+      setDocTemplateStatus((prev) => ({ ...prev, [activeDocId]: khung.length ? "co_khung" : "rong" }))
+    }
+  }
+
+  const handleConfirmAndSend = async (opts?: { allowEmpty?: boolean }) => {
     if (missingRequired.length > 0) {
       setMissingStepsAlert({
         open: true,
@@ -2134,26 +2238,17 @@ export default function SignTemplateEditorPage() {
     setError("")
     try {
       if (dirty || !templateExisted) {
-        const { data: sessionData } = await supabase.auth.getSession()
-        const token = sessionData.session?.access_token || ""
-        const keyToSave = isIso ? formatIsoTemplateKey(activeLoai) : (activeLoai || "KHONG_MA")
-        const res = await fetch("/api/signing/templates", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-              factoryId,
-              loaiTaiLieu: keyToSave,
-              khung: buildKhungPayload(),
-              modun: isIso ? "iso" : "van_ban",
-              allowEmpty: isExemptIsoDoc,
-            }),
-        })
-        const json = (await res.json()) as { template?: unknown; error?: string }
-        if (!res.ok) throw new Error(json.error || "Lỗi lưu mẫu vị trí")
+        const khung = buildKhungPayload()
+        if (!khung.length && !opts?.allowEmpty) {
+          if (isIso && isExemptIsoDoc) {
+            // Lưu biểu mẫu KHÔNG có khung nào phải do người dùng xác nhận tường minh.
+            setEmptySaveConfirm(true)
+            return
+          }
+          throw new Error("Chưa đặt khung nào — cần ít nhất 1 khung trước khi lưu mẫu vị trí.")
+        }
+        await saveCurrentTemplate(true)
       }
-      setInitialSnapshot(JSON.stringify(roles))
-      setTemplateExisted(true)
-      setDocTemplateStatus((prev) => ({ ...prev, [activeDocId]: true }))
 
       // Khi cài đặt vị trí thành công cho tài liệu ISO cụ thể, gửi thông báo giao_soan_thao cho người soạn thảo
       if (isIso && activeDocId) {
@@ -2251,6 +2346,23 @@ export default function SignTemplateEditorPage() {
         </button>
       </div>
     )
+  }
+
+  // Nhãn của thẻ đang mở: chỉ tính từ khung sống SAU KHI mẫu nạp xong (trước đó báo "Đang tải").
+  const renderActiveDocBadge = (id: string) => {
+    if (!templateLoaded || switchingDoc) {
+      return <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium">Đang tải…</span>
+    }
+    if (isCurrentDocFullyPlaced) {
+      return <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
+    }
+    if (isCurrentDocPartiallyPlaced) {
+      return <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">⚠ Chưa đủ bước</span>
+    }
+    if (!dirty && docTemplateStatus[id] === "rong") {
+      return <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium">Không ký</span>
+    }
+    return <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium">• Chưa đặt</span>
   }
 
   const renderSidebarContent = (isMobile = false) => (
@@ -2643,15 +2755,11 @@ export default function SignTemplateEditorPage() {
           >
             <span>📄 Quy trình chính ({isoDocData?.ma_tai_lieu || "Tài liệu"})</span>
             {activeDocId === docId ? (
-              isCurrentDocFullyPlaced ? (
-                <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
-              ) : isCurrentDocPartiallyPlaced ? (
-                <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">⚠ Chưa đủ bước</span>
-              ) : (
-                <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium">• Chưa đặt</span>
-              )
-            ) : docTemplateStatus[docId] ? (
+              renderActiveDocBadge(docId)
+            ) : docTemplateStatus[docId] === "co_khung" ? (
               <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
+            ) : docTemplateStatus[docId] === "rong" ? (
+              <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium" title="Đã lưu là biểu mẫu không cần khung ký">Không ký</span>
             ) : (
               <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">• Chưa đặt</span>
             )}
@@ -2673,15 +2781,11 @@ export default function SignTemplateEditorPage() {
             >
               <span>📑 Biểu mẫu: {child.ma_tai_lieu || child.ten_tai_lieu || `Hồ sơ ${idx + 1}`}</span>
               {activeDocId === child.id ? (
-                isCurrentDocFullyPlaced ? (
-                  <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
-                ) : isCurrentDocPartiallyPlaced ? (
-                  <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">⚠ Chưa đủ bước</span>
-                ) : (
-                  <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium">• Chưa đặt</span>
-                )
-              ) : docTemplateStatus[child.id] ? (
+                renderActiveDocBadge(child.id)
+              ) : docTemplateStatus[child.id] === "co_khung" ? (
                 <span className="px-1 py-0.5 rounded text-[9px] bg-emerald-800 text-emerald-100 font-bold">✓ Đã đặt</span>
+              ) : docTemplateStatus[child.id] === "rong" ? (
+                <span className="px-1 py-0.5 rounded text-[9px] bg-white/20 text-white/80 font-medium" title="Đã lưu là biểu mẫu không cần khung ký">Không ký</span>
               ) : (
                 <span className="px-1 py-0.5 rounded text-[9px] bg-amber-500 text-white font-bold">• Chưa đặt</span>
               )}
@@ -2848,7 +2952,14 @@ export default function SignTemplateEditorPage() {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={pageImages[currentPage]} alt={`Trang ${currentPage}`} className="w-full h-full object-contain pointer-events-none select-none" draggable={false} />
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-300 text-sm">Không tải được ảnh trang</div>
+              <div className="absolute inset-0 flex items-center justify-center text-slate-300 text-sm">
+                {numPages > 0 ? "Đang dựng trang…" : "Không tải được ảnh trang"}
+              </div>
+            )}
+            {(switchingDoc || !templateLoaded) && (
+              <div className="absolute inset-0 z-40 flex items-center justify-center gap-2 bg-white/85 text-sm font-semibold text-slate-600">
+                <Loader2 className="animate-spin" size={16} /> Đang tải biểu mẫu và mẫu vị trí…
+              </div>
             )}
             {gridVisible && (
               <div
@@ -3134,6 +3245,79 @@ export default function SignTemplateEditorPage() {
             </button>
           </div>
         </div>
+      )}
+      {pendingSwitch && (
+        <ModalShell title="Lưu thay đổi trước khi chuyển?" onClose={() => setPendingSwitch(null)} maxWidth="sm">
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Bạn đã chỉnh vị trí của <strong>{activeDocLabel}</strong> nhưng chưa lưu. Chọn cách xử lý trước khi chuyển sang tài liệu khác.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setPendingSwitch(null)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                Ở lại
+              </button>
+              <button
+                type="button"
+                onClick={() => { const t = pendingSwitch; if (t) void doSwitchIsoDoc(t) }}
+                className="px-3.5 py-2 text-xs font-bold rounded-xl border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+              >
+                Bỏ thay đổi
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                  const t = pendingSwitch
+                  if (!t) return
+                  setSaving(true)
+                  try {
+                    await saveCurrentTemplate(isExemptIsoDoc)
+                    showToast(`Đã lưu vị trí cho ${activeDocLabel}`)
+                    await doSwitchIsoDoc(t)
+                  } catch (err) {
+                    setPendingSwitch(null)
+                    showToast(err instanceof Error ? err.message : "Lỗi lưu mẫu vị trí")
+                  } finally {
+                    setSaving(false)
+                  }
+                }}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 shadow-sm"
+              >
+                Lưu &amp; chuyển
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+      {emptySaveConfirm && (
+        <ModalShell title="Biểu mẫu này không cần ký?" onClose={() => setEmptySaveConfirm(false)} maxWidth="sm">
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Chưa có khung nào trên <strong>{activeDocLabel}</strong>. Nếu lưu, biểu mẫu sẽ được ghi nhận là <strong>không cần khung ký</strong>
+              {" "}và sẽ không có chữ ký/QR nào được đóng lên file này.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setEmptySaveConfirm(false)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                Quay lại đặt khung
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEmptySaveConfirm(false); void handleConfirmAndSend({ allowEmpty: true }) }}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-700 text-white hover:bg-slate-800 shadow-sm"
+              >
+                Đúng, không cần ký
+              </button>
+            </div>
+          </div>
+        </ModalShell>
       )}
       {/* Modal xác nhận đặt lại/tạo mẫu mới */}
       {showResetConfirmModal && (

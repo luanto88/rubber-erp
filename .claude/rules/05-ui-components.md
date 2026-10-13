@@ -440,3 +440,23 @@ Bố cục theo mẫu `previews/enterprise-iso-vanban-unified-preview.html`, **m
   `font-doc` + `bg-app-bg`) cho `/van-ban-verify/[logId]` (GIỮ CÔNG KHAI — người dùng chốt) và
   `/iso-doc/[id]`; nội dung dùng `StatusBadge` / `DocCodePill` / `InspectorCard` + `MetaRow`.
   Link "Đăng nhập" ở `/iso-doc` → `/login?next=/dashboard/iso/documents/{id}`.
+
+### Vá màn "Cài đặt vị trí ký" — bộ hồ sơ ISO (2026-10-13, chưa test tay)
+
+- Bug thật đo trên DB: chuyển thẻ biểu mẫu trong "Bộ hồ sơ" **tự lưu** mẫu với cờ `dirty` /
+  `templateExisted` lẫn lộn ⇒ ghi đè hàng chục phiên bản `khung = []` (NMCB-QT77-F01 có 25 phiên bản,
+  chỉ 5 bản có khung). API cho ISO lưu rỗng ngầm (`allowEmpty: isIso || …`).
+- Nay: **không tự lưu khi chuyển thẻ**; còn thay đổi chưa lưu ⇒ hộp "Ở lại / Bỏ thay đổi / Lưu &
+  chuyển". Lấy Signed URL trước rồi đổi `activeDocId/activePdfUrl/activeLoai/activeDocLabel` cùng
+  lượt; nạp mẫu chỉ khi `dimsForUrl === activePdfUrl` (khổ giấy đúng file); deps không còn
+  `isoChildDocs/isExemptIsoDoc` (đọc qua `docCtxRef`). Ảnh trang dựng dần (JPEG 1.5x) + đệm theo
+  `activeDocId`. ISO reconcile N bước tách thành hàm thuần `reconcileIsoRoles` (gọi mỗi lần nạp mẫu).
+- API `api/signing/templates`: mẫu rỗng CHỈ khi body `allowEmpty === true`. Màn cài đặt chỉ gửi rỗng
+  sau hộp xác nhận "Biểu mẫu này không cần ký?".
+- `docTemplateStatus`: `"co_khung" | "rong"` theo **phiên bản mới nhất** mỗi khoá (thẻ hiện "Đã đặt" /
+  "Không ký" / "Chưa đặt"; thẻ đang mở hiện "Đang tải…" tới khi mẫu nạp xong).
+- Khôi phục: `scripts/restore-empty-sign-templates.mjs` (mặc định xem; `--apply` chèn phiên bản mới
+  copy từ bản có khung ký gần nhất, không sửa/xoá dòng cũ).
+- 2026-10-13 (tiếp): **đã xoá modal đặt vị trí cũ** ở `iso/documents/[id]` (~1.400 dòng: state
+  `placementModal`, `openPlacementForTask`, `handlePlacementConfirm`, JSX). Có PDF ⇒ luôn
+  `IsoBatchSignModal`; không có PDF ⇒ `PinDialog` rồi `doTransition` trực tiếp.

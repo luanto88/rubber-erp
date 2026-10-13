@@ -7884,3 +7884,11 @@ Chi tiết: `.claude/rules/06-module-production.md` mục 4.5 (GĐ6b) và 4.13 (
   cột `kien_changes`, nhưng RPC cũ chưa chặn đổi trùng).
 - Phát hiện khi đối soát: `sk_history.from_boc` cũ không tin được theo kiện; 1679cs/26 bị sửa bọc tay qua
   "Sửa giao dịch" (không có trong sk_history) ⇒ F12 bỏ dựng lại lô này (lưới an toàn), tính theo bọc hiện tại.
+
+## Kế hoạch đồng bộ giao diện toàn app (2026-10-13)
+
+Kế hoạch đầy đủ (quy chuẩn màu, font, bảng, từ điển icon, giai đoạn U0–U8):
+`.claude/plans/ke-hoach-dong-bo-ui-toan-app.md`. Đã chốt: con mắt = xem chi tiết; giữ màu banner
+riêng từng module, còn lại dùng `brand-*`; font Plus Jakarta Sans toàn app; thứ tự Bảo trì → Điều xe
+→ Kiểm nghiệm → Đề nghị mua → Kho vật tư → Xuất hàng → Thành phẩm/Sản lượng/Kho NL. Phiên sau bắt
+đầu từ U0 (nền tảng) — dựng `cung_cap_dl/UIUX/chuan-ui.html` cho người dùng duyệt trước khi code.

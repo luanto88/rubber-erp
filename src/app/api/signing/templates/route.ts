@@ -117,7 +117,9 @@ export async function POST(req: NextRequest) {
       loaiTaiLieu: body.loaiTaiLieu,
       khung: body.khung,
       taoBoi: authUser.id,
-      allowEmpty: isIso || !!body.allowEmpty,
+      // Mẫu rỗng ("biểu mẫu không cần ký") chỉ khi client xác nhận tường minh — trước đây ISO luôn
+      // cho phép rỗng ngầm, màn cài đặt tự lưu khi chuyển thẻ đã ghi đè hàng loạt phiên bản rỗng.
+      allowEmpty: body.allowEmpty === true,
     })
     return NextResponse.json({ template })
   } catch (err) {
