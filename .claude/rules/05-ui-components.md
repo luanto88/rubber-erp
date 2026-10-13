@@ -421,3 +421,22 @@ Bố cục theo mẫu `previews/enterprise-iso-vanban-unified-preview.html`, **m
   tài liệu + drawer mobile giữ nguyên bên trong). Chỉ đổi vỏ — toạ độ/kẹp khung/payload không đổi.
 - **`doc-ui/pdfjs-worker.ts` `ensurePdfjsWorker(pdfjsLib)`** — worker luôn từ gói đã cài; đã bỏ worker
   CDN ở modal ISO tài liệu. (Màn ký hàng loạt còn `cMapUrl` CDN — chưa đổi.)
+
+### Vá sau test GĐ5 + GĐ6 (2026-10-13)
+
+- **Bước Soạn thảo ISO dùng `IsoBatchSignModal`** (cùng màn với Xem xét/Phê duyệt): rail trái liệt kê
+  cả bộ, thumbnail có khung, chức vụ trên tên, 1 lần PIN. Helper `openSignStep()` ở
+  `iso/documents/[id]`: bộ có PDF → màn ký tập trung; bộ chỉ DOCX/XLSX → `PinDialog` (handlePinConfirm
+  tự chuyển trạng thái). Modal đặt vị trí cũ chỉ còn là nhánh dự phòng `fallbackTask`.
+  Ở bước Soạn thảo modal đọc file GỐC (`file-url?source=original`), không hiện chữ ký vòng trước.
+- `IsoBatchSignModal` bỏ `cMapUrl` CDN (từng ghim pdfjs 5.4.449, lệch bản cài 5.7.284) — như DocViewer.
+- **Chống màn trắng**: `src/app/error.tsx` + `global-error.tsx` (`AppErrorView`: thông điệp lỗi, Tải
+  lại, Mở bằng trình duyệt ngoài). Mọi truy cập `localStorage/sessionStorage` lúc khởi động bọc
+  try/catch (`supabase.ts` rơi về bộ nhớ RAM; `auth.ts`, `customer-portal-i18n.ts`, layout). Code mới
+  đọc storage ở luồng khởi động PHẢI bọc try/catch — WebView Telegram/Zalo có thể ném SecurityError.
+- `OpenExternalBrowser` (`src/app/_components/`, `src/lib/in-app-browser.ts`): banner ở /login khi mở
+  trong Telegram/Zalo/Facebook/WebView — "Mở bằng Chrome" (intent:// Android) + Sao chép link.
+- **GĐ6 trang công khai**: `PublicDocShell` (`src/app/_components/public-doc-shell.tsx`, dải brand +
+  `font-doc` + `bg-app-bg`) cho `/van-ban-verify/[logId]` (GIỮ CÔNG KHAI — người dùng chốt) và
+  `/iso-doc/[id]`; nội dung dùng `StatusBadge` / `DocCodePill` / `InspectorCard` + `MetaRow`.
+  Link "Đăng nhập" ở `/iso-doc` → `/login?next=/dashboard/iso/documents/{id}`.

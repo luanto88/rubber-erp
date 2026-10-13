@@ -14,7 +14,8 @@ const LANG_CHANGE_EVENT = "customer-portal-lang-changed"
 
 export function getStoredCustomerPortalLang(): CustomerPortalLang {
   if (typeof window === "undefined") return "en"
-  return window.localStorage.getItem(STORAGE_KEY) === "vi" ? "vi" : "en"
+  // try/catch: trình duyệt trong ứng dụng (Telegram...) có thể chặn localStorage.
+  try { return window.localStorage.getItem(STORAGE_KEY) === "vi" ? "vi" : "en" } catch { return "en" }
 }
 
 // true nếu người dùng đã từng chọn ngôn ngữ tường minh (ở bất kỳ trang nào dùng chung
@@ -22,12 +23,12 @@ export function getStoredCustomerPortalLang(): CustomerPortalLang {
 // lựa chọn cũ khi nó thực sự tồn tại, không ăn theo default "en" của Customer Portal.
 export function hasStoredCustomerPortalLang(): boolean {
   if (typeof window === "undefined") return false
-  return window.localStorage.getItem(STORAGE_KEY) !== null
+  try { return window.localStorage.getItem(STORAGE_KEY) !== null } catch { return false }
 }
 
 export function setStoredCustomerPortalLang(lang: CustomerPortalLang) {
   if (typeof window === "undefined") return
-  window.localStorage.setItem(STORAGE_KEY, lang)
+  try { window.localStorage.setItem(STORAGE_KEY, lang) } catch { /* storage bị chặn */ }
 }
 
 // Lưu lựa chọn + phát sự kiện để các thành phần khác đang mở cùng lúc (vd khung

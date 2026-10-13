@@ -10,9 +10,43 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 // tại) là "nhớ" — không đổi hành vi hiện có của người dùng cũ.
 const REMEMBER_KEY = "erp_remember_me"
 
+// Một số trình duyệt nhúng trong ứng dụng (Telegram, Zalo, Facebook...) chặn hoặc giới hạn
+// localStorage/sessionStorage: chỉ cần ĐỌC thuộc tính `window.localStorage` cũng ném SecurityError,
+// làm sập toàn bộ app thành màn trắng (bug mở link từ nhóm Telegram, 2026-10-13). Mọi truy cập
+// storage ở đây đều qua `safeStorage()`; bị chặn thì rơi về bộ nhớ RAM (phiên chỉ sống trong tab).
+const memoryStore = new Map<string, string>()
+const memoryStorage = {
+  getItem: (key: string) => memoryStore.get(key) ?? null,
+  setItem: (key: string, value: string) => { memoryStore.set(key, value) },
+  removeItem: (key: string) => { memoryStore.delete(key) },
+}
+type MiniStorage = typeof memoryStorage
+
+const storageUsable: Partial<Record<"localStorage" | "sessionStorage", boolean>> = {}
+function safeStorage(kind: "localStorage" | "sessionStorage"): MiniStorage {
+  if (storageUsable[kind] === false) return memoryStorage
+  try {
+    const store = window[kind]
+    if (storageUsable[kind] === undefined) {
+      const probe = "__erp_probe__"
+      store.setItem(probe, "1")
+      store.removeItem(probe)
+      storageUsable[kind] = true
+    }
+    return store
+  } catch {
+    storageUsable[kind] = false
+    return memoryStorage
+  }
+}
+
 export function setRememberMe(remember: boolean) {
   if (typeof window === "undefined") return
-  window.localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0")
+  try {
+    safeStorage("localStorage").setItem(REMEMBER_KEY, remember ? "1" : "0")
+  } catch {
+    // storage đầy / bị chặn — giữ mặc định "nhớ đăng nhập"
+  }
 }
 
 // CHỈ 1 client Supabase duy nhất trong suốt vòng đời tab (không tạo 2 client khác `storage` rồi
@@ -22,17 +56,23 @@ export function setRememberMe(remember: boolean) {
 // SỐNG của REMEMBER_KEY tại đúng thời điểm gọi getItem/setItem/removeItem — nhờ vậy checkbox có
 // hiệu lực thật ngay trong cùng 1 lần tải trang (kể cả vừa mới bỏ tick rồi bấm đăng nhập ngay),
 // không cần reload lại trang để "chọn client mới".
-function activeAuthStorage(): Storage {
-  return window.localStorage.getItem(REMEMBER_KEY) === "0" ? window.sessionStorage : window.localStorage
+function activeAuthStorage(): MiniStorage {
+  const local = safeStorage("localStorage")
+  return local.getItem(REMEMBER_KEY) === "0" ? safeStorage("sessionStorage") : local
 }
 
 const routedAuthStorage = {
-  getItem: (key: string) => (typeof window === "undefined" ? null : activeAuthStorage().getItem(key)),
+  getItem: (key: string) => {
+    if (typeof window === "undefined") return null
+    try { return activeAuthStorage().getItem(key) } catch { return memoryStorage.getItem(key) }
+  },
   setItem: (key: string, value: string) => {
-    if (typeof window !== "undefined") activeAuthStorage().setItem(key, value)
+    if (typeof window === "undefined") return
+    try { activeAuthStorage().setItem(key, value) } catch { memoryStorage.setItem(key, value) }
   },
   removeItem: (key: string) => {
-    if (typeof window !== "undefined") activeAuthStorage().removeItem(key)
+    if (typeof window === "undefined") return
+    try { activeAuthStorage().removeItem(key) } catch { memoryStorage.removeItem(key) }
   },
 }
 

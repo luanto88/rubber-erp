@@ -51,13 +51,18 @@ export function authEmailsForUsername(username: string) {
 }
 
 export function clearLegacySession() {
-  localStorage.removeItem("erp_user")
-  localStorage.removeItem("erp_factory")
-  // Draft phiếu kho lưu theo thiết bị, không theo user — dọn khi đăng xuất để tránh tên người
-  // dùng cũ (Người lập phiếu) rò rỉ sang tài khoản khác đăng nhập sau trên cùng máy.
-  localStorage.removeItem("inventory-issue-draft-v4")
-  localStorage.removeItem("inventory-receipt-draft-v5")
-  localStorage.removeItem("inventory-transfer-draft-v3")
+  // try/catch: trình duyệt trong ứng dụng (Telegram...) có thể chặn localStorage — xem supabase.ts.
+  try {
+    localStorage.removeItem("erp_user")
+    localStorage.removeItem("erp_factory")
+    // Draft phiếu kho lưu theo thiết bị, không theo user — dọn khi đăng xuất để tránh tên người
+    // dùng cũ (Người lập phiếu) rò rỉ sang tài khoản khác đăng nhập sau trên cùng máy.
+    localStorage.removeItem("inventory-issue-draft-v4")
+    localStorage.removeItem("inventory-receipt-draft-v5")
+    localStorage.removeItem("inventory-transfer-draft-v3")
+  } catch {
+    // storage bị chặn — không có gì để dọn
+  }
 }
 
 export function clearSupabaseBrowserSession() {
@@ -77,13 +82,17 @@ export function clearSupabaseBrowserSession() {
     }
   }
 
-  clearStore(window.localStorage)
-  clearStore(window.sessionStorage)
+  try { clearStore(window.localStorage) } catch { /* storage bị chặn */ }
+  try { clearStore(window.sessionStorage) } catch { /* storage bị chặn */ }
 }
 
 export function persistLegacySession(user: SessionUser) {
-  localStorage.setItem("erp_user", JSON.stringify(user))
-  localStorage.setItem("erp_factory", user.factory_id || "")
+  try {
+    localStorage.setItem("erp_user", JSON.stringify(user))
+    localStorage.setItem("erp_factory", user.factory_id || "")
+  } catch {
+    // storage bị chặn (trình duyệt trong ứng dụng) — cache UI không có, phiên Supabase vẫn chạy
+  }
 }
 
 export async function getAuthSession() {
@@ -309,7 +318,8 @@ export async function getActiveFactoryId() {
     return null
   }
 
-  const cachedFactoryId = localStorage.getItem("erp_factory")
+  let cachedFactoryId: string | null = null
+  try { cachedFactoryId = localStorage.getItem("erp_factory") } catch { cachedFactoryId = null }
   if (cachedFactoryId) return cachedFactoryId
 
   const user = await buildSessionUser(session.user)

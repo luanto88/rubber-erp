@@ -526,10 +526,10 @@ export default function IsoDocumentDetailPage() {
     showToast(true, "Đã lưu cài đặt vị trí ký thành công. Vui lòng bấm Ký để tiến hành gửi duyệt.")
   }, [doc, factoryId, searchParams, docId, router])
 
-  // Modal ký duyệt tập trung ISO (Xem xét & Phê duyệt)
+  // Modal ký duyệt tập trung ISO (Soạn thảo, Xem xét & Phê duyệt)
   const [batchSignModal, setBatchSignModal] = useState<{
     open: boolean
-    action: "gui_phe_duyet" | "phe_duyet" | "gui_lai_phe_duyet"
+    action: "gui_xem_xet" | "gui_phe_duyet" | "phe_duyet" | "gui_lai_phe_duyet"
   } | null>(null)
 
   // Signature placement modal
@@ -2366,6 +2366,18 @@ export default function IsoDocumentDetailPage() {
     }
   }
 
+  // Mở màn ký tập trung khi bộ hồ sơ có PDF; bộ chỉ có DOCX/XLSX thì ký qua hộp PIN
+  // (handlePinConfirm tự chuyển trạng thái, không cần đặt vị trí).
+  const openSignStep = (action: "gui_xem_xet" | "gui_phe_duyet" | "phe_duyet" | "gui_lai_phe_duyet", label: string) => {
+    if (buildSignFileQueue().length > 0) {
+      setBatchSignModal({ open: true, action })
+      return
+    }
+    setPinModal({ action, label })
+    setPin("")
+    setPinError("")
+  }
+
   const handleBatchTransitionSuccess = async (
     completedPlacements: SignedFilePlacement[],
     token: string,
@@ -4198,6 +4210,11 @@ export default function IsoDocumentDetailPage() {
               const label = form.cap_tl === "Cấp 2"
                 ? (trangThai === "tra_ve" ? "Xác nhận ký & gửi phê duyệt lại" : "Xác nhận ký & gửi phê duyệt")
                 : (trangThai === "tra_ve" ? "Xác nhận ký & gửi xem xét lại" : "Xác nhận ký & gửi xem xét")
+              // Có PDF → màn ký tập trung (cùng màn với Xem xét / Phê duyệt); chỉ Office → hộp PIN.
+              if (buildSignFileQueue().length > 0) {
+                setBatchSignModal({ open: true, action: "gui_xem_xet" })
+                return
+              }
               setPinModal({ action: "gui_xem_xet", label })
               setPin("")
               setPinError("")
@@ -4215,15 +4232,15 @@ export default function IsoDocumentDetailPage() {
     }
   }
   if (!isNew && trangThai === "cho_xem_xet" && canXemXet) {
-    isoPrimary = { key: "gui_phe_duyet", label: "Ký xem xét & Gửi phê duyệt", icon: <Send size={16} />, onClick: () => setBatchSignModal({ open: true, action: "gui_phe_duyet" }) }
+    isoPrimary = { key: "gui_phe_duyet", label: "Ký xem xét & Gửi phê duyệt", icon: <Send size={16} />, onClick: () => openSignStep("gui_phe_duyet", "Ký xem xét & Gửi phê duyệt") }
     isoDanger.push({ key: "khong_xem_xet", label: "Từ chối", icon: <X size={14} />, onClick: () => { setReturnModal({ action: "khong_xem_xet", label: "Từ chối xem xét" }); setLyDoTraVe(""); setReturnError("") } })
   }
   if (!isNew && trangThai === "cho_phe_duyet" && canApprove) {
-    isoPrimary = { key: "phe_duyet", label: "Phê duyệt & Ban hành", icon: <CheckCircle2 size={16} />, onClick: () => setBatchSignModal({ open: true, action: "phe_duyet" }) }
+    isoPrimary = { key: "phe_duyet", label: "Phê duyệt & Ban hành", icon: <CheckCircle2 size={16} />, onClick: () => openSignStep("phe_duyet", "Phê duyệt & Ban hành") }
     isoDanger.push({ key: "tu_choi_phe_duyet", label: "Không phê duyệt", icon: <X size={14} />, onClick: () => { setReturnModal({ action: "tu_choi_phe_duyet", label: "Không phê duyệt" }); setLyDoTraVe(""); setReturnError("") } })
   }
   if (!isNew && trangThai === "bi_tu_choi_phe_duyet" && canXemXet) {
-    isoPrimary = { key: "gui_lai_phe_duyet", label: "Ký xem xét & Gửi phê duyệt lại", icon: <Send size={16} />, onClick: () => setBatchSignModal({ open: true, action: "gui_lai_phe_duyet" }) }
+    isoPrimary = { key: "gui_lai_phe_duyet", label: "Ký xem xét & Gửi phê duyệt lại", icon: <Send size={16} />, onClick: () => openSignStep("gui_lai_phe_duyet", "Ký xem xét & Gửi phê duyệt lại") }
     isoDanger.push({ key: "tra_ve_nhap", label: "Trả về Nháp", icon: <RotateCcw size={14} />, onClick: () => { setReturnModal({ action: "tra_ve_nhap", label: "Trả về Nháp" }); setLyDoTraVe(""); setReturnError("") } })
   }
   if (canRecall) {

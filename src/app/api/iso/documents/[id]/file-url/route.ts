@@ -60,7 +60,19 @@ type DocRow = {
 
 type Variant = "main" | "change_request" | "review_request"
 
-function resolveSourceUrl(doc: DocRow, variant: Variant): string | null {
+function resolveSourceUrl(doc: DocRow, variant: Variant, preferOriginal = false): string | null {
+  // `?source=original`: màn ký bước Soạn thảo cần file GỐC (chưa có chữ ký vòng trước) — khớp
+  // việc generate-pdf luôn dựng lại từ file gốc ở bước này.
+  if (preferOriginal) {
+    switch (variant) {
+      case "main":
+        return doc.file_goc_url || doc.file_signed_pdf_url || doc.file_signed_office_url
+      case "change_request":
+        return doc.file_phieu_yeu_cau_thay_doi_url || doc.file_phieu_yeu_cau_thay_doi_signed_url
+      case "review_request":
+        return doc.file_de_nghi_soat_xet_url || doc.file_de_nghi_soat_xet_signed_url
+    }
+  }
   switch (variant) {
     case "main":
       return doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
@@ -165,7 +177,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       )
     }
 
-    const sourceUrl = resolveSourceUrl(doc, variant)
+    const sourceUrl = resolveSourceUrl(doc, variant, req.nextUrl.searchParams.get("source") === "original")
     if (!sourceUrl) {
       return NextResponse.json({ error: "Tài liệu chưa có file" }, { status: 404 })
     }

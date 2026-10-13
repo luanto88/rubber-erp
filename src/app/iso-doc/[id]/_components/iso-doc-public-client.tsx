@@ -2,8 +2,11 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowRight, CheckCircle2, Download, ExternalLink, Loader2, Lock, XCircle } from "lucide-react"
-import { LOAI_TAI_LIEU_LABEL, TRANG_THAI_LABEL } from "@/app/dashboard/iso/_components/iso-types"
+import { AlertTriangle, ArrowRight, CheckCircle2, Download, ExternalLink, FileText, Files, Loader2, Lock, XCircle } from "lucide-react"
+import { LOAI_TAI_LIEU_LABEL } from "@/app/dashboard/iso/_components/iso-types"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
+import { InspectorCard, MetaList, MetaRow } from "@/app/dashboard/_components/doc-ui/inspector-card"
 
 // Trang tra cứu CÔNG KHAI cho QR in trên tài liệu ISO — mirror `/storage` (tra cứu ngăn lưu) và
 // `/van-ban-verify` (xác thực chữ ký). Nguồn dữ liệu là route service-role
@@ -59,22 +62,12 @@ function fmtDate(value: string | null): string {
 /**
  * Mọi thao tác Xem/Tải đều đi qua đăng nhập rồi mở trang chi tiết trong dashboard.
  *
- * KHÔNG trỏ thẳng `/dashboard/iso/documents/:id`: `dashboard/layout.tsx` chuyển hướng người
- * CHƯA đăng nhập từ route đó về đúng trang công khai này (`isoPublicFallbackFor`) ⇒ bấm nút
- * sẽ quay vòng về chỗ cũ thay vì hiện form đăng nhập. Đi qua `/login?next=` thì người đã có
- * phiên được đưa thẳng tới tài liệu, người chưa có phiên đăng nhập xong cũng tới đúng đó.
+ * Đi qua `/login?next=`: người đã có phiên được đưa thẳng tới tài liệu, người chưa có phiên
+ * đăng nhập xong cũng tới đúng đó (từ 2026-10-13 dashboard luôn chuyển chưa-đăng-nhập sang
+ * /login?next=, trang công khai này chỉ còn phục vụ URL /iso-doc đã chia sẻ trước đây).
  */
 function loginGatedDocLink(targetDocId: string): string {
   return `/login?next=${encodeURIComponent(`/dashboard/iso/documents/${targetDocId}`)}`
-}
-
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex justify-between gap-4 border-b border-slate-100 pb-2 last:border-b-0 last:pb-0">
-      <span className="shrink-0 text-slate-500">{label}</span>
-      <span className={`text-right font-bold text-slate-800 ${mono ? "font-mono" : ""}`}>{value}</span>
-    </div>
-  )
 }
 
 export function IsoDocPublicClient({ docId }: { docId: string }) {
@@ -105,114 +98,114 @@ export function IsoDocPublicClient({ docId }: { docId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-8 text-slate-500 shadow-md">
-        <Loader2 size={18} className="animate-spin" /> Đang tra cứu tài liệu...
+      <div className="flex items-center justify-center gap-2 rounded-[14px] border border-slate-200 bg-white p-8 text-sm text-slate-500 shadow-sm">
+        <Loader2 size={18} className="animate-spin text-brand-600" /> Đang tra cứu tài liệu...
       </div>
     )
   }
 
   if (loadError || !data) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-md">
-        <XCircle size={32} className="mx-auto mb-2 text-red-500" />
-        <p className="font-semibold text-red-600">{loadError || "Không tải được thông tin tài liệu"}</p>
+      <div className="rounded-[14px] border border-[#fecaca] bg-[#fef2f2] p-6 text-center">
+        <XCircle size={30} className="mx-auto mb-2 text-[#dc2626]" />
+        <p className="text-sm font-semibold text-[#991b1b]">{loadError || "Không tải được thông tin tài liệu"}</p>
       </div>
     )
   }
 
   const expired = data.trangThai === "het_hieu_luc"
-  const trangThaiLabel = (TRANG_THAI_LABEL as Record<string, string>)[data.trangThai] || data.trangThai
   const loaiLabel = data.loaiTaiLieu ? LOAI_TAI_LIEU_LABEL[data.loaiTaiLieu] || data.loaiTaiLieu : null
+  const btnPrimary =
+    "inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 py-2.5 text-xs font-bold text-white shadow-sm transition-all sm:px-5 sm:text-sm"
+  const btnPrimaryStyle = { background: "linear-gradient(135deg, #2f5d52 0%, #1c3a32 100%)" }
 
   return (
     <div className="space-y-4">
       {/* Nếu là Biểu mẫu con: Hiện banner liên kết về Quy trình cha */}
       {data.parentDoc && (
-        <div className="rounded-2xl border border-blue-200 bg-blue-50/80 p-4 shadow-sm flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 rounded-[14px] border border-brand-200 bg-brand-50 p-4">
           <div className="min-w-0">
-            <span className="text-[11px] font-extrabold uppercase tracking-wide text-blue-600 block">
-              Thuộc Tài liệu quy trình
+            <span className="block text-[11px] font-bold uppercase tracking-wide text-brand-700">
+              Thuộc tài liệu quy trình
             </span>
-            <p className="font-bold text-sm text-blue-900 truncate">
-              {data.parentDoc.maTaiLieu} · {data.parentDoc.tenTaiLieu}
+            <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-sm font-semibold text-slate-800">
+              <DocCodePill code={data.parentDoc.maTaiLieu} />
+              <span className="truncate">{data.parentDoc.tenTaiLieu}</span>
             </p>
           </div>
           <Link
             href={`/iso-doc/${data.parentDoc.id}`}
-            className="shrink-0 inline-flex items-center gap-1 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-all"
+            className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-700"
           >
-            Xem Quy trình <ArrowRight size={13} />
+            Xem quy trình <ArrowRight size={13} />
           </Link>
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-md">
-        <div className={`flex items-center gap-3 p-6 ${expired ? "bg-red-50" : "bg-emerald-50"}`}>
-          {expired ? (
-            <AlertTriangle size={32} className="shrink-0 text-red-600" />
-          ) : (
-            <CheckCircle2 size={32} className="shrink-0 text-emerald-600" />
-          )}
-          <div>
-            <p className={`text-lg font-extrabold ${expired ? "text-red-700" : "text-emerald-700"}`}>
-              {expired ? "TÀI LIỆU ĐÃ HẾT HIỆU LỰC" : "Tài liệu đang có hiệu lực"}
+      {/* Kết quả tra cứu hiệu lực */}
+      <div
+        className={`flex items-start gap-3 rounded-[14px] border p-4 sm:p-5 ${
+          expired ? "border-[#fecaca] bg-[#fef2f2]" : "border-[#a7f3d0] bg-[#ecfdf5]"
+        }`}
+      >
+        {expired ? (
+          <AlertTriangle size={30} className="mt-0.5 shrink-0 text-[#dc2626]" />
+        ) : (
+          <CheckCircle2 size={30} className="mt-0.5 shrink-0 text-[#15803d]" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className={`text-lg font-extrabold ${expired ? "text-[#991b1b]" : "text-[#065f46]"}`}>
+              {expired ? "Tài liệu đã hết hiệu lực" : "Tài liệu đang có hiệu lực"}
             </p>
-            <p className={`mt-0.5 text-sm ${expired ? "text-red-600" : "text-emerald-600"}`}>
-              {expired
-                ? "Không sử dụng bản này cho công việc. Hãy dùng bản thay thế đang có hiệu lực."
-                : "Đây là bản ban hành mới nhất đang được áp dụng."}
-            </p>
+            <StatusBadge domain="iso" status={data.trangThai} size="xs" />
           </div>
+          <p className={`mt-1 text-sm ${expired ? "text-[#b91c1c]" : "text-[#047857]"}`}>
+            {expired
+              ? "Không sử dụng bản này cho công việc. Hãy dùng bản thay thế đang có hiệu lực."
+              : "Đây là bản ban hành mới nhất đang được áp dụng."}
+          </p>
         </div>
+      </div>
 
-        <div className="space-y-3 p-6 text-sm">
-          {data.maTaiLieu && <Row label="Mã tài liệu" value={data.maTaiLieu} mono />}
-          {data.tenTaiLieu && <Row label="Tên tài liệu" value={data.tenTaiLieu} />}
+      <InspectorCard title="Thông tin tài liệu" icon={FileText}>
+        <MetaList>
+          {data.maTaiLieu && <MetaRow label="Mã tài liệu" value={<DocCodePill code={data.maTaiLieu} />} />}
+          {data.tenTaiLieu && <MetaRow label="Tên tài liệu" value={data.tenTaiLieu} />}
           {loaiLabel && (
-            <Row
-              label={data.phanLoaiTl === "con" ? "Loại hồ sơ" : "Loại tài liệu"}
-              value={loaiLabel}
-            />
+            <MetaRow label={data.phanLoaiTl === "con" ? "Loại hồ sơ" : "Loại tài liệu"} value={loaiLabel} />
           )}
-          {data.phongBan && <Row label="Phòng ban" value={data.phongBan} />}
-          {data.capTl && <Row label="Cấp tài liệu" value={data.capTl} />}
-          <Row label="Lần ban hành" value={data.lanBanHanh || "—"} />
-          <Row label="Ngày hiệu lực" value={fmtDate(data.ngayHieuLuc)} />
-          {expired && <Row label="Ngày hết hiệu lực" value={fmtDate(data.ngayHetHieuLuc)} />}
-          <Row label="Trạng thái" value={trangThaiLabel} />
-        </div>
+          {data.phongBan && <MetaRow label="Phòng ban" value={data.phongBan} />}
+          {data.capTl && <MetaRow label="Cấp tài liệu" value={data.capTl} />}
+          <MetaRow label="Lần ban hành" value={data.lanBanHanh || "—"} />
+          <MetaRow label="Ngày hiệu lực" value={fmtDate(data.ngayHieuLuc)} />
+          {expired && <MetaRow label="Ngày hết hiệu lực" value={fmtDate(data.ngayHetHieuLuc)} />}
+        </MetaList>
 
         {/* Cụm thao tác — luôn nằm GỌN MỘT DÒNG ở mọi khổ màn hình: không `flex-wrap`, mỗi nút
             `flex-1` chia đều, phần chữ dài chỉ hiện từ `sm:` trở lên.
-            Bản hết hiệu lực CỐ Ý không có nút Xem/Tải bản cũ: từ 2026-09-15 chỉ tài khoản được
-            cấp `iso.view_het_hieu_luc` mới mở được nội dung, nên nút to ở đây sẽ dẫn đa số
-            người dùng vào ngõ cụt. Thay bằng 1 link chữ nhỏ có ghi rõ điều kiện, để người thật
-            sự có quyền vẫn vào được từ QR. */}
+            Bản hết hiệu lực CỐ Ý không có nút Xem/Tải bản cũ: chỉ tài khoản được cấp
+            `iso.view_het_hieu_luc` mới mở được nội dung. Thay bằng 1 link chữ nhỏ có ghi rõ điều
+            kiện, để người thật sự có quyền vẫn vào được từ QR. */}
         {(!expired ? data.hasFile : Boolean(data.replacement) || data.hasFile) && (
-          <div className="border-t border-slate-100 bg-slate-50/60 p-6">
+          <div className="mt-4 border-t border-slate-100 pt-4">
             <div className="flex items-stretch gap-2">
               {expired ? (
                 data.replacement && (
-                  <Link
-                    href={loginGatedDocLink(data.replacement.id)}
-                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:bg-emerald-700 sm:px-5 sm:text-sm"
-                  >
+                  <Link href={loginGatedDocLink(data.replacement.id)} className={btnPrimary} style={btnPrimaryStyle}>
                     <ExternalLink size={16} className="shrink-0" />
                     <span>Xem <span className="hidden sm:inline">tài liệu </span>thay thế</span>
                   </Link>
                 )
               ) : (
                 <>
-                  <Link
-                    href={loginGatedDocLink(data.id)}
-                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:bg-emerald-700 sm:px-5 sm:text-sm"
-                  >
+                  <Link href={loginGatedDocLink(data.id)} className={btnPrimary} style={btnPrimaryStyle}>
                     <ExternalLink size={16} className="shrink-0" />
                     <span>Xem<span className="hidden sm:inline"> tài liệu</span></span>
                   </Link>
                   <Link
                     href={loginGatedDocLink(data.id)}
-                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-slate-300 px-3 py-2.5 text-xs font-bold text-slate-700 transition-all hover:bg-slate-100 sm:px-5 sm:text-sm"
+                    className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 transition-all hover:bg-slate-50 sm:px-5 sm:text-sm"
                   >
                     <Download size={16} className="shrink-0" />
                     <span>Tải<span className="hidden sm:inline"> tài liệu</span></span>
@@ -239,75 +232,62 @@ export function IsoDocPublicClient({ docId }: { docId: string }) {
             )}
           </div>
         )}
-      </div>
+      </InspectorCard>
 
       {/* Danh mục Hồ sơ & Biểu mẫu đính kèm trong bộ này (nếu là Quy trình cha) */}
       {data.childDocs && data.childDocs.length > 0 && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-md">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-extrabold text-slate-800">
-              Hồ sơ & Biểu mẫu trong bộ này ({data.childDocs.length})
-            </p>
-            <span className="text-[11px] text-slate-400">Đang áp dụng</span>
-          </div>
-
-          <div className="divide-y divide-slate-100">
+        <InspectorCard
+          title={`Hồ sơ & biểu mẫu trong bộ này (${data.childDocs.length})`}
+          icon={Files}
+          actions={<StatusBadge tone="valid" label="Đang áp dụng" size="xs" />}
+        >
+          <ul className="divide-y divide-slate-100">
             {data.childDocs.map((child) => (
-              <div key={child.id} className="py-2.5 flex items-center justify-between gap-3 first:pt-0 last:pb-0">
+              <li key={child.id} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span className="font-mono text-xs font-bold text-emerald-700">
-                      {child.maTaiLieu || "—"}
-                    </span>
-                    <span className="text-[10px] rounded bg-slate-100 px-1 text-slate-500 font-semibold">
+                    <DocCodePill code={child.maTaiLieu} />
+                    <span className="rounded bg-slate-100 px-1 text-[10px] font-semibold text-slate-500">
                       {child.loaiTaiLieu || "F"}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-700 font-medium truncate mt-0.5">
-                    {child.tenTaiLieu || ""}
-                  </p>
+                  <p className="mt-0.5 truncate text-xs font-medium text-slate-700">{child.tenTaiLieu || ""}</p>
                 </div>
-
                 <Link
                   href={`/iso-doc/${child.id}`}
-                  className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 transition-all"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
                 >
                   Chi tiết <ArrowRight size={12} />
                 </Link>
-              </div>
+              </li>
             ))}
-          </div>
-        </div>
+          </ul>
+        </InspectorCard>
       )}
 
       {expired && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-md">
-          <p className="mb-3 text-sm font-extrabold text-slate-700">Bản thay thế</p>
+        <InspectorCard title="Bản thay thế" icon={CheckCircle2}>
           {data.replacement ? (
             <Link
               href={`/iso-doc/${data.replacement.id}`}
-              className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 transition-all hover:bg-emerald-100"
+              className="flex items-center gap-3 rounded-xl border border-[#a7f3d0] bg-[#ecfdf5] p-4 transition-colors hover:bg-[#d1fae5]"
             >
-              <CheckCircle2 size={20} className="shrink-0 text-emerald-600" />
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-sm font-bold text-emerald-800">
-                  {data.replacement.maTaiLieu || "—"}
-                </p>
-                <p className="truncate text-xs text-emerald-700">{data.replacement.tenTaiLieu || ""}</p>
-                <p className="mt-0.5 text-[11px] text-emerald-600">
-                  Lần ban hành {data.replacement.lanBanHanh || "—"} · Hiệu lực từ{" "}
-                  {fmtDate(data.replacement.ngayHieuLuc)}
+                <DocCodePill code={data.replacement.maTaiLieu} />
+                <p className="mt-1 truncate text-xs font-semibold text-slate-700">{data.replacement.tenTaiLieu || ""}</p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Lần ban hành {data.replacement.lanBanHanh || "—"} · Hiệu lực từ {fmtDate(data.replacement.ngayHieuLuc)}
                 </p>
               </div>
-              <ArrowRight size={18} className="shrink-0 text-emerald-600" />
+              <ArrowRight size={18} className="shrink-0 text-[#15803d]" />
             </Link>
           ) : (
-            <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-700">
+            <p className="rounded-xl border border-[#fde68a] bg-[#fffbeb] p-4 text-sm text-[#92400e]">
               Chưa tìm thấy bản thay thế đang có hiệu lực trong hệ thống. Vui lòng liên hệ bộ phận quản lý
               tài liệu để được cung cấp bản mới nhất.
             </p>
           )}
-        </div>
+        </InspectorCard>
       )}
     </div>
   )

@@ -19,6 +19,7 @@ import {
   Users,
 } from "lucide-react"
 import { setRememberMe, supabase } from "@/lib/supabase"
+import { OpenExternalBrowser } from "@/app/_components/open-external-browser"
 import {
   authBlockReason,
   clearLegacySession,
@@ -866,6 +867,9 @@ function LoginPageContent() {
                 </button>
               </div>
             )}
+
+            {/* Mở từ Telegram/Zalo... — gợi ý chuyển sang trình duyệt ngoài để giữ đăng nhập. */}
+            <OpenExternalBrowser />
 
             {noticeText && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700">

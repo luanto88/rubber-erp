@@ -731,3 +731,8 @@ sửa/xoá như nháp (rule xoá cũ giữ nguyên: chỉ draft + người tạo
 ## Trả về không PIN (2026-10-13)
 
 Từ chối xem xét / Không phê duyệt / Trả về Nháp của tài liệu ISO KHÔNG còn hỏi PIN — chỉ hộp xác nhận với lý do BẮT BUỘC (`returnModal`). QR tài liệu ISO không còn công khai: chưa đăng nhập ⇒ `/login?next=`. Chi tiết: rule 05 mục "Sửa sau test GĐ4 + GĐ5".
+
+## Bước Soạn thảo dùng màn ký tập trung (2026-10-13)
+
+Nút "Ký & Gửi xem xét/phê duyệt" mở `IsoBatchSignModal` (action `gui_xem_xet`) khi bộ có PDF — không
+còn mở modal đặt vị trí cũ từng file một. Bộ chỉ Office → hộp PIN. Xem rule 05 mục "Vá sau test GĐ5 + GĐ6".

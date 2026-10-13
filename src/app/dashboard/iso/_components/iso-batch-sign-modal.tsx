@@ -750,7 +750,9 @@ export function IsoBatchSignModal({
         }> = []
 
         // File chính Quy trình cha
-        const parentPdf = doc.file_signed_pdf_url || doc.file_goc_url
+        // Bước Soạn thảo luôn ký trên file GỐC (generate-pdf cũng dựng lại từ file gốc) — tránh hiện
+        // chữ ký của vòng trước khi gửi lại sau Trả về.
+        const parentPdf = isSoanThao ? (doc.file_goc_url || doc.file_signed_pdf_url) : (doc.file_signed_pdf_url || doc.file_goc_url)
         if (isPdfUrl(parentPdf)) {
           rawDocs.push({
             docId: doc.id,
@@ -765,7 +767,9 @@ export function IsoBatchSignModal({
 
         // File phụ soát xét nếu có
         if (doc.chon_quy_trinh === "Soát xét") {
-          const changeUrl = doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url
+          const changeUrl = isSoanThao
+            ? (doc.file_phieu_yeu_cau_thay_doi_url || doc.file_phieu_yeu_cau_thay_doi_signed_url)
+            : (doc.file_phieu_yeu_cau_thay_doi_signed_url || doc.file_phieu_yeu_cau_thay_doi_url)
           if (isPdfUrl(changeUrl)) {
             rawDocs.push({
               docId: doc.id,
@@ -777,7 +781,9 @@ export function IsoBatchSignModal({
               isParent: false,
             })
           }
-          const reviewUrl = doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url
+          const reviewUrl = isSoanThao
+            ? (doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url || doc.file_de_nghi_soat_xet_signed_url)
+            : (doc.file_de_nghi_soat_xet_signed_url || doc.file_de_nghi_soat_xet_url || doc.file_soat_xet_url)
           if (isPdfUrl(reviewUrl)) {
             rawDocs.push({
               docId: doc.id,
@@ -793,7 +799,7 @@ export function IsoBatchSignModal({
 
         // Toàn bộ Biểu mẫu con PDF
         for (const child of childDocs) {
-          const childPdf = child.file_signed_pdf_url || child.file_goc_url
+          const childPdf = isSoanThao ? (child.file_goc_url || child.file_signed_pdf_url) : (child.file_signed_pdf_url || child.file_goc_url)
           if (isPdfUrl(childPdf)) {
             rawDocs.push({
               docId: child.id,
@@ -817,7 +823,7 @@ export function IsoBatchSignModal({
         // Signed URL ngắn hạn TRƯỚC khi giao cho pdfjs fetch trong trình duyệt — bucket
         // `iso-documents` sẽ chuyển private, URL public cũ không còn tải được nữa.
         const signedUrls = await Promise.all(
-          rawDocs.map((rd) => fetchSecureUrl(`/api/iso/documents/${rd.docId}/file-url?variant=${rd.kind}`)),
+          rawDocs.map((rd) => fetchSecureUrl(`/api/iso/documents/${rd.docId}/file-url?variant=${rd.kind}${isSoanThao ? "&source=original" : ""}`)),
         )
         rawDocs.forEach((rd, idx) => {
           const result = signedUrls[idx]
@@ -870,8 +876,6 @@ export function IsoBatchSignModal({
           try {
             const pdf = await pdfjsLib.getDocument({
               url: rDoc.url,
-              cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.449/cmaps/",
-              cMapPacked: true,
             }).promise
             pdfDocsCache.current[rDoc.url] = pdf
             numPages = pdf.numPages
@@ -1059,8 +1063,6 @@ export function IsoBatchSignModal({
         if (!pdf) {
           pdf = await pdfjsLib.getDocument({
             url: item.url,
-            cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.449/cmaps/",
-            cMapPacked: true,
           }).promise
           pdfDocsCache.current[item.url] = pdf
         }
@@ -1115,8 +1117,6 @@ export function IsoBatchSignModal({
       if (!pdf) {
         pdf = await pdfjsLib.getDocument({
           url: activeDoc.url,
-          cMapUrl: "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.449/cmaps/",
-          cMapPacked: true,
         }).promise
         pdfDocsCache.current[activeDoc.url] = pdf
       }
@@ -1352,7 +1352,7 @@ export function IsoBatchSignModal({
             const effectiveCvText =
               (b.chucVuKey === "kiem_nhiem" ? signerChucVuByKey?.kiem_nhiem : signerChucVuByKey?.chinh_quyen) ||
               signerChucVu ||
-              (isPheDuyet ? "Người phê duyệt" : "Người xem xét")
+              (isPheDuyet ? "Người phê duyệt" : isSoanThao ? "Người soạn thảo" : "Người xem xét")
             const snugCv = computeSnugBoxSize(effectiveCvText, "chuc_vu")
             const cvInnerW = b.cvInnerW || Math.min(bDomW - 8, snugCv.w)
             const cvInnerH = b.cvInnerH || snugCv.h
@@ -1479,6 +1479,8 @@ export function IsoBatchSignModal({
   // Danh sách chữ ký bước trước cần xem trước
   const previewSignatures = useMemo(() => {
     if (!doc || !activeDoc) return [] as PreviewSig[]
+    // Bước Soạn thảo: các bước sau sẽ dựng lại từ file gốc ⇒ không hiện chữ ký của vòng trước.
+    if (isSoanThao) return [] as PreviewSig[]
     const list: PreviewSig[] = []
 
     const nameMap: Record<string, string> = {}
@@ -1546,7 +1548,7 @@ export function IsoBatchSignModal({
     }
 
     return list
-  }, [doc, activeDoc, isPheDuyet])
+  }, [doc, activeDoc, isPheDuyet, isSoanThao])
 
   const defaultCanvasW = (activeDoc?.pageDims[activePage]?.w || 595.28) * 1.35
   const defaultCanvasH = (activeDoc?.pageDims[activePage]?.h || 841.89) * 1.35

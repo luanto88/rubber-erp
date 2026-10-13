@@ -500,8 +500,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (!user?.id || !user?.factory_id) return
     const todayIso = new Date().toISOString().slice(0, 10)
     const flagKey = `kpi_ensured_${user.factory_id}_${todayIso}`
-    if (sessionStorage.getItem(flagKey)) return
-    sessionStorage.setItem(flagKey, "1")
+    try {
+      if (sessionStorage.getItem(flagKey)) return
+      sessionStorage.setItem(flagKey, "1")
+    } catch {
+      // storage bị chặn (trình duyệt trong ứng dụng) — RPC tự idempotent, gọi lại cũng không sao
+    }
     void import("@/lib/kpi-templates")
       .then(({ ensureTodayKpiTaskInstances }) => ensureTodayKpiTaskInstances(user.factory_id as string))
       .catch(() => {})
