@@ -13,7 +13,7 @@ import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { type MaintenanceSigningStatus } from "./_components/maintenance-sign-types"
-import { MaintenanceRowActions, MaintenanceSignCell } from "../_components/maintenance-row-cells"
+import { MaintenanceLinesDetail, MaintenanceRowActions, MaintenanceSignCell } from "../_components/maintenance-row-cells"
 import { HangMucLabel } from "../_components/hang-muc-label"
 import { BannerAction } from "../_components/banner-action"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
@@ -559,34 +559,8 @@ export default function MaintenanceRecordsPage() {
                 const shownCodes = codes.length === 0
                   ? "—"
                   : codes.length > 2 ? `${codes.slice(0, 2).join(", ")} +${codes.length - 2} khác` : codes.join(", ")
-                const lines = [...(r.maintenance_record_lines || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-                const isXe = r.bo_phan === "Đội xe"
-                const detail = (
-                  <table className="enterprise-table dense">
-                    <thead>
-                      <tr>
-                        <th>{isXe ? "Mã xe" : "Mã TB"}</th>
-                        <th>{isXe ? "Xe" : "Thiết bị"}</th>
-                        {isXe && <th>Tài xế</th>}
-                        <th>Nội dung</th>
-                        <th className="text-right">Chi phí dự kiến</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lines.map((l, i) => (
-                        <tr key={`${l.ma_tb}-${i}`}>
-                          <td className="whitespace-nowrap font-code text-xs">{l.ma_tb || "—"}</td>
-                          <td className="whitespace-nowrap">{l.ten_tb || "—"}</td>
-                          {isXe && <td className="whitespace-nowrap">{l.ten_tai_xe || "—"}</td>}
-                          <td className="max-w-md">{l.cac_khac_phuc || l.noi_dung || "—"}</td>
-                          <td className="whitespace-nowrap text-right tabular-nums">
-                            {l.chi_phi_dk ? `${Number(l.chi_phi_dk).toLocaleString()} ${l.loai_tien || ""}` : "—"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )
+                const lines = r.maintenance_record_lines || []
+                const detail = <MaintenanceLinesDetail lines={lines} isXe={r.bo_phan === "Đội xe"} />
                 return (
                 <ExpandableRow
                   key={r.id}

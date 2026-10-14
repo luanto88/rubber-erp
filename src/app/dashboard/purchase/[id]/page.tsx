@@ -4,8 +4,8 @@ import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "r
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
-  AlertTriangle, ArrowLeft, Ban, BarChart3, Bell, CalendarClock, CheckCircle2, Clock, Download, Eye, FilePen, ImagePlus, Images, Loader2, Lock, PackageCheck,
-  Pencil, PenTool, Send, ShoppingCart,
+  AlertTriangle, Ban, BarChart3, Bell, CalendarClock, Download, FileCheck2, FilePen, History, ImagePlus, Images, Info, Loader2, Lock, PackageCheck,
+  Pencil, PenTool, Send, ShoppingCart, Workflow,
 } from "lucide-react"
 import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
@@ -13,13 +13,27 @@ import { buildStorageDownloadUrl, safeDownloadFileName } from "@/lib/storage-dow
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
+import { DetailPageHeader, HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
+import { DetailSplitLayout } from "@/app/dashboard/_components/doc-ui/detail-split-layout"
+import { DocViewer } from "@/app/dashboard/_components/doc-ui/doc-viewer"
+import { HeaderQr } from "@/app/dashboard/_components/doc-ui/header-qr"
+import { InspectorCard, MetaList, MetaRow, StatusSummaryBar } from "@/app/dashboard/_components/doc-ui/inspector-card"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { SignActionBox, type SignAction } from "@/app/dashboard/_components/doc-ui/sign-action-box"
+import { TimelineProgress, TimelineSteps, type TimelineStepItem } from "@/app/dashboard/_components/doc-ui/timeline-steps"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { useIsDesktop } from "@/app/dashboard/_components/doc-ui/use-is-desktop"
 import {
-  formatMoney, formatQty, formatSoPhieuFull, isPurchaseActive, PURCHASE_SIGN_ORDER, PURCHASE_STATUS_CLASS, PURCHASE_STATUS_LABEL,
+  formatMoney, formatQty, formatSoPhieuFull, isPurchaseActive, PURCHASE_SIGN_ORDER,
   insightWarnings, purchaseUrgency, type PurchaseSignRole,
 } from "@/lib/purchase/types"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { PurchaseForm } from "../_components/purchase-form"
-import { fetchPurchaseDetail, readJson, submitPurchaseForSigning, updateLineImages, type PurchaseDetail } from "../_components/purchase-client"
+import {
+  buildPurchaseDraftPdfBytes, fetchPurchaseDetail, readJson, submitPurchaseForSigning, updateLineImages, type PurchaseDetail,
+} from "../_components/purchase-client"
 import { ImageLightbox, PurchaseImagePicker } from "../_components/purchase-image-picker"
 import { PurchaseInsightPanel } from "../_components/purchase-insight-panel"
 import { AdjustModal, ClosePurchaseModal, PurchaseFulfillmentPanel, ReceiveModal } from "../_components/purchase-fulfillment"
@@ -77,6 +91,10 @@ function PurchaseDetailInner() {
   // Dòng đang mở panel "Bằng chứng" (số liệu tồn kho chụp lúc gửi ký).
   const [openInsight, setOpenInsight] = useState<Record<string, boolean>>({})
   const [imageError, setImageError] = useState<string | null>(null)
+  // Bố cục 70/30 (rule 29 mục C).
+  const isDesktop = useIsDesktop()
+  const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
+  const [docTab, setDocTab] = useState<"file" | "content">("file")
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -215,20 +233,24 @@ function PurchaseDetailInner() {
     )
   }
 
-  return (
-    <div className="space-y-4">
-      <PageHeaderBanner
-        title={`${isAdjustment ? "Phiếu điều chỉnh" : "Phiếu đề nghị mua"} ${soPhieu}`}
-        subtitle={`Ngày ${fmtDate(req.ngay)} · Người đề nghị: ${req.nguoi_de_nghi_ten || detail.names[req.nguoi_de_nghi_id] || ""}${req.bo_phan ? ` · Bộ phận: ${req.bo_phan}` : ""}`}
-        theme="teal"
-        icon={ShoppingCart}
-        action={
-          <button onClick={() => router.push("/dashboard/purchase")} className="flex items-center gap-2 px-4 py-2 bg-white/15 hover:bg-white/25 border border-white/40 text-white font-bold rounded-xl">
-            <ArrowLeft size={16} /> Danh sách
-          </button>
-        }
-      />
+  const docLabel = isAdjustment ? "Phiếu điều chỉnh" : "Phiếu đề nghị mua"
+  const nguoiDeNghiTen = req.nguoi_de_nghi_ten || detail.names[req.nguoi_de_nghi_id] || ""
+  const hasSignedFile = !!(detail.fileHienTai && req.yeu_cau_ky_id)
+  // Bản chưa ký: chỉ khi CHƯA có yêu cầu ký (nháp). Phiếu đã huỷ/đóng không có file vẫn chỉ xem nội dung.
+  const hasDraft = !hasSignedFile && !req.yeu_cau_ky_id && req.trang_thai === "nhap" && detail.lines.length > 0 && !!factoryId
+  const effectiveDocTab: "file" | "content" = hasSignedFile || hasDraft ? docTab : "content"
+  const anyModalOpen = receiveOpen || adjustOpen || closeOpen || cancelOpen || !!imageEdit
+  const viewerActive = (isDesktop || mobileTab === "doc") && !anyModalOpen
+  const viewFileName = `${docLabel} ${soPhieu.replace("/", "-")}`
+  const openSignedFile = () => {
+    if (!req.yeu_cau_ky_id) return
+    void openSecureFile(`/api/signing/requests/${req.yeu_cau_ky_id}/file-url?view=1&name=${encodeURIComponent(viewFileName)}`).then((r) => {
+      if (!r.ok) setActionError(r.error)
+    })
+  }
 
+  const bannersNode = (
+    <>
       {detail.maintenanceSource && (
         <div className="rounded-xl bg-orange-50 border border-orange-200 px-4 py-3 text-sm text-orange-900">
           <b>Lập từ biên bản bảo trì</b>{" "}
@@ -269,66 +291,13 @@ function PurchaseDetailInner() {
         </div>
       )}
       {actionError && <div className="whitespace-pre-line rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm font-semibold text-red-700">{actionError}</div>}
+    </>
+  )
 
-      {/* Thanh hành động */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 flex flex-wrap items-center gap-2">
-        <span className={`px-3 py-1 rounded-full text-xs font-bold ${PURCHASE_STATUS_CLASS[req.trang_thai]}`}>{PURCHASE_STATUS_LABEL[req.trang_thai]}</span>
-        <div className="flex-1" />
-        {detail.fileHienTai && (
-          <>
-            <a href={detail.fileHienTai} target="_blank" rel="noreferrer" className="p-2 rounded-lg text-teal-700 hover:bg-teal-50" title="Xem file PDF">
-              <Eye size={17} />
-            </a>
-            <a href={buildStorageDownloadUrl(detail.fileHienTai, fileName)} className="p-2 rounded-lg text-indigo-600 hover:bg-indigo-50" title="Tải file PDF">
-              <Download size={17} />
-            </a>
-          </>
-        )}
-        {myTurn && req.yeu_cau_ky_id && (
-          <Link href={`/dashboard/ky/${req.yeu_cau_ky_id}`} className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-xl shadow">
-            <Bell size={15} /> Ký ngay
-          </Link>
-        )}
-        {!myTurn && req.trang_thai === "cho_ky" && req.yeu_cau_ky_id && (
-          <Link href={`/dashboard/ky/${req.yeu_cau_ky_id}`} className="flex items-center gap-1.5 px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-50">
-            <PenTool size={15} /> Màn ký
-          </Link>
-        )}
-        {detail.perms.canEdit && (
-          <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 px-4 py-2 border border-sky-300 text-sky-700 text-sm font-bold rounded-xl hover:bg-sky-50">
-            <Pencil size={15} /> {detail.perms.canTakeOver ? "Nhận xử lý" : "Sửa"}
-          </button>
-        )}
-        {detail.perms.canSubmit && (
-          <button onClick={handleSubmit} disabled={busy} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow disabled:opacity-60">
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />} {req.trang_thai === "tra_ve" ? "Gửi ký lại" : "Gửi ký"}
-          </button>
-        )}
-        {detail.perms.canReceive && (
-          <button onClick={() => { setNotice(null); setReceiveOpen(true) }} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow">
-            <PackageCheck size={15} /> Ghi nhận mua / Nhập kho
-          </button>
-        )}
-        {detail.perms.canAdjust && (
-          <button onClick={() => setAdjustOpen(true)} className="flex items-center gap-1.5 px-4 py-2 border border-sky-300 text-sky-700 text-sm font-bold rounded-xl hover:bg-sky-50">
-            <FilePen size={15} /> Lập phiếu điều chỉnh
-          </button>
-        )}
-        {detail.perms.canClose && (
-          <button onClick={() => setCloseOpen(true)} className="flex items-center gap-1.5 px-4 py-2 border border-slate-300 text-slate-700 text-sm font-bold rounded-xl hover:bg-slate-50">
-            <Lock size={15} /> Đóng phiếu
-          </button>
-        )}
-        {detail.perms.canCancel && (
-          <button onClick={() => setCancelOpen(true)} className="flex items-center gap-1.5 px-4 py-2 border border-red-300 text-red-600 text-sm font-bold rounded-xl hover:bg-red-50">
-            <Ban size={15} /> Huỷ phiếu
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+  const contentNode = (
+    <div className="space-y-4">
         {/* Bảng vật tư */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-sm font-extrabold text-slate-700">Nội dung đề nghị</h3>
             <span className="text-sm font-extrabold text-slate-800">{formatMoney(req.tong_tien, req.loai_tien)} {req.loai_tien}</span>
@@ -445,52 +414,186 @@ function PurchaseDetailInner() {
           </ResponsiveTableWrapper>
           {req.ghi_chu && <p className="px-4 py-3 text-sm text-slate-600 border-t border-slate-100">Ghi chú: {req.ghi_chu}</p>}
         </div>
-        {!isAdjustment && detail.effectiveLines.length > 0 && (
-          <div className="lg:col-span-2 lg:row-start-2">
-            <PurchaseFulfillmentPanel detail={detail} />
-          </div>
-        )}
+        {!isAdjustment && detail.effectiveLines.length > 0 && <PurchaseFulfillmentPanel detail={detail} />}
+    </div>
+  )
 
-        {/* Luồng ký */}
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-            <h3 className="text-sm font-extrabold text-slate-700 mb-3">Luồng ký duyệt</h3>
-            <ol className="space-y-3">
-              {(Object.keys(PURCHASE_SIGN_ORDER) as PurchaseSignRole[]).map((role) => {
-                const cfg = PURCHASE_SIGN_ORDER[role]
-                const s = signerByThuTu.get(cfg.thuTu)
-                const uid = s?.userId || assigned[role]
-                const done = s?.trangThai === "da_ky"
-                const isTurn = req.trang_thai === "cho_ky" && pending[0]?.thuTu === cfg.thuTu
-                return (
-                  <li key={role} className="flex items-start gap-3">
-                    <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? "bg-emerald-100 text-emerald-600" : isTurn ? "bg-amber-100 text-amber-600" : "bg-slate-100 text-slate-400"}`}>
-                      {done ? <CheckCircle2 size={15} /> : <Clock size={15} />}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-slate-500">{cfg.label}</p>
-                      <p className="text-sm font-semibold text-slate-800">{(uid && detail.names[uid]) || s?.hoTen || "—"}</p>
-                      <p className="text-xs text-slate-500">{done ? `Đã ký ${fmtDateTime(s?.kyLuc)}` : isTurn ? "Đang chờ ký" : req.trang_thai === "nhap" ? "Chưa gửi" : "Chờ bước trước"}</p>
-                    </div>
-                  </li>
-                )
-              })}
-            </ol>
-          </div>
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-            <h3 className="text-sm font-extrabold text-slate-700 mb-2">Nhật ký</h3>
-            <ul className="space-y-1.5 text-xs text-slate-600">
-              {detail.logs.map((l, i) => (
-                <li key={i}>
-                  <span className="text-slate-400">{fmtDateTime(l.created_at)}</span> · <b>{LOG_LABEL[l.hanh_dong] || l.hanh_dong}</b>
-                  {l.user_id && detail.names[l.user_id] ? ` — ${detail.names[l.user_id]}` : ""}
-                  {l.noi_dung ? `: ${l.noi_dung}` : ""}
-                </li>
-              ))}
-            </ul>
-          </div>
+  // ── Tiến trình ký ──
+  const timeline: TimelineStepItem[] = (Object.keys(PURCHASE_SIGN_ORDER) as PurchaseSignRole[]).map((role, idx) => {
+    const cfg = PURCHASE_SIGN_ORDER[role]
+    const s = signerByThuTu.get(cfg.thuTu)
+    const uid = s?.userId || assigned[role]
+    const done = s?.trangThai === "da_ky"
+    const isTurn = req.trang_thai === "cho_ky" && pending[0]?.thuTu === cfg.thuTu
+    const rejected = req.trang_thai === "tra_ve" && !done && pending[0]?.thuTu === cfg.thuTu
+    return {
+      key: role,
+      stepNo: idx + 1,
+      role: `Bước ${idx + 1}`,
+      title: cfg.label,
+      actor: (uid && detail.names[uid]) || s?.hoTen || "—",
+      time: done ? s?.kyLuc ?? null : null,
+      state: done ? "done" : rejected ? "rejected" : isTurn ? "current" : "waiting",
+      isMine: isTurn && !!uid && uid === user?.id,
+      note: done ? undefined : isTurn ? "Đang chờ ký" : req.trang_thai === "nhap" ? "Chưa gửi ký" : "Chờ bước trước",
+    }
+  })
+  const doneCount = timeline.filter((t) => t.state === "done").length
+
+  // ── Hành động: 1 nút chính duy nhất ──
+  const actions: SignAction[] = []
+  if (myTurn && req.yeu_cau_ky_id) {
+    actions.push({ key: "sign", label: "Ký ngay", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
+  }
+  if (detail.perms.canSubmit) {
+    actions.push({
+      key: "submit",
+      label: req.trang_thai === "tra_ve" ? "Gửi ký lại" : "Gửi ký duyệt",
+      icon: <Send size={16} />,
+      onClick: () => void handleSubmit(),
+      loading: busy,
+      disabled: busy,
+    })
+  }
+  if (detail.perms.canReceive) {
+    actions.push({ key: "receive", label: "Ghi nhận mua / Nhập kho", icon: <PackageCheck size={16} />, onClick: () => { setNotice(null); setReceiveOpen(true) } })
+  }
+  if (!myTurn && req.trang_thai === "cho_ky" && req.yeu_cau_ky_id) {
+    actions.push({ key: "kyscreen", label: "Mở màn ký", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
+  }
+  if (detail.perms.canEdit) {
+    actions.push({ key: "edit", label: detail.perms.canTakeOver ? "Nhận xử lý" : "Sửa phiếu", icon: <Pencil size={16} />, onClick: () => setEditing(true) })
+  }
+  if (detail.perms.canAdjust) {
+    actions.push({ key: "adjust", label: "Lập phiếu điều chỉnh", icon: <FilePen size={16} />, onClick: () => setAdjustOpen(true) })
+  }
+  if (detail.perms.canClose) {
+    actions.push({ key: "close", label: "Đóng phiếu", icon: <Lock size={16} />, onClick: () => setCloseOpen(true) })
+  }
+  const primary = actions[0] ?? null
+  const secondary = actions.slice(1)
+  const danger: SignAction[] = detail.perms.canCancel
+    ? [{ key: "cancel", label: "Huỷ phiếu", icon: <Ban size={16} />, onClick: () => setCancelOpen(true) }]
+    : []
+
+  const inspectorNode = (
+    <>
+      <StatusSummaryBar
+        domain="purchase"
+        status={req.trang_thai}
+        headline={`${formatMoney(req.tong_tien, req.loai_tien)} ${req.loai_tien}`}
+        meta={req.trang_thai === "cho_ky" ? `Đã ký ${doneCount}/${timeline.length} bước` : undefined}
+      />
+      {myTurn && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+          <Bell size={15} /> Đến lượt bạn ký phiếu này
         </div>
-      </div>
+      )}
+      {(primary || secondary.length > 0 || danger.length > 0) && (
+        <SignActionBox title="Hành động" primary={primary} secondary={secondary} danger={danger} />
+      )}
+      <InspectorCard title="Tiến trình ký" icon={Workflow}>
+        <TimelineSteps steps={timeline} formatTime={(iso) => fmtDateTime(iso)} />
+        <div className="mt-3">
+          <TimelineProgress done={doneCount} total={timeline.length} />
+        </div>
+      </InspectorCard>
+      <InspectorCard title="Thông tin phiếu" icon={Info}>
+        <MetaList>
+          <MetaRow label="Ngày lập" value={fmtDate(req.ngay)} />
+          <MetaRow label="Người đề nghị" value={nguoiDeNghiTen || "—"} />
+          <MetaRow label="Bộ phận" value={req.bo_phan || "—"} />
+          <MetaRow label="Số vật tư" value={detail.lines.length} />
+          <MetaRow label="Tổng tiền" value={`${formatMoney(req.tong_tien, req.loai_tien)} ${req.loai_tien}`} />
+          {req.ngay_can_hang && <MetaRow label="Cần hàng sớm nhất" value={fmtDate(req.ngay_can_hang)} />}
+          {req.ghi_chu && <MetaRow label="Ghi chú" value={req.ghi_chu} />}
+        </MetaList>
+      </InspectorCard>
+      <InspectorCard title="Nhật ký" icon={History}>
+        <ul className="space-y-1.5 text-xs text-slate-600">
+          {detail.logs.map((l, i) => (
+            <li key={i}>
+              <span className="text-slate-400">{fmtDateTime(l.created_at)}</span> · <b>{LOG_LABEL[l.hanh_dong] || l.hanh_dong}</b>
+              {l.user_id && detail.names[l.user_id] ? ` — ${detail.names[l.user_id]}` : ""}
+              {l.noi_dung ? `: ${l.noi_dung}` : ""}
+            </li>
+          ))}
+        </ul>
+      </InspectorCard>
+    </>
+  )
+
+  const documentNode = (
+    <div className="space-y-3">
+      {(hasSignedFile || hasDraft) && (
+        <SegmentedTabs
+          items={[
+            { key: "file", label: hasSignedFile ? (req.trang_thai === "cho_ky" || req.trang_thai === "tra_ve" ? "File đang ký" : "File đã ký") : "Bản xem trước (chưa ký)" },
+            { key: "content", label: "Nội dung phiếu" },
+          ]}
+          value={effectiveDocTab}
+          onChange={(k) => setDocTab(k as "file" | "content")}
+          size="sm"
+        />
+      )}
+      {effectiveDocTab === "file" && hasSignedFile ? (
+        <DocViewer
+          key={detail.fileHienTai || "signed"}
+          active={viewerActive}
+          endpoint={`/api/signing/requests/${req.yeu_cau_ky_id}/file-url`}
+          kind="pdf"
+          fileExt="pdf"
+          label={`${req.trang_thai === "cho_ky" || req.trang_thai === "tra_ve" ? "Bản đang ký" : "Bản đã ký"} · PDF`}
+        />
+      ) : effectiveDocTab === "file" && hasDraft && factoryId ? (
+        <DocViewer
+          key={`draft-${req.id}`}
+          active={viewerActive}
+          loadBytes={() => buildPurchaseDraftPdfBytes(detail, factoryId)}
+          sourceKey={`draft-${req.id}-${detail.lines.length}-${req.tong_tien}`}
+          kind="pdf"
+          fileExt="pdf"
+          label="Bản chưa ký · PDF"
+        />
+      ) : contentNode}
+    </div>
+  )
+
+  return (
+    <div className={`space-y-4 ${moduleThemeClass("teal")}`}>
+      <DetailSplitLayout
+        mobileTab={mobileTab}
+        onMobileTabChange={setMobileTab}
+        header={
+          <DetailPageHeader
+            backHref="/dashboard/purchase"
+            backLabel="Danh sách"
+            eyebrow="Đề nghị mua vật tư"
+            title={docLabel}
+            code={soPhieu}
+            subtitle={`Ngày ${fmtDate(req.ngay)} · ${nguoiDeNghiTen}${req.bo_phan ? ` · ${req.bo_phan}` : ""}`}
+            tags={<StatusBadge domain="purchase" status={req.trang_thai} />}
+            actions={
+              <>
+                {hasSignedFile && (
+                  <>
+                    <HeaderButton icon={<FileCheck2 size={16} />} label="Xem file ký" onClick={openSignedFile} />
+                    <HeaderButton
+                      icon={<Download size={16} />}
+                      label="Tải file ký"
+                      href={buildStorageDownloadUrl(detail.fileHienTai as string, fileName)}
+                    />
+                  </>
+                )}
+                <HeaderQr value={`${typeof window !== "undefined" ? window.location.origin : ""}/dashboard/purchase/${req.id}`} code={soPhieu} title={docLabel} />
+              </>
+            }
+          />
+        }
+        banners={<div className="space-y-3">{bannersNode}</div>}
+        document={documentNode}
+        inspector={inspectorNode}
+      />
 
       {receiveOpen && factoryId && (
         <ReceiveModal

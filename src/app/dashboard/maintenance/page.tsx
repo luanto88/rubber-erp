@@ -11,7 +11,8 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import { type MaintenanceSigningStatus } from "./records/_components/maintenance-sign-types"
-import { MaintenanceRowActions, MaintenanceSignCell } from "./_components/maintenance-row-cells"
+import { MaintenanceLinesDetail, MaintenanceRowActions, MaintenanceSignCell, type MaintenanceLineSummary } from "./_components/maintenance-row-cells"
+import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import { HangMucLabel } from "./_components/hang-muc-label"
 import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
@@ -38,7 +39,7 @@ type RecentRecord = {
   nguoi_tao: string | null
   created_by: string | null
   lines_count: number
-  maintenance_record_lines: { loai_sua_chua: string | null }[]
+  maintenance_record_lines: (MaintenanceLineSummary & { loai_sua_chua: string | null })[]
 }
 
 // Suy ra bundle ký số (nếu có) — mirror đúng resolveSignBundle() trong records/page.tsx.
@@ -68,6 +69,14 @@ export default function MaintenanceDashboardPage() {
   const [signingStatusError, setSigningStatusError] = useState(false)
   const signingReqSeq = useRef(0)
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const toggleExpanded = (id: string) =>
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   useEffect(() => {
     if (!toast) return
@@ -118,7 +127,7 @@ export default function MaintenanceDashboardPage() {
           .gte("ngay", firstOfMonth),
         supabase
           .from("maintenance_records")
-          .select("id, ma_bb, hang_muc, bo_phan, ngay, trang_thai, nguoi_tao, created_by, maintenance_record_lines(loai_sua_chua)")
+          .select("id, ma_bb, hang_muc, bo_phan, ngay, trang_thai, nguoi_tao, created_by, maintenance_record_lines(ma_tb, ten_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, ten_tai_xe, loai_sua_chua, sort_order)")
           .eq("factory_id", fid)
           .order("created_at", { ascending: false })
           .limit(8),
@@ -218,9 +227,23 @@ export default function MaintenanceDashboardPage() {
 
       {/* Recent records */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-4 py-3.5 border-b border-slate-100 flex items-center justify-between">
+        <div className="px-4 py-3.5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
           <span className="font-extrabold text-slate-800">Biên bản gần đây</span>
-          <Link href="/dashboard/maintenance/records" className="text-xs font-bold text-brand-700 hover:underline">Xem tất cả →</Link>
+          <div className="flex items-center gap-3">
+            {(() => {
+              const ids = recent.filter((r) => (r.maintenance_record_lines || []).length > 0).map((r) => r.id)
+              const allExpanded = ids.length > 0 && ids.every((id) => expandedIds.has(id))
+              return (
+                <ExpandAllToggle
+                  allExpanded={allExpanded}
+                  disabled={ids.length === 0}
+                  onExpandAll={() => setExpandedIds(new Set(ids))}
+                  onCollapseAll={() => setExpandedIds(new Set())}
+                />
+              )
+            })()}
+            <Link href="/dashboard/maintenance/records" className="text-xs font-bold text-brand-700 hover:underline">Xem tất cả →</Link>
+          </div>
         </div>
         {loading && recent.length === 0 ? (
           <ListState kind="loading" />
@@ -228,7 +251,7 @@ export default function MaintenanceDashboardPage() {
           <ListState kind="empty" message="Chưa có biên bản nào" />
         ) : (
           <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-          <table className="enterprise-table">
+          <table className="enterprise-table dense">
             <thead>
               <tr>
                 <th>Mã biên bản</th>
@@ -237,7 +260,7 @@ export default function MaintenanceDashboardPage() {
                 <th>Ngày</th>
                 <th>Trạng thái</th>
                 <th>Ký duyệt</th>
-                <th className="sticky-end text-right">Thao tác</th>
+                <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
               </tr>
             </thead>
             <tbody>
@@ -248,9 +271,19 @@ export default function MaintenanceDashboardPage() {
                   loaded: signingStatusLoaded,
                   error: signingStatusError,
                 }
+                const lines = r.maintenance_record_lines || []
                 return (
-                <tr key={r.id}>
-                  <td>
+                <ExpandableRow
+                  key={r.id}
+                  expanded={expandedIds.has(r.id)}
+                  onToggle={() => toggleExpanded(r.id)}
+                  canExpand={lines.length > 0}
+                  colSpan={7}
+                  label="Xem thiết bị trong biên bản"
+                  endCell={<MaintenanceRowActions recordId={r.id} maBb={r.ma_bb} sign={sign} canPrint={canPrint} onError={(msg) => setToast({ msg, ok: false })} />}
+                  detail={<MaintenanceLinesDetail lines={lines} isXe={r.bo_phan === "Đội xe"} />}
+                >
+                  <td onClick={(e) => e.stopPropagation()}>
                     <Link href={`/dashboard/maintenance/records/${r.id}`} className="hover:opacity-80">
                       <DocCodePill code={r.ma_bb} />
                     </Link>
@@ -259,7 +292,7 @@ export default function MaintenanceDashboardPage() {
                   <td className="text-slate-500">{r.bo_phan}</td>
                   <td className="text-slate-500 text-xs whitespace-nowrap">{r.ngay ? new Date(r.ngay).toLocaleDateString("vi-VN") : "—"}</td>
                   <td><StatusBadge domain="maintenance" status={r.trang_thai} /></td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <MaintenanceSignCell
                       sign={sign}
                       user={user}
@@ -270,10 +303,7 @@ export default function MaintenanceDashboardPage() {
                       showToast={(msg, ok = true) => setToast({ msg, ok })}
                     />
                   </td>
-                  <td className="sticky-end">
-                    <MaintenanceRowActions recordId={r.id} maBb={r.ma_bb} sign={sign} canPrint={canPrint} onError={(msg) => setToast({ msg, ok: false })} />
-                  </td>
-                </tr>
+                </ExpandableRow>
                 )
               })}
             </tbody>

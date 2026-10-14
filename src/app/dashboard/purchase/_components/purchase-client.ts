@@ -124,9 +124,56 @@ export async function submitPurchaseForSigning(requestId: string, factoryId: str
     await authFetch(`/api/purchase/requests/${requestId}/insight-snapshot`, { method: "POST" }),
   )
 
-  const chucVuOf = (list: PurchaseApprover[], id: string) => list.find((a) => a.id === id)?.chuc_vu || null
-  const pdf = await buildPurchasePdfForSigning({
-    factoryName: (factory?.name as string) || "Nhà máy chế biến",
+  const pdf = await buildPurchasePdfForSigning(
+    buildPurchasePdfInput(detail, approvers, (factory?.name as string) || "", (lineId) => snapshots[lineId] ?? null, requestId),
+  )
+
+  const fieldsByRole = {} as Record<PurchaseSignRole, SigningFieldInput[]>
+  for (const role of Object.keys(PURCHASE_SIGN_ORDER) as PurchaseSignRole[]) {
+    const b = pdf.boxesByRole[role]
+    const nhan = PURCHASE_SIGN_ORDER[role].label
+    fieldsByRole[role] = [
+      { page: b.page, ...jsPdfBoxToPt(pdf.pageHeightMm, b.chuKyBox), loai: "chu_ky", nhan },
+      { page: b.page, ...jsPdfBoxToPt(pdf.pageHeightMm, b.tenBox), loai: "ten", nhan },
+    ]
+  }
+
+  const res = await authFetch(`/api/purchase/requests/${requestId}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileBase64: bytesToBase64(pdf.bytes), fieldsByRole }),
+  })
+  const json = await readJson<{ yeuCauId: string }>(res)
+  return json.yeuCauId
+}
+
+/**
+ * Bản CHƯA ký để xem nhúng ở trang chi tiết (rule 29 mục G) — cùng bố cục phiếu sẽ gửi ký, dùng
+ * bản chụp bằng chứng đã lưu (nếu có); KHÔNG gọi insight-snapshot (route đó ghi DB).
+ */
+export async function buildPurchaseDraftPdfBytes(detail: PurchaseDetail, factoryId: string): Promise<Uint8Array> {
+  const [approvers, { data: factory }] = await Promise.all([
+    fetchApprovers(),
+    supabase.from("factories").select("name").eq("id", factoryId).maybeSingle(),
+  ])
+  const byId = new Map(detail.lines.map((l) => [l.id, l.insight_snapshot ?? null]))
+  const pdf = await buildPurchasePdfForSigning(
+    buildPurchasePdfInput(detail, approvers, (factory?.name as string) || "", (lineId) => byId.get(lineId) ?? null, detail.request.id),
+  )
+  return pdf.bytes
+}
+
+function buildPurchasePdfInput(
+  detail: PurchaseDetail,
+  approvers: ApproversResponse,
+  factoryName: string,
+  insightOf: (lineId: string) => PurchaseInsightSnapshot | null,
+  requestId: string,
+): Parameters<typeof buildPurchasePdfForSigning>[0] {
+  const req = detail.request
+  const chucVuOf = (list: PurchaseApprover[], id: string | null) => (id ? list.find((a) => a.id === id)?.chuc_vu || null : null)
+  return {
+    factoryName: factoryName || "Nhà máy chế biến",
     soPhieu: req.so,
     ngay: req.ngay,
     loaiTien: req.loai_tien,
@@ -160,28 +207,10 @@ export async function submitPurchaseForSigning(requestId: string, factoryId: str
       mua_tai: l.mua_tai ?? null,
       ngay_co_hang: l.ngay_co_hang ?? null,
       ngay_can_hang: l.ngay_can_hang ?? null,
-      insight: snapshots[l.id] ?? null,
+      insight: insightOf(l.id),
     })),
     qrUrl: `${window.location.origin}/dashboard/purchase/${requestId}`,
-  })
-
-  const fieldsByRole = {} as Record<PurchaseSignRole, SigningFieldInput[]>
-  for (const role of Object.keys(PURCHASE_SIGN_ORDER) as PurchaseSignRole[]) {
-    const b = pdf.boxesByRole[role]
-    const nhan = PURCHASE_SIGN_ORDER[role].label
-    fieldsByRole[role] = [
-      { page: b.page, ...jsPdfBoxToPt(pdf.pageHeightMm, b.chuKyBox), loai: "chu_ky", nhan },
-      { page: b.page, ...jsPdfBoxToPt(pdf.pageHeightMm, b.tenBox), loai: "ten", nhan },
-    ]
   }
-
-  const res = await authFetch(`/api/purchase/requests/${requestId}/submit`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileBase64: bytesToBase64(pdf.bytes), fieldsByRole }),
-  })
-  const json = await readJson<{ yeuCauId: string }>(res)
-  return json.yeuCauId
 }
 
 export async function updateLineImages(requestId: string, lineId: string, imageUrls: string[]) {

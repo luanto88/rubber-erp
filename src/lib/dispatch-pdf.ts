@@ -14,6 +14,18 @@ import {
 } from "@/lib/dispatch-analytics"
 import { describeNoteFilterMulti } from "@/lib/note-filter"
 import { DOI_NHO_UNASSIGNED } from "@/lib/dispatch-master"
+import { addQrImage } from "@/lib/pdf-qr-shared"
+
+/**
+ * QR tra cứu Phiếu điều xe ngày: `/dashboard/dispatch?entry={id}` — trang danh sách tự mở chi tiết
+ * phiếu (chưa đăng nhập → /login?next=). Ô tìm ở danh sách cũng nhận đúng URL này khi quét QR.
+ */
+export function buildDispatchEntryLookupUrl(entryId: string): string {
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://qlsxkpt.vercel.app"
+  return `${origin}/dashboard/dispatch?entry=${encodeURIComponent(entryId)}`
+}
+
+const ENTRY_QR_SIZE_MM = 13
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
@@ -386,6 +398,12 @@ async function buildDispatchEntryDocAtDensity(params: {
 }, level: number): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
+  // QR tra cứu phiếu — luôn ở GÓC PHẢI TRÊN (quy ước chung mọi phiếu).
+  if (params.entry.id) {
+    try {
+      await addQrImage(doc, buildDispatchEntryLookupUrl(params.entry.id), doc.internal.pageSize.getWidth() - 10 - ENTRY_QR_SIZE_MM, 3, ENTRY_QR_SIZE_MM)
+    } catch { /* bỏ qua QR, không chặn PDF */ }
+  }
   renderHeader(doc, `PHIẾU ĐIỀU XE NGÀY ${formatDateVi(params.entry.ngay)}`, `Mã ĐX: ${params.entry.ma_dx || "-"}; nhà máy: ${params.factoryName}; chứng nhận: ${params.entry.chung_nhan || "-"}`)
 
   const margin = 10
@@ -581,6 +599,19 @@ export async function downloadDispatchEntryPdf(params: {
   renderEntrySignatures(doc, params.makerName)
   footer(doc)
   doc.save(`phieu-dieu-xe-ngay-${safeName(params.entry.ngay)}.pdf`)
+}
+
+/** Bản CHƯA ký (giống "Xuất PDF ngày") trả về bytes — cho khung xem nhúng ở trang chi tiết. */
+export async function buildDispatchEntryDraftPdfBytes(params: {
+  entry: DispatchAnalyticsEntry
+  trips: DispatchFlatTrip[]
+  factoryName: string
+  makerName?: string
+}): Promise<Uint8Array> {
+  const doc = await buildDispatchEntryDoc(params)
+  renderEntrySignatures(doc, params.makerName)
+  footer(doc)
+  return new Uint8Array(doc.output("arraybuffer") as ArrayBuffer)
 }
 
 /**

@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
+import dynamic from "next/dynamic"
+import { createPortal } from "react-dom"
 import * as XLSX from "xlsx"
 import { supabase } from "@/lib/supabase"
 import QualityAnalyticsPage from "@/app/dashboard/quality-analytics/page"
@@ -10,9 +12,19 @@ import { formatDateDisplay, getDateParts, normalizeDateInput } from "@/lib/date-
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { downloadQualityKqknPdf, type QualityKqknResult } from "@/lib/quality-pdf"
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { QualitySignModal } from "@/app/dashboard/quality/_components/quality-sign-modal"
-import { QualitySignStatusBadge, type QualitySigningStatus } from "@/app/dashboard/quality/_components/quality-sign-status"
+import { type QualitySigningStatus } from "@/app/dashboard/quality/_components/quality-sign-status"
+import { SignStatusBadge } from "@/app/dashboard/_components/sign-status-badge"
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
+import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
+import { DateGroupHead, DateGroupRow } from "@/app/dashboard/_components/doc-ui/date-group-card"
+import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import { QualityConverterView, FxToExcelIcon } from "@/app/dashboard/quality/_components/quality-converter-view"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
@@ -22,11 +34,20 @@ import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-stat
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import {
-  ClipboardCheck, Plus, X, Search, ChevronDown, ChevronRight,
+  ClipboardCheck, Plus, X, Search,
   Edit2, Trash2, Check, AlertTriangle, BarChart2, XCircle,
-  RefreshCw, Clock, Star, ArrowLeft, Printer, Eye, FileText, Loader2,
-  Upload, Download, CheckCircle, FlaskConical
+  RefreshCw, Clock, Star, ArrowLeft, Printer, Loader2,
+  Upload, Download, CheckCircle, FlaskConical, Activity, QrCode
 } from "lucide-react"
+
+// html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client (mirror maintenance/history).
+const QrScanner = dynamic(
+  () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
+  { ssr: false },
+)
+
+// QR in trên Phiếu KQKN = `{origin}/dashboard/quality/{YYYY-MM-DD}` (xem buildQualityKqknLookupUrl).
+const QC_DATE_IN_URL_RE = /\/dashboard\/quality\/(\d{4}-\d{2}-\d{2})/
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Samples = Record<string, (string | number)[]>
@@ -367,6 +388,7 @@ export default function QualityPage() {
   const [filterTT,    setFilterTT]    = useState("")
   const [filterFrom,  setFilterFrom]  = useState("")
   const [filterTo,    setFilterTo]    = useState("")
+  const [scanning,    setScanning]    = useState(false)
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set())
   const [editDateModal, setEditDateModal] = useState<string|null>(null)
   const [deleteMode,    setDeleteMode]   = useState<string|null>(null)
@@ -482,6 +504,19 @@ export default function QualityPage() {
     toastTimerRef.current = setTimeout(()=>setToast(null),3500)
   }, [])
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current) }, [])
+
+  // Quét QR Phiếu KQKN → lọc đúng ngày KN của phiếu; QR khác (mã lô dán tay…) → đưa vào ô tìm.
+  const handleScanDecoded = (text: string) => {
+    const raw = text.trim()
+    const date = raw.match(QC_DATE_IN_URL_RE)?.[1]
+    setScanning(false)
+    if (date) {
+      setSearch(""); setFilterFrom(date); setFilterTo(date)
+      showToast(`Đã lọc phiếu kiểm nghiệm ngày ${formatDateDisplay(date) || date}`)
+    } else {
+      setSearch(raw)
+    }
+  }
 
   // ── Load results ─────────────────────────────────────────────────────────────
   const loadResults = useCallback(async (fid: string) => {
@@ -2214,8 +2249,26 @@ export default function QualityPage() {
 
       {/* ── LIST / GIÁM SÁT VIEW ─────────────────────────────────────────── */}
       {view === "list" && (
-        <div>
+        <div className={moduleThemeClass("mint")}>
           <PageBackgroundMotif theme="mint"/>
+          {scanning && typeof document !== "undefined" &&
+            createPortal(
+              <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
+                <QrScanner
+                  onDecoded={(t) => handleScanDecoded(t)}
+                  onCancel={() => setScanning(false)}
+                  hintText="Đưa camera vào mã QR trên Phiếu kết quả kiểm nghiệm"
+                  cancelText="Hủy quét"
+                  cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+                  uploadButtonText="Tải ảnh chứa QR"
+                  uploadScanningText="Đang xử lý ảnh..."
+                  uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+                  orDividerText="hoặc"
+                  scanError={null}
+                />
+              </div>,
+              document.body,
+            )}
           {/* Hidden file input for import */}
           <input ref={importFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
             onChange={e => { const f=e.target.files?.[0]; if (f) handleImport(f) }}/>
@@ -2317,37 +2370,30 @@ export default function QualityPage() {
           )}
 
           {/* Tab nav */}
-          <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit overflow-x-auto max-w-full">
-            {([
-              { val:"xep_hang", label:"Xếp hạng", icon:Star },
-              { val:"giam_sat", label:"Giám sát KN", icon:Eye },
-              { val:"thong_ke", label:"Thống kê", icon:BarChart2 },
-            ] as const).map(t => (
-              <button key={t.val} onClick={()=>setMainTab(t.val)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-                  mainTab===t.val ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"}`}>
-                <t.icon size={14}/> {t.label}
-              </button>
-            ))}
+          <div className="mb-5">
+            <SegmentedTabs
+              ariaLabel="Chọn chế độ xem kiểm nghiệm"
+              value={mainTab}
+              onChange={setMainTab}
+              items={[
+                { key: "xep_hang", label: "Xếp hạng", icon: Star },
+                { key: "giam_sat", label: "Giám sát KN", icon: Activity },
+                { key: "thong_ke", label: "Thống kê", icon: BarChart2 },
+              ]}
+            />
           </div>
 
           {/* ── XẾP HẠNG TAB ─────────────────────────────────────────────── */}
           {mainTab === "xep_hang" && (
             <>
               {/* Stats */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-                {[
-                  { label:"Tổng lô (mới nhất)", value:stats.total,                                            color:"text-slate-700",   Icon:ClipboardCheck, ic:"text-slate-400"   },
-                  { label:"Đạt hạng",            value:`${stats.dat} lô`,                                     color:"text-emerald-600", Icon:Check,          ic:"text-emerald-400" },
-                  { label:"Rớt hạng",            value:`${stats.khongDat} lô (${stats.tyLeKhongDatStr})`,       color:"text-red-500",     Icon:XCircle,        ic:"text-red-400"     },
-                  { label:"Tỷ lệ đạt",           value:stats.tyLeStr,                                         color:"text-blue-600",    Icon:BarChart2,      ic:"text-blue-400"    },
-                ].map(s=>(
-                  <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
-                    <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
-                    <div className={`text-2xl font-extrabold ${s.color}`}>{s.value}</div>
-                    <div className="text-xs text-slate-500 mt-1">{s.label}</div>
-                  </div>
-                ))}
+              <div className="mb-5">
+                <StatGrid cols={4}>
+                  <StatCard icon={ClipboardCheck} label="Tổng lô (mới nhất)" value={stats.total} />
+                  <StatCard icon={Check} label="Đạt hạng" value={`${stats.dat} lô`} valueTone="good" />
+                  <StatCard icon={XCircle} label="Rớt hạng" value={`${stats.khongDat} lô`} sub={stats.tyLeKhongDatStr} valueTone={stats.khongDat > 0 ? "danger" : "default"} />
+                  <StatCard icon={BarChart2} label="Tỷ lệ đạt" value={stats.tyLeStr} />
+                </StatGrid>
               </div>
 
               {/* Filter bar */}
@@ -2356,6 +2402,16 @@ export default function QualityPage() {
                   <Search size={14} className="text-slate-400"/>
                   <input value={search} onChange={e=>setSearch(e.target.value)}
                     placeholder="Tìm mã lô, PKN..." className="flex-1 text-sm outline-none"/>
+                  <button
+                    type="button"
+                    onClick={() => setScanning(true)}
+                    title="Quét QR phiếu kiểm nghiệm đã in"
+                    aria-label="Quét QR phiếu kiểm nghiệm đã in"
+                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-mod-50 px-2.5 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-200"
+                  >
+                    <QrCode size={15} />
+                    <span className="hidden sm:inline">Quét QR</span>
+                  </button>
                 </div>
                 <select value={filterLoai} onChange={e=>setFilterLoai(e.target.value)}
                   className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none">
@@ -2381,44 +2437,48 @@ export default function QualityPage() {
                 )}
               </FilterBar>
 
-              {/* Date-grouped list */}
+              {/* Date-grouped list — rule 29: MỘT bảng, mỗi ngày là 1 dòng xổ (DateGroupRow), mũi tên cuối dòng. */}
               {/* Chỉ hiện "Đang tải" khi chưa có dữ liệu — tải lại không gỡ bảng (tránh nhấp nháy cột Ký duyệt). */}
               {loading && results.length === 0 ? (
-                <div className="bg-white rounded-xl p-12 text-center text-slate-400">Đang tải...</div>
+                <ListState kind="loading" />
               ) : dateGroups.length === 0 ? (
-                <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
-                  <ClipboardCheck size={40} className="mx-auto mb-3 opacity-30"/>
-                  <p>Không có kết quả kiểm nghiệm nào</p>
+                <div className="bg-white rounded-xl border border-slate-200">
+                  <ListState kind="empty" message="Không có kết quả kiểm nghiệm nào" />
                 </div>
               ) : (
-                <div className="space-y-3">
+                <ResponsiveTableWrapper>
+                  <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+                    <ExpandAllToggle
+                      allExpanded={dateGroups.every(([d]) => expandedDates.has(d))}
+                      onExpandAll={() => setExpandedDates(new Set(dateGroups.map(([d]) => d)))}
+                      onCollapseAll={() => setExpandedDates(new Set())}
+                    />
+                  </div>
+                  <table className="enterprise-table dense">
+                    <DateGroupHead dateLabel="Ngày KN" summaryLabel="Phiếu & kết quả" />
+                    <tbody>
                   {dateGroups.map(([date, dateResults]) => {
                     const expanded = expandedDates.has(date)
                     const inDeleteMode = deleteMode===date
                     const dateDat = dateResults.filter(r => !getEffectiveQc(r).dat_hang?.endsWith("RH")).length
                     const hasRetest = dateResults.some(r => r.parent_id || getEffectiveQc(r).id !== r.id)
                     // Chỉ người tạo (hoặc admin) mới được Sửa/Ký duyệt "biên bản" (= cả nhóm phiếu KN
-                    // trong ngày). Dữ liệu CŨ không rõ created_by (NULL) KHÔNG còn được coi là "ai có
-                    // quyền edit cũng thao tác được" — chỉ admin xử lý được khi không xác định được
-                    // người tạo (đã tighten 2026-08-31 sau khi phát hiện gần như toàn bộ dữ liệu thật
-                    // đang NULL created_by, khiến rule cũ vô hiệu hoá hoàn toàn tính năng ownership).
+                    // trong ngày). Dữ liệu CŨ không rõ created_by (NULL) chỉ admin xử lý (tighten 2026-08-31).
                     const canOwnerAct = currentUser
                       ? currentUser.role === "admin" ||
                         dateResults.some(r => r.created_by === currentUser.id)
                       : false
+                    const st = signingStatusByDate.get(date)
                     // Sau khi ngày đã "Đã ký duyệt" (hoan_tat), chỉ admin được Sửa/Xóa.
-                    const isDateLocked = currentUser?.role !== "admin" &&
-                      signingStatusByDate.get(date)?.trangThai === "hoan_tat"
-                    // "Thêm phiếu" (+ Nhập Excel) khoá SỚM HƠN Sửa/Xóa — ngay khi ngày đã "gửi ký
-                    // duyệt" (dang_luan_chuyen), không chờ tới "hoan_tat". Bug đã báo 2026-09-01:
-                    // Trưởng phòng QLCL (chỉ là người PHÊ DUYỆT, không phải chủ phiếu) vẫn thêm được
-                    // phiếu mới vào ngày đang chờ chính họ duyệt vì "+" trước đây chỉ khoá ở hoan_tat.
-                    const isAddBlocked = currentUser?.role !== "admin" && !!signingStatusByDate.get(date)
-                    // "Chọn hết" ở chế độ xóa: chỉ các phiếu người dùng thực sự được xóa — admin tất
-                    // cả, người khác chỉ phiếu do chính mình tạo (khớp RLS xóa theo từng phiếu).
+                    const isDateLocked = currentUser?.role !== "admin" && st?.trangThai === "hoan_tat"
+                    // "Thêm phiếu" (+ Nhập Excel) khoá SỚM HƠN Sửa/Xóa — ngay khi ngày đã gửi ký duyệt
+                    // (bug 2026-09-01: người phê duyệt thêm được phiếu vào ngày đang chờ chính họ duyệt).
+                    const isAddBlocked = currentUser?.role !== "admin" && !!st
+                    // "Chọn hết" ở chế độ xóa: chỉ các phiếu người dùng thực sự được xóa.
                     const deletableIds = dateResults
                       .filter(r => currentUser?.role === "admin" || (!!currentUser && r.created_by === currentUser.id))
                       .map(r => r.id)
+                    const statusReady = signingStatusLoaded && !signingStatusError
 
                     // Distinct batches in this date group (dedup by batch_id or pkn)
                     const batches = Array.from(
@@ -2429,168 +2489,137 @@ export default function QualityPage() {
                       }, new Map<string,{pkn:number;ngay_kn:string;batch_id?:string}>())
                     ).map(([,v])=>v)
 
+                    // Lô đã kiểm lại → dùng kết quả mới nhất (samples+grade+dat_hang), giữ lo_kn/ma_lo bản gốc.
+                    const resolveDateResults = async () => {
+                      const parentIds = dateResults.map(r=>r.id)
+                      const { data: retests } = await supabase.from("qc_results")
+                        .select("*")
+                        .in("parent_id", parentIds)
+                        .order("created_at", { ascending: false })
+                      const retestMap = new Map<string,QcResult>()
+                      ;(retests||[]).forEach(r=>{ if(r.parent_id&&!retestMap.has(r.parent_id)) retestMap.set(r.parent_id, r) })
+                      return dateResults.map(r=> {
+                        const rt = retestMap.get(r.id)
+                        return rt ? {...rt, lo_kn: r.lo_kn, ma_lo: r.ma_lo} : r
+                      })
+                    }
+                    const fileName = `Phiếu KQKN ${factoryCode} ${date}`
+                    const openSignedFile = (download: boolean) => {
+                      if (!st?.yeuCauId) return
+                      const q = download ? "download=1" : "view=1"
+                      void openSecureFile(`/api/signing/requests/${st.yeuCauId}/file-url?${q}&name=${encodeURIComponent(fileName)}`)
+                        .then(r => { if (!r.ok) showToast(r.error, false) })
+                    }
+                    const toggleOpen = (next: boolean) =>
+                      setExpandedDates(p => { const n = new Set(p); if (next) n.add(date); else n.delete(date); return n })
+
+                    const actions = inDeleteMode ? (
+                      <>
+                        <span className="hidden text-xs font-bold text-red-600 sm:inline">Chọn phiếu cần xóa</span>
+                        <button onClick={()=>{
+                            const allSelected = deletableIds.length > 0 && deletableIds.every(id => selectedDeleteIds.has(id))
+                            setSelectedDeleteIds(allSelected ? new Set() : new Set(deletableIds))
+                          }}
+                          disabled={deletableIds.length === 0}
+                          className="px-2.5 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded-lg disabled:opacity-40">
+                          {deletableIds.length > 0 && deletableIds.every(id => selectedDeleteIds.has(id)) ? "Bỏ chọn hết" : `Chọn hết (${deletableIds.length})`}
+                        </button>
+                        <button onClick={handleBulkDelete}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-red-600 text-white text-xs font-bold rounded-lg">
+                          <Trash2 size={11}/> Xóa {selectedDeleteIds.size}
+                        </button>
+                        <button onClick={()=>{setDeleteMode(null);setSelectedDeleteIds(new Set())}}
+                          className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg">Hủy</button>
+                      </>
+                    ) : !signingStatusLoaded ? (
+                      // Chưa biết trạng thái ký thật — skeleton trung tính, không hiện nút tạm rồi đổi.
+                      <span className="p-1.5 text-slate-300"><Loader2 size={15} className="animate-spin"/></span>
+                    ) : (
+                      <IconActionGroup>
+                        {hasPermission(currentUser, "quality.create") && statusReady && !isAddBlocked && (
+                          <RowAction kind="add" label="Thêm phiếu vào ngày này" onClick={() => openCreate(date)} />
+                        )}
+                        <RowAction kind="view" label="Xem chi tiết phiếu KQKN ngày này" href={`/dashboard/quality/${date}`} />
+
+                        {st?.fileHienTai ? (
+                          <>
+                            <RowAction kind="signed"
+                              label={st.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đang ký"}
+                              onClick={() => openSignedFile(false)} />
+                            <RowAction kind="download"
+                              label={st.trangThai === "hoan_tat" ? "Tải file đã ký duyệt" : "Tải file đang ký"}
+                              onClick={() => openSignedFile(true)} />
+                          </>
+                        ) : statusReady && !st ? (
+                          <RowAction kind="draft" label="Xuất PDF chưa ký" onClick={async () => {
+                            try {
+                              await downloadQualityKqknPdf(await resolveDateResults(), date, factoryCode)
+                            } catch {
+                              showToast("Không tạo được PDF phiếu KQKN.", false)
+                            }
+                          }} />
+                        ) : null}
+                        {hasPermission(currentUser, "quality.edit") && canOwnerAct && statusReady && !isDateLocked && (
+                          <RowAction kind="edit" label="Sửa phiếu trong ngày" onClick={() => { setEditDateModal(date); toggleOpen(true) }} />
+                        )}
+                        {hasPermission(currentUser, "quality.delete") && canOwnerAct && statusReady && !isDateLocked && (
+                          <RowAction kind="delete" label="Chọn phiếu để xóa" onClick={() => { setDeleteMode(date); setSelectedDeleteIds(new Set()); toggleOpen(true) }} />
+                        )}
+                      </IconActionGroup>
+                    )
+
+                    const sign = !currentUser ? null : !signingStatusLoaded ? (
+                      <Loader2 size={14} className="animate-spin text-slate-300"/>
+                    ) : signingStatusError && !st ? (
+                      <button onClick={() => void loadSigningStatuses()}
+                        title="Không tải được trạng thái ký — bấm để thử lại"
+                        className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-50">
+                        <AlertTriangle size={14}/> Thử lại
+                      </button>
+                    ) : (
+                      <SignStatusBadge
+                        status={st}
+                        currentUser={currentUser}
+                        canCreate={hasPermission(currentUser, "quality.edit") && canOwnerAct}
+                        continueRule="approver"
+                        showToast={showToast}
+                        onCancelled={loadSigningStatuses}
+                        onOpenSignPrompt={async () => {
+                          // Khoá ổn định theo ngày — ma_ho_so tương quan chống trùng yêu cầu ký (migration 20260904).
+                          setSignModal({ dateResults: await resolveDateResults(), maHoSo: date })
+                        }}
+                        cancelMessage={`Hủy yêu cầu ký ngày ${date} đang chờ Trưởng phòng QLCL phê duyệt? Sau khi hủy, có thể bấm “Gửi ký duyệt” để tạo yêu cầu mới từ đầu.`}
+                        dataChangedTitle="Có phiếu kiểm nghiệm đã được thêm/sửa cho ngày này SAU khi đã ký duyệt — file đã ký không còn khớp dữ liệu hiện tại. Xóa hết phiếu ngày này rồi nhập lại để ký lại từ đầu."
+                      />
+                    )
+
+                    const subColSpan = (inDeleteMode ? 1 : 0) + 9
                     return (
-                      <div key={date} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                        {/* Date header */}
-                        <div className={`px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 hover:bg-slate-50 transition-colors ${expanded?"border-b border-slate-100":""}`}>
-                          <div className="flex items-center gap-3 cursor-pointer flex-1 flex-wrap"
-                            onClick={()=>{ const next=new Set(expandedDates); expanded?next.delete(date):next.add(date); setExpandedDates(next) }}>
-                            {expanded ? <ChevronDown size={16} className="text-slate-400"/> : <ChevronRight size={16} className="text-slate-400"/>}
-                            <span className="font-extrabold text-slate-800 text-base">
-                              {new Date(date).toLocaleDateString("vi-VN")}
-                            </span>
-                            <span className="px-2 py-0.5 bg-white border border-slate-200 text-xs font-bold rounded-full text-slate-600">
-                              {dateResults.length} lô
-                            </span>
-                            {/* Batch PKN badges */}
+                      <DateGroupRow
+                        key={date}
+                        title={new Date(date).toLocaleDateString("vi-VN")}
+                        subtitle={`${dateResults.length} lô`}
+                        open={expanded || inDeleteMode}
+                        onToggle={toggleOpen}
+                        summary={
+                          <>
                             {batches.map(b=>(
                               <span key={b.pkn} className="px-2 py-0.5 bg-violet-50 border border-violet-200 text-violet-700 text-[10px] font-bold rounded-full">
                                 {formatPKN(b.pkn, b.ngay_kn, factoryCode)}
                               </span>
                             ))}
-                            <span className="text-xs text-emerald-600 font-bold">{dateDat} đạt</span>
-                            {hasRetest && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">↺ KN lại</span>}
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {inDeleteMode ? (
-                              <>
-                                <span className="text-xs text-red-600 font-bold">Chọn phiếu cần xóa...</span>
-                                <button onClick={()=>{
-                                    const allSelected = deletableIds.length > 0 && deletableIds.every(id => selectedDeleteIds.has(id))
-                                    setSelectedDeleteIds(allSelected ? new Set() : new Set(deletableIds))
-                                  }}
-                                  disabled={deletableIds.length === 0}
-                                  className="px-2.5 py-1 bg-white border border-red-200 text-red-600 text-xs font-bold rounded-lg disabled:opacity-40">
-                                  {deletableIds.length > 0 && deletableIds.every(id => selectedDeleteIds.has(id)) ? "Bỏ chọn hết" : `Chọn hết (${deletableIds.length})`}
-                                </button>
-                                <button onClick={handleBulkDelete}
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-red-600 text-white text-xs font-bold rounded-lg">
-                                  <Trash2 size={11}/> Xóa {selectedDeleteIds.size}
-                                </button>
-                                <button onClick={()=>{setDeleteMode(null);setSelectedDeleteIds(new Set())}}
-                                  className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg">Hủy</button>
-                              </>
-                            ) : (
-                              <>
-                                {hasPermission(currentUser, "quality.create") && signingStatusLoaded && !signingStatusError && !isAddBlocked && (
-                                  <button onClick={e=>{e.stopPropagation();openCreate(date)}}
-                                    title="Thêm phiếu"
-                                    className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors">
-                                    <Plus size={15}/>
-                                  </button>
-                                )}
-                                {hasPermission(currentUser, "quality.edit") && canOwnerAct && signingStatusLoaded && !signingStatusError && !isDateLocked && (
-                                  <button onClick={e=>{e.stopPropagation();setEditDateModal(date);setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
-                                    title="Sửa"
-                                    className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition-colors">
-                                    <Edit2 size={15}/>
-                                  </button>
-                                )}
-                                {hasPermission(currentUser, "quality.delete") && canOwnerAct && signingStatusLoaded && !signingStatusError && !isDateLocked && (
-                                  <button onClick={e=>{e.stopPropagation();setDeleteMode(date);setSelectedDeleteIds(new Set());setExpandedDates(p=>{const n=new Set(p);n.add(date);return n})}}
-                                    title="Xóa"
-                                    className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors">
-                                    <Trash2 size={15}/>
-                                  </button>
-                                )}
-                                {!signingStatusLoaded ? (
-                                  // Chưa biết trạng thái ký thật — hiện skeleton trung tính thay vì icon/badge
-                                  // "chưa ký" tạm thời rồi đổi ngay sau đó (bug "icon ẩn/hiện" đã báo 2026-09-01).
-                                  <span className="p-1.5 rounded-lg text-slate-300">
-                                    <Loader2 size={15} className="animate-spin"/>
-                                  </span>
-                                ) : signingStatusError && !signingStatusByDate.get(date) ? (
-                                  <button onClick={e=>{e.stopPropagation(); void loadSigningStatuses()}}
-                                    title="Không tải được trạng thái ký — bấm để thử lại"
-                                    className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-50">
-                                    <AlertTriangle size={14}/> Thử lại
-                                  </button>
-                                ) : (
-                                <>
-                                {/* PDF: chưa ký → render bản in nháp; đã có yêu cầu ký → mở đúng file hiện
-                                    tại (đã có chữ ký Lập biểu nếu đang chờ, đủ cả 2 chữ ký nếu hoàn tất) */}
-                                {signingStatusByDate.get(date)?.fileHienTai ? (
-                                  <>
-                                    <a href={signingStatusByDate.get(date)!.fileHienTai!} target="_blank" rel="noreferrer"
-                                      onClick={e=>e.stopPropagation()}
-                                      title={signingStatusByDate.get(date)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập biểu"}
-                                      className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors">
-                                      <Eye size={15}/>
-                                    </a>
-                                    {/* Tải về máy: dùng ?download= của Supabase Storage — thuộc tính HTML
-                                        `download` KHÔNG có tác dụng vì file khác origin với app. */}
-                                    <a href={buildStorageDownloadUrl(signingStatusByDate.get(date)!.fileHienTai!, `Phiếu KQKN ${factoryCode} ${date}`)}
-                                      onClick={e=>e.stopPropagation()}
-                                      title={signingStatusByDate.get(date)!.trangThai === "hoan_tat" ? "Tải file đã ký duyệt về máy" : "Tải file đã ký (đang chờ ký tiếp)"}
-                                      className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors">
-                                      <Download size={15}/>
-                                    </a>
-                                  </>
-                                ) : (
-                                  <button onClick={async e=>{e.stopPropagation();
-                                    // Nếu lô đã kiểm lại → dùng kết quả mới nhất (samples+grade+dat_hang)
-                                    const parentIds = dateResults.map(r=>r.id)
-                                    const { data: retests } = await supabase.from("qc_results")
-                                      .select("*")
-                                      .in("parent_id", parentIds)
-                                      .order("created_at", { ascending: false })
-                                    const retestMap = new Map<string,QcResult>()
-                                    ;(retests||[]).forEach(r=>{ if(r.parent_id&&!retestMap.has(r.parent_id)) retestMap.set(r.parent_id, r) })
-                                    // Substitute re-test record but keep lo_kn từ bản gốc để PDF đúng số thứ tự
-                                    const resolved = dateResults.map(r=> {
-                                      const rt = retestMap.get(r.id)
-                                      return rt ? {...rt, lo_kn: r.lo_kn, ma_lo: r.ma_lo} : r
-                                    })
-                                    try {
-                                      await downloadQualityKqknPdf(resolved, date, factoryCode)
-                                    } catch {
-                                      showToast("Không tạo được PDF phiếu KQKN.", false)
-                                    }}}
-                                    title="Xuất PDF (chưa ký)"
-                                    className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors">
-                                    <FileText size={15}/>
-                                  </button>
-                                )}
-                                {currentUser && (
-                                  <QualitySignStatusBadge
-                                    status={signingStatusByDate.get(date)}
-                                    currentUser={currentUser}
-                                    canCreate={hasPermission(currentUser, "quality.edit") && canOwnerAct}
-                                    showToast={showToast}
-                                    onCancelled={loadSigningStatuses}
-                                    onOpenSignPrompt={async () => {
-                                      const parentIds = dateResults.map(r=>r.id)
-                                      const { data: retests } = await supabase.from("qc_results")
-                                        .select("*")
-                                        .in("parent_id", parentIds)
-                                        .order("created_at", { ascending: false })
-                                      const retestMap = new Map<string,QcResult>()
-                                      ;(retests||[]).forEach(r=>{ if(r.parent_id&&!retestMap.has(r.parent_id)) retestMap.set(r.parent_id, r) })
-                                      const resolved = dateResults.map(r=> {
-                                        const rt = retestMap.get(r.id)
-                                        return rt ? {...rt, lo_kn: r.lo_kn, ma_lo: r.ma_lo} : r
-                                      })
-                                      // Khoá ổn định theo ngày (không phụ thuộc batch nào tới trước) — dùng làm
-                                      // ma_ho_so tương quan chống trùng yêu cầu ký, xem migration 20260904.
-                                      setSignModal({ dateResults: resolved, maHoSo: date })
-                                    }}
-                                  />
-                                )}
-                                </>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Expanded rows */}
-                        {expanded && (
-                          <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-                          <table className="w-full text-sm">
-                            <thead className="bg-slate-50 border-b border-slate-100">
+                            <StatusBadge tone="valid" label={`${dateDat}/${dateResults.length} đạt`} size="xs" />
+                            {hasRetest && <StatusBadge tone="warn" label="↺ KN lại" size="xs" />}
+                          </>
+                        }
+                        sign={sign}
+                        actions={actions}
+                      >
+                          <table className="enterprise-table dense">
+                            <thead>
                               <tr>
                                 {inDeleteMode && (
-                                  <th className="px-3 py-2 w-8">
+                                  <th className="w-8">
                                     <input type="checkbox" className="rounded"
                                       title="Chọn tất cả phiếu được phép xóa trong ngày"
                                       checked={deletableIds.length > 0 && deletableIds.every(id => selectedDeleteIds.has(id))}
@@ -2603,82 +2632,26 @@ export default function QualityPage() {
                                     />
                                   </th>
                                 )}
-                                {["Lô PKN","Lô KN","Loại","Tiêu chuẩn","Tạp chất","Tro","PRI","Kết quả",""].map(h=>(
-                                  <th key={h} className="px-3 py-2 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                                {["Lô PKN","Lô KN","Loại","Tiêu chuẩn","Tạp chất","Tro","PRI","Kết quả"].map(h=>(
+                                  <th key={h}>{h}</th>
                                 ))}
+                                <ExpandHeaderCell />
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100">
+                            <tbody>
                               {dateResults.map(r => {
                                 const effectiveR = getEffectiveQc(r)
                                 const isRetested = effectiveR.id !== r.id
                                 const isEffectivePassed = !effectiveR.dat_hang?.endsWith("RH")
                                 return (
-                                <>
-                                  <tr key={r.id} className="hover:bg-slate-50 transition-colors cursor-pointer row-hover"
-                                    onClick={()=>setExpandedId(expandedId===r.id?null:r.id)}>
-                                    {inDeleteMode && (
-                                      <td className="px-3 py-2.5" onClick={e=>e.stopPropagation()}>
-                                        <input type="checkbox" checked={selectedDeleteIds.has(r.id)}
-                                          onChange={e=>{
-                                            const n=new Set(selectedDeleteIds)
-                                            e.target.checked?n.add(r.id):n.delete(r.id)
-                                            setSelectedDeleteIds(n)
-                                          }} className="rounded"/>
-                                      </td>
-                                    )}
-                                    <td className="px-3 py-2.5 text-center font-bold text-violet-700 text-xs font-mono">
-                                      {r.lo_kn||"—"}
-                                      {r.parent_id && <span className="ml-1 px-1 py-0.5 bg-amber-100 text-amber-700 text-[9px] font-bold rounded">KN lại</span>}
-                                      {isRetested && (
-                                        <span className={`ml-1 px-1.5 py-0.5 text-[9px] font-bold rounded ${
-                                          isEffectivePassed ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-amber-100 text-amber-700 border border-amber-200"
-                                        }`}>
-                                          ↺ KN lại: {isEffectivePassed ? `Đạt ${effectiveR.dat_hang}` : effectiveR.dat_hang}
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td className="px-3 py-2.5 font-semibold text-emerald-700">{r.ma_lo}</td>
-                                    <td className="px-3 py-2.5">
-                                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">{effectiveR.loai_csr}</span>
-                                    </td>
-                                    <td className="px-3 py-2.5 text-slate-400 text-xs">{effectiveR.tieu_chuan}</td>
-                                    <td className="px-3 py-2.5 text-xs text-slate-600">
-                                      {effectiveR.grade?.tap_chat?.tb?.toFixed(3)??"-"}
-                                      <span className={`ml-1 ${effectiveR.grade?.tap_chat?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {effectiveR.grade?.tap_chat?.dat!=null?(effectiveR.grade.tap_chat.dat?"✓":"✗"):""}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2.5 text-xs text-slate-600">
-                                      {effectiveR.grade?.tro?.tb?.toFixed(3)??"-"}
-                                      <span className={`ml-1 ${effectiveR.grade?.tro?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {effectiveR.grade?.tro?.dat!=null?(effectiveR.grade.tro.dat?"✓":"✗"):""}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2.5 text-xs text-slate-600">
-                                      {effectiveR.grade?.pri?.tb?.toFixed(1)??"-"}
-                                      <span className={`ml-1 ${effectiveR.grade?.pri?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {effectiveR.grade?.pri?.dat!=null?(effectiveR.grade.pri.dat?"✓":"✗"):""}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2.5">
-                                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                        isEffectivePassed ?"bg-emerald-100 text-emerald-700":"bg-red-100 text-red-600"}`}>
-                                        {isEffectivePassed ? `✓ ${effectiveR.dat_hang}` : `✗ ${effectiveR.dat_hang||"Rớt hạng"}`}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2.5">
-                                      <button onClick={e=>{e.stopPropagation();setExpandedId(expandedId===r.id?null:r.id)}}
-                                        className="p-1 hover:bg-slate-100 rounded-lg">
-                                        {expandedId===r.id?<ChevronDown size={13} className="text-slate-400"/>:<ChevronRight size={13} className="text-slate-400"/>}
-                                      </button>
-                                    </td>
-                                  </tr>
-                                  {/* Expanded detail */}
-                                  {expandedId===r.id && (
-                                    <tr key={r.id+"_exp"}>
-                                      <td colSpan={inDeleteMode?10:9} className="px-4 py-4 bg-slate-50">
-                                        <div className="space-y-3">
+                                  <ExpandableRow
+                                    key={r.id}
+                                    expanded={expandedId===r.id}
+                                    onToggle={()=>setExpandedId(expandedId===r.id?null:r.id)}
+                                    colSpan={subColSpan}
+                                    label="Xem số liệu mẫu"
+                                    detail={
+                                        <div className="space-y-3 py-1">
                                           {isRetested && (
                                             <div className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg flex items-center gap-2">
                                               <CheckCircle size={14}/> Kết quả sau Kiểm nghiệm lại (Lần {effectiveR.lan || 2} - Ngày {effectiveR.ngay_kn}):
@@ -2724,20 +2697,70 @@ export default function QualityPage() {
                                             </div>
                                           )}
                                         </div>
+                                    }
+                                  >
+                                    {inDeleteMode && (
+                                      <td onClick={e=>e.stopPropagation()}>
+                                        <input type="checkbox" checked={selectedDeleteIds.has(r.id)}
+                                          onChange={e=>{
+                                            const n=new Set(selectedDeleteIds)
+                                            e.target.checked?n.add(r.id):n.delete(r.id)
+                                            setSelectedDeleteIds(n)
+                                          }} className="rounded"/>
                                       </td>
-                                    </tr>
-                                  )}
-                                </>
+                                    )}
+                                    <td className="whitespace-nowrap font-code text-xs font-bold text-violet-700">
+                                      {r.lo_kn||"—"}
+                                      {r.parent_id && <span className="ml-1 px-1 py-0.5 bg-amber-100 text-amber-700 text-[9px] font-bold rounded">KN lại</span>}
+                                      {isRetested && (
+                                        <span className={`ml-1 px-1.5 py-0.5 text-[9px] font-bold rounded ${
+                                          isEffectivePassed ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-amber-100 text-amber-700 border border-amber-200"
+                                        }`}>
+                                          ↺ KN lại: {isEffectivePassed ? `Đạt ${effectiveR.dat_hang}` : effectiveR.dat_hang}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="whitespace-nowrap font-semibold text-slate-800">{r.ma_lo}</td>
+                                    <td>
+                                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">{effectiveR.loai_csr}</span>
+                                    </td>
+                                    <td className="text-slate-400 text-xs">{effectiveR.tieu_chuan}</td>
+                                    <td className="text-xs text-slate-600">
+                                      {effectiveR.grade?.tap_chat?.tb?.toFixed(3)??"-"}
+                                      <span className={`ml-1 ${effectiveR.grade?.tap_chat?.dat?"text-emerald-500":"text-red-500"}`}>
+                                        {effectiveR.grade?.tap_chat?.dat!=null?(effectiveR.grade.tap_chat.dat?"✓":"✗"):""}
+                                      </span>
+                                    </td>
+                                    <td className="text-xs text-slate-600">
+                                      {effectiveR.grade?.tro?.tb?.toFixed(3)??"-"}
+                                      <span className={`ml-1 ${effectiveR.grade?.tro?.dat?"text-emerald-500":"text-red-500"}`}>
+                                        {effectiveR.grade?.tro?.dat!=null?(effectiveR.grade.tro.dat?"✓":"✗"):""}
+                                      </span>
+                                    </td>
+                                    <td className="text-xs text-slate-600">
+                                      {effectiveR.grade?.pri?.tb?.toFixed(1)??"-"}
+                                      <span className={`ml-1 ${effectiveR.grade?.pri?.dat?"text-emerald-500":"text-red-500"}`}>
+                                        {effectiveR.grade?.pri?.dat!=null?(effectiveR.grade.pri.dat?"✓":"✗"):""}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <StatusBadge
+                                        tone={isEffectivePassed ? "valid" : "danger"}
+                                        label={isEffectivePassed ? `Đạt ${effectiveR.dat_hang || ""}`.trim() : (effectiveR.dat_hang || "Rớt hạng")}
+                                        size="xs"
+                                      />
+                                    </td>
+                                  </ExpandableRow>
                                 )
                               })}
                             </tbody>
                           </table>
-                          </ResponsiveTableWrapper>
-                        )}
-                      </div>
+                      </DateGroupRow>
                     )
                   })}
-                </div>
+                    </tbody>
+                  </table>
+                </ResponsiveTableWrapper>
               )}
             </>
           )}
@@ -2750,7 +2773,7 @@ export default function QualityPage() {
                 {[
                   { label:"Đã KN lại đạt hạng", value:gmsStats.rotCT, color:"text-emerald-600", Icon:CheckCircle, ic:"text-emerald-500" },
                   { label:"KN lại 6 tháng",value:gmsStats.thang6,color:"text-blue-600",  Icon:Clock,     ic:"text-blue-400"  },
-                  { label:"Tổng giám sát", value:gmsStats.total, color:"text-slate-700", Icon:Eye,        ic:"text-slate-400" },
+                  { label:"Tổng giám sát", value:gmsStats.total, color:"text-slate-700", Icon:Activity,        ic:"text-slate-400" },
                 ].map(s=>(
                   <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
                     <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`}/>
@@ -2791,7 +2814,7 @@ export default function QualityPage() {
               {/* Giám sát cards */}
               {gmsResults.length === 0 ? (
                 <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
-                  <Eye size={40} className="mx-auto mb-3 opacity-30"/>
+                  <Activity size={40} className="mx-auto mb-3 opacity-30"/>
                   <p>Không có dữ liệu giám sát</p>
                 </div>
               ) : (

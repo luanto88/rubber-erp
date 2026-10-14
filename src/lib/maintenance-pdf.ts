@@ -1963,3 +1963,19 @@ export async function downloadMaintenanceBaoCaoKyPdf(
   })
   doc.save(`bao-cao-bao-tri-${safeName(from)}-${safeName(to)}.pdf`)
 }
+
+/**
+ * Dựng PDF bản CHƯA ký (giống "In bản chưa ký", có tên người ký in sẵn) trả về bytes — dùng cho
+ * khung xem nhúng ở trang chi tiết biên bản khi chưa gửi ký (rule 29 mục C). Không tải file.
+ */
+export async function buildMaintenanceDraftPdfBytes(
+  bundle: MaintenanceSignBundle, record: RecordData, qrUrl: string, staffMap: Map<string, string>,
+): Promise<Uint8Array> {
+  const builder =
+    bundle === "su_co_nho" ? buildMaintenanceSuCoNhoDoc
+    : bundle === "bao_duong" ? buildMaintenanceBaoDuongDoc
+    : bundle === "bao_duong_xe" ? buildMaintenanceBaoDuongXeDoc
+    : buildMaintenanceSuaChuaNhoXeDoc
+  const { doc } = await builder(record, qrUrl, staffMap, false)
+  return new Uint8Array(doc.output("arraybuffer") as ArrayBuffer)
+}

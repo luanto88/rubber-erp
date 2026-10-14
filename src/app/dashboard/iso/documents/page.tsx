@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, type SessionUser } from "@/lib/auth"
@@ -19,7 +19,7 @@ import {
   type IsoTrangThai,
 } from "../_components/iso-types"
 import { canOpenIsoFile, EXPIRED_FILE_HINT } from "../_components/iso-file-access"
-import { Plus, Search, FileText, Eye, ChevronDown, Pencil, Trash2, Share2, ChevronUp, Download, FileSignature, ShieldCheck } from "lucide-react"
+import { Plus, Search, FileText, Eye, Pencil, Trash2, Share2, ChevronUp, Download, FileSignature, ShieldCheck } from "lucide-react"
 import Link from "next/link"
 import { DistributionModal } from "../_components/distribution-modal"
 import { DistributionManagement } from "../_components/distribution-management"
@@ -30,6 +30,7 @@ import { PageBackgroundMotif } from "../../_components/page-background-motif"
 import { fetchSecureUrl, openSecureFile } from "../../_components/secure-file-open"
 import { canCreateIsoDocument, canSeeIsoDocInLibrary, canViewIsoLibrary, isIsoDocParticipant, readCachedIsoUser } from "../_components/iso-access"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
 
 export default function IsoDocumentsPage() {
@@ -379,6 +380,20 @@ export default function IsoDocumentsPage() {
             </div>
           ) : (
             <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
+            {(() => {
+              const ids = parentRows.filter((d) => (childrenByParent[d.id] || []).length > 0).map((d) => d.id)
+              const allExpanded = ids.length > 0 && ids.every((id) => expandedParents[id])
+              return (
+                <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+                  <ExpandAllToggle
+                    allExpanded={allExpanded}
+                    disabled={ids.length === 0}
+                    onExpandAll={() => setExpandedParents(Object.fromEntries(ids.map((id) => [id, true])))}
+                    onCollapseAll={() => setExpandedParents({})}
+                  />
+                </div>
+              )
+            })()}
             <table className="enterprise-table">
               <thead>
                 <tr>
@@ -390,31 +405,151 @@ export default function IsoDocumentsPage() {
                   <th className="px-4 py-3 text-left font-semibold hidden lg:table-cell">Cấp</th>
                   <th className="px-4 py-3 text-left font-semibold">Trạng thái</th>
                   <th className="px-4 py-3 text-left font-semibold hidden xl:table-cell">Ngày HLực</th>
-                  <th className="px-4 py-3 text-right font-semibold">Hành động</th>
+                  <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
                 </tr>
               </thead>
               <tbody>
                 {parentRows.map((doc) => {
                   const childRows = childrenByParent[doc.id] || []
                   const isExpanded = !!expandedParents[doc.id]
+                const renderDocActions = (d: typeof parentRows[number], isChild: boolean) =>
+                        (() => {
+                          const isAdmin = userRole === "admin"
+                          const canEditDoc = (d.trang_thai === "draft" && (d.soan_thao_user_id === userId || d.created_by === userId)) || isAdmin
+                          const canDeleteDoc = (d.trang_thai === "draft" && (d.soan_thao_user_id === userId || d.created_by === userId)) || isAdmin
+                          const canOpenDocFile = canOpenIsoFile(d.trang_thai, user, d, userId)
+                          const hasDocFile = !!(d.file_signed_pdf_url || d.file_signed_office_url || d.file_goc_url)
+                          return (
+                            <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <Link
+                                href={`/dashboard/iso/documents/${d.id}`}
+                                title="Xem chi tiết"
+                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
+                              >
+                                <Eye size={14} />
+                              </Link>
+                              {!canOpenDocFile ? (
+                                <span
+                                  title={EXPIRED_FILE_HINT}
+                                  className="p-1.5 rounded-lg text-slate-200 cursor-not-allowed"
+                                >
+                                  <Download size={14} />
+                                </span>
+                              ) : hasDocFile ? (
+                                <button
+                                  type="button"
+                                  title="Tải xuống"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void openSecureFile(`/api/iso/documents/${d.id}/file-url?variant=main&download=1`)
+                                  }}
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-600 transition-colors"
+                                >
+                                  <Download size={14} />
+                                </button>
+                              ) : (
+                                <Link
+                                  href={`/dashboard/iso/documents/${d.id}`}
+                                  title="Tải xuống"
+                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-brand-600 transition-colors"
+                                >
+                                  <Download size={14} />
+                                </Link>
+                              )}
+                              {!isChild && canDistribute && d.trang_thai === "co_hieu_luc" && (
+                                <button
+                                  title="Phân phối tài liệu này"
+                                  onClick={() => { setDistributeDocId(d.id); setShowDistributeModal(true) }}
+                                  className="p-1.5 rounded-lg hover:bg-sky-50 text-slate-400 hover:text-sky-700 transition-colors"
+                                >
+                                  <Share2 size={14} />
+                                </button>
+                              )}
+                              {canEditDoc && (
+                                <Link
+                                  href={`/dashboard/iso/documents/${d.id}`}
+                                  title="Sửa"
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
+                                >
+                                  <Pencil size={14} />
+                                </Link>
+                              )}
+                              {hasDocFile && canEditDoc && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void goToMauViTri(d.id, d.loai_tai_lieu || d.ma_tai_lieu || "")
+                                  }}
+                                  title="Cài đặt mẫu vị trí ký"
+                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
+                                >
+                                  <FileSignature size={14} />
+                                </button>
+                              )}
+                              {canDeleteDoc && (
+                                <button
+                                  title="Xóa"
+                                  onClick={() => setDelConfirm(d.id)}
+                                  className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })()
+                  const childTable = (
+                    <table className="enterprise-table dense">
+                      <thead>
+                        <tr>
+                          <th>Mã hồ sơ</th>
+                          <th>Tên hồ sơ</th>
+                          <th className="hidden sm:table-cell">Loại</th>
+                          <th className="hidden lg:table-cell">Lần BH</th>
+                          <th>Trạng thái</th>
+                          <th className="hidden md:table-cell">Ngày HLực</th>
+                          <th className="sticky-end text-right">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {childRows.map((child) => (
+                          <tr key={child.id}>
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <Link href={`/dashboard/iso/documents/${child.id}`} className="hover:opacity-80">
+                                <DocCodePill code={child.ma_tai_lieu} muted />
+                              </Link>
+                            </td>
+                            <td><div className="font-medium text-slate-700 line-clamp-1">{child.ten_tai_lieu}</div></td>
+                            <td className="hidden sm:table-cell">{renderLoaiBadge(child.loai_tai_lieu)}</td>
+                            <td className="hidden lg:table-cell text-center text-slate-600 text-xs font-mono">{child.lan_ban_hanh}</td>
+                            <td>{renderStatusBadge(child.trang_thai)}</td>
+                            <td className="hidden md:table-cell text-xs text-slate-500">{fmtDate(child.ngay_hieu_luc)}</td>
+                            <td className="sticky-end text-right">{renderDocActions(child, true)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
                   return (
-                  <Fragment key={doc.id}>
-                  <tr key={doc.id} className="hover:bg-brand-50/40 transition-colors">
-                    <td className="px-4 py-3">
+                  <ExpandableRow
+                    key={doc.id}
+                    expanded={isExpanded}
+                    onToggle={() => setExpandedParents((prev) => ({ ...prev, [doc.id]: !prev[doc.id] }))}
+                    canExpand={childRows.length > 0}
+                    colSpan={9}
+                    label={`Xem ${childRows.length} hồ sơ trong bộ`}
+                    endCell={renderDocActions(doc, false)}
+                    detail={childTable}
+                  >
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-2">
-                        {childRows.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => setExpandedParents((prev) => ({ ...prev, [doc.id]: !prev[doc.id] }))}
-                            className="rounded-md p-1 text-slate-500 hover:bg-brand-50 hover:text-brand-800"
-                            title="Xem hồ sơ"
-                          >
-                            <ChevronDown size={14} className={`transition-transform ${isExpanded ? "rotate-180" : ""}`} />
-                          </button>
-                        ) : (
-                          <span className="w-6" />
+                        <Link href={`/dashboard/iso/documents/${doc.id}`} className="hover:opacity-80">
+                          <DocCodePill code={doc.ma_tai_lieu} />
+                        </Link>
+                        {childRows.length > 0 && (
+                          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-slate-500">{childRows.length} hồ sơ</span>
                         )}
-                        <DocCodePill code={doc.ma_tai_lieu} />
                       </div>
                       {doc.loai_vb === "Mật" && (
                         <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-600 text-[10px] font-bold rounded">Mật</span>
@@ -453,194 +588,7 @@ export default function IsoDocumentsPage() {
                     <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">
                       {fmtDate(doc.ngay_hieu_luc)}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      {(() => {
-                        const isAdmin = userRole === "admin"
-                        const canEditDoc = (doc.trang_thai === "draft" && (doc.soan_thao_user_id === userId || doc.created_by === userId)) || isAdmin
-                        const canDeleteDoc = (doc.trang_thai === "draft" && (doc.soan_thao_user_id === userId || doc.created_by === userId)) || isAdmin
-                        const canOpenDocFile = canOpenIsoFile(doc.trang_thai, user, doc, userId)
-                        const hasDocFile = !!(doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url)
-                        return (
-                          <div className="inline-flex items-center gap-1">
-                            <Link
-                              href={`/dashboard/iso/documents/${doc.id}`}
-                              title="Xem chi tiết"
-                              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
-                            >
-                              <Eye size={14} />
-                            </Link>
-                            {!canOpenDocFile ? (
-                              <span
-                                title={EXPIRED_FILE_HINT}
-                                className="p-1.5 rounded-lg text-slate-200 cursor-not-allowed"
-                              >
-                                <Download size={14} />
-                              </span>
-                            ) : hasDocFile ? (
-                              <button
-                                type="button"
-                                title="Tải xuống"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void openSecureFile(`/api/iso/documents/${doc.id}/file-url?variant=main&download=1`)
-                                }}
-                                className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-600 transition-colors"
-                              >
-                                <Download size={14} />
-                              </button>
-                            ) : (
-                              <Link
-                                href={`/dashboard/iso/documents/${doc.id}`}
-                                title="Tải xuống"
-                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-brand-600 transition-colors"
-                              >
-                                <Download size={14} />
-                              </Link>
-                            )}
-                            {canDistribute && doc.trang_thai === "co_hieu_luc" && (
-                              <button
-                                title="Phân phối tài liệu này"
-                                onClick={() => { setDistributeDocId(doc.id); setShowDistributeModal(true) }}
-                                className="p-1.5 rounded-lg hover:bg-sky-50 text-slate-400 hover:text-sky-700 transition-colors"
-                              >
-                                <Share2 size={14} />
-                              </button>
-                            )}
-                            {canEditDoc && (
-                              <Link
-                                href={`/dashboard/iso/documents/${doc.id}`}
-                                title="Sửa"
-                                className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
-                              >
-                                <Pencil size={14} />
-                              </Link>
-                            )}
-                            {hasDocFile && canEditDoc && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void goToMauViTri(doc.id, doc.loai_tai_lieu || doc.ma_tai_lieu || "")
-                                }}
-                                title="Cài đặt mẫu vị trí ký"
-                                className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
-                              >
-                                <FileSignature size={14} />
-                              </button>
-                            )}
-                            {canDeleteDoc && (
-                              <button
-                                title="Xóa"
-                                onClick={() => setDelConfirm(doc.id)}
-                                className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
-                          </div>
-                        )
-                      })()}
-                    </td>
-                  </tr>
-                  {isExpanded && childRows.map((child) => (
-                    <tr key={child.id} className="bg-brand-50/20 hover:bg-brand-50/50 transition-colors">
-                      <td className="px-4 py-3 pl-12">
-                        <DocCodePill code={child.ma_tai_lieu} muted />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-700 line-clamp-1">{child.ten_tai_lieu}</div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">Hồ sơ</div>
-                      </td>
-                      <td className="px-4 py-3 hidden sm:table-cell">
-                        {renderLoaiBadge(child.loai_tai_lieu)}
-                      </td>
-                      <td className="px-4 py-3 hidden md:table-cell text-xs text-slate-500">{child.phong_ban || doc.phong_ban || "—"}</td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-center text-slate-600 text-xs font-mono">{child.lan_ban_hanh}</td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-xs text-slate-500">{renderCapBadge(child.cap_tl || doc.cap_tl)}</td>
-                      <td className="px-4 py-3">{renderStatusBadge(child.trang_thai)}</td>
-                      <td className="px-4 py-3 hidden xl:table-cell text-xs text-slate-500">{fmtDate(child.ngay_hieu_luc)}</td>
-                      <td className="px-4 py-3 text-right">
-                        {(() => {
-                          const isAdmin = userRole === "admin"
-                          const canEditChild = (child.trang_thai === "draft" && (child.soan_thao_user_id === userId || child.created_by === userId)) || isAdmin
-                          const canDeleteChild = (child.trang_thai === "draft" && (child.soan_thao_user_id === userId || child.created_by === userId)) || isAdmin
-                          const canOpenChildFile = canOpenIsoFile(child.trang_thai, user, child, userId)
-                          const hasChildFile = !!(child.file_signed_pdf_url || child.file_signed_office_url || child.file_goc_url)
-                          return (
-                            <div className="inline-flex items-center gap-1">
-                              <Link
-                                href={`/dashboard/iso/documents/${child.id}`}
-                                title="Xem chi tiết"
-                                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
-                              >
-                                <Eye size={14} />
-                              </Link>
-                              {!canOpenChildFile ? (
-                                <span
-                                  title={EXPIRED_FILE_HINT}
-                                  className="p-1.5 rounded-lg text-slate-200 cursor-not-allowed"
-                                >
-                                  <Download size={14} />
-                                </span>
-                              ) : hasChildFile ? (
-                                <button
-                                  type="button"
-                                  title="Tải xuống"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    void openSecureFile(`/api/iso/documents/${child.id}/file-url?variant=main&download=1`)
-                                  }}
-                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-600 transition-colors"
-                                >
-                                  <Download size={14} />
-                                </button>
-                              ) : (
-                                <Link
-                                  href={`/dashboard/iso/documents/${child.id}`}
-                                  title="Tải xuống"
-                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-brand-600 transition-colors"
-                                >
-                                  <Download size={14} />
-                                </Link>
-                              )}
-                              {canEditChild && (
-                                <Link
-                                  href={`/dashboard/iso/documents/${child.id}`}
-                                  title="Sửa"
-                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
-                                >
-                                  <Pencil size={14} />
-                                </Link>
-                              )}
-                              {hasChildFile && canEditChild && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    void goToMauViTri(child.id, child.loai_tai_lieu || child.ma_tai_lieu || "")
-                                  }}
-                                  title="Cài đặt mẫu vị trí ký cho biểu mẫu này"
-                                  className="p-1.5 rounded-lg hover:bg-brand-100 text-slate-400 hover:text-brand-700 transition-colors"
-                                >
-                                  <FileSignature size={14} />
-                                </button>
-                              )}
-                              {canDeleteChild && (
-                                <button
-                                  title="Xóa"
-                                  onClick={() => setDelConfirm(child.id)}
-                                  className="p-1.5 rounded-lg hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              )}
-                            </div>
-                          )
-                        })()}
-                      </td>
-                    </tr>
-                  ))}
-                  </Fragment>
+                  </ExpandableRow>
                   )
                 })}
               </tbody>

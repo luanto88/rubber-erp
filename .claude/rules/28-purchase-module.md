@@ -209,3 +209,9 @@ Không migration. tsc + eslint sạch, CHƯA test tay, CHƯA commit.
   · Gần — cần xem 188 · Không khớp 169; cột "Mã CHỐT" để người dùng điền. CHƯA ghi `inventory_item_id` — phiên
   sau: script gán theo CSV đã duyệt rồi chạy lại backfill (biên bản đã duyệt) cho các dòng mới có mã. Cẩn thận
   cặp gần giống khác hàng thật (UC 208 ≠ UCP 208, B45 ≠ B46).
+
+## U4 giao diện (2026-10-14, chờ test tay)
+Danh sách + chi tiết theo rule 29 (mục F). GET danh sách trả thêm `lines` rút gọn (dòng xổ). Chi tiết
+70/30: file ký qua `/api/signing/requests/{yeu_cau_ky_id}/file-url` (quyền: người ký /
+`purchase.view_all` / admin), Nháp xem bản chưa ký `buildPurchaseDraftPdfBytes` (dùng bản chụp bằng
+chứng đã lưu, KHÔNG gọi insight-snapshot). Mọi điều kiện quyền/nút giữ nguyên `detail.perms`.

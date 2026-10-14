@@ -7910,3 +7910,7 @@ trang Lý lịch, `BannerAction`. Tiếp theo: U1b (trang chi tiết biên bản
 ### U1b + DateGroupRow + U2 Điều xe (2026-10-14, chờ test tay)
 Trang chi tiết biên bản chế độ xem 70/30 + route `api/maintenance/records/[id]/file-url`;
 `DateGroupRow`; danh sách Điều xe theo chuẩn U0. Chi tiết: rule 05 mục "U1b trang chi tiết biên bản".
+
+### U3 Kiểm nghiệm + dòng xổ Văn bản/ISO/Tổng quan Bảo trì (2026-10-14, chờ test tay)
+Bản chưa ký nhúng ở chi tiết Bảo trì/Điều xe (`DocViewer loadBytes`); trang mới
+`/dashboard/quality/[date]`. Chi tiết + bảng tình trạng: rule 29 mục F, G.

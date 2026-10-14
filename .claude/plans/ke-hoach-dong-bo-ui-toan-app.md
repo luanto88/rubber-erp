@@ -197,3 +197,25 @@ ExpandableRow. Backlog: Biên bản Bảo trì xổ thiết bị; Văn bản/ISO
 Tạo `.claude/rules/29-ui-standard.md` (nguồn duy nhất). Điều xe: trang chi tiết 70/30 + PDF nhúng,
 hộp xoá/modal ký dùng chung danh sách + chi tiết. Bảo trì: danh sách Biên bản xổ thiết bị.
 Tiếp theo: U3 Kiểm nghiệm theo đủ checklist rule 29.
+
+### U3 Kiểm nghiệm + đồng bộ dòng xổ (2026-10-14, chờ test tay)
+- Chi tiết Bảo trì/Điều xe: chưa gửi ký ⇒ khung xem nhúng bản chưa ký (`DocViewer loadBytes`).
+- Dòng xổ: Tổng quan Bảo trì "Biên bản gần đây" (thiết bị, dùng chung `MaintenanceLinesDetail`);
+  Văn bản (tiến trình ký, `van-ban-sign-progress.tsx`); ISO tài liệu (hồ sơ con, mũi tên về cuối).
+- Kiểm nghiệm: `moduleThemeClass("mint")`, `SegmentedTabs` (Giám sát KN = `Activity`), `StatGrid`,
+  danh sách = `DateGroupRow` trong 1 bảng, lô = `ExpandableRow` (số liệu mẫu), thao tác theo từ
+  điển (Thêm → Xem chi tiết → File ký → Tải → PDF chưa ký → Sửa → Xoá), ký = `SignStatusBadge`.
+  Trang mới `/dashboard/quality/[date]` 70/30. `QualitySignStatusBadge` còn file, không còn dùng.
+- Tiếp theo: U4 Đề nghị mua; Văn bản/ISO dùng `?view=1` (xem file đúng tên).
+
+
+### U4 Đề nghị mua + QR phiếu (2026-10-14, chờ test tay)
+- QR luôn GÓC PHẢI TRÊN phiếu: thêm cho Phiếu KQKN và Phiếu điều xe ngày; nút Quét QR ở ô tìm của
+  Kiểm nghiệm (tab Xếp hạng → lọc theo ngày KN) và Điều xe (mở chi tiết phiếu, deep-link `?entry=`).
+- Đề nghị mua danh sách: `moduleThemeClass("teal")`, `SegmentedTabs`, `StatGrid`, `FilterBar grid`,
+  `ExpandableRow` xổ dòng vật tư (GET `/api/purchase/requests` trả kèm `lines` rút gọn),
+  `StatusBadge domain="purchase"`, thao tác [Ký ngay] → view → signed (token) → download.
+- Chi tiết: `DetailPageHeader` + `DetailSplitLayout` (tab File/Nội dung, `DocViewer` file ký hoặc bản
+  chưa ký dựng bằng `buildPurchaseDraftPdfBytes`), inspector = trạng thái → `SignActionBox` (1 nút
+  chính) → tiến trình ký → thông tin → nhật ký.
+- Tiếp theo: U5 Kho vật tư; Quét QR cho Đề nghị mua; Văn bản/ISO `?view=1` (chờ đồng ý).

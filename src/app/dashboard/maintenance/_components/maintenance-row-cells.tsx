@@ -132,3 +132,45 @@ export function MaintenanceRowActions({
     </IconActionGroup>
   )
 }
+
+export type MaintenanceLineSummary = {
+  ma_tb: string | null
+  ten_tb: string | null
+  noi_dung: string | null
+  cac_khac_phuc: string | null
+  chi_phi_dk: number | null
+  loai_tien: string | null
+  ten_tai_xe: string | null
+  sort_order: number | null
+}
+
+/** Bảng con thiết bị/xe của 1 biên bản — dùng trong dòng xổ ở Tổng quan và Danh sách biên bản. */
+export function MaintenanceLinesDetail({ lines, isXe }: { lines: MaintenanceLineSummary[]; isXe: boolean }) {
+  const sorted = [...lines].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  return (
+    <table className="enterprise-table dense">
+      <thead>
+        <tr>
+          <th>{isXe ? "Mã xe" : "Mã TB"}</th>
+          <th>{isXe ? "Xe" : "Thiết bị"}</th>
+          {isXe && <th>Tài xế</th>}
+          <th>Nội dung</th>
+          <th className="text-right">Chi phí dự kiến</th>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map((l, i) => (
+          <tr key={`${l.ma_tb}-${i}`}>
+            <td className="whitespace-nowrap font-code text-xs">{l.ma_tb || "—"}</td>
+            <td className="whitespace-nowrap">{l.ten_tb || "—"}</td>
+            {isXe && <td className="whitespace-nowrap">{l.ten_tai_xe || "—"}</td>}
+            <td className="max-w-md">{l.cac_khac_phuc || l.noi_dung || "—"}</td>
+            <td className="whitespace-nowrap text-right tabular-nums">
+              {l.chi_phi_dk ? `${Number(l.chi_phi_dk).toLocaleString()} ${l.loai_tien || ""}` : "—"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { createPortal } from "react-dom"
+import dynamic from "next/dynamic"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { buildDispatchAnalytics, DISPATCH_MATERIAL_OPTIONS, formatKg, formatKm, formatTon, getTripDois, getTripMaterialFlags } from "@/lib/dispatch-analytics"
@@ -9,7 +10,7 @@ import { buildLoThuHoach as buildLoThuHoachFromPoints, calcManhattanKm as calcMa
 import { replaceDispatchEntryRows } from "@/lib/dispatch-entry-rows"
 import { formatDateDisplay, getFactoryTodayISO, getTodayISODate, isDateInRange } from "@/lib/date-utils"
 import { renderDispatchPlanImage, shareDispatchPlanImage } from "@/lib/dispatch-plan-image"
-import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
+import { buildDispatchEntryDraftPdfBytes, downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { DispatchSignModal } from "@/app/dashboard/dispatch/_components/dispatch-sign-modal"
 import type { DispatchSigningStatus } from "@/app/dashboard/dispatch/_components/dispatch-sign-status"
@@ -43,7 +44,15 @@ import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-se
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Pencil, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Loader2, Eye, AlertTriangle, ImageIcon, ArrowUp, ArrowDown } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Pencil, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Loader2, Eye, AlertTriangle, ImageIcon, ArrowUp, ArrowDown, QrCode } from "lucide-react"
+
+// html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client (mirror maintenance/history).
+const QrScanner = dynamic(
+  () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
+  { ssr: false },
+)
+// QR in trên Phiếu điều xe ngày = `{origin}/dashboard/dispatch?entry={uuid}` (buildDispatchEntryLookupUrl).
+const DISPATCH_ENTRY_ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 
 // Types
 type DxRow = {
@@ -726,6 +735,10 @@ export default function DispatchPage() {
   const [filterLoai, setFilterLoai] = useState<string[]>([])
   const [filterFrom, setFilterFrom] = useState("")
   const [filterTo, setFilterTo]   = useState("")
+  const [scanning, setScanning]   = useState(false)
+  // Mở chi tiết theo QR / deep-link `?entry=` — chờ danh sách tải xong rồi mới mở.
+  const [pendingEntryId, setPendingEntryId] = useState<string | null>(null)
+  const pendingRetriedRef = useRef(false)
   const [listTab, setListTab] = useState<"list"|"stats">("list")
   const [statsDoi, setStatsDoi] = useState<string[]>([])
   const [statsVehicle, setStatsVehicle] = useState<string[]>([])
@@ -779,6 +792,45 @@ export default function DispatchPage() {
   // Toast
   const [toast, setToast]         = useState<string|null>(null)
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
+
+  // Deep-link `?entry=<uuid>` (QR in trên phiếu) — đọc 1 lần lúc vào trang.
+  useEffect(() => {
+    try {
+      const id = new URLSearchParams(window.location.search).get("entry")
+      if (id && DISPATCH_ENTRY_ID_RE.test(id)) setPendingEntryId(id)
+    } catch { /* bỏ qua */ }
+  }, [])
+
+  useEffect(() => {
+    if (!pendingEntryId || !entriesLoaded) return
+    const found = entries.find(e => e.id === pendingEntryId)
+    if (found) {
+      setPendingEntryId(null)
+      pendingRetriedRef.current = false
+      setSelected(found); setDetailDocTab("file"); setDetailMobileTab("info"); setView("detail")
+      try { window.history.replaceState(null, "", "/dashboard/dispatch") } catch { /* bỏ qua */ }
+      return
+    }
+    // Có thể đang bị bộ lọc ngày loại ra — bỏ lọc ngày 1 lần rồi thử lại.
+    if (!pendingRetriedRef.current && (filterFrom || filterTo)) {
+      pendingRetriedRef.current = true
+      setFilterFrom(""); setFilterTo("")
+      return
+    }
+    setPendingEntryId(null)
+    pendingRetriedRef.current = false
+    showToast("Không tìm thấy phiếu điều xe từ mã QR này trong nhà máy hiện tại.")
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingEntryId, entriesLoaded, entries])
+
+  // Quét QR phiếu điều xe đã in → mở chi tiết; mã ĐX dạng chữ → đưa vào ô tìm.
+  const handleScanDecoded = (text: string) => {
+    const raw = text.trim()
+    setScanning(false)
+    const id = raw.match(DISPATCH_ENTRY_ID_RE)?.[0]
+    if (id) { pendingRetriedRef.current = false; setPendingEntryId(id); return }
+    setSearch(raw)
+  }
 
   // Ký duyệt bảng phân xe (Giai đoạn 4 — hệ thống ký số dùng chung)
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
@@ -1062,6 +1114,7 @@ export default function DispatchPage() {
   const filtered = entries.filter(e =>
     (
       !search || e.ngay?.includes(search) ||
+      (e.ma_dx || "").toLowerCase().includes(search.toLowerCase()) ||
       e.rows?.some(r => r.so_xe?.toLowerCase().includes(search.toLowerCase()) ||
         r.tai_xe?.toLowerCase().includes(search.toLowerCase()))
     ) &&
@@ -1769,6 +1822,24 @@ export default function DispatchPage() {
     <div className={moduleThemeClass("ocean")}>
       <PageBackgroundMotif theme="ocean"/>
       <ToastNotification/>
+      {scanning && typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
+            <QrScanner
+              onDecoded={(t) => handleScanDecoded(t)}
+              onCancel={() => setScanning(false)}
+              hintText="Đưa camera vào mã QR trên Phiếu điều xe đã in"
+              cancelText="Hủy quét"
+              cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+              uploadButtonText="Tải ảnh chứa QR"
+              uploadScanningText="Đang xử lý ảnh..."
+              uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+              orDividerText="hoặc"
+              scanError={null}
+            />
+          </div>,
+          document.body,
+        )}
       {kpiPrompt && (
         <KpiLinkPrompt
           factoryId={factoryId}
@@ -1845,8 +1916,18 @@ export default function DispatchPage() {
         <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-mod-600">
           <Search size={15} className="shrink-0 text-slate-400"/>
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Tìm ngày, xe, tài xế..."
+            placeholder="Tìm mã ĐX, ngày, xe, tài xế..."
             className="w-full min-w-0 text-sm outline-none"/>
+          <button
+            type="button"
+            onClick={() => setScanning(true)}
+            title="Quét QR phiếu điều xe đã in"
+            aria-label="Quét QR phiếu điều xe đã in"
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-mod-50 px-2 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-200"
+          >
+            <QrCode size={15} />
+            <span className="hidden sm:inline">Quét QR</span>
+          </button>
         </div>
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:col-span-2">
           <DateTextInput value={filterFrom} onChange={setFilterFrom}
@@ -2226,7 +2307,14 @@ export default function DispatchPage() {
     const canCreateSign = !!currentUser && hasPermission(currentUser, "dispatch.edit") && canOwner
     const st = signingStatusByEntry.get(selected.id)
     const hasFile = !!st?.fileHienTai
-    const docTab: "file" | "content" = hasFile ? detailDocTab : "content"
+    // Chưa gửi ký ⇒ khung xem nhúng bản CHƯA ký (cùng nội dung "Xuất PDF ngày", toàn bộ chuyến).
+    const hasDraft = !hasFile && signingStatusLoaded && !signingStatusError && !st && (selected.rows || []).length > 0
+    const docTab: "file" | "content" = hasFile || hasDraft ? detailDocTab : "content"
+    const loadDraftPdf = async () => {
+      const dayAnalytics = buildDispatchAnalytics([selected], deliveryPoints, {})
+      if (dayAnalytics.trips.length === 0) throw new Error("Phiếu chưa có chuyến để dựng bản xem trước")
+      return buildDispatchEntryDraftPdfBytes({ entry: selected, trips: dayAnalytics.trips, factoryName, makerName })
+    }
     const trips = selected.rows || []
     const totalFresh = trips.reduce((a, r) => a + getDispatchRowFresh(r), 0)
     const totalDry = trips.reduce((a, r) => a + getDispatchRowDry(r), 0)
@@ -2377,13 +2465,13 @@ export default function DispatchPage() {
         }
         document={
           <>
-            {hasFile && (
+            {(hasFile || hasDraft) && (
               <SegmentedTabs
                 ariaLabel="Chọn nội dung cột tài liệu"
                 value={docTab}
                 onChange={setDetailDocTab}
                 items={[
-                  { key: "file", label: "File đã ký", icon: FileText },
+                  { key: "file", label: hasFile ? "File đã ký" : "Bản xem trước (chưa ký)", icon: FileText },
                   { key: "content", label: "Danh sách chuyến", icon: Truck },
                 ]}
               />
@@ -2396,6 +2484,16 @@ export default function DispatchPage() {
                 kind="pdf"
                 fileExt="pdf"
                 label={`${st.trangThai === "hoan_tat" ? "Bản đã ký duyệt" : "Bản đang ký"} · PDF`}
+              />
+            ) : docTab === "file" && hasDraft ? (
+              <DocViewer
+                key={`draft-${selected.id}`}
+                active={(isDesktop || detailMobileTab === "doc") && !signModalEntry}
+                loadBytes={loadDraftPdf}
+                sourceKey={`draft-${selected.id}-${trips.length}-${totalFresh}-${totalDry}`}
+                kind="pdf"
+                fileExt="pdf"
+                label="Bản chưa ký · PDF"
               />
             ) : tripTable}
           </>

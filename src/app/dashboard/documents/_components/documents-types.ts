@@ -139,6 +139,8 @@ export type VanBanDocument = {
   tra_ve_nguoi: string | null
   tra_ve_at: string | null
   ngay_phe_duyet: string | null
+  /** Thời điểm ký phê duyệt chính xác tới giây (migration 20260904). */
+  ky_phe_duyet_at?: string | null
   file_goc_url: string | null
   file_signed_pdf_url: string | null
   file_signed_office_url: string | null

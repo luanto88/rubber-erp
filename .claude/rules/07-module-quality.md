@@ -217,3 +217,10 @@ qua `status-query.ts`, lỗi phiên trả 401.
   kiểm tra lại `qc_results` theo `lot_id` ngay trước khi insert.
 - Chế độ xóa theo ngày có "Chọn hết" (chỉ phiếu được phép xóa: admin tất cả, người khác phiếu
   `created_by` của mình).
+
+## U3 giao diện (2026-10-14)
+
+Danh sách = 1 bảng `DateGroupRow` (mỗi ngày KN 1 dòng xổ; lô bên trong là `ExpandableRow` mở số
+liệu mẫu). Trang chi tiết mới `/dashboard/quality/[date]` (70/30: PDF đã ký hoặc bản chưa ký dựng
+sẵn + trạng thái/ký/tiến trình) — chỉ xem + ký; Thêm/Sửa/Xoá phiếu vẫn ở danh sách. Xem file đã
+ký qua `/api/signing/requests/{id}/file-url?view=1&name=Phiếu KQKN …`. Chi tiết: rule 29.

@@ -1,6 +1,6 @@
 import jsPDF from "jspdf"
 import autoTable, { type CellHookData, type CellDef } from "jspdf-autotable"
-import { ensurePdfFont, safeName, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
+import { addQrImage, ensurePdfFont, safeName, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
 import { getDateParts, formatDateDisplay } from "@/lib/date-utils"
 
 export type QualityKqknResult = {
@@ -119,6 +119,17 @@ export type QualityKqknPageInfo = {
   nguoiLap: QualityKqknSignerBoxes
   nguoiPheDuyet: QualityKqknSignerBoxes
 }
+
+/**
+ * QR tra cứu phiếu: trỏ trang chi tiết ngày KN `/dashboard/quality/{ngay_kn}` (chưa đăng nhập →
+ * /login?next=). Ô tìm ở tab Xếp hạng nhận đúng URL này (quét QR) để lọc theo ngày.
+ */
+export function buildQualityKqknLookupUrl(ngayKn: string): string {
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://qlsxkpt.vercel.app"
+  return `${origin}/dashboard/quality/${encodeURIComponent(ngayKn)}`
+}
+
+const QR_SIZE_MM = 12
 
 function renderBatchPage(doc: jsPDF, batchResults: QualityKqknResult[], fCode: string): QualityKqknPageInfo {
   const sorted = [...batchResults].sort((a, b) => (a.lo_kn || 0) - (b.lo_kn || 0))
@@ -290,10 +301,19 @@ async function buildQualityKqknDoc(
   const batches = Array.from(batchMap.values()).sort((a, b) => (a[0].pkn || 0) - (b[0].pkn || 0))
 
   const pages: QualityKqknPageInfo[] = []
-  batches.forEach((batch, i) => {
+  for (let i = 0; i < batches.length; i++) {
     if (i > 0) doc.addPage()
-    pages.push(renderBatchPage(doc, batch, fCode))
-  })
+    const startPage = doc.getNumberOfPages()
+    pages.push(renderBatchPage(doc, batches[i], fCode))
+    // QR luôn ở GÓC PHẢI TRÊN — chỉ trang đầu của mỗi phiếu (batch), nằm trên dòng "Nhà máy" (y=19).
+    const ngayKn = batches[i][0]?.ngay_kn
+    if (ngayKn) {
+      const endPage = doc.getNumberOfPages()
+      doc.setPage(startPage)
+      try { await addQrImage(doc, buildQualityKqknLookupUrl(ngayKn), doc.internal.pageSize.getWidth() - 8 - QR_SIZE_MM, 2, QR_SIZE_MM) } catch { /* bỏ qua QR, không chặn PDF */ }
+      doc.setPage(endPage)
+    }
+  }
 
   // Mã hồ sơ — neo cố định góc trái, sát mép dưới trang, đồng hàng với "Trang X/Y" ở
   // góc phải. Vẽ ở đây (1 lần cho MỌI trang của toàn bộ tài liệu) thay vì bên trong
@@ -318,6 +338,12 @@ async function buildQualityKqknDoc(
 export async function downloadQualityKqknPdf(dateResults: QualityKqknResult[], date: string, fCode: string) {
   const { doc } = await buildQualityKqknDoc(dateResults, fCode)
   doc.save(`phieu-kqkn-${safeName(date)}.pdf`)
+}
+
+/** Bản CHƯA ký (giống "Xuất PDF chưa ký") trả về bytes — cho khung xem nhúng ở trang chi tiết ngày. */
+export async function buildQualityKqknDraftPdfBytes(dateResults: QualityKqknResult[], fCode: string): Promise<Uint8Array> {
+  const { doc } = await buildQualityKqknDoc(dateResults, fCode)
+  return new Uint8Array(doc.output("arraybuffer") as ArrayBuffer)
 }
 
 /**

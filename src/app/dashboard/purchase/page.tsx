@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Bell, Download, Eye, Loader2, Plus, ShoppingCart } from "lucide-react"
+import { AlertTriangle, Bell, ClipboardList, Clock, PenTool, Plus, Search, ShoppingCart } from "lucide-react"
 import { hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
 import { getFactoryTodayISO } from "@/lib/date-utils"
@@ -14,12 +14,35 @@ import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-sele
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
+import { SegmentedTabs, type SegmentedTabItem } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
+import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import {
-  formatMoney, formatSoPhieuFull, isPurchaseActive, purchaseDownloadBaseName, purchaseUrgency, PURCHASE_STATUS_CLASS, PURCHASE_STATUS_LABEL,
+  formatMoney, formatQty, formatSoPhieuFull, isPurchaseActive, purchaseDownloadBaseName, purchaseUrgency,
   type PurchaseRequestRow,
 } from "@/lib/purchase/types"
 import { readJson } from "./_components/purchase-client"
 import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
+
+/** Dòng vật tư rút gọn do GET /api/purchase/requests trả kèm (cho dòng xổ). */
+type ListLine = {
+  id: string
+  item_code: string | null
+  item_name: string
+  unit: string | null
+  so_luong: number
+  don_gia: number
+  thanh_tien: number
+  sl_da_mua: number
+  muc_dich: string | null
+  ngay_can_hang: string | null
+}
 
 type ListRow = PurchaseRequestRow & {
   giam_doc_ten: string
@@ -28,9 +51,12 @@ type ListRow = PurchaseRequestRow & {
   signerCount: number
   myTurn: boolean
   file_hien_tai: string | null
+  lines?: ListLine[]
 }
 
 type Tab = "todo" | "mine" | "all"
+
+const COLS = 9
 
 function fmtDate(iso: string) {
   const [y, m, d] = iso.slice(0, 10).split("-")
@@ -50,6 +76,8 @@ function PurchaseListInner() {
   const [to, setTo] = useState("")
   const [search, setSearch] = useState("")
   const [boPhanFilter, setBoPhanFilter] = useState<string[]>([])
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [toast, setToast] = useState<string | null>(null)
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -87,31 +115,73 @@ function PurchaseListInner() {
     if (user) void load()
   }, [user, load])
 
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3500)
+  }
+
   const filtered = useMemo(() => {
     const q = normalizeName(search)
     if (!q) return rows
     return rows.filter((r) =>
-      normalizeName(`${formatSoPhieuFull(r.so, r.nam)} ${r.nguoi_de_nghi_ten || ""} ${r.ghi_chu || ""}`).includes(q),
+      normalizeName(
+        `${formatSoPhieuFull(r.so, r.nam)} ${r.nguoi_de_nghi_ten || ""} ${r.ghi_chu || ""} ${(r.lines || [])
+          .map((l) => `${l.item_code || ""} ${l.item_name}`)
+          .join(" ")}`,
+      ).includes(q),
     )
   }, [rows, search])
 
   const canCreate = hasPermission(user, "purchase.create")
   const today = getFactoryTodayISO()
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "todo", label: "Chờ tôi xử lý" },
+  const tabs: SegmentedTabItem<Tab>[] = [
+    { key: "todo", label: "Chờ tôi xử lý", ...(tab === "todo" ? { count: rows.length, alertCount: true } : {}) },
     { key: "mine", label: "Của tôi" },
     ...(canAll ? [{ key: "all" as Tab, label: "Tất cả" }] : []),
   ]
 
+  const stats = useMemo(() => {
+    let dangKy = 0
+    let myTurn = 0
+    let dangMua = 0
+    let gap = 0
+    for (const r of rows) {
+      if (r.trang_thai === "cho_ky") dangKy++
+      if (r.myTurn) myTurn++
+      if (r.trang_thai === "dang_mua" || r.trang_thai === "da_duyet") dangMua++
+      const urg = r.ngay_can_hang && isPurchaseActive(r.trang_thai) ? purchaseUrgency(r.ngay_can_hang, today) : null
+      if (urg && (urg.level === "qua_han" || urg.level === "gap")) gap++
+    }
+    return { total: rows.length, dangKy, myTurn, dangMua, gap }
+  }, [rows, today])
+
+  const expandableIds = filtered.filter((r) => (r.lines || []).length > 0).map((r) => r.id)
+  const allExpanded = expandableIds.length > 0 && expandableIds.every((id) => expanded.has(id))
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
   return (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${moduleThemeClass("teal")}`}>
+      {toast && (
+        <div className="fixed left-1/2 top-4 z-50 max-w-xl -translate-x-1/2 rounded-2xl bg-red-600 px-5 py-3 text-sm font-bold text-white shadow-2xl">
+          {toast}
+        </div>
+      )}
       <PageHeaderBanner
         title="Đề nghị mua vật tư hàng hóa"
         subtitle="Lập phiếu, ký số 3 bước: Người đề nghị → Giám đốc → Kế toán"
         theme="teal"
         icon={ShoppingCart}
         action={canCreate ? (
-          <button onClick={() => router.push("/dashboard/purchase/new")} className="flex items-center gap-2 px-4 py-2 bg-white text-teal-700 font-bold rounded-xl shadow-md hover:bg-teal-50">
+          <button
+            onClick={() => router.push("/dashboard/purchase/new")}
+            className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 font-bold text-brand-700 shadow-md hover:bg-brand-50"
+          >
             <Plus size={16} /> Lập phiếu
           </button>
         ) : undefined}
@@ -119,110 +189,211 @@ function PurchaseListInner() {
 
       <KtShortageBanner />
 
-      <div className="flex flex-wrap gap-2">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${tab === t.key ? "bg-teal-600 text-white shadow" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <SegmentedTabs
+        items={tabs}
+        value={tab}
+        onChange={(k) => { setTab(k); setExpanded(new Set()) }}
+        ariaLabel="Phạm vi phiếu đề nghị mua"
+      />
 
-      <FilterBar activeCount={[search, to].filter(Boolean).length + (boPhanFilter.length ? 1 : 0)}>
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Tìm số phiếu, người đề nghị..." className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500 min-w-[220px]" />
+      <StatGrid cols={4}>
+        <StatCard icon={ClipboardList} label="Số phiếu" value={stats.total} sub={`${stats.dangMua} phiếu đã duyệt / đang mua`} />
+        <StatCard icon={Clock} label="Đang ký duyệt" value={stats.dangKy} />
+        <StatCard icon={Bell} label="Chờ bạn ký" value={stats.myTurn} valueTone={stats.myTurn > 0 ? "warn" : "default"} />
+        <StatCard icon={AlertTriangle} label="Cần hàng gấp / quá hạn" value={stats.gap} valueTone={stats.gap > 0 ? "danger" : "default"} />
+      </StatGrid>
+
+      <FilterBar layout="grid" activeCount={[search, to].filter(Boolean).length + (boPhanFilter.length ? 1 : 0)}>
+        <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-mod-600">
+          <Search size={15} className="shrink-0 text-slate-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Tìm số phiếu, người đề nghị, vật tư..."
+            className="w-full min-w-0 text-sm outline-none"
+          />
+        </div>
         <FilterMultiSelect
           placeholder="Tất cả bộ phận"
           options={[...BO_PHAN_LIST]}
           selected={boPhanFilter}
           onChange={setBoPhanFilter}
           searchPlaceholder="Tìm bộ phận..."
+          fullWidth
         />
-        <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500">Từ <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="px-2 py-1.5 border border-slate-300 rounded-lg text-sm" /></label>
-        <label className="flex items-center gap-1.5 text-xs font-bold text-slate-500">Đến <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="px-2 py-1.5 border border-slate-300 rounded-lg text-sm" /></label>
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:col-span-2">
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Từ ngày"
+            className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-mod-600" />
+          <span className="text-sm text-slate-400">→</span>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Đến ngày"
+            className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-mod-600" />
+        </div>
       </FilterBar>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <ResponsiveTableWrapper>
         {loading && rows.length === 0 ? (
-          <div className="p-12 text-center text-slate-400"><Loader2 className="mx-auto animate-spin mb-2" />Đang tải...</div>
+          <ListState kind="loading" />
         ) : error ? (
-          <div className="p-8 text-center text-red-600 font-semibold">{error} <button onClick={() => void load()} className="ml-2 underline">Thử lại</button></div>
+          <ListState kind="error" message={error} onRetry={() => void load()} />
         ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-slate-400"><ShoppingCart size={40} className="mx-auto mb-3 opacity-30" />Không có phiếu nào</div>
+          <ListState kind="empty" message="Không có phiếu đề nghị mua nào" />
         ) : (
-          <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs text-slate-500">
+          <>
+            <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+              <ExpandAllToggle
+                allExpanded={allExpanded}
+                disabled={expandableIds.length === 0}
+                onExpandAll={() => setExpanded(new Set(expandableIds))}
+                onCollapseAll={() => setExpanded(new Set())}
+              />
+            </div>
+            <table className="enterprise-table dense">
+              <thead>
                 <tr>
-                  <th className="text-left px-3 py-2">Số phiếu</th>
-                  <th className="text-left px-3 py-2">Ngày</th>
-                  <th className="text-left px-3 py-2">Cần hàng</th>
-                  <th className="text-left px-3 py-2">Người đề nghị</th>
-                  <th className="text-left px-3 py-2">Bộ phận</th>
-                  <th className="text-left px-3 py-2">Giám đốc / Kế toán</th>
-                  <th className="text-right px-3 py-2">Tổng tiền</th>
-                  <th className="text-left px-3 py-2">Trạng thái</th>
-                  <th className="px-3 py-2"></th>
+                  <th>Số phiếu</th>
+                  <th>Ngày</th>
+                  <th>Cần hàng</th>
+                  <th>Người đề nghị</th>
+                  <th>Bộ phận</th>
+                  <th>Giám đốc / Kế toán</th>
+                  <th className="text-right">Tổng tiền</th>
+                  <th>Trạng thái</th>
+                  <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
-                  <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer" onClick={() => router.push(`/dashboard/purchase/${r.id}`)}>
-                    <td className="px-3 py-2 font-bold text-slate-800 whitespace-nowrap">
-                      {formatSoPhieuFull(r.so, r.nam)}
-                      {r.loai === "dieu_chinh" && <span className="ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">Điều chỉnh</span>}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{fmtDate(r.ngay)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {r.ngay_can_hang ? (() => {
-                        const urg = isPurchaseActive(r.trang_thai) ? purchaseUrgency(r.ngay_can_hang, today) : null
-                        return (
+                {filtered.map((r) => {
+                  const lines = r.lines || []
+                  const soPhieu = formatSoPhieuFull(r.so, r.nam)
+                  const baseName = purchaseDownloadBaseName(r.loai, r.so, r.nam)
+                  const stillSigning = r.trang_thai === "cho_ky" || r.trang_thai === "tra_ve"
+                  const openDetail = () => router.push(`/dashboard/purchase/${r.id}`)
+                  const urg = r.ngay_can_hang && isPurchaseActive(r.trang_thai) ? purchaseUrgency(r.ngay_can_hang, today) : null
+                  const detail = (
+                    <table className="enterprise-table dense">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Vật tư</th>
+                          <th>ĐVT</th>
+                          <th className="text-right">SL</th>
+                          <th className="text-right">Đơn giá</th>
+                          <th className="text-right">Thành tiền</th>
+                          <th className="text-right">Đã mua</th>
+                          <th>Mục đích</th>
+                          <th>Cần hàng</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lines.map((l, i) => (
+                          <tr key={l.id}>
+                            <td className="tabular-nums text-slate-500">{i + 1}</td>
+                            <td>
+                              <div className="font-semibold text-slate-800">{l.item_name}</div>
+                              {l.item_code && <div className="font-code text-[11px] text-slate-500">{l.item_code}</div>}
+                            </td>
+                            <td className="whitespace-nowrap">{l.unit || "—"}</td>
+                            <td className="text-right tabular-nums">{formatQty(l.so_luong)}</td>
+                            <td className="whitespace-nowrap text-right tabular-nums">{formatMoney(l.don_gia, r.loai_tien)}</td>
+                            <td className="whitespace-nowrap text-right font-semibold tabular-nums">{formatMoney(l.thanh_tien, r.loai_tien)}</td>
+                            <td className="text-right tabular-nums">{formatQty(l.sl_da_mua)}</td>
+                            <td className="text-slate-600">{l.muc_dich || "—"}</td>
+                            <td className="whitespace-nowrap">{l.ngay_can_hang ? fmtDate(l.ngay_can_hang) : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )
+                  const actionCell = (
+                    <IconActionGroup>
+                      {r.myTurn && r.yeu_cau_ky_id && (
+                        <Link
+                          href={`/dashboard/ky/${r.yeu_cau_ky_id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-brand-600 bg-brand-600 px-3 text-[12.5px] font-bold text-white transition-colors hover:bg-brand-700"
+                        >
+                          <PenTool size={14} /> Ký ngay
+                        </Link>
+                      )}
+                      <RowAction kind="view" label="Xem chi tiết phiếu" onClick={openDetail} />
+                      {r.file_hien_tai && r.yeu_cau_ky_id && (
+                        <>
+                          <RowAction
+                            kind="signed"
+                            label={stillSigning ? "Xem file (đang chờ ký tiếp)" : "Xem file đã ký"}
+                            onClick={() => {
+                              const name = encodeURIComponent(baseName)
+                              void openSecureFile(`/api/signing/requests/${r.yeu_cau_ky_id}/file-url?view=1&name=${name}`).then((res) => {
+                                if (!res.ok) showToast(res.error)
+                              })
+                            }}
+                          />
+                          <RowAction
+                            kind="download"
+                            label={stillSigning ? "Tải file (đang chờ ký tiếp)" : "Tải file đã ký về máy"}
+                            href={buildStorageDownloadUrl(r.file_hien_tai, safeDownloadFileName(baseName, "pdf"))}
+                          />
+                        </>
+                      )}
+                    </IconActionGroup>
+                  )
+                  return (
+                    <ExpandableRow
+                      key={r.id}
+                      expanded={expanded.has(r.id)}
+                      onToggle={() => toggle(r.id)}
+                      canExpand={lines.length > 0}
+                      colSpan={COLS}
+                      label="Xem các dòng vật tư"
+                      endCell={actionCell}
+                      detail={detail}
+                    >
+                      <td className="whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); openDetail() }}
+                          className="font-code text-xs font-bold text-brand-700 hover:underline"
+                        >
+                          {soPhieu}
+                        </button>
+                        {r.loai === "dieu_chinh" && <StatusBadge tone="info" label="Điều chỉnh" size="xs" className="ml-1.5" />}
+                        <div className="text-[11px] text-slate-500">{lines.length} vật tư</div>
+                      </td>
+                      <td className="whitespace-nowrap">{fmtDate(r.ngay)}</td>
+                      <td className="whitespace-nowrap">
+                        {r.ngay_can_hang ? (
                           <>
                             <span className="text-slate-700">{fmtDate(r.ngay_can_hang)}</span>
                             {urg && urg.level !== "binh_thuong" && (
-                              <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold ${urg.className}`}>{urg.label}</span>
+                              <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${urg.className}`}>{urg.label}</span>
                             )}
                           </>
-                        )
-                      })() : <span className="text-slate-400">—</span>}
-                    </td>
-                    <td className="px-3 py-2">{r.nguoi_de_nghi_ten}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.bo_phan || "—"}</td>
-                    <td className="px-3 py-2 text-xs text-slate-600">{r.giam_doc_ten || "—"}<br />{r.ke_toan_ten || "—"}</td>
-                    <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">{formatMoney(r.tong_tien, r.loai_tien)} {r.loai_tien}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${PURCHASE_STATUS_CLASS[r.trang_thai]}`}>{PURCHASE_STATUS_LABEL[r.trang_thai]}</span>
-                        {r.trang_thai === "cho_ky" && <span className="text-xs text-slate-500">{r.signedCount}/{r.signerCount}</span>}
-                        {r.myTurn && (
-                          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500 text-white"><Bell size={11} /> Chờ BẠN ký</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">
-                      {r.file_hien_tai && (
-                        <a
-                          href={buildStorageDownloadUrl(r.file_hien_tai, safeDownloadFileName(purchaseDownloadBaseName(r.loai, r.so, r.nam), "pdf"))}
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50"
-                          title={r.trang_thai === "cho_ky" ? "Tải PDF (đang chờ ký tiếp)" : "Tải PDF đã ký"}
-                        >
-                          <Download size={15} />
-                        </a>
-                      )}
-                      <Link href={`/dashboard/purchase/${r.id}`} onClick={(e) => e.stopPropagation()} className="inline-flex p-1.5 rounded-lg text-teal-600 hover:bg-teal-50" title="Xem phiếu">
-                        <Eye size={15} />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                        ) : <span className="text-slate-400">—</span>}
+                      </td>
+                      <td>{r.nguoi_de_nghi_ten}</td>
+                      <td className="whitespace-nowrap">{r.bo_phan || "—"}</td>
+                      <td className="text-xs text-slate-600">{r.giam_doc_ten || "—"}<br />{r.ke_toan_ten || "—"}</td>
+                      <td className="whitespace-nowrap text-right font-semibold tabular-nums">
+                        {formatMoney(r.tong_tien, r.loai_tien)} {r.loai_tien}
+                      </td>
+                      <td>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StatusBadge
+                            domain="purchase"
+                            status={r.trang_thai}
+                            label={r.trang_thai === "cho_ky" && r.signerCount > 0 ? `Đang ký duyệt (${r.signedCount}/${r.signerCount})` : undefined}
+                          />
+                          {r.myTurn && <StatusBadge tone="pending" label="Chờ BẠN ký" size="xs" />}
+                        </div>
+                      </td>
+                    </ExpandableRow>
+                  )
+                })}
               </tbody>
             </table>
-          </ResponsiveTableWrapper>
+          </>
         )}
-      </div>
+      </ResponsiveTableWrapper>
     </div>
   )
 }

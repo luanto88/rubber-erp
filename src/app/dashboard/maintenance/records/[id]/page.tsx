@@ -51,7 +51,7 @@ import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { prepareImageForUpload, withRetry } from "@/lib/image-upload"
 import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
-import { MaintenanceSignModal } from "../_components/maintenance-sign-modal"
+import { MaintenanceSignModal, loadRecordForSigning } from "../_components/maintenance-sign-modal"
 import { authFetch } from "@/lib/auth-fetch"
 import type { KtRecordStatus } from "@/lib/maintenance-kt"
 import { PURCHASE_STATUS_LABEL, type PurchaseStatus } from "@/lib/purchase/types"
@@ -69,7 +69,7 @@ import { TimelineProgress, TimelineSteps, type TimelineStepItem } from "@/app/da
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
-import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
+import { buildMaintenanceDraftPdfBytes, type MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 
 type InventoryItemOption = {
   id: string
@@ -240,6 +240,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // "su_co_nho" (xem điều kiện IIFE ở khối nút "In biên bản" bên dưới).
   const [signingStatus, setSigningStatus] = useState<MaintenanceSigningStatus | undefined>(undefined)
   const [signModalOpen, setSignModalOpen] = useState(false)
+  // Đã tải xong trạng thái ký lần nào chưa — chỉ khi biết chắc CHƯA có file ký mới dựng bản xem trước.
+  const [signingStatusChecked, setSigningStatusChecked] = useState(false)
 
   // "Gắn bản ghi tại chỗ" — gợi ý gắn biên bản vừa lưu vào công việc KPI đang mở. `navigateTo`
   // chỉ có ở nhánh tạo mới — điều hướng bị DELAY tới khi banner đóng (onDone), vì đổi params.id
@@ -824,7 +826,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         headers: { Authorization: `Bearer ${accessToken}` },
       })
       const json = (await res.json()) as MaintenanceSigningStatus[] | { error?: string }
-      setSigningStatus(Array.isArray(json) ? json[0] : undefined)
+      if (!res.ok || !Array.isArray(json)) return
+      setSigningStatus(json[0])
+      setSigningStatusChecked(true)
     } catch {
       // Badge chỉ là thông tin phụ — lỗi tải không được chặn trang chi tiết biên bản.
     }
@@ -1471,6 +1475,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     : null
   const reloadSigningStatus = () => {
     setSigningStatus(undefined)
+    setSigningStatusChecked(false)
     if (factoryId) void loadSigningStatus(factoryId, effectiveId)
   }
   const showToast = (msg: string, ok = true) => {
@@ -3172,7 +3177,17 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   // ── U1b: CHẾ ĐỘ XEM (biên bản đã lưu, không sửa) — cùng ngôn ngữ trang chi tiết Văn bản/ISO ──
   const hasSignedFile = !!signingStatus?.fileHienTai
-  const activeDocTab: "file" | "content" = hasSignedFile ? (docTab ?? "file") : "content"
+  // Chưa gửi ký ⇒ khung xem nhúng bản CHƯA ký dựng ngay trong trình duyệt (cùng nội dung "In bản chưa ký").
+  const draftBundle = !hasSignedFile && signingStatusChecked ? signBundle : null
+  const hasViewerFile = hasSignedFile || !!draftBundle
+  const activeDocTab: "file" | "content" = hasViewerFile ? (docTab ?? "file") : "content"
+  const loadDraftPdf = async () => {
+    if (!factoryId || !draftBundle) throw new Error("Chưa đủ dữ liệu để dựng bản xem trước")
+    const loaded = await loadRecordForSigning(effectiveId, factoryId)
+    if (!loaded) throw new Error("Không tải được dữ liệu biên bản")
+    const qrUrl = `${window.location.origin}/dashboard/maintenance/records/${effectiveId}`
+    return buildMaintenanceDraftPdfBytes(draftBundle, loaded.record, qrUrl, loaded.staffMap)
+  }
   const myTurn = !!signingStatus && signingStatus.trangThai === "dang_luan_chuyen" &&
     computeMyTurn(signingStatus.signers, user?.id)
 
@@ -3307,13 +3322,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       }
       document={
         <>
-          {hasSignedFile && (
+          {hasViewerFile && (
             <SegmentedTabs
               ariaLabel="Chọn nội dung cột tài liệu"
               value={activeDocTab}
               onChange={setDocTab}
               items={[
-                { key: "file", label: "File đã ký", icon: FileSignature },
+                { key: "file", label: hasSignedFile ? "File đã ký" : "Bản xem trước (chưa ký)", icon: hasSignedFile ? FileSignature : FileText },
                 { key: "content", label: "Nội dung biên bản", icon: Wrench },
               ]}
             />
@@ -3326,6 +3341,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               kind="pdf"
               fileExt="pdf"
               label={`${signingStatus.trangThai === "hoan_tat" ? "Bản đã ký duyệt" : "Bản đang ký"} · PDF`}
+            />
+          ) : activeDocTab === "file" && draftBundle ? (
+            <DocViewer
+              key={`draft-${effectiveId}`}
+              active={(isDesktop || mobileTab === "doc") && !signModalOpen}
+              loadBytes={loadDraftPdf}
+              sourceKey={`draft-${effectiveId}-${record?.updated_at || ""}`}
+              kind="pdf"
+              fileExt="pdf"
+              label="Bản chưa ký · PDF"
             />
           ) : (
             <>

@@ -48,15 +48,35 @@ print `Printer` → riêng module → edit `Pencil` → copy `Copy` → delete `
 - `DocViewer` endpoint = `/api/signing/requests/{yeuCauId}/file-url` (không tham số).
 - Tên file: "<Loại chứng từ> <mã>" (vd "Biên bản DX-…", "Phiếu điều xe ĐX-…").
 
+## D2. QR trên phiếu + Quét QR ở ô tìm (2026-10-14)
+- Mọi phiếu PDF có URL riêng ⇒ in QR **GÓC PHẢI TRÊN** trang đầu (không bao giờ góc trái), không
+  đè tiêu đề/dòng chữ đầu trang. QR trỏ trang chi tiết trong app (chưa đăng nhập → `/login?next=`).
+  Đã áp: Bảo trì, Đề nghị mua (có từ trước), Kiểm nghiệm (`buildQualityKqknLookupUrl` →
+  `/dashboard/quality/{ngay_kn}`), Điều xe (`buildDispatchEntryLookupUrl` →
+  `/dashboard/dispatch?entry={id}`, trang danh sách tự mở chi tiết). PDF đã ký trước đó bất biến.
+- Ô tìm của danh sách có nút **Quét QR** (`QrScanner` qua `next/dynamic ssr:false` +
+  `createPortal` ra `document.body`, mirror `maintenance/history`). Quét ra URL phiếu ⇒ lọc/mở đúng
+  phiếu; ra chuỗi khác ⇒ đưa vào ô tìm.
+
 ## E. Bàn giao mỗi lần sửa (bắt buộc cuối phiên)
 1. Liệt kê việc đã làm theo file. 2. Hướng dẫn test tay (từng bước, kết quả mong đợi). 3. Việc còn
 lại / lệch chuẩn đã thấy. 4. Prompt bàn giao cho phiên sau (đọc rule 29 + phần còn lại).
 Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 
-## F. Tình trạng áp dụng
-| Module | Danh sách | Dòng xổ | Chi tiết 70/30 + PDF | Xem file token |
-|---|---|---|---|---|
-| Bảo trì | ✅ | Lý lịch ✅ · Biên bản ✅ · Tổng quan "Biên bản gần đây" ❌ | ✅ | ✅ |
-| Điều xe | ✅ | ✅ | ✅ (2026-10-14) | ✅ |
-| Kiểm nghiệm, Đề nghị mua, Kho vật tư, Xuất hàng, Thành phẩm, Sản lượng, Kho NL | ❌ | ❌ | ❌ | ❌ |
-| Văn bản, ISO | (Doc-UI riêng) | mũi tên ĐẦU dòng — lệch | ✅ | ❌ (lưu tên object) |
+## F. Tình trạng áp dụng (cập nhật 2026-10-14, U4)
+| Module | Danh sách | Dòng xổ | Chi tiết 70/30 + PDF | Xem file token | QR phiếu + Quét QR |
+|---|---|---|---|---|---|
+| Bảo trì | ✅ | Lý lịch ✅ · Biên bản ✅ · Tổng quan ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ (quét ở Lý lịch) |
+| Điều xe | ✅ | ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ |
+| Kiểm nghiệm | ✅ | ✅ (ngày → lô → số liệu mẫu) | ✅ `/dashboard/quality/[date]` | ✅ | ✅ (tab Xếp hạng) |
+| Đề nghị mua | ✅ | ✅ (dòng vật tư) | ✅ (+ bản chưa ký nhúng khi Nháp) | ✅ | QR có từ trước; chưa có Quét QR |
+| Văn bản | (Doc-UI riêng) | ✅ tiến trình ký | ✅ | ❌ (lưu tên object) | — |
+| ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
+| Kho vật tư, Xuất hàng, Thành phẩm, Sản lượng, Kho NL | ❌ | ❌ | ❌ | ❌ | — |
+
+## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)
+Chưa gửi ký ⇒ tab "Bản xem trước (chưa ký)" dựng PDF ngay trong trình duyệt: `DocViewer`
+nhận `loadBytes={() => build…DraftPdfBytes(...)}` + `sourceKey` (đổi để dựng lại; `endpoint` bỏ
+trống). Chỉ dựng khi ĐÃ tải xong trạng thái ký và chắc chắn chưa có yêu cầu ký (lỗi tải ⇒ không
+dựng). Hàm dựng: `buildMaintenanceDraftPdfBytes(bundle,…)`, `buildDispatchEntryDraftPdfBytes`,
+`buildQualityKqknDraftPdfBytes` — cùng nội dung nút "In/Xuất PDF chưa ký".

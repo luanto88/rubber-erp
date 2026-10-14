@@ -79,7 +79,7 @@ function buildMaintenanceMaHoSo(record: RecordData): string {
 // (Promise.all), rồi 1 query DUY NHẤT lấy vật tư của TẤT CẢ dòng cùng lúc (`line_id IN (...)`)
 // và tự gom nhóm ở client — mirror đúng pattern `matsMap` đã dùng ở `loadRecord()` trong
 // `records/[id]/page.tsx`.
-async function loadRecordForSigning(recordId: string, factoryId: string): Promise<{ record: RecordData; staffMap: Map<string, string> } | null> {
+export async function loadRecordForSigning(recordId: string, factoryId: string): Promise<{ record: RecordData; staffMap: Map<string, string> } | null> {
   const [{ data: rec }, { data: rawLines }, { data: staffData }] = await Promise.all([
     supabase.from("maintenance_records").select("*").eq("id", recordId).eq("factory_id", factoryId).single(),
     supabase.from("maintenance_record_lines").select("*").eq("record_id", recordId).order("sort_order"),

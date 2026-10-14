@@ -31,6 +31,8 @@ import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { IconAction, IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
+import { VanBanSignProgress } from "./_components/van-ban-sign-progress"
 
 type AiSearchResult = {
   id: string
@@ -59,6 +61,14 @@ export default function DocumentsPage() {
   const [editDoc, setEditDoc] = useState<VanBanDocument | null>(null)
   const [editLoading, setEditLoading] = useState(false)
   const [delConfirmId, setDelConfirmId] = useState<string | null>(null)
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const toggleExpanded = (id: string) =>
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   const [deleting, setDeleting] = useState(false)
 
   const [search, setSearch] = useState("")
@@ -111,7 +121,7 @@ export default function DocumentsPage() {
       const { data } = await supabase
         .from("van_ban_documents")
         .select(
-          "id, ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, trang_thai, is_uploaded, che_do_xem, ngay_phe_duyet, nam, so_van_ban, file_signed_pdf_url, file_signed_office_url, file_goc_url, nguoi_soan_thao_display, soan_thao_user_id, phe_duyet_user_id, thu_tu_ky_json, buoc_hien_tai, created_at, updated_at",
+          "id, ma_van_ban, ten_van_ban, loai_van_ban, phong_ban, trang_thai, is_uploaded, che_do_xem, ngay_phe_duyet, nam, so_van_ban, file_signed_pdf_url, file_signed_office_url, file_goc_url, nguoi_soan_thao_display, soan_thao_user_id, phe_duyet_user_id, phe_duyet, ky_phe_duyet_at, nguoi_ky, thu_tu_ky_json, buoc_hien_tai, created_at, updated_at",
         )
         .eq("factory_id", fid)
         .order("updated_at", { ascending: false })
@@ -524,6 +534,14 @@ export default function DocumentsPage() {
               <p>Không có văn bản nào</p>
             </div>
           ) : (
+            <>
+            <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+              <ExpandAllToggle
+                allExpanded={filtered.length > 0 && filtered.every((d) => expandedIds.has(d.id))}
+                onExpandAll={() => setExpandedIds(new Set(filtered.map((d) => d.id)))}
+                onCollapseAll={() => setExpandedIds(new Set())}
+              />
+            </div>
             <table className="enterprise-table">
               <thead>
                 <tr>
@@ -533,7 +551,7 @@ export default function DocumentsPage() {
                   <th>Phòng ban</th>
                   <th>Trạng thái</th>
                   <th>Ngày phê duyệt</th>
-                  <th className="!text-right">Thao tác</th>
+                  <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
                 </tr>
               </thead>
               <tbody>
@@ -541,9 +559,48 @@ export default function DocumentsPage() {
                   const downloadUrl = doc.file_signed_pdf_url || doc.file_signed_office_url || doc.file_goc_url
                   const needsMySign = (doc.trang_thai === "cho_phe_duyet" || doc.trang_thai === "cho_ky_phong_ban") && isMyTurnToAct(doc)
                   return (
-                    <tr key={doc.id} className="cursor-pointer" onClick={() => window.location.href = `/dashboard/documents/${doc.id}`}>
-                      <td className="whitespace-nowrap">
-                        <DocCodePill code={doc.ma_van_ban} />
+                    <ExpandableRow
+                      key={doc.id}
+                      expanded={expandedIds.has(doc.id)}
+                      onToggle={() => toggleExpanded(doc.id)}
+                      colSpan={7}
+                      label="Xem tiến trình ký"
+                      detail={<VanBanSignProgress doc={doc} />}
+                      endCell={
+                        <IconActionGroup>
+                          {needsMySign && (
+                            <Link
+                              href={`/dashboard/documents/${doc.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              title="Đến lượt bạn ký — bấm để ký ngay"
+                              className="mr-1 inline-flex items-center gap-1 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 px-2.5 py-1 text-xs font-bold text-white shadow-sm transition-all hover:from-brand-700 hover:to-brand-900 active:scale-95"
+                            >
+                              <FileSignature size={12} />
+                              <span>Ký ngay</span>
+                            </Link>
+                          )}
+                          <IconAction icon={Eye} label="Xem chi tiết văn bản" href={`/dashboard/documents/${doc.id}`} />
+                          {downloadUrl && (
+                            // Vá bảo mật 2026-09-20: mint Signed URL qua route xác thực.
+                            <IconAction
+                              icon={Download}
+                              label="Tải văn bản về máy"
+                              onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url?download=1`)}
+                            />
+                          )}
+                          {canEditDoc(doc) && (
+                            <IconAction icon={Pencil} label="Sửa văn bản" tone="amber" onClick={() => void openEdit(doc.id)} />
+                          )}
+                          {canDeleteDoc(doc) && (
+                            <IconAction icon={Trash2} label="Xóa văn bản" tone="danger" onClick={() => setDelConfirmId(doc.id)} />
+                          )}
+                        </IconActionGroup>
+                      }
+                    >
+                      <td className="whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <Link href={`/dashboard/documents/${doc.id}`} className="hover:opacity-80">
+                          <DocCodePill code={doc.ma_van_ban} />
+                        </Link>
                       </td>
                       <td className="max-w-xs">
                         <Link href={`/dashboard/documents/${doc.id}`} className="line-clamp-2 font-semibold text-slate-800 hover:text-brand-700" onClick={(e) => e.stopPropagation()}>
@@ -580,41 +637,12 @@ export default function DocumentsPage() {
                       <td className="whitespace-nowrap text-xs text-slate-500">
                         {doc.ngay_phe_duyet ? fmtDate(doc.ngay_phe_duyet) : <span className="text-slate-300">—</span>}
                       </td>
-                      <td>
-                        <IconActionGroup>
-                          {needsMySign && (
-                            <Link
-                              href={`/dashboard/documents/${doc.id}`}
-                              onClick={(e) => e.stopPropagation()}
-                              title="Đến lượt bạn ký — bấm để ký ngay"
-                              className="mr-1 inline-flex items-center gap-1 rounded-lg bg-gradient-to-br from-brand-600 to-brand-800 px-2.5 py-1 text-xs font-bold text-white shadow-sm transition-all hover:from-brand-700 hover:to-brand-900 active:scale-95"
-                            >
-                              <FileSignature size={12} />
-                              <span>Ký ngay</span>
-                            </Link>
-                          )}
-                          <IconAction icon={Eye} label="Xem chi tiết văn bản" href={`/dashboard/documents/${doc.id}`} />
-                          {downloadUrl && (
-                            // Vá bảo mật 2026-09-20: mint Signed URL qua route xác thực.
-                            <IconAction
-                              icon={Download}
-                              label="Tải văn bản về máy"
-                              onClick={() => void openSecureFile(`/api/documents/${doc.id}/file-url?download=1`)}
-                            />
-                          )}
-                          {canEditDoc(doc) && (
-                            <IconAction icon={Pencil} label="Sửa văn bản" tone="amber" onClick={() => void openEdit(doc.id)} />
-                          )}
-                          {canDeleteDoc(doc) && (
-                            <IconAction icon={Trash2} label="Xóa văn bản" tone="danger" onClick={() => setDelConfirmId(doc.id)} />
-                          )}
-                        </IconActionGroup>
-                      </td>
-                    </tr>
+                    </ExpandableRow>
                   )
                 })}
               </tbody>
             </table>
+            </>
           )}
         </ResponsiveTableWrapper>
       )}

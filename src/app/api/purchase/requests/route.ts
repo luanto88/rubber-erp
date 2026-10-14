@@ -82,6 +82,28 @@ export async function GET(req: NextRequest) {
       for (const y of (data || []) as { id: string; file_hien_tai: string | null }[]) fileByYc.set(y.id, y.file_hien_tai)
     }
 
+    // Dòng vật tư rút gọn — cho dòng xổ ở danh sách (rule 29 mục A.3).
+    type ListLine = {
+      id: string; request_id: string; sort_order: number; item_code: string | null; item_name: string
+      unit: string | null; so_luong: number; don_gia: number; thanh_tien: number; sl_da_mua: number
+      muc_dich: string | null; ngay_can_hang: string | null
+    }
+    const linesByReq = new Map<string, ListLine[]>()
+    const reqIds = rows.map((r) => r.id)
+    for (let i = 0; i < reqIds.length; i += 100) {
+      const { data } = await supabaseAdmin
+        .from("purchase_request_lines")
+        .select("id, request_id, sort_order, item_code, item_name, unit, so_luong, don_gia, thanh_tien, sl_da_mua, muc_dich, ngay_can_hang")
+        .in("request_id", reqIds.slice(i, i + 100))
+        .order("sort_order", { ascending: true })
+        .range(0, 9999)
+      for (const l of (data || []) as ListLine[]) {
+        const arr = linesByReq.get(l.request_id) || []
+        arr.push(l)
+        linesByReq.set(l.request_id, arr)
+      }
+    }
+
     const userIds = new Set<string>()
     for (const r of rows) {
       ;[r.nguoi_de_nghi_id, r.giam_doc_user_id, r.ke_toan_user_id].forEach((id) => id && userIds.add(id))
@@ -110,6 +132,7 @@ export async function GET(req: NextRequest) {
         turnUserIds,
         myTurn: turnUserIds.includes(actor.userId),
         file_hien_tai: r.yeu_cau_ky_id ? fileByYc.get(r.yeu_cau_ky_id) || null : null,
+        lines: (linesByReq.get(r.id) || []).sort((a, b) => a.sort_order - b.sort_order),
       }
     })
 

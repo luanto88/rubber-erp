@@ -32,8 +32,14 @@ export type DocViewerKind = "pdf" | "office" | "none"
 export type DocViewerVariant = { key: string; label: string }
 
 export type DocViewerImplProps = {
-  /** Route mint Signed URL (vd `/api/documents/{id}/file-url`). */
-  endpoint: string
+  /** Route mint Signed URL (vd `/api/documents/{id}/file-url`). Bỏ trống khi dùng `loadBytes`. */
+  endpoint?: string
+  /**
+   * Tự dựng bytes PDF ngay trong trình duyệt (vd bản CHƯA ký dựng bằng jsPDF) thay vì tải qua
+   * `endpoint`. Đổi `sourceKey` để dựng lại (hàm không cần ổn định identity).
+   */
+  loadBytes?: () => Promise<ArrayBuffer | Uint8Array>
+  sourceKey?: string
   kind: DocViewerKind
   /** Nhãn file trên thanh công cụ — KHÔNG lặp tên tài liệu (vd "Bản đã ký · PDF"). */
   label: string
@@ -191,6 +197,8 @@ function PdfPage({
 
 export default function DocViewerImpl({
   endpoint,
+  loadBytes,
+  sourceKey,
   kind,
   label,
   fileExt,
@@ -212,6 +220,9 @@ export default function DocViewerImpl({
   const [nativeFs, setNativeFs] = useState(false)
   const [overlayFs, setOverlayFs] = useState(false)
   const [officeError, setOfficeError] = useState<string | null>(null)
+  const loadBytesRef = useRef(loadBytes)
+  useEffect(() => { loadBytesRef.current = loadBytes }, [loadBytes])
+  const sourceId = sourceKey ?? endpoint ?? ""
 
   // ── Nạp file ──
   useEffect(() => {
@@ -225,11 +236,14 @@ export default function DocViewerImpl({
     setCurrentPage(1)
     const run = async () => {
       try {
-        const bytes = await fetchPdfBytes(endpoint)
+        const loader = loadBytesRef.current
+        if (!loader && !endpoint) throw new Error("Chưa có file để xem")
+        const raw = loader ? await loader() : await fetchPdfBytes(endpoint as string)
         if (cancelled) return
+        const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw)
         const pdfjsLib = await import("pdfjs-dist")
         ensurePdfjsWorker(pdfjsLib)
-        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(bytes) }).promise
+        const doc = await pdfjsLib.getDocument({ data: bytes }).promise
         loaded = doc
         if (cancelled) { void doc.destroy(); return }
         const list: PageSize[] = []
@@ -254,7 +268,8 @@ export default function DocViewerImpl({
       cancelled = true
       if (loaded) void loaded.destroy()
     }
-  }, [endpoint, kind, reloadNonce])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadBytes đọc qua ref, đổi qua sourceKey
+  }, [sourceId, kind, reloadNonce])
 
   // ── Tỉ lệ "vừa bề ngang" ──
   const maxPageW = useMemo(() => sizes.reduce((m, s) => Math.max(m, s.w), 0), [sizes])
@@ -410,6 +425,7 @@ export default function DocViewerImpl({
           type="button"
           onClick={async () => {
             setOfficeError(null)
+            if (!endpoint) return
             const r = await openSecureFile(endpoint)
             if (!r.ok) setOfficeError(r.error)
           }}
