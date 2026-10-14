@@ -3,16 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, CheckCircle2, Clock, Download, Eye, FileText, Loader2, Plus, Wrench } from "lucide-react"
+import { CheckCircle2, ClipboardList, Clock, Plus, Wrench } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { MaintenanceShell } from "./_components/maintenance-shell"
-import { currencySymbol } from "./_components/maintenance-data"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
-import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "./records/_components/maintenance-sign-status"
+import { type MaintenanceSigningStatus } from "./records/_components/maintenance-sign-types"
+import { MaintenanceRowActions, MaintenanceSignCell } from "./_components/maintenance-row-cells"
+import { HangMucLabel } from "./_components/hang-muc-label"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
 import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
@@ -189,7 +193,7 @@ export default function MaintenanceDashboardPage() {
         action={
           <Link
             href="/dashboard/maintenance/records/new"
-            className="flex items-center gap-2 px-5 py-2.5 bg-white text-slate-800 font-bold rounded-xl shadow-sm transition-all hover:bg-white/90"
+            className="flex items-center gap-2 px-5 py-2.5 bg-white text-brand-800 font-bold rounded-xl shadow-sm transition-all hover:bg-white/90"
           >
             <Plus size={16} /> Tạo biên bản
           </Link>
@@ -199,139 +203,79 @@ export default function MaintenanceDashboardPage() {
       <KtShortageBanner />
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Wrench size={16} className="text-orange-500" />
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Biên bản tháng này</span>
-          </div>
-          <div className="text-3xl font-extrabold text-slate-800">{loading ? "—" : kpi.totalMonth}</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock size={16} className="text-amber-500" />
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Chờ duyệt</span>
-          </div>
-          <div className={`text-3xl font-extrabold ${kpi.pendingApproval > 0 ? "text-amber-600" : "text-slate-800"}`}>
-            {loading ? "—" : kpi.pendingApproval}
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <CheckCircle2 size={16} className="text-emerald-500" />
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Đã duyệt tháng này</span>
-          </div>
-          <div className="text-3xl font-extrabold text-slate-800">{loading ? "—" : kpi.approvedMonth}</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle size={16} className="text-blue-500" />
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Biên bản gần đây</span>
-          </div>
-          <div className="text-3xl font-extrabold text-slate-800">{loading ? "—" : recent.length}</div>
-        </div>
-      </div>
+      <StatGrid cols={4}>
+        <StatCard icon={Wrench} label="Biên bản tháng này" value={kpi.totalMonth} loading={loading} />
+        <StatCard
+          icon={Clock}
+          label="Chờ duyệt"
+          value={kpi.pendingApproval}
+          valueTone={kpi.pendingApproval > 0 ? "warn" : "default"}
+          loading={loading}
+        />
+        <StatCard icon={CheckCircle2} label="Đã duyệt tháng này" value={kpi.approvedMonth} loading={loading} />
+        <StatCard icon={ClipboardList} label="Biên bản gần đây" value={recent.length} loading={loading} />
+      </StatGrid>
 
       {/* Recent records */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <span className="font-extrabold text-slate-700">Biên bản gần đây</span>
-          <Link href="/dashboard/maintenance/records" className="text-xs font-bold text-emerald-600 hover:underline">Xem tất cả</Link>
+        <div className="px-4 py-3.5 border-b border-slate-100 flex items-center justify-between">
+          <span className="font-extrabold text-slate-800">Biên bản gần đây</span>
+          <Link href="/dashboard/maintenance/records" className="text-xs font-bold text-brand-700 hover:underline">Xem tất cả →</Link>
         </div>
         {loading && recent.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
+          <ListState kind="loading" />
         ) : recent.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">
-            <Wrench size={36} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Chưa có biên bản nào</p>
-          </div>
+          <ListState kind="empty" message="Chưa có biên bản nào" />
         ) : (
           <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+          <table className="enterprise-table">
+            <thead>
               <tr>
-                {["Mã biên bản", "Hạng mục", "Bộ phận", "Ngày", "Ký duyệt"].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
-                ))}
+                <th>Mã biên bản</th>
+                <th>Hạng mục</th>
+                <th>Bộ phận</th>
+                <th>Ngày</th>
+                <th>Trạng thái</th>
+                <th>Ký duyệt</th>
+                <th className="sticky-end text-right">Thao tác</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {recent.map((r) => (
-                <tr key={r.id} className="row-hover">
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/maintenance/records/${r.id}`} className="font-mono text-xs font-bold text-emerald-700 hover:underline">
-                      {r.ma_bb || "—"}
+            <tbody>
+              {recent.map((r) => {
+                const sign = {
+                  bundle: resolveSignBundle(r),
+                  status: signingStatusByRecord.get(r.id),
+                  loaded: signingStatusLoaded,
+                  error: signingStatusError,
+                }
+                return (
+                <tr key={r.id}>
+                  <td>
+                    <Link href={`/dashboard/maintenance/records/${r.id}`} className="hover:opacity-80">
+                      <DocCodePill code={r.ma_bb} />
                     </Link>
                   </td>
-                  <td className="px-4 py-3 font-medium text-slate-700">{r.hang_muc}</td>
-                  <td className="px-4 py-3 text-slate-500">{r.bo_phan}</td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">{r.ngay ? new Date(r.ngay).toLocaleDateString("vi-VN") : "—"}</td>
-                  <td className="px-4 py-3">
-                    {(() => {
-                      const bundle = resolveSignBundle(r)
-                      if (!bundle) return <span className="text-xs text-slate-300">—</span>
-                      if (!signingStatusLoaded) return <Loader2 size={14} className="animate-spin text-slate-300" />
-                      const status = signingStatusByRecord.get(r.id)
-                      if (!status && signingStatusError) {
-                        return (
-                          <button
-                            onClick={() => { if (factoryId) void loadSigningStatuses(factoryId, recent) }}
-                            title="Không tải được trạng thái ký — bấm để thử lại"
-                            className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-50"
-                          >
-                            <AlertTriangle size={14} /> Thử lại
-                          </button>
-                        )
-                      }
-                      return (
-                        <div className="flex items-center gap-1.5">
-                          {status?.fileHienTai ? (
-                            <>
-                              <a
-                                href={status.fileHienTai}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={status.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                                className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                              >
-                                <Eye size={15} />
-                              </a>
-                              {/* Tải về máy: dùng ?download= của Supabase Storage — thuộc tính HTML
-                                  `download` KHÔNG có tác dụng vì file khác origin với app. */}
-                              <a
-                                href={buildStorageDownloadUrl(status.fileHienTai, `Biên bản ${r.ma_bb || r.id}`)}
-                                title={status.trangThai === "hoan_tat" ? "Tải file đã ký duyệt về máy" : "Tải file đã ký (đang chờ ký tiếp)"}
-                                className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors"
-                              >
-                                <Download size={15} />
-                              </a>
-                            </>
-                          ) : canPrint ? (
-                            <Link
-                              href={`/dashboard/maintenance/print?type=${bundle}&record_id=${r.id}`}
-                              target="_blank"
-                              title="In biên bản (chưa ký)"
-                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                            >
-                              <FileText size={15} />
-                            </Link>
-                          ) : null}
-                          {user && (
-                            <MaintenanceSignStatusBadge
-                              status={status}
-                              currentUser={user}
-                              canCreate={canCreate && canOwnerAct(r)}
-                              onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
-                              onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, recent) }}
-                              showToast={(msg, ok = true) => setToast({ msg, ok })}
-                            />
-                          )}
-                        </div>
-                      )
-                    })()}
+                  <td><HangMucLabel hangMuc={r.hang_muc} /></td>
+                  <td className="text-slate-500">{r.bo_phan}</td>
+                  <td className="text-slate-500 text-xs whitespace-nowrap">{r.ngay ? new Date(r.ngay).toLocaleDateString("vi-VN") : "—"}</td>
+                  <td><StatusBadge domain="maintenance" status={r.trang_thai} /></td>
+                  <td>
+                    <MaintenanceSignCell
+                      sign={sign}
+                      user={user}
+                      canCreate={canCreate && canOwnerAct(r)}
+                      onRetry={() => { if (factoryId) void loadSigningStatuses(factoryId, recent) }}
+                      onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
+                      onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, recent) }}
+                      showToast={(msg, ok = true) => setToast({ msg, ok })}
+                    />
+                  </td>
+                  <td className="sticky-end">
+                    <MaintenanceRowActions recordId={r.id} maBb={r.ma_bb} sign={sign} canPrint={canPrint} onError={(msg) => setToast({ msg, ok: false })} />
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
           </ResponsiveTableWrapper>

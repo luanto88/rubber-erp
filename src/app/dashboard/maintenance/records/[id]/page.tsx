@@ -3,10 +3,9 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { QRCodeSVG } from "qrcode.react"
 import {
-  AlertCircle, AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, Coins, Edit3, Eye, ExternalLink, FileSignature, FileText, ImagePlus, Loader2, Plus,
-  QrCode, RotateCcw, Save, Send, ShoppingCart, Trash2, Users, Wrench, X,
+  AlertCircle, AlertTriangle, ArrowLeft, Ban, CheckCircle2, ChevronDown, ChevronUp, Coins, Download, Eye, ExternalLink, FileSignature, FileText, GitBranch, ImagePlus, Loader2, Pencil, PenTool, Plus,
+  Printer, QrCode, RotateCcw, Save, Send, ShoppingCart, Trash2, Users, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
@@ -56,7 +55,20 @@ import { MaintenanceSignModal } from "../_components/maintenance-sign-modal"
 import { authFetch } from "@/lib/auth-fetch"
 import type { KtRecordStatus } from "@/lib/maintenance-kt"
 import { PURCHASE_STATUS_LABEL, type PurchaseStatus } from "@/lib/purchase/types"
-import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "../_components/maintenance-sign-status"
+import type { MaintenanceSigningStatus } from "../_components/maintenance-sign-types"
+import { SignStatusBadge } from "@/app/dashboard/_components/sign-status-badge"
+import { computeMyTurn } from "@/app/dashboard/_components/signing-my-turn"
+import { DetailSplitLayout } from "@/app/dashboard/_components/doc-ui/detail-split-layout"
+import { DetailPageHeader, HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
+import { HeaderQr } from "@/app/dashboard/_components/doc-ui/header-qr"
+import { DocViewer } from "@/app/dashboard/_components/doc-ui/doc-viewer"
+import { useIsDesktop } from "@/app/dashboard/_components/doc-ui/use-is-desktop"
+import { InspectorCard, MetaList, MetaRow, StatusSummaryBar } from "@/app/dashboard/_components/doc-ui/inspector-card"
+import { SignActionBox, type SignAction } from "@/app/dashboard/_components/doc-ui/sign-action-box"
+import { TimelineProgress, TimelineSteps, type TimelineStepItem } from "@/app/dashboard/_components/doc-ui/timeline-steps"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 
 type InventoryItemOption = {
@@ -1438,6 +1450,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
+  // U1b — chế độ xem: tab mobile (Tài liệu/Ký duyệt) + tab cột tài liệu (File đã ký/Nội dung).
+  const isDesktop = useIsDesktop()
+  const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
+  const [docTab, setDocTab] = useState<"file" | "content" | null>(null)
+
   const recordQrUrl = useMemo(() => {
     if (!record?.id || typeof window === "undefined") return ""
     return `${window.location.origin}/dashboard/maintenance/records/${record.id}`
@@ -1445,32 +1462,40 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   if (loading) return <MaintenanceShell><div className="p-12 text-center text-slate-400">Đang tải...</div></MaintenanceShell>
 
-  const statusBadge = record?.trang_thai === "da_duyet"
-    ? <span className="px-3 py-1 rounded-full text-sm font-bold bg-emerald-100 text-emerald-700">Đã duyệt</span>
-    : record?.trang_thai === "huy"
-    ? <span className="px-3 py-1 rounded-full text-sm font-bold bg-red-100 text-red-600">Đã hủy</span>
-    : record?.trang_thai === "tu_choi"
-    ? <span className="px-3 py-1 rounded-full text-sm font-bold bg-rose-100 text-rose-700">Bị từ chối</span>
-    : <span className="px-3 py-1 rounded-full text-sm font-bold bg-amber-100 text-amber-700">Chờ duyệt</span>
+  const statusBadge = <StatusBadge domain="maintenance" status={record?.trang_thai || "cho_duyet"} />
+
+  // ── Ký duyệt điện tử: dữ liệu dùng chung cho thẻ ký (chế độ sửa) và hộp hành động (chế độ xem) ──
+  const canCreateSign = !!user && hasPermission(user, "maintenance.create") && (isAdmin || isCreator)
+  const ktBlockedReason = ktStatus && ktStatus.totalShortage > 0
+    ? `Kho tạm ${ktStatus.ktWarehouse?.code || "KT"} chưa đủ vật tư mua ngoài — lập đề nghị mua và nhập kho trước khi gửi ký`
+    : null
+  const reloadSigningStatus = () => {
+    setSigningStatus(undefined)
+    if (factoryId) void loadSigningStatus(factoryId, effectiveId)
+  }
+  const showToast = (msg: string, ok = true) => {
+    if (ok) setSaveSuccess(msg)
+    else setSaveError(msg)
+  }
+  // Bản in chưa ký — trang in dùng chung `/dashboard/maintenance/print` (trước đây trỏ nhầm
+  // `/records/{id}/print` không tồn tại). Dùng effectiveId để đúng bản ghi ngay sau lần Lưu đầu.
+  const printHref = `/dashboard/maintenance/print?type=${printDocType}&record_id=${effectiveId}`
+  const signedFileEndpoint = `/api/maintenance/records/${effectiveId}/file-url`
+  const openSignedFile = async (download: boolean) => {
+    // Xem: `?view=1` → mở qua route app để trình xem PDF lưu ra "Biên bản {mã}.pdf" (không phải "v4.pdf").
+    const r = await openSecureFile(`${signedFileEndpoint}?${download ? "download=1" : "view=1"}`)
+    if (!r.ok) setSaveError(r.error)
+  }
 
   const renderReadOnlyGeneralInfo = () => (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
         <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
-          <Wrench size={18} className="text-orange-500" />
+          <Wrench size={18} className="text-mod-600" />
           Thông tin chung
         </h2>
-        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
-          Chế độ xem
-        </span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
-        <div>
-          <p className="text-sm font-medium text-slate-500">Mã biên bản</p>
-          <p className="text-base font-bold font-mono text-orange-600 mt-1 break-all">
-            {record?.ma_bb || "—"}
-          </p>
-        </div>
         <div>
           <p className="text-sm font-medium text-slate-500">Hạng mục</p>
           <div className="mt-1">
@@ -1507,10 +1532,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           <p className="text-sm font-medium text-slate-500">Người tạo biên bản</p>
           <p className="text-base font-semibold text-slate-800 mt-1">{record?.nguoi_tao || "—"}</p>
         </div>
-        <div>
-          <p className="text-sm font-medium text-slate-500">Trạng thái phê duyệt</p>
-          <div className="mt-1">{statusBadge}</div>
-        </div>
       </div>
     </div>
   )
@@ -1519,7 +1540,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-5">
         <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
-          <Wrench size={18} className="text-orange-500" />
+          <Wrench size={18} className="text-mod-600" />
           Chi tiết Thiết bị & Hạng mục bảo trì
         </h2>
         <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
@@ -1587,7 +1608,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               {/* Header dòng */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 pb-3 mb-4">
                 <div className="flex items-center gap-3">
-                  <span className="w-7 h-7 rounded-full bg-orange-500 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                  <span className="w-7 h-7 rounded-full bg-mod-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
                     {idx + 1}
                   </span>
                   <div>
@@ -1762,7 +1783,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               <td className="py-2.5 px-3 text-right text-slate-700 font-mono">
                                 {donGia > 0 ? `${donGia.toLocaleString()} ${mat.loai_tien || ""}` : "—"}
                               </td>
-                              <td className="py-2.5 px-3 text-right font-bold text-emerald-700 font-mono">
+                              <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
                                 {thanhTien > 0 ? `${thanhTien.toLocaleString()} ${mat.loai_tien || ""}` : "—"}
                               </td>
                             </tr>
@@ -1784,10 +1805,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-1">
         <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
-          <Wrench size={18} className="text-orange-500" />
+          <Wrench size={18} className="text-mod-600" />
           Thông tin biên bản
         </h2>
-        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-orange-50 text-orange-700">
+        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-mod-50 text-mod-800">
           Chế độ chỉnh sửa
         </span>
       </div>
@@ -1798,7 +1819,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             value={hangMuc}
             onChange={(e) => setHangMuc(e.target.value as "Sửa chữa" | "Bảo dưỡng")}
             disabled={isReadOnly}
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
           >
             <option value="Sửa chữa">Sửa chữa</option>
             <option value="Bảo dưỡng">Bảo dưỡng</option>
@@ -1811,7 +1832,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             value={ngay}
             onChange={(e) => setNgay(e.target.value)}
             disabled={isReadOnly}
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
           />
         </div>
         <div>
@@ -1821,7 +1842,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             value={tuGio}
             onChange={(e) => setTuGio(e.target.value)}
             disabled={isReadOnly}
-            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
           />
         </div>
         <div>
@@ -1831,7 +1852,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             value={denGio}
             onChange={(e) => setDenGio(e.target.value)}
             disabled={isReadOnly}
-            className={`w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 ${timeWarning ? "border-amber-400" : "border-slate-300"}`}
+            className={`w-full px-3 py-2 border rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 ${timeWarning ? "border-amber-400" : "border-slate-300"}`}
           />
           {timeWarning && (
             <p className="text-[11px] text-amber-600 font-semibold mt-1 flex items-center gap-1">
@@ -1846,7 +1867,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           value={boPhan}
           onChange={(e) => { setBoPhan(e.target.value); setSelectedAssetIds([]); setSelectedVehicleIds([]); setLines([]) }}
           disabled={isReadOnly}
-          className="w-full md:w-64 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+          className="w-full md:w-64 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
         >
           {BO_PHAN_LIST.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
@@ -1860,7 +1881,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       {!isReadOnly && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-3">
           <label className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
-            <Wrench size={14} className="text-orange-500" />
+            <Wrench size={14} className="text-mod-600" />
             {isDoiXe ? "Chọn xe phục vụ bảo trì *" : "Chọn thiết bị phục vụ bảo trì *"}
           </label>
 
@@ -1869,7 +1890,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <button
               type="button"
               onClick={() => setAssetDropdownOpen((o) => !o)}
-              className="w-full flex items-center justify-between px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm bg-white hover:border-orange-400 focus:border-orange-400 outline-none transition-colors"
+              className="w-full flex items-center justify-between px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm bg-white hover:border-mod-600 focus:border-mod-600 outline-none transition-colors"
             >
               <span className={(isDoiXe ? selectedVehicleIds.length > 0 : selectedAssetIds.length > 0) ? "text-slate-700 font-semibold" : "text-slate-400"}>
                 {isDoiXe
@@ -1886,7 +1907,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   value={assetSearch}
                   onChange={(e) => setAssetSearch(e.target.value)}
                   placeholder={isDoiXe ? "Tìm nhanh mã hoặc tên xe..." : "Tìm nhanh mã hoặc tên thiết bị..."}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-400 mb-2"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 mb-2"
                 />
 
                 <div className="flex items-center justify-between mb-2">
@@ -1913,7 +1934,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         })
                       }
                     }}
-                    className="text-xs font-bold text-orange-600 hover:bg-orange-50 px-2.5 py-1 rounded-lg transition-colors"
+                    className="text-xs font-bold text-mod-600 hover:bg-mod-50 px-2.5 py-1 rounded-lg transition-colors"
                   >
                     Chọn tất cả
                   </button>
@@ -1940,8 +1961,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     ) : filteredVehicles.map((v) => {
                       const selected = selectedVehicleIds.includes(v.id)
                       return (
-                        <label key={v.id} className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
-                          <input type="checkbox" checked={selected} onChange={() => toggleVehicle(v)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 shrink-0" />
+                        <label key={v.id} className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${selected ? "border-mod-200 bg-mod-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
+                          <input type="checkbox" checked={selected} onChange={() => toggleVehicle(v)} className="h-4 w-4 rounded border-slate-300 text-mod-600 focus:ring-mod-600 shrink-0" />
                           <span className="min-w-0 flex-1">
                             <span className="block text-xs font-bold font-mono text-slate-800 truncate">{v.code} — {v.name}</span>
                             <span className="block text-[11px] text-slate-500 truncate">
@@ -1949,7 +1970,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               {v.plate_number && ` · ${v.plate_number}`}
                             </span>
                           </span>
-                          <span className={`text-[10px] font-semibold shrink-0 ${selected ? "text-emerald-600" : "text-slate-400"}`}>Xe</span>
+                          <span className={`text-[10px] font-semibold shrink-0 ${selected ? "text-mod-600" : "text-slate-400"}`}>Xe</span>
                         </label>
                       )
                     })
@@ -1961,13 +1982,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     ) : filteredAssets.map((a) => {
                       const selected = selectedAssetIds.includes(a.id)
                       return (
-                        <label key={a.id} className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${selected ? "border-emerald-200 bg-emerald-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
-                          <input type="checkbox" checked={selected} onChange={() => toggleAsset(a)} className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 shrink-0" />
+                        <label key={a.id} className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${selected ? "border-mod-200 bg-mod-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
+                          <input type="checkbox" checked={selected} onChange={() => toggleAsset(a)} className="h-4 w-4 rounded border-slate-300 text-mod-600 focus:ring-mod-600 shrink-0" />
                           <span className="min-w-0 flex-1">
                             <span className="block text-xs font-bold font-mono text-slate-800 truncate">{a.ma_tb}</span>
                             <span className="block text-[11px] text-slate-600 truncate">{a.ten_tb}</span>
                           </span>
-                          <span className={`text-[10px] font-semibold shrink-0 ${selected ? "text-emerald-600" : "text-slate-400"}`}>{a.loai === "xe" ? "Xe" : "Máy"}</span>
+                          <span className={`text-[10px] font-semibold shrink-0 ${selected ? "text-mod-600" : "text-slate-400"}`}>{a.loai === "xe" ? "Xe" : "Máy"}</span>
                         </label>
                       )
                     })
@@ -1983,15 +2004,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 pt-1">
                 {dispatchVehicles.filter((v) => selectedVehicleIds.includes(v.id)).map((v) => (
                   <button key={v.id} type="button" onClick={() => toggleVehicle(v)} title="Bấm để bỏ chọn"
-                    className="relative min-h-[84px] rounded-xl border border-emerald-400 bg-emerald-50 p-2.5 text-left transition-all hover:border-red-300 hover:bg-red-50 group"
+                    className="relative min-h-[84px] rounded-xl border border-mod-600 bg-mod-50 p-2.5 text-left transition-all hover:border-red-300 hover:bg-red-50 group"
                   >
-                    <div className="absolute right-2 top-2 rounded-full p-1 bg-emerald-500 text-white group-hover:bg-red-400 transition-colors">
+                    <div className="absolute right-2 top-2 rounded-full p-1 bg-mod-600 text-white group-hover:bg-red-400 transition-colors">
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5L4.5 8L9 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </div>
                     <div className="pr-7">
                       <div className="text-xs font-bold font-mono text-slate-800 truncate">{v.code}</div>
                       <div className="mt-1 text-[11px] text-slate-600 line-clamp-2 leading-tight">{v.name}</div>
-                      <div className="mt-1.5 text-[10px] font-semibold text-emerald-600">
+                      <div className="mt-1.5 text-[10px] font-semibold text-mod-600">
                         {v.currentDriverName || "Chưa có tài xế"}
                       </div>
                     </div>
@@ -2004,15 +2025,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 pt-1">
                 {assets.filter((a) => selectedAssetIds.includes(a.id)).map((a) => (
                   <button key={a.id} type="button" onClick={() => toggleAsset(a)} title="Bấm để bỏ chọn"
-                    className="relative min-h-[84px] rounded-xl border border-emerald-400 bg-emerald-50 p-2.5 text-left transition-all hover:border-red-300 hover:bg-red-50 group"
+                    className="relative min-h-[84px] rounded-xl border border-mod-600 bg-mod-50 p-2.5 text-left transition-all hover:border-red-300 hover:bg-red-50 group"
                   >
-                    <div className="absolute right-2 top-2 rounded-full p-1 bg-emerald-500 text-white group-hover:bg-red-400 transition-colors">
+                    <div className="absolute right-2 top-2 rounded-full p-1 bg-mod-600 text-white group-hover:bg-red-400 transition-colors">
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5L4.5 8L9 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </div>
                     <div className="pr-7">
                       <div className="text-xs font-bold font-mono text-slate-800 truncate">{a.ma_tb}</div>
                       <div className="mt-1 text-[11px] text-slate-600 line-clamp-2 leading-tight">{a.ten_tb}</div>
-                      <div className="mt-1.5 text-[10px] font-semibold text-emerald-600">
+                      <div className="mt-1.5 text-[10px] font-semibold text-mod-600">
                         {a.loai === "xe" ? "Xe" : "Máy"}{a.bien_so && ` · ${a.bien_so}`}
                       </div>
                     </div>
@@ -2141,11 +2162,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         <div key={line.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           {/* Line header */}
           <div
-            className="flex items-center justify-between px-5 py-3.5 bg-orange-50/70 border-b border-orange-100 cursor-pointer"
+            className="flex items-center justify-between px-5 py-3.5 bg-mod-50/70 border-b border-mod-50 cursor-pointer"
             onClick={() => updateLine(line.id, { expanded: !line.expanded })}
           >
             <div className="flex items-center gap-3">
-              <span className="w-6 h-6 rounded-full bg-orange-200 text-orange-700 text-xs font-bold flex items-center justify-center">{idx + 1}</span>
+              <span className="w-6 h-6 rounded-full bg-mod-200 text-mod-800 text-xs font-bold flex items-center justify-center">{idx + 1}</span>
               <div>
                 <span className="font-bold text-slate-800">{line.ten_tb}</span>
                 <span className="ml-2 text-xs text-slate-500 font-mono">{line.ma_tb}</span>
@@ -2193,7 +2214,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         <button
                           type="button"
                           onClick={() => setDriverManualModes((prev) => ({ ...prev, [line.id]: !isDriverManual }))}
-                          className="flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors bg-white text-slate-500 border-slate-300 hover:border-orange-400 hover:text-orange-600"
+                          className="flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors bg-white text-slate-500 border-slate-300 hover:border-mod-600 hover:text-mod-600"
                         >
                           {isDriverManual ? "← Chọn danh sách" : "+ Nhập tên khác"}
                         </button>
@@ -2204,7 +2225,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         value={line.ten_tai_xe}
                         onChange={(e) => updateLine(line.id, { ten_tai_xe: e.target.value })}
                         disabled={isReadOnly}
-                        className="w-full md:w-72 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                        className="w-full md:w-72 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                         placeholder="Tên tài xế"
                       />
                     ) : (
@@ -2212,7 +2233,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         value={line.ten_tai_xe}
                         onChange={(e) => updateLine(line.id, { ten_tai_xe: e.target.value })}
                         disabled={isReadOnly}
-                        className="w-full md:w-72 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                        className="w-full md:w-72 px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 bg-white"
                       >
                         <option value="">— Chọn tài xế —</option>
                         {driversList.map((d) => (
@@ -2240,7 +2261,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   disabled={isReadOnly}
                   rows={2}
                   placeholder={hangMuc === "Bảo dưỡng" && (noiDungChung.trim() || nguyenNhanChung.trim() || cacKhacPhucChung.trim()) ? "Để trống = dùng nội dung chung; nhập thêm = kết hợp vào biên bản" : ""}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 resize-none"
                 />
               </div>
 
@@ -2254,7 +2275,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     onChange={(e) => updateLine(line.id, { nguyen_nhan: e.target.value })}
                     disabled={isReadOnly}
                     rows={2}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 resize-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 resize-none"
                   />
                 </div>
               )}
@@ -2266,7 +2287,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   onChange={(e) => updateLine(line.id, { cac_khac_phuc: e.target.value })}
                   disabled={isReadOnly}
                   rows={2}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 resize-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 resize-none"
                 />
               </div>
 
@@ -2289,7 +2310,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     value={line.loai_tien}
                     onChange={(e) => updateLine(line.id, { loai_tien: e.target.value })}
                     disabled={isReadOnly}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                   >
                     {CURRENCIES.map((c) => <option key={c} value={c}>{currencySymbol(c)} {c}</option>)}
                   </select>
@@ -2301,7 +2322,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       value={line.loai_sua_chua}
                       onChange={(e) => updateLine(line.id, { loai_sua_chua: e.target.value })}
                       disabled={isReadOnly}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                     >
                       <option value="nho">Nhỏ (≤ 200$)</option>
                       <option value="lon">Lớn (&gt; 200$)</option>
@@ -2315,7 +2336,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     value={line.cong_tho}
                     onChange={(e) => updateLine(line.id, { cong_tho: e.target.value })}
                     disabled={isReadOnly}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                   />
                 </div>
               </div>
@@ -2333,7 +2354,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           <button
                             type="button"
                             onClick={() => setFuelManualModes((prev) => ({ ...prev, [line.id]: !isManual }))}
-                            className="flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors bg-white text-slate-500 border-slate-300 hover:border-orange-400 hover:text-orange-600"
+                            className="flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-bold rounded-md border transition-colors bg-white text-slate-500 border-slate-300 hover:border-mod-600 hover:text-mod-600"
                           >
                             {isManual ? "← Chọn danh sách" : "+ Nhập tên khác"}
                           </button>
@@ -2345,7 +2366,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           onChange={(e) => updateLine(line.id, { nhien_lieu_su_dung: e.target.value })}
                           disabled={isReadOnly}
                           placeholder="Nhập tên nhiên liệu..."
-                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                         />
                       ) : (
                         <select
@@ -2359,7 +2380,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             })
                           }}
                           disabled={isReadOnly}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 bg-white"
                         >
                           <option value="">— Chọn nhiên liệu —</option>
                           {fuelItems.map((f) => (
@@ -2378,7 +2399,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         onChange={(e) => updateLine(line.id, { dvt_do: e.target.value })}
                         disabled={isReadOnly || (!isManual && !!selectedFuel)}
                         placeholder={!isManual && selectedFuel ? selectedFuel.unit : ""}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                       />
                     </div>
                     <div>
@@ -2388,7 +2409,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         value={line.so_luong_do}
                         onChange={(e) => updateLine(line.id, { so_luong_do: e.target.value })}
                         disabled={isReadOnly}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                       />
                     </div>
                   </div>
@@ -2406,7 +2427,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       onChange={(e) => updateLine(line.id, { km_dong_ho: e.target.value })}
                       disabled={isReadOnly}
                       placeholder="VD: 125000"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                     />
                   </div>
                 )}
@@ -2449,7 +2470,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     <button
                       type="button"
                       onClick={() => addMaterial(line.id)}
-                      className="flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg"
+                      className="flex items-center gap-1 px-2 py-1 bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-bold rounded-lg"
                     >
                       <Plus size={11} /> Thêm dòng vật tư
                     </button>
@@ -2471,7 +2492,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               href="/dashboard/inventory/receipts"
                               target="_blank"
                               title="Mở trang Nhập kho để tạo mã vật tư mới và nhập số lượng thực tế"
-                              className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
+                              className="flex items-center gap-0.5 text-[10px] font-bold text-brand-700 hover:text-brand-800"
                             >
                               <ExternalLink size={10} /> Nhập kho vật tư mới
                             </Link>
@@ -2482,7 +2503,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                 setNewExtMatModal({ lineId: line.id, matId: mat.id })
                                 setNewExtMatForm({ code: "", ten_vat_tu: "", dvt: mat.dvt || "", specification: "", category_id: "" })
                               }}
-                              className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 hover:text-emerald-700"
+                              className="flex items-center gap-0.5 text-[10px] font-bold text-brand-700 hover:text-brand-800"
                             >
                               <Plus size={10} /> Thêm mã vật tư ngoài
                             </button>
@@ -2496,7 +2517,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             value={mat.nguon}
                             onChange={(e) => updateMaterial(line.id, mat.id, { nguon: e.target.value as "trong_kho" | "ben_ngoai", inventory_item_id: "", ten_vat_tu: "" })}
                             disabled={isReadOnly}
-                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white"
                           >
                             <option value="ben_ngoai">Bên ngoài</option>
                             <option value="trong_kho">Trong kho</option>
@@ -2508,7 +2529,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             value={catFilter}
                             onChange={(e) => setMatCategoryFilters((prev) => ({ ...prev, [searchKey]: e.target.value }))}
                             disabled={isReadOnly}
-                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white bg-white"
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white bg-white"
                           >
                             <option value="">Tất cả nhóm</option>
                             {inventoryCategories.map((c) => (
@@ -2522,7 +2543,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             type="button"
                             disabled={isReadOnly}
                             onClick={() => setActiveMaterialDropdown(activeMaterialDropdown === mat.id ? null : mat.id)}
-                            className="w-full flex items-center justify-between px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white bg-white text-left"
+                            className="w-full flex items-center justify-between px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white bg-white text-left"
                           >
                             <span className={mat.ten_vat_tu ? "text-slate-800 truncate" : "text-slate-400"}>
                               {mat.ten_vat_tu || "— Chọn vật tư —"}
@@ -2549,7 +2570,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                   value={search}
                                   onChange={(e) => setMatSearches((prev) => ({ ...prev, [searchKey]: e.target.value }))}
                                   placeholder="Tìm theo mã hoặc tên..."
-                                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500"
+                                  className="w-full px-2 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600"
                                 />
                               </div>
                               <div className="max-h-72 overflow-y-auto">
@@ -2566,7 +2587,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                       updateMaterial(line.id, mat.id, { inventory_item_id: item.id, ten_vat_tu: item.name, dvt: item.unit || "", ...priceFields })
                                       setActiveMaterialDropdown(null)
                                     }}
-                                    className={`w-full text-left px-3 py-2 text-xs hover:bg-emerald-50 flex justify-between gap-2 border-b border-slate-50 last:border-0 ${mat.inventory_item_id === item.id ? "bg-emerald-50 font-bold" : ""}`}
+                                    className={`w-full text-left px-3 py-2 text-xs hover:bg-mod-50 flex justify-between gap-2 border-b border-slate-50 last:border-0 ${mat.inventory_item_id === item.id ? "bg-mod-50 font-bold" : ""}`}
                                   >
                                     <span className="truncate">{item.code} — {item.name}</span>
                                     {isKho && (
@@ -2586,7 +2607,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             value={mat.dvt}
                             onChange={(e) => updateMaterial(line.id, mat.id, { dvt: e.target.value })}
                             disabled={isReadOnly}
-                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white"
                           />
                         </div>
                         <div className="w-[50px]">
@@ -2596,7 +2617,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             value={mat.so_luong}
                             onChange={(e) => updateMaterial(line.id, mat.id, { so_luong: e.target.value })}
                             disabled={isReadOnly}
-                            className={`w-full px-1.5 py-1.5 border rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white ${
+                            className={`w-full px-1.5 py-1.5 border rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white ${
                               mat.nguon === "trong_kho" && mat.inventory_item_id &&
                               parseFloat(mat.so_luong) > (inventoryItems.find(i => i.id === mat.inventory_item_id)?.currentStock ?? Infinity)
                                 ? "border-red-400 bg-red-50"
@@ -2633,7 +2654,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             value={mat.don_gia}
                             onChange={(e) => updateMaterial(line.id, mat.id, { don_gia: e.target.value })}
                             disabled={isReadOnly}
-                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white"
                           />
                         </div>
                         <div className="w-[74px]">
@@ -2642,7 +2663,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             value={mat.loai_tien}
                             onChange={(e) => updateMaterial(line.id, mat.id, { loai_tien: e.target.value })}
                             disabled={isReadOnly}
-                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-emerald-500 disabled:bg-white"
+                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white"
                           >
                             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                           </select>
@@ -2676,7 +2697,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     <button
                       disabled={uploadingSlot === line.id}
                       onClick={() => handleSlotClick(line.id)}
-                      className="flex items-center gap-1 px-2 py-1 bg-orange-50 hover:bg-orange-100 text-orange-600 text-xs font-bold rounded-lg disabled:opacity-40"
+                      className="flex items-center gap-1 px-2 py-1 bg-mod-50 hover:bg-mod-50 text-mod-600 text-xs font-bold rounded-lg disabled:opacity-40"
                     >
                       {uploadingSlot === line.id
                         ? <Loader2 size={11} className="animate-spin" />
@@ -2782,7 +2803,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
         <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
-          <FileSignature size={18} className="text-orange-500" />
+          <FileSignature size={18} className="text-mod-600" />
           Ký duyệt & Chứng từ
         </h3>
         {!effectiveIsNew && (
@@ -2808,22 +2829,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               <label className="text-[11px] font-bold text-slate-500 block mb-2 uppercase tracking-wider">
                 Tiến độ ký duyệt điện tử
               </label>
-              <MaintenanceSignStatusBadge
+              <SignStatusBadge
                 status={signingStatus}
                 currentUser={user}
-                canCreate={hasPermission(user, "maintenance.create") && (isAdmin || isCreator)}
-                blockedReason={ktStatus && ktStatus.totalShortage > 0
-                  ? `Kho tạm ${ktStatus.ktWarehouse?.code || "KT"} chưa đủ vật tư mua ngoài — lập đề nghị mua và nhập kho trước khi gửi ký`
-                  : null}
+                canCreate={canCreateSign}
+                continueRule="participant"
+                showProgress
+                hideWhenCannotCreate
+                blockedReason={ktBlockedReason}
+                cancelMessage={signCancelMessage}
                 onOpenSignPrompt={() => setSignModalOpen(true)}
-                onCancelled={() => {
-                  setSigningStatus(undefined)
-                  if (factoryId) void loadSigningStatus(factoryId, id)
-                }}
-                showToast={(msg, ok = true) => {
-                  if (ok) setSaveSuccess(msg)
-                  else setSaveError(msg)
-                }}
+                onCancelled={reloadSigningStatus}
+                showToast={showToast}
               />
             </div>
           )}
@@ -2831,25 +2848,25 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {/* Mẫu in / Xem file đã ký */}
           <div className="space-y-2 pt-1">
             {signingStatus?.fileHienTai ? (
+              <button
+                type="button"
+                onClick={() => void openSignedFile(false)}
+                className="flex items-center justify-center gap-2 w-full py-2.5 px-3 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold transition-all shadow-2xs"
+                title="Xem file PDF đã ký duyệt"
+              >
+                <Eye size={15} />
+                Xem file PDF đã ký điện tử
+              </button>
+            ) : (
               <a
-                href={signingStatus.fileHienTai}
+                href={printHref}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-2xs"
-                title="Xem hoặc tải file PDF đã ký duyệt"
-              >
-                <FileText size={15} className="text-emerald-400" />
-                Xem file PDF đã ký điện tử
-              </a>
-            ) : (
-              <Link
-                href={`/dashboard/maintenance/records/${id}/print?type=${printDocType}`}
-                target="_blank"
-                className="flex items-center justify-center gap-2 w-full py-2.5 px-3 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold transition-all border border-orange-200"
+                className="flex items-center justify-center gap-2 w-full py-2.5 px-3 rounded-xl bg-mod-50 hover:bg-mod-50/70 text-mod-800 text-xs font-bold transition-all border border-mod-200"
               >
                 <FileText size={15} />
-                In / Xuất mẫu biên bản
-              </Link>
+                In bản chưa ký
+              </a>
             )}
           </div>
 
@@ -2920,7 +2937,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
         <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
-          <Coins size={18} className="text-emerald-600" />
+          <Coins size={18} className="text-mod-600" />
           Tổng hợp chi phí & vật tư
         </h3>
       </div>
@@ -2935,7 +2952,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             Object.entries(costByCurrency).map(([cur, amount]) => (
               <div key={cur} className="flex items-center justify-between">
                 <span className="text-xs font-medium text-slate-600">Loại tiền {cur}:</span>
-                <span className="text-sm font-bold font-mono text-emerald-700">
+                <span className="text-sm font-bold font-mono text-slate-900">
                   {currencySymbol(cur)} {amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} {cur}
                 </span>
               </div>
@@ -2978,7 +2995,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       <div>
         <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
           <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
-            <FileText size={18} className="text-orange-500" />
+            <FileText size={18} className="text-mod-600" />
             Ghi chú & Chi tiết bổ sung
           </h3>
           <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
@@ -2995,7 +3012,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               disabled={isReadOnly}
               rows={4}
               placeholder="Nhập ghi chú thêm cho biên bản bảo trì (nếu có)..."
-              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 resize-none"
+              className="w-full px-3.5 py-2.5 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 resize-none"
             />
           </div>
         ) : (
@@ -3017,8 +3034,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <span className="font-bold text-slate-700 block">Liên kết tra cứu trực tuyến</span>
             <span className="font-mono text-[11px] text-slate-400 break-all">{recordQrUrl}</span>
           </div>
-          <div className="shrink-0 p-1.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
-            <QRCodeSVG value={recordQrUrl} size={48} level="M" />
+          <div className="shrink-0">
+            <HeaderQr value={recordQrUrl} code={record?.ma_bb} title={`${hangMuc} · ${boPhan}`} />
           </div>
         </div>
       )}
@@ -3055,7 +3072,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                       }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                         sel
-                          ? "bg-emerald-100 border-emerald-300 text-emerald-700 shadow-2xs"
+                          ? "bg-mod-50 border-mod-200 text-mod-800 shadow-2xs"
                           : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
                       }`}
                     >
@@ -3073,7 +3090,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   value={nvPhuTrach}
                   onChange={(e) => setNvPhuTrach(e.target.value)}
                   disabled={isReadOnly}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 bg-white"
                 >
                   <option value="">— Chọn —</option>
                   {eligibleStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
@@ -3086,7 +3103,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   value={bgdPhuTrach}
                   onChange={(e) => setBgdPhuTrach(e.target.value)}
                   disabled={isReadOnly}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 bg-white"
                 >
                   <option value="">— Chọn —</option>
                   {bgdPhuTrachStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
@@ -3099,7 +3116,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   value={giamDoc}
                   onChange={(e) => setGiamDoc(e.target.value)}
                   disabled={isReadOnly}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 bg-white"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 bg-white"
                 >
                   <option value="">— Chọn —</option>
                   {giamDocStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
@@ -3153,6 +3170,258 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     </div>
   )
 
+  // ── U1b: CHẾ ĐỘ XEM (biên bản đã lưu, không sửa) — cùng ngôn ngữ trang chi tiết Văn bản/ISO ──
+  const hasSignedFile = !!signingStatus?.fileHienTai
+  const activeDocTab: "file" | "content" = hasSignedFile ? (docTab ?? "file") : "content"
+  const myTurn = !!signingStatus && signingStatus.trangThai === "dang_luan_chuyen" &&
+    computeMyTurn(signingStatus.signers, user?.id)
+
+  // Nhãn vai trò theo thứ tự ký của maintenance-sign-modal (NV phụ trách → BGĐ phụ trách → Giám đốc).
+  const signRoleLabel = (thuTu: number) =>
+    thuTu < 20 ? "NV phụ trách" : thuTu < 40 ? "BGĐ phụ trách" : "Giám đốc nhà máy"
+
+  const signTimeline: TimelineStepItem[] = (() => {
+    if (signingStatus) {
+      const sorted = [...signingStatus.signers].sort((a, b) => a.thuTu - b.thuTu)
+      let currentSet = false
+      return sorted.map((sg, i) => {
+        const done = sg.trangThai === "da_ky" || signingStatus.trangThai === "hoan_tat"
+        let state: TimelineStepItem["state"] = done ? "done" : "waiting"
+        if (!done && !currentSet) {
+          currentSet = true
+          state = "current"
+        }
+        return {
+          key: `${sg.userId}-${i}`,
+          stepNo: i + 1,
+          role: signRoleLabel(sg.thuTu),
+          title: sg.hoTen || "—",
+          state,
+          isMine: state === "current" && sg.userId === user?.id,
+        }
+      })
+    }
+    // Chưa gửi ký: hiện người ký dự kiến theo biên bản.
+    const approved = record?.trang_thai === "da_duyet"
+    return [
+      { role: "NV phụ trách", name: nvPhuTrach },
+      { role: "BGĐ phụ trách", name: bgdPhuTrach },
+      { role: "Giám đốc nhà máy", name: giamDoc },
+    ].map((p, i) => ({
+      key: p.role,
+      stepNo: i + 1,
+      role: p.role,
+      title: p.name || "Chưa chọn",
+      state: approved ? ("done" as const) : ("waiting" as const),
+    }))
+  })()
+  const signDone = signTimeline.filter((t) => t.state === "done").length
+
+  const goToSignScreen = () => {
+    if (signingStatus) router.push(`/dashboard/ky/${signingStatus.yeuCauId}`)
+  }
+  let primaryAction: SignAction | null = null
+  if (signingStatus?.trangThai === "dang_luan_chuyen") {
+    if (signingStatus.traVeLyDo && (isAdmin || user?.id === signingStatus.nguoiTao)) {
+      primaryAction = { key: "resign", label: "Sửa & ký lại", icon: <RotateCcw size={16} />, onClick: goToSignScreen }
+    } else if (myTurn) {
+      primaryAction = { key: "sign", label: "Ký ngay", icon: <PenTool size={16} />, onClick: goToSignScreen }
+    }
+  } else if (!signingStatus && signBundle && canCreateSign) {
+    primaryAction = {
+      key: "send",
+      label: "Gửi ký duyệt",
+      icon: <PenTool size={16} />,
+      onClick: () => setSignModalOpen(true),
+      disabled: !!ktBlockedReason || saving,
+      title: ktBlockedReason || undefined,
+    }
+  }
+  const busy = saving || isUploadingAnyImage
+  const secondaryActions: SignAction[] = []
+  // Đã có file ký ⇒ KHÔNG còn "In bản chưa ký" (người dùng chốt 2026-10-14: gây nhầm với bản đã ký).
+  if (record?.trang_thai === "tu_choi" && isCreator) {
+    secondaryActions.push({ key: "resubmit", label: "Gửi duyệt lại", icon: <Send size={14} />, onClick: () => void handleResubmit(), disabled: busy })
+  }
+  const dangerActions: SignAction[] = []
+  if (record?.trang_thai === "cho_duyet" && isCreator) {
+    dangerActions.push({ key: "cancel", label: "Hủy biên bản", icon: <Ban size={14} />, onClick: () => void handleCancel(), disabled: busy })
+  }
+  if (record?.trang_thai === "da_duyet" && isAdmin) {
+    dangerActions.push({ key: "cancel-approved", label: "Hủy biên bản đã duyệt", icon: <Ban size={14} />, onClick: () => void handleCancel(), disabled: busy })
+    dangerActions.push({
+      key: "reverse",
+      label: "Đảo xuất kho",
+      icon: <RotateCcw size={14} />,
+      onClick: () => void handleReverseApproval(),
+      disabled: busy,
+      title: "Hủy sau khi hoàn tất để đảo ngược xuất kho và đưa biên bản về chờ ký",
+    })
+  }
+  if (canDelete) {
+    dangerActions.push({ key: "delete", label: "Xóa biên bản", icon: <Trash2 size={14} />, onClick: () => void handleDeleteRecord(), disabled: busy })
+  }
+
+  const headerChip = "rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11.5px] font-medium text-slate-600"
+  const signCancelMessage = "Hủy yêu cầu ký biên bản này? Sau khi hủy, có thể bấm “Gửi ký duyệt” để tạo yêu cầu mới từ đầu."
+
+  const renderViewMode = () => (
+    <DetailSplitLayout
+      mobileTab={mobileTab}
+      onMobileTabChange={setMobileTab}
+      header={
+        <DetailPageHeader
+          backHref="/dashboard/maintenance/records"
+          backLabel="Quay lại danh sách biên bản"
+          eyebrow="Biên bản bảo trì"
+          title={`${hangMuc} · ${boPhan}`}
+          code={record?.ma_bb}
+          tags={
+            <>
+              <span className={headerChip}>
+                {fmtDateVi(ngay)}
+                {tuGio ? ` · ${tuGio}` : ""}
+                {denGio ? ` → ${denGio.includes("T") ? denGio.slice(11, 16) : denGio.slice(0, 5)}` : ""}
+              </span>
+              <span className={headerChip}>{lines.length} {isDoiXe ? "xe" : "thiết bị"}</span>
+              {record?.nguoi_tao && <span className={headerChip}>Người tạo: {record.nguoi_tao}</span>}
+            </>
+          }
+          actions={
+            <>
+              {hasSignedFile ? (
+                <>
+                  <HeaderButton icon={<Eye size={15} />} label="Xem file ký" onClick={() => void openSignedFile(false)} />
+                  <HeaderButton icon={<Download size={15} />} label="Tải file ký" onClick={() => void openSignedFile(true)} />
+                </>
+              ) : (
+                <HeaderButton icon={<Printer size={15} />} label="In bản chưa ký" href={printHref} target="_blank" />
+              )}
+              {isEditable && (
+                <HeaderButton icon={<Pencil size={15} />} label="Chỉnh sửa" onClick={() => setIsEditMode(true)} />
+              )}
+              {recordQrUrl && <HeaderQr value={recordQrUrl} code={record?.ma_bb} title={`${hangMuc} · ${boPhan}`} />}
+            </>
+          }
+        />
+      }
+      document={
+        <>
+          {hasSignedFile && (
+            <SegmentedTabs
+              ariaLabel="Chọn nội dung cột tài liệu"
+              value={activeDocTab}
+              onChange={setDocTab}
+              items={[
+                { key: "file", label: "File đã ký", icon: FileSignature },
+                { key: "content", label: "Nội dung biên bản", icon: Wrench },
+              ]}
+            />
+          )}
+          {activeDocTab === "file" && signingStatus?.fileHienTai ? (
+            <DocViewer
+              key={signingStatus.fileHienTai}
+              active={(isDesktop || mobileTab === "doc") && !signModalOpen}
+              endpoint={signedFileEndpoint}
+              kind="pdf"
+              fileExt="pdf"
+              label={`${signingStatus.trangThai === "hoan_tat" ? "Bản đã ký duyệt" : "Bản đang ký"} · PDF`}
+            />
+          ) : (
+            <>
+              {renderReadOnlyGeneralInfo()}
+              {renderReadOnlyLines()}
+              {ghiChu.trim() && (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                  <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3 mb-3">
+                    <FileText size={18} className="text-mod-600" />
+                    Ghi chú
+                  </h2>
+                  <p className="text-sm text-slate-800 whitespace-pre-wrap">{ghiChu}</p>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      }
+      inspector={
+        <>
+          <StatusSummaryBar
+            domain="maintenance"
+            status={record?.trang_thai || "cho_duyet"}
+            meta={
+              signBundle && user ? (
+                <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span>Ký duyệt:</span>
+                  <SignStatusBadge
+                    status={signingStatus}
+                    currentUser={user}
+                    canCreate={canCreateSign}
+                    continueRule="participant"
+                    showProgress
+                    chipOnly
+                    blockedReason={ktBlockedReason}
+                    cancelMessage={signCancelMessage}
+                    onOpenSignPrompt={() => setSignModalOpen(true)}
+                    onCancelled={reloadSigningStatus}
+                    showToast={showToast}
+                  />
+                </span>
+              ) : undefined
+            }
+          />
+          <SignActionBox
+            primary={primaryAction}
+            secondary={secondaryActions}
+            danger={dangerActions}
+            hint={primaryAction?.key === "send" && ktBlockedReason ? ktBlockedReason : undefined}
+          />
+          {ktStatus && ktStatus.items.length > 0 && renderKtPanel(ktStatus)}
+          <InspectorCard
+            title="Tiến trình ký"
+            icon={GitBranch}
+            actions={<span className="text-[11.5px] font-semibold text-slate-400">{signDone}/{signTimeline.length} bước</span>}
+          >
+            <div className="space-y-3">
+              <TimelineSteps steps={signTimeline} compact />
+              <TimelineProgress done={signDone} total={signTimeline.length} />
+              {!signingStatus && (
+                <p className="text-[11.5px] text-slate-400">Chưa gửi ký duyệt — danh sách người ký dự kiến theo biên bản.</p>
+              )}
+            </div>
+          </InspectorCard>
+          <InspectorCard title="Chi phí" icon={Coins}>
+            <MetaList>
+              {Object.keys(costByCurrency).length > 0 ? (
+                Object.entries(costByCurrency).map(([cur, amount]) => (
+                  <MetaRow
+                    key={cur}
+                    label={`Chi phí dự kiến (${cur})`}
+                    value={`${currencySymbol(cur)} ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                    mono
+                  />
+                ))
+              ) : (
+                <MetaRow label="Chi phí dự kiến" value="0" mono />
+              )}
+              <MetaRow label="Công thợ" value={totalCongTho.toLocaleString()} mono />
+              <MetaRow label="Vật tư" value={`${totalMaterialsCount} dòng (${totalMaterialsQty.toLocaleString()} SL)`} />
+            </MetaList>
+          </InspectorCard>
+          <InspectorCard title="Nhân sự" icon={Users}>
+            <MetaList>
+              <MetaRow label="Người thực hiện" value={selectedStaff.length > 0 ? selectedStaff.join(", ") : null} />
+              <MetaRow label="NV phụ trách" value={nvPhuTrach || null} />
+              <MetaRow label="BGĐ phụ trách" value={bgdPhuTrach || null} />
+              <MetaRow label="Giám đốc" value={giamDoc || null} />
+              <MetaRow label="Cập nhật" value={fmtDateTimeVi(record?.updated_at || record?.created_at)} />
+            </MetaList>
+          </InspectorCard>
+        </>
+      }
+    />
+  )
+
   return (
     <MaintenanceShell>
       {/* Toast Alert Notifications */}
@@ -3188,6 +3457,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       )}
 
+      {!inEditMode && record ? renderViewMode() : (
+        <>
       {/* Top Header / Sticky Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-5 flex flex-wrap items-center justify-between gap-4">
         {/* Left: Back button, Title, Status badge */}
@@ -3199,7 +3470,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           >
             <ArrowLeft size={18} />
           </Link>
-          <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-mod-50 text-mod-600 flex items-center justify-center font-bold shrink-0">
             <Wrench size={20} />
           </div>
           <div>
@@ -3233,7 +3504,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border ${
                 isEditMode
                   ? "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
-                  : "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100"
+                  : "bg-mod-50 text-mod-800 border-mod-200 hover:bg-mod-50"
               }`}
             >
               {isEditMode ? (
@@ -3242,7 +3513,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 </>
               ) : (
                 <>
-                  <Edit3 size={14} /> Chỉnh sửa
+                  <Pencil size={14} /> Chỉnh sửa
                 </>
               )}
             </button>
@@ -3255,7 +3526,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               onClick={handleSave}
               disabled={saving || isUploadingAnyImage || !isDirty}
               title={saving ? "Đang lưu..." : !isDirty ? "Chưa có thay đổi nào để lưu" : undefined}
-              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all disabled:opacity-50"
+              className="flex items-center gap-1.5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all disabled:opacity-50"
             >
               <Save size={14} />
               {saving ? "Đang lưu..." : "Lưu biên bản"}
@@ -3288,6 +3559,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           {renderPersonnelCard()}
         </div>
       </div>
+
+        </>
+      )}
 
       {/* Hidden file inputs for image slot upload */}
       <input
@@ -3348,7 +3622,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 type="button"
                 onClick={() => void handleSaveNewExtMat()}
                 disabled={savingNewExtMat}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
+                className="px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
               >
                 {savingNewExtMat ? "Đang lưu..." : "Lưu vật tư"}
               </button>
@@ -3363,7 +3637,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   value={newExtMatForm.code}
                   onChange={(e) => setNewExtMatForm((p) => ({ ...p, code: e.target.value }))}
                   placeholder="VD: BD22211"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 font-mono"
                 />
               </div>
               <div>
@@ -3371,7 +3645,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 <select
                   value={newExtMatForm.category_id}
                   onChange={(e) => setNewExtMatForm((p) => ({ ...p, category_id: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 bg-white"
                 >
                   <option value="">— Không phân nhóm —</option>
                   {inventoryCategories.map((c) => (
@@ -3387,7 +3661,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   value={newExtMatForm.ten_vat_tu}
                   onChange={(e) => setNewExtMatForm((p) => ({ ...p, ten_vat_tu: e.target.value }))}
                   placeholder="Tên đầy đủ của vật tư"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
                 />
               </div>
               <div>
@@ -3396,7 +3670,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   value={newExtMatForm.dvt}
                   onChange={(e) => setNewExtMatForm((p) => ({ ...p, dvt: e.target.value }))}
                   placeholder="Cái, kg, lít..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
                 />
               </div>
             </div>
@@ -3406,7 +3680,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 value={newExtMatForm.specification}
                 onChange={(e) => setNewExtMatForm((p) => ({ ...p, specification: e.target.value }))}
                 placeholder="Quy cách, đặc tính kỹ thuật..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
               />
             </div>
           </div>

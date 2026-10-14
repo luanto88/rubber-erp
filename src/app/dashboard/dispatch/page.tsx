@@ -1,5 +1,6 @@
 "use client"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
@@ -11,7 +12,24 @@ import { renderDispatchPlanImage, shareDispatchPlanImage } from "@/lib/dispatch-
 import { downloadDispatchEntryPdf, downloadDispatchStatsPdf, downloadDispatchTripPdf } from "@/lib/dispatch-pdf"
 import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { DispatchSignModal } from "@/app/dashboard/dispatch/_components/dispatch-sign-modal"
-import { DispatchSignStatusBadge, type DispatchSigningStatus } from "@/app/dashboard/dispatch/_components/dispatch-sign-status"
+import type { DispatchSigningStatus } from "@/app/dashboard/dispatch/_components/dispatch-sign-status"
+import { SignStatusBadge } from "@/app/dashboard/_components/sign-status-badge"
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
+import { IconAction, IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
+import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
+import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
+import { DetailSplitLayout } from "@/app/dashboard/_components/doc-ui/detail-split-layout"
+import { DetailPageHeader, HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
+import { DocViewer } from "@/app/dashboard/_components/doc-ui/doc-viewer"
+import { useIsDesktop } from "@/app/dashboard/_components/doc-ui/use-is-desktop"
+import { InspectorCard, MetaList, MetaRow, StatusSummaryBar } from "@/app/dashboard/_components/doc-ui/inspector-card"
+import { SignActionBox, type SignAction } from "@/app/dashboard/_components/doc-ui/sign-action-box"
+import { TimelineProgress, TimelineSteps, type TimelineStepItem } from "@/app/dashboard/_components/doc-ui/timeline-steps"
+import { computeMyTurn } from "@/app/dashboard/_components/signing-my-turn"
 import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
 import { FALLBACK_DRIVERS, FALLBACK_VEHICLES } from "@/lib/dispatch-vehicle-master"
 import { EMPTY_NOTE_FILTER, matchesNoteFilterMulti } from "@/lib/note-filter"
@@ -25,7 +43,7 @@ import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-se
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
-import { Truck, Plus, ChevronRight, X, Search, Calendar, Edit2, Trash2, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Eye, Loader2, AlertTriangle, ImageIcon, ArrowUp, ArrowDown } from "lucide-react"
+import { Truck, Plus, ChevronRight, X, Search, Calendar, Pencil, Check, Weight, Info, Download, Map as MapIcon, Lock, Unlock, Upload, BarChart3, FileText, Copy, UserX, Loader2, Eye, AlertTriangle, ImageIcon, ArrowUp, ArrowDown } from "lucide-react"
 
 // Types
 type DxRow = {
@@ -242,11 +260,6 @@ function getEntryProgress(rows: DxRow[] = []): EntryProgress {
   const withKl = trips.filter(hasKl).length
   if (withKl === 0) return "ke_hoach"
   return withKl >= trips.length ? "du" : "mot_phan"
-}
-const ENTRY_PROGRESS_UI: Record<EntryProgress, { label: string; cls: string }> = {
-  ke_hoach: { label: "Kế hoạch", cls: "bg-slate-100 text-slate-600" },
-  mot_phan: { label: "Đã có sản lượng", cls: "bg-amber-100 text-amber-700" },
-  du: { label: "Đủ sản lượng", cls: "bg-emerald-100 text-emerald-700" },
 }
 
 function getDispatchRowFresh(row: DxRow) {
@@ -728,6 +741,16 @@ export default function DispatchPage() {
   // Views: list | detail | add | edit
   const [view, setView]           = useState<"list"|"detail"|"add"|"edit">("list")
   const [selected, setSelected]   = useState<DispatchEntry|null>(null)
+  // Danh sách: phiếu đang xổ bảng chuyến (quy tắc "dòng có chi tiết con", rule 05).
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  // Trang chi tiết (chuẩn 70/30 — rule 29): tab mobile + tab cột tài liệu.
+  const router = useRouter()
+  const isDesktop = useIsDesktop()
+  const [detailMobileTab, setDetailMobileTab] = useState<"doc" | "info">("info")
+  const [detailDocTab, setDetailDocTab] = useState<"file" | "content">("file")
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  }, [])
 
   // Add/Edit form
   const [formNgay, setFormNgay]         = useState(getTodayISODate())
@@ -1484,10 +1507,12 @@ export default function DispatchPage() {
       showToast("Phiếu này đã ký duyệt — chỉ admin được xóa/sửa")
       return
     }
-    await supabase.from("dispatch_entries").delete().eq("id", id)
+    const { error } = await supabase.from("dispatch_entries").delete().eq("id", id)
+    if (error) { showToast(`Không xóa được: ${error.message}`); return }
     setDelConfirm(null)
+    if (selected?.id === id) { setSelected(null); setView("list") }
     showToast("Đã xóa bảng phân xe")
-    loadData(factoryId)
+    void loadData(factoryId)
   }
 
   // Update row field with auto-calc
@@ -1698,6 +1723,41 @@ export default function DispatchPage() {
   }
 
   // Toast
+  // Hộp xác nhận xoá dùng chung cho danh sách + trang chi tiết.
+  const deleteConfirmNode = delConfirm && (
+    <ModalShell
+      title="Xác nhận xóa?"
+      onClose={() => setDelConfirm(null)}
+      maxWidth="sm"
+      footer={
+        <>
+          <button onClick={() => setDelConfirm(null)}
+            className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
+          <button onClick={() => void handleDelete(delConfirm)}
+            className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">Xóa</button>
+        </>
+      }
+    >
+      <p className="text-sm text-slate-500">Bảng phân xe này sẽ bị xóa vĩnh viễn.</p>
+    </ModalShell>
+  )
+
+  // Modal ký dùng chung cho danh sách + trang chi tiết.
+  const signModalNode = signModalEntry && factoryId && currentUser && (
+        <DispatchSignModal
+          open
+          onClose={() => {
+            setSignModalEntry(null)
+            void loadSigningStatus(factoryId, entries.map((e) => e.id))
+          }}
+          factoryId={factoryId}
+          currentUser={currentUser}
+          entry={signModalEntry}
+          deliveryPoints={deliveryPoints}
+          factoryName={factoryName}
+        />
+      )
+
   const ToastNotification = () => toast ? (
     <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-xl shadow-lg animate-[fadeInUp_0.3s_ease-out]">
       <Check size={16}/> {toast}
@@ -1706,7 +1766,7 @@ export default function DispatchPage() {
 
   // Render: LIST
   if (view === "list") return (
-    <div>
+    <div className={moduleThemeClass("ocean")}>
       <PageBackgroundMotif theme="ocean"/>
       <ToastNotification/>
       {kpiPrompt && (
@@ -1738,19 +1798,16 @@ export default function DispatchPage() {
         }
       />
 
-      <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-        <button onClick={() => setListTab("list")}
-          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
-            listTab === "list" ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"
-          }`}>
-          <Truck size={15}/> Danh sách
-        </button>
-        <button onClick={() => setListTab("stats")}
-          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-colors ${
-            listTab === "stats" ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"
-          }`}>
-          <BarChart3 size={15}/> Thống kê
-        </button>
+      <div className="mb-4 flex items-center gap-2">
+        <SegmentedTabs
+          ariaLabel="Chọn chế độ xem điều xe"
+          value={listTab}
+          onChange={setListTab}
+          items={[
+            { key: "list", label: "Danh sách", icon: Truck },
+            { key: "stats", label: "Thống kê", icon: BarChart3 },
+          ]}
+        />
         {loading && entriesLoaded && (
           <span className="flex items-center px-2 text-slate-400" title="Đang tải lại dữ liệu...">
             <Loader2 size={15} className="animate-spin"/>
@@ -1760,22 +1817,17 @@ export default function DispatchPage() {
 
       {/* Stats */}
       {listTab === "list" && (
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
-        {([
-          { label: "T\u1ed5ng b\u1ea3ng ph\u00e2n xe", value: stats.total,                         Icon: Calendar, ic: "text-slate-400"   },
-          { label: "T\u1ed5ng chuy\u1ebfn xe",    value: stats.totalXe,                        Icon: Truck,    ic: "text-emerald-400" },
-          { label: "T\u1ed5ng km di chuy\u1ec3n", value: `${formatKm(analytics.totals.km)} km`, Icon: MapIcon, ic: "text-cyan-500" },
-          { label: "KL t\u01b0\u01a1i theo lo\u1ea1i", value: `${formatTon(analytics.totals.totalTuoi)}T`, sub: dispatchFreshBreakdown, Icon: Weight, ic: "text-amber-500" },
-          { label: "KL kh\u00f4 theo lo\u1ea1i", value: `${formatTon(analytics.totals.totalKho)}T`, sub: dispatchDryBreakdown, Icon: Weight, ic: "text-blue-400"    },
-        ] as const).map(s => (
-          <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4">
-            <s.Icon size={20} className={`${s.ic} mb-2 opacity-80`}/>
-            <div className="text-2xl font-extrabold text-emerald-700">{s.value}</div>
-            <div className="text-xs text-slate-500 mt-1">{s.label}</div>
-            {"sub" in s && s.sub && <div className="mt-2 text-[11px] leading-5 text-slate-400">{s.sub}</div>}
-          </div>
-        ))}
-      </div>
+        <div className="mb-6">
+          <StatGrid cols={5}>
+            <StatCard icon={Calendar} label="Tổng bảng phân xe" value={stats.total} />
+            <StatCard icon={Truck} label="Tổng chuyến xe" value={stats.totalXe} />
+            <StatCard icon={MapIcon} label="Tổng km di chuyển" value={`${formatKm(analytics.totals.km)} km`} />
+            <StatCard icon={Weight} label="KL tươi theo loại" value={`${formatTon(analytics.totals.totalTuoi)}T`}
+              sub={dispatchFreshBreakdown ? <span title={String(dispatchFreshBreakdown)}>{dispatchFreshBreakdown}</span> : undefined} />
+            <StatCard icon={Weight} label="KL khô theo loại" value={`${formatTon(analytics.totals.totalKho)}T`}
+              sub={dispatchDryBreakdown ? <span title={String(dispatchDryBreakdown)}>{dispatchDryBreakdown}</span> : undefined} />
+          </StatGrid>
+        </div>
       )}
 
       {/* Filters */}
@@ -1790,7 +1842,7 @@ export default function DispatchPage() {
           (statsVehicle.length > 0 ? 1 : 0)
         }
       >
-        <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-emerald-400">
+        <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-mod-600">
           <Search size={15} className="shrink-0 text-slate-400"/>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Tìm ngày, xe, tài xế..."
@@ -1798,10 +1850,10 @@ export default function DispatchPage() {
         </div>
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:col-span-2">
           <DateTextInput value={filterFrom} onChange={setFilterFrom}
-            className="w-full min-w-0 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
+            className="w-full min-w-0 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-mod-600"/>
           <span className="text-slate-400 text-sm">{"\u2192"}</span>
           <DateTextInput value={filterTo} onChange={setFilterTo}
-            className="w-full min-w-0 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"/>
+            className="w-full min-w-0 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-mod-600"/>
         </div>
         <FilterMultiSelect
           options={doiOptionStrings}
@@ -1969,15 +2021,37 @@ export default function DispatchPage() {
             <p>{"Kh\u00f4ng c\u00f3 b\u1ea3ng ph\u00e2n xe n\u00e0o"}</p>
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+          <>
+          {(() => {
+            const expandableIds = filtered.filter(e => filterRowsByActiveFilters(e.rows || []).length > 0).map(e => e.id)
+            const allExpanded = expandableIds.length > 0 && expandableIds.every(id => expandedIds.has(id))
+            return (
+              <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+                <ExpandAllToggle
+                  allExpanded={allExpanded}
+                  disabled={expandableIds.length === 0}
+                  onExpandAll={() => setExpandedIds(new Set(expandableIds))}
+                  onCollapseAll={() => setExpandedIds(new Set())}
+                />
+              </div>
+            )
+          })()}
+          <table className="enterprise-table dense">
+            <thead>
               <tr>
-                {["M\u00e3 \u0110X","Ng\u00e0y","D\u00e2y chuy\u1ec1n","Ch\u1ee9ng nh\u1eadn","Tr\u1ea1ng th\u00e1i","S\u1ed1 xe","T\u1ed5ng KL t\u01b0\u01a1i","T\u1ed5ng KL kh\u00f4","K\u00fd duy\u1ec7t",""].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
-                ))}
+                <th>Mã ĐX</th>
+                <th>Ngày</th>
+                <th>Dây chuyền</th>
+                <th>Chứng nhận</th>
+                <th>Trạng thái</th>
+                <th className="text-right">Số xe</th>
+                <th className="text-right">Tổng KL tươi</th>
+                <th className="text-right">Tổng KL khô</th>
+                <th>Ký duyệt</th>
+                <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {filtered.map(entry => {
                 const entryRows = filterRowsByActiveFilters(entry.rows || [])
                 const totalKLT = entryRows.reduce((s, r) => s + getDispatchRowFresh(r), 0)
@@ -1991,54 +2065,118 @@ export default function DispatchPage() {
                 // Sau khi phiếu đã "Đã ký duyệt" (hoan_tat), chỉ admin được Sửa/Xóa.
                 const isEntryLocked = currentUser?.role !== "admin" &&
                   signingStatusByEntry.get(entry.id)?.trangThai === "hoan_tat"
+                const signStatus = signingStatusByEntry.get(entry.id)
+                const signedFile = signStatus?.fileHienTai ?? null
+                const signDone = signStatus?.trangThai === "hoan_tat"
+                const openDetail = () => { setSelected(entry); setDetailDocTab("file"); setDetailMobileTab("info"); setView("detail") }
+                const tripDetail = (
+                  <table className="enterprise-table dense">
+                    <thead>
+                      <tr>
+                        <th>Số xe</th>
+                        <th className="text-right">Chuyến</th>
+                        <th>Tài xế</th>
+                        <th>Đội</th>
+                        <th>Điểm GN / Phiên</th>
+                        <th className="text-right">KL tươi</th>
+                        <th className="text-right">KL khô</th>
+                        <th>Ghi chú</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entryRows.map((r, i) => {
+                        const stops = r.stops_detail && r.stops_detail.length > 0
+                          ? r.stops_detail.map(sd => `${sd.diem}${sd.phien?.length ? ` (${sd.phien.join(", ")})` : ""}`).join("; ")
+                          : `${(r.diem_gn || []).join(", ")}${r.phien?.length ? ` · ${r.phien.join(", ")}` : ""}`
+                        return (
+                          <tr key={r.uid || r.row_id || i}>
+                            <td className="whitespace-nowrap font-semibold text-slate-800">{r.so_xe || "—"}</td>
+                            <td className="text-right tabular-nums">{r.chuyen || "—"}</td>
+                            <td className="whitespace-nowrap">{r.tai_xe || "—"}</td>
+                            <td className="whitespace-nowrap">{r.doi?.length ? r.doi.join(", ") : "—"}</td>
+                            <td>{stops || "—"}</td>
+                            <td className="whitespace-nowrap text-right tabular-nums">{getDispatchRowFresh(r).toLocaleString()} kg</td>
+                            <td className="whitespace-nowrap text-right tabular-nums">{getDispatchRowDry(r).toLocaleString()} kg</td>
+                            <td className="text-slate-600">{r.ghi_chu || "—"}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )
+                const actionCell = (
+                  <IconActionGroup>
+                        <RowAction kind="view" label="Xem chi tiết phiếu" onClick={openDetail} />
+                        {!signingStatusLoaded ? (
+                          <span className="inline-flex h-8 w-8 items-center justify-center text-slate-300"><Loader2 size={14} className="animate-spin"/></span>
+                        ) : signedFile ? (
+                          <>
+                            <RowAction kind="signed"
+                              label={signDone ? "Xem file đã ký duyệt" : "Xem file đã ký Lập bảng"}
+                              onClick={() => {
+                                if (!signStatus?.yeuCauId) return
+                                const name = encodeURIComponent(`Phiếu điều xe ${entry.ma_dx || entry.ngay}`)
+                                void openSecureFile(`/api/signing/requests/${signStatus.yeuCauId}/file-url?view=1&name=${name}`)
+                                  .then(r => { if (!r.ok) showToast(r.error) })
+                              }} />
+                            {/* Tải về máy: dùng ?download= của Supabase Storage — thuộc tính HTML
+                                `download` KHÔNG có tác dụng vì file khác origin với app. */}
+                            <RowAction kind="download"
+                              label={signDone ? "Tải file đã ký duyệt về máy" : "Tải file đã ký (đang chờ ký tiếp)"}
+                              href={buildStorageDownloadUrl(signedFile, `Phiếu điều xe ${entry.ma_dx || entry.ngay}`)} />
+                          </>
+                        ) : signingStatusError ? (
+                          // Không biết phiếu đã ký hay chưa → KHÔNG render bản chưa ký (dễ nhầm với
+                          // file đã ký, đúng bug báo 2026-09-26).
+                          <RowAction kind="draft" label="Chưa tải được trạng thái ký" disabled />
+                        ) : (
+                          <RowAction kind="draft" label="Xuất PDF (chưa ký)" onClick={() => exportEntryPdf(entry)} />
+                        )}
+                        <IconAction icon={ImageIcon} tone="sky" label="Ảnh phiếu điều xe (gửi tài xế)"
+                          onClick={() => void exportPlanImage(entry.id, entry.ngay, entry.rows || [])}
+                          disabled={planImageBusy !== null}
+                          loading={planImageBusy === entry.id} />
+                        {hasPermission(currentUser, "dispatch.edit") && canOwnerEditEntry && signingStatusLoaded && !signingStatusError && !isEntryLocked && (
+                          <RowAction kind="edit" onClick={() => openEdit(entry)} />
+                        )}
+                        <RowAction kind="copy" label="Nhân bản phiếu này" onClick={() => openClone(entry)} />
+                        {hasPermission(currentUser, "dispatch.delete") && canOwnerEditEntry && signingStatusLoaded && !signingStatusError && !isEntryLocked && (
+                          <RowAction kind="delete" onClick={() => setDelConfirm(entry.id)} />
+                        )}
+                  </IconActionGroup>
+                )
                 return (
-                  <tr key={entry.id} className="hover:bg-slate-50 cursor-pointer transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500"
-                      onClick={() => { setSelected(entry); setView("detail") }}>
-                      {entry.ma_dx || "—"}
+                  <ExpandableRow key={entry.id}
+                    expanded={expandedIds.has(entry.id)}
+                    onToggle={() => toggleExpanded(entry.id)}
+                    canExpand={entryRows.length > 0}
+                    colSpan={10}
+                    label="Xem các chuyến của phiếu"
+                    endCell={actionCell}
+                    detail={tripDetail}>
+                    <td>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); openDetail() }}
+                        className="font-code text-xs font-bold text-brand-700 hover:underline">
+                        {entry.ma_dx || "—"}
+                      </button>
                     </td>
-                    <td className="px-4 py-3 font-bold text-slate-700"
-                      onClick={() => { setSelected(entry); setView("detail") }}>
+                    <td className="whitespace-nowrap font-semibold text-slate-800">
                       {entry.ngay ? new Date(entry.ngay.includes("/")?
                         entry.ngay.split("/").reverse().join("-") : entry.ngay
                       ).toLocaleDateString("vi-VN") : "—"}
                     </td>
-                    <td className="px-4 py-3" onClick={() => { setSelected(entry); setView("detail") }}>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                        entry.day_chuyen === "Mủ nước" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
-                      }`}>{entry.day_chuyen || "Mủ tạp"}</span>
+                    <td className="whitespace-nowrap text-slate-700">{entry.day_chuyen || "Mủ tạp"}</td>
+                    <td className="whitespace-nowrap text-slate-600">{entry.chung_nhan || "PEFC CS"}</td>
+                    <td>
+                      <StatusBadge domain="dispatch_progress" status={getEntryProgress(entry.rows)} />
                     </td>
-                    <td className="px-4 py-3" onClick={() => { setSelected(entry); setView("detail") }}>
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-bold">
-                        {entry.chung_nhan || "PEFC CS"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3" onClick={() => { setSelected(entry); setView("detail") }}>
-                      {(() => {
-                        const progress = ENTRY_PROGRESS_UI[getEntryProgress(entry.rows)]
-                        return (
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${progress.cls}`}>
-                            {progress.label}
-                          </span>
-                        )
-                      })()}
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-slate-700"
-                      onClick={() => { setSelected(entry); setView("detail") }}>
-                      {entryRows.length || 0} xe
-                    </td>
-                    <td className="px-4 py-3 text-slate-600"
-                      onClick={() => { setSelected(entry); setView("detail") }}>
-                      {totalKLT.toLocaleString()} kg
-                    </td>
-                    <td className="px-4 py-3 text-slate-600"
-                      onClick={() => { setSelected(entry); setView("detail") }}>
-                      {totalKLK.toLocaleString()} kg
-                    </td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <td className="text-right font-semibold text-slate-700">{entryRows.length || 0} xe</td>
+                    <td className="whitespace-nowrap text-right tabular-nums text-slate-600">{totalKLT.toLocaleString()} kg</td>
+                    <td className="whitespace-nowrap text-right tabular-nums text-slate-600">{totalKLK.toLocaleString()} kg</td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       {!signingStatusLoaded ? (
                         <Loader2 size={14} className="animate-spin text-slate-300"/>
-                      ) : signingStatusError && !signingStatusByEntry.get(entry.id) ? (
+                      ) : signingStatusError && !signStatus ? (
                         <button
                           onClick={() => { if (factoryId) void loadSigningStatus(factoryId, entries.map((e) => e.id)) }}
                           title="Không tải được trạng thái ký — bấm để thử lại"
@@ -2046,216 +2184,271 @@ export default function DispatchPage() {
                           <AlertTriangle size={14}/> Thử lại
                         </button>
                       ) : currentUser && (
-                        <DispatchSignStatusBadge
-                          status={signingStatusByEntry.get(entry.id)}
+                        <SignStatusBadge
+                          status={signStatus}
                           currentUser={currentUser}
                           canCreate={hasPermission(currentUser, "dispatch.edit") && canOwnerEditEntry}
+                          continueRule="approver"
                           onOpenSignPrompt={() => setSignModalEntry(entry)}
                           onCancelled={() => { if (factoryId) void loadSigningStatus(factoryId, entries.map((e) => e.id)) }}
                           showToast={showToast}
+                          cancelMessage="Hủy yêu cầu ký bảng phân xe này đang chờ Giám đốc nhà máy phê duyệt? Sau khi hủy, có thể bấm “Gửi ký duyệt” để tạo yêu cầu mới từ đầu."
+                          dataChangedTitle="Phiếu này đã bị ghi đè (thường qua đồng bộ Sản lượng) SAU khi đã ký duyệt — file đã ký không còn khớp dữ liệu hiện tại."
                         />
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1">
-                        {!signingStatusLoaded ? (
-                          <span className="p-1.5 text-slate-300"><Loader2 size={14} className="animate-spin"/></span>
-                        ) : signingStatusByEntry.get(entry.id)?.fileHienTai ? (
-                          <>
-                            <button onClick={(e) => { e.stopPropagation(); window.open(signingStatusByEntry.get(entry.id)!.fileHienTai!, "_blank") }}
-                              className="p-1.5 hover:bg-sky-50 text-sky-600 rounded-lg transition-colors"
-                              title={signingStatusByEntry.get(entry.id)!.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký Lập bảng"}>
-                              <Eye size={14}/>
-                            </button>
-                            {/* Tải về máy: dùng ?download= của Supabase Storage — thuộc tính HTML
-                                `download` KHÔNG có tác dụng vì file khác origin với app. */}
-                            <a href={buildStorageDownloadUrl(signingStatusByEntry.get(entry.id)!.fileHienTai!, `Phiếu điều xe ${entry.ma_dx || entry.ngay}`)}
-                              onClick={(e) => e.stopPropagation()}
-                              className="p-1.5 hover:bg-indigo-50 text-indigo-600 rounded-lg transition-colors"
-                              title={signingStatusByEntry.get(entry.id)!.trangThai === "hoan_tat" ? "Tải file đã ký duyệt về máy" : "Tải file đã ký (đang chờ ký tiếp)"}>
-                              <Download size={14}/>
-                            </a>
-                          </>
-                        ) : signingStatusError ? (
-                          // Không biết phiếu đã ký hay chưa → KHÔNG render bản chưa ký (dễ nhầm với
-                          // file đã ký, đúng bug báo 2026-09-26).
-                          <span className="p-1.5 text-slate-300" title="Chưa tải được trạng thái ký"><FileText size={14}/></span>
-                        ) : (
-                          <button onClick={(e) => { e.stopPropagation(); exportEntryPdf(entry) }}
-                            className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF (chưa ký)">
-                            <FileText size={14}/>
-                          </button>
-                        )}
-                        <button onClick={(e) => { e.stopPropagation(); void exportPlanImage(entry.id, entry.ngay, entry.rows || []) }}
-                          disabled={planImageBusy !== null}
-                          className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-lg transition-colors disabled:opacity-50" title="Ảnh phiếu điều xe (gửi tài xế)">
-                          {planImageBusy === entry.id ? <Loader2 size={14} className="animate-spin"/> : <ImageIcon size={14}/>}
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); openClone(entry) }}
-                          className="p-1.5 hover:bg-violet-50 text-violet-500 rounded-lg transition-colors" title="Nhân bản phiếu này">
-                          <Copy size={14}/>
-                        </button>
-                        {hasPermission(currentUser, "dispatch.edit") && canOwnerEditEntry && signingStatusLoaded && !signingStatusError && !isEntryLocked && (
-                          <button onClick={(e) => { e.stopPropagation(); openEdit(entry) }}
-                            className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors" title="Sửa">
-                            <Edit2 size={14}/>
-                          </button>
-                        )}
-                        {hasPermission(currentUser, "dispatch.delete") && canOwnerEditEntry && signingStatusLoaded && !signingStatusError && !isEntryLocked && (
-                          <button onClick={(e) => { e.stopPropagation(); setDelConfirm(entry.id) }}
-                            className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors" title="Xóa">
-                            <Trash2 size={14}/>
-                          </button>
-                        )}
-                        <button onClick={() => { setSelected(entry); setView("detail") }}
-                          className="p-1.5 hover:bg-slate-100 text-slate-400 rounded-lg transition-colors" title="Xem">
-                          <ChevronRight size={16}/>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  </ExpandableRow>
                 )
               })}
             </tbody>
           </table>
+          </>
         )}
       </ResponsiveTableWrapper>
 
-      {/* Delete confirm */}
-      {delConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
-            <h3 className="font-extrabold text-slate-800 mb-2">Xác nhận xóa?</h3>
-            <p className="text-sm text-slate-500 mb-5">Bảng phân xe này sẽ bị xóa vĩnh viễn.</p>
-            <div className="flex gap-3">
-              <button onClick={() => setDelConfirm(null)}
-                className="flex-1 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={() => handleDelete(delConfirm)}
-                className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow-md">Xóa</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {deleteConfirmNode}
 
-      {/* Ký duyệt bảng phân xe (Giai đoạn 4) */}
-      {signModalEntry && factoryId && currentUser && (
-        <DispatchSignModal
-          open
-          onClose={() => {
-            setSignModalEntry(null)
-            void loadSigningStatus(factoryId, entries.map((e) => e.id))
-          }}
-          factoryId={factoryId}
-          currentUser={currentUser}
-          entry={signModalEntry}
-          deliveryPoints={deliveryPoints}
-          factoryName={factoryName}
-        />
-      )}
+      {signModalNode}
     </div>
   )
 
   // Render: DETAIL
   if (view === "detail" && selected) {
-    // Cùng quy tắc "chỉ người tạo (hoặc admin) mới Sửa" đã áp cho danh sách — trang chi tiết
-    // trước đây có nút "Sửa" riêng, hoàn toàn không gate quyền/ownership, nên vẫn lọt qua dù
-    // đã ẩn nút ở danh sách. `created_by` NULL không còn được coi là "ai cũng sửa được" (tighten
-    // 2026-08-31); `signingStatusLoaded` tránh nút hiện tạm trong lúc chưa tải xong trạng thái ký.
+    // Chuẩn trang chi tiết (rule 29): header + DetailSplitLayout 70/30, cột trái = file đã ký nhúng
+    // (DocViewer) / danh sách chuyến, cột phải = trạng thái + hành động ký + tiến trình + tổng hợp.
+    // Quyền Sửa giữ nguyên: chỉ người tạo (hoặc admin), phiếu đã ký duyệt chỉ admin.
     const canEditSelected = !!currentUser && hasPermission(currentUser, "dispatch.edit") &&
       (currentUser.role === "admin" || selected.created_by === currentUser.id) &&
       signingStatusLoaded &&
       !signingStatusError &&
       !(currentUser.role !== "admin" && signingStatusByEntry.get(selected.id)?.trangThai === "hoan_tat")
-    return (
-    <div>
-      <ToastNotification/>
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => setView("list")} className="p-2 hover:bg-slate-100 rounded-xl transition-colors"><X size={18}/></button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-extrabold text-slate-800">{selected.ma_dx || "Bảng phân xe"} — {selected.ngay}</h1>
-          <p className="text-sm text-slate-500 flex items-center gap-2">
-            {selected.rows?.length} xe · {selected.chung_nhan}
-            <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-              selected.day_chuyen === "Mủ nước" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
-            }`}>{selected.day_chuyen || "Mủ tạp"}</span>
-          </p>
-        </div>
-        {canEditSelected && (
-          <button onClick={() => openEdit(selected)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-sm transition-colors">
-            <Edit2 size={14}/> Sửa
-          </button>
-        )}
-      </div>
+    const canOwner = !!currentUser && (currentUser.role === "admin" || selected.created_by === currentUser.id)
+    const canCreateSign = !!currentUser && hasPermission(currentUser, "dispatch.edit") && canOwner
+    const st = signingStatusByEntry.get(selected.id)
+    const hasFile = !!st?.fileHienTai
+    const docTab: "file" | "content" = hasFile ? detailDocTab : "content"
+    const trips = selected.rows || []
+    const totalFresh = trips.reduce((a, r) => a + getDispatchRowFresh(r), 0)
+    const totalDry = trips.reduce((a, r) => a + getDispatchRowDry(r), 0)
+    const totalKm = trips.reduce((a, r) => a + (Number(r.so_km) || 0), 0)
+    const ngayLabel = selected.ngay ? new Date(selected.ngay.includes("/") ? selected.ngay.split("/").reverse().join("-") : selected.ngay).toLocaleDateString("vi-VN") : "—"
+    const fileName = `Phiếu điều xe ${selected.ma_dx || selected.ngay}`
+    const openFile = (download: boolean) => {
+      if (!st?.yeuCauId) return
+      const q = download ? "download=1" : "view=1"
+      void openSecureFile(`/api/signing/requests/${st.yeuCauId}/file-url?${q}&name=${encodeURIComponent(fileName)}`)
+        .then(r => { if (!r.ok) showToast(r.error) })
+    }
+    const reloadSign = () => { if (factoryId) void loadSigningStatus(factoryId, entries.map((e) => e.id)) }
 
+    // Tiến trình ký: Lập bảng → Giám đốc nhà máy.
+    const signTimeline: TimelineStepItem[] = st
+      ? (() => {
+          let currentSet = false
+          return [...st.signers].sort((a, b) => a.thuTu - b.thuTu).map((sg, i) => {
+            const done = sg.trangThai === "da_ky" || st.trangThai === "hoan_tat"
+            let state: TimelineStepItem["state"] = done ? "done" : "waiting"
+            if (!done && !currentSet) { currentSet = true; state = "current" }
+            const role = sg.userId === st.pheDuyetUserId ? "Giám đốc nhà máy" : "Lập bảng"
+            return { key: `${sg.userId}-${i}`, stepNo: i + 1, role, title: done ? "Đã ký" : state === "current" ? "Đang chờ ký" : "Chưa tới lượt", state, isMine: state === "current" && sg.userId === currentUser?.id }
+          })
+        })()
+      : [
+          { key: "lap", stepNo: 1, role: "Lập bảng", title: "Chưa gửi ký", state: "waiting" as const },
+          { key: "gd", stepNo: 2, role: "Giám đốc nhà máy", title: "Chưa gửi ký", state: "waiting" as const },
+        ]
+    const signDoneCount = signTimeline.filter(t => t.state === "done").length
+
+    const goSign = () => { if (st) router.push(`/dashboard/ky/${st.yeuCauId}`) }
+    let primary: SignAction | null = null
+    if (st?.trangThai === "dang_luan_chuyen") {
+      if (st.traVeLyDo && (currentUser?.role === "admin" || currentUser?.id === st.nguoiTao)) {
+        primary = { key: "resign", label: "Sửa & ký lại", icon: <Pencil size={16}/>, onClick: goSign }
+      } else if (computeMyTurn(st.signers, currentUser?.id)) {
+        primary = { key: "sign", label: "Ký ngay", icon: <Pencil size={16}/>, onClick: goSign }
+      }
+    } else if (!st && signingStatusLoaded && !signingStatusError && canCreateSign) {
+      primary = { key: "send", label: "Gửi ký duyệt", icon: <Pencil size={16}/>, onClick: () => setSignModalEntry(selected) }
+    }
+    const secondary: SignAction[] = [
+      { key: "plan", label: "Ảnh phiếu điều xe", icon: <ImageIcon size={14}/>, onClick: () => void exportPlanImage(selected.id, selected.ngay, trips), loading: planImageBusy === selected.id, disabled: planImageBusy !== null },
+      { key: "clone", label: "Nhân bản phiếu", icon: <Copy size={14}/>, onClick: () => openClone(selected) },
+    ]
+    const danger: SignAction[] = []
+    if (hasPermission(currentUser, "dispatch.delete") && canEditSelected) {
+      danger.push({ key: "delete", label: "Xóa phiếu", icon: <X size={14}/>, onClick: () => setDelConfirm(selected.id) })
+    }
+    const chip = "rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11.5px] font-medium text-slate-600"
+
+    const tripTable = (
       <ResponsiveTableWrapper>
-        <table className="w-full text-xs">
-          <thead className="bg-slate-50 border-b border-slate-200">
+        <table className="enterprise-table dense">
+          <thead>
             <tr>
-              <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">PDF</th>
-              {["Xe","Chuyến","Tài xế","Điểm GN","Đội lớn","Đội nhỏ","Phiên","Lô thu hoạch","KM","KL tươi","DRC%","KL khô"].map(h => (
-                <th key={h} className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-              ))}
-              <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ký hiệu KT</th>
-              <th className="px-3 py-3 text-left font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ghi chú</th>
+              <th>Xe</th>
+              <th className="text-right">Chuyến</th>
+              <th>Tài xế</th>
+              <th>Điểm GN</th>
+              <th>Đội lớn</th>
+              <th>Đội nhỏ</th>
+              <th>Phiên</th>
+              <th>Lô thu hoạch</th>
+              <th className="text-right">KM</th>
+              <th className="text-right">KL tươi</th>
+              <th className="text-right">KL khô</th>
+              <th>Ký hiệu KT</th>
+              <th>Ghi chú</th>
+              <th className="sticky-end text-right">PDF</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(selected.rows||[]).map((row, i) => (
-              <tr key={row.uid||i} className="hover:bg-slate-50">
-                <td className="px-3 py-2.5">
-                  <button onClick={() => exportTripPdf(selected, row)}
-                    className="p-1.5 hover:bg-emerald-50 text-emerald-600 rounded-lg transition-colors" title="Xuất PDF chuyến">
-                    <FileText size={14}/>
-                  </button>
+          <tbody>
+            {trips.map((row, i) => (
+              <tr key={row.uid || i}>
+                <td className="whitespace-nowrap font-semibold text-slate-800">{row.so_xe}</td>
+                <td className="text-right tabular-nums">{row.chuyen}</td>
+                <td className="whitespace-nowrap">{row.tai_xe}</td>
+                <td className="whitespace-nowrap">{(row.diem_gn || []).join(", ") || "—"}</td>
+                <td className="whitespace-nowrap">{formatDoiLabel(getTripDois(row, deliveryPoints))}</td>
+                <td className="whitespace-nowrap">{resolveTripDoiNhos(row.diem_gn || [], deliveryPoints).join(", ") || "—"}</td>
+                <td className="whitespace-nowrap">{(row.phien || []).join(", ") || "—"}</td>
+                <td className="max-w-48 truncate text-[11px]" title={Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.join(", ") : String(row.lo_thu_hoach || "")}>
+                  {Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.join(", ") : row.lo_thu_hoach}
                 </td>
-                <td className="px-3 py-2.5 font-bold text-emerald-700">{row.so_xe}</td>
-                <td className="px-3 py-2.5 text-center">
-                  <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-bold">{row.chuyen}</span>
+                <td className="text-right tabular-nums">{row.so_km} km</td>
+                <td className="whitespace-nowrap text-right tabular-nums">{getDispatchRowFresh(row).toLocaleString()} kg</td>
+                <td className="whitespace-nowrap text-right tabular-nums font-semibold text-slate-800">{getDispatchRowDry(row).toLocaleString()} kg</td>
+                <td className="whitespace-nowrap">{row.ghi_chu || "—"}</td>
+                <td className="max-w-48 truncate" title={row.ghi_chu_tu_do}>{row.ghi_chu_tu_do || "—"}</td>
+                <td className="sticky-end text-right">
+                  <RowAction kind="draft" label="Xuất PDF chuyến (chưa ký)" onClick={() => void exportTripPdf(selected, row)} />
                 </td>
-                <td className="px-3 py-2.5 text-slate-700">{row.tai_xe}</td>
-                <td className="px-3 py-2.5">
-                  <div className="flex flex-wrap gap-1">
-                    {(row.diem_gn||[]).map(d => (
-                      <span key={d} className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-xs">{d}</span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-3 py-2.5 text-slate-600">{formatDoiLabel(getTripDois(row, deliveryPoints))}</td>
-                <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{resolveTripDoiNhos(row.diem_gn || [], deliveryPoints).join(", ") || "—"}</td>
-                <td className="px-3 py-2.5 text-slate-500">{(row.phien||[]).join(", ")}</td>
-                <td className="px-3 py-2.5 text-slate-500 text-[10px] max-w-48 truncate">{Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.join(", ") : row.lo_thu_hoach}</td>
-                <td className="px-3 py-2.5 text-slate-600">{row.so_km} km</td>
-                <td className="px-3 py-2.5 font-semibold text-slate-700">{row.kl_dct}</td>
-                <td className="px-3 py-2.5 text-slate-600">{row.drc_dc}%</td>
-                <td className="px-3 py-2.5 font-semibold text-emerald-700">{row.kl_dck}</td>
-                <td className="px-3 py-2.5 font-medium">
-                  {row.ghi_chu ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold font-mono text-[11px]">
-                      {row.ghi_chu}
-                    </span>
-                  ) : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="px-3 py-2.5 text-slate-500 max-w-48 truncate" title={row.ghi_chu_tu_do}>{row.ghi_chu_tu_do || "—"}</td>
               </tr>
             ))}
           </tbody>
-          <tfoot className="bg-slate-50 border-t-2 border-slate-200">
-            <tr>
-              <td colSpan={10} className="px-3 py-2.5 font-bold text-slate-600">TỔNG</td>
-              <td className="px-3 py-2.5 font-bold text-slate-700">
-                {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dct)||0),0).toLocaleString()}
-              </td>
-              <td/>
-              <td className="px-3 py-2.5 font-bold text-emerald-700">
-                {(selected.rows||[]).reduce((s,r)=>s+(parseFloat(r.kl_dck)||0),0).toLocaleString()}
-              </td>
-              <td/>
-              <td/>
+          <tfoot>
+            <tr className="font-bold">
+              <td colSpan={8}>TỔNG</td>
+              <td className="text-right tabular-nums">{totalKm.toLocaleString()} km</td>
+              <td className="whitespace-nowrap text-right tabular-nums">{totalFresh.toLocaleString()} kg</td>
+              <td className="whitespace-nowrap text-right tabular-nums">{totalDry.toLocaleString()} kg</td>
+              <td colSpan={3}/>
             </tr>
           </tfoot>
         </table>
       </ResponsiveTableWrapper>
+    )
+
+    return (
+    <div className={moduleThemeClass("ocean")}>
+      <ToastNotification/>
+      <DetailSplitLayout
+        mobileTab={detailMobileTab}
+        onMobileTabChange={setDetailMobileTab}
+        header={
+          <DetailPageHeader
+            onBack={() => setView("list")}
+            backLabel="Quay lại danh sách"
+            eyebrow="Bảng phân xe"
+            title={`Ngày ${ngayLabel}`}
+            code={selected.ma_dx}
+            tags={
+              <>
+                <span className={chip}>{trips.length} chuyến</span>
+                <span className={chip}>{selected.day_chuyen || "Mủ tạp"}</span>
+                <span className={chip}>{selected.chung_nhan || "PEFC CS"}</span>
+              </>
+            }
+            actions={
+              <>
+                {hasFile ? (
+                  <>
+                    <HeaderButton icon={<Eye size={15}/>} label="Xem file ký" onClick={() => openFile(false)} />
+                    <HeaderButton icon={<Download size={15}/>} label="Tải file ký" onClick={() => openFile(true)} />
+                  </>
+                ) : signingStatusLoaded && !signingStatusError ? (
+                  <HeaderButton icon={<FileText size={15}/>} label="Xuất PDF (chưa ký)" onClick={() => void exportEntryPdf(selected)} />
+                ) : null}
+                {canEditSelected && (
+                  <HeaderButton icon={<Pencil size={15}/>} label="Chỉnh sửa" onClick={() => openEdit(selected)} />
+                )}
+              </>
+            }
+          />
+        }
+        document={
+          <>
+            {hasFile && (
+              <SegmentedTabs
+                ariaLabel="Chọn nội dung cột tài liệu"
+                value={docTab}
+                onChange={setDetailDocTab}
+                items={[
+                  { key: "file", label: "File đã ký", icon: FileText },
+                  { key: "content", label: "Danh sách chuyến", icon: Truck },
+                ]}
+              />
+            )}
+            {docTab === "file" && st?.fileHienTai ? (
+              <DocViewer
+                key={st.fileHienTai}
+                active={(isDesktop || detailMobileTab === "doc") && !signModalEntry}
+                endpoint={`/api/signing/requests/${st.yeuCauId}/file-url`}
+                kind="pdf"
+                fileExt="pdf"
+                label={`${st.trangThai === "hoan_tat" ? "Bản đã ký duyệt" : "Bản đang ký"} · PDF`}
+              />
+            ) : tripTable}
+          </>
+        }
+        inspector={
+          <>
+            <StatusSummaryBar
+              domain="dispatch_progress"
+              status={getEntryProgress(selected.rows)}
+              meta={currentUser ? (
+                <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span>Ký duyệt:</span>
+                  {!signingStatusLoaded ? <Loader2 size={14} className="animate-spin text-slate-300"/> : (
+                    <SignStatusBadge
+                      status={st}
+                      currentUser={currentUser}
+                      canCreate={canCreateSign}
+                      continueRule="approver"
+                      chipOnly
+                      onOpenSignPrompt={() => setSignModalEntry(selected)}
+                      onCancelled={reloadSign}
+                      showToast={showToast}
+                      cancelMessage="Hủy yêu cầu ký bảng phân xe này đang chờ Giám đốc nhà máy phê duyệt? Sau khi hủy, có thể bấm “Gửi ký duyệt” để tạo yêu cầu mới từ đầu."
+                      dataChangedTitle="Phiếu này đã bị ghi đè (thường qua đồng bộ Sản lượng) SAU khi đã ký duyệt — file đã ký không còn khớp dữ liệu hiện tại."
+                    />
+                  )}
+                </span>
+              ) : undefined}
+            />
+            <SignActionBox primary={primary} secondary={secondary} danger={danger} />
+            <InspectorCard
+              title="Tiến trình ký"
+              icon={FileText}
+              actions={<span className="text-[11.5px] font-semibold text-slate-400">{signDoneCount}/{signTimeline.length} bước</span>}
+            >
+              <div className="space-y-3">
+                <TimelineSteps steps={signTimeline} compact />
+                <TimelineProgress done={signDoneCount} total={signTimeline.length} />
+              </div>
+            </InspectorCard>
+            <InspectorCard title="Tổng hợp" icon={Weight}>
+              <MetaList>
+                <MetaRow label="Số chuyến" value={`${trips.length} chuyến · ${new Set(trips.map(r => r.so_xe).filter(Boolean)).size} xe`} />
+                <MetaRow label="Tổng KL tươi" value={`${totalFresh.toLocaleString()} kg`} mono />
+                <MetaRow label="Tổng KL khô" value={`${totalDry.toLocaleString()} kg`} mono />
+                <MetaRow label="Tổng quãng đường" value={`${totalKm.toLocaleString()} km`} mono />
+              </MetaList>
+            </InspectorCard>
+          </>
+        }
+      />
+      {deleteConfirmNode}
+      {signModalNode}
     </div>
     )
   }

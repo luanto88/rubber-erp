@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>U1b Chi tiết biên bản — trước và sau</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--b50:#eef5f2;--b100:#d6e8e1;--b200:#aed1c4;--b500:#3c7565;--b600:#2f5d52;--b700:#264c43;--b800:#1c3a32;--m50:#f1f5f9;--m200:#cbd5e1;--m600:#475569;--m800:#1e293b;--bg:#f2f8f5}
+*{box-sizing:border-box}body{margin:0;background:#e9eef0;font-family:"Plus Jakarta Sans",sans-serif;color:#1e293b;font-size:14px}
+svg.i{width:16px;height:16px;flex-shrink:0}
+.doc{max-width:1280px;margin:0 auto;padding:20px}h1.t{font-size:22px;margin:0 0 4px}h2.s{font-size:17px;margin:28px 0 10px}
+.note{background:#fff;border:1px solid #e2e8f0;border-left:4px solid var(--b600);border-radius:10px;padding:12px 16px;font-size:13.5px;line-height:1.6}
+.note.ask{border-left-color:#d97706;background:#fffbeb}.note.bad{border-left-color:#dc2626;margin-top:6px}
+.tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;padding:3px 10px;border-radius:999px;margin-bottom:6px}
+.tag.old{background:#fee2e2;color:#991b1b}.tag.new{background:var(--b100);color:var(--b800)}
+.frame{background:var(--bg);border:1px solid #cbd5e1;border-radius:14px;padding:16px}
+.seg{display:inline-flex;gap:4px;background:#f1f5f9;border-radius:12px;padding:4px}
+.seg a{padding:7px 13px;border-radius:8px;font-size:13px;font-weight:600;color:#64748b;position:relative}
+.seg a.on{background:#fff;color:var(--m800);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg a.on:after{content:"";position:absolute;left:10px;right:10px;bottom:2px;height:2px;border-radius:2px;background:var(--m600)}
+.hd{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-top:12px}
+.hl{display:flex;gap:12px;align-items:flex-start}
+.bk{width:36px;height:36px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;display:flex;align-items:center;justify-content:center;color:#475569}
+.eb{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--m600)}
+.ti{font-size:20px;font-weight:800;margin:2px 0 6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.code{font-family:"JetBrains Mono",monospace;font-size:12.5px;font-weight:700;background:var(--b50);color:var(--b800);padding:3px 9px;border-radius:7px;border:1px solid var(--b100)}
+.chip{font-size:12px;color:#475569;background:#fff;border:1px solid #e2e8f0;border-radius:999px;padding:2px 10px}
+.ha{display:flex;gap:8px;flex-wrap:wrap}
+.hb{display:inline-flex;align-items:center;gap:6px;height:36px;border-radius:10px;padding:0 13px;font-weight:700;font-size:13px;border:1px solid #e2e8f0;background:#fff;color:#334155}
+.hb.sq{width:36px;padding:0;justify-content:center}
+.split{display:grid;grid-template-columns:minmax(0,7fr) minmax(320px,3fr);gap:16px;margin-top:14px}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.ch{padding:11px 14px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ch b{font-size:14px;display:flex;gap:7px;align-items:center}.ch b svg{color:var(--m600)}
+.cb{padding:14px}
+.vt{display:flex;gap:6px;align-items:center;justify-content:space-between;background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:8px 12px}
+.pdf{background:#64748b;padding:18px;display:flex;justify-content:center}
+.page{background:#fff;width:470px;height:600px;padding:28px 32px;font-size:9px;color:#334155;box-shadow:0 4px 18px rgba(0,0,0,.3);position:relative}
+.page h4{text-align:center;font-size:12px;margin:14px 0 10px}.ln{height:6px;background:#e2e8f0;border-radius:3px;margin:8px 0}
+.sigs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;position:absolute;bottom:40px;left:32px;right:32px;text-align:center;font-weight:700}
+.sigs i{display:block;height:34px;font-style:normal;color:#1d4ed8;font-family:cursive;font-size:15px;padding-top:10px}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kv div{background:#f8fafc;border:1px solid #f1f5f9;border-radius:9px;padding:8px 10px}
+.kv span{display:block;font-size:11px;color:#64748b;font-weight:600}.kv b{font-size:13px}
+.line{border:1px solid #e2e8f0;border-left:3px solid var(--m600);border-radius:10px;padding:10px 12px;margin-top:10px}
+.line .lh{display:flex;justify-content:space-between;font-weight:700;gap:8px}
+.mt{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}.mt th{background:#f8fafc;color:#64748b;font-size:11px;text-transform:uppercase;text-align:left;padding:6px 8px}.mt td{padding:6px 8px;border-top:1px solid #f1f5f9}
+.thumbs{display:flex;gap:6px;margin-top:8px}.thumbs i{width:48px;height:48px;border-radius:8px;background:linear-gradient(135deg,#cbd5e1,#94a3b8)}
+.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid;border-radius:999px;padding:1px 10px;font-size:12px;font-weight:600;line-height:20px;white-space:nowrap}
+.dot{width:6px;height:6px;border-radius:999px}
+.b-pend{background:#fffbeb;color:#92400e;border-color:#fde68a}.b-pend .dot{background:#d97706}
+.b-info{background:#eff6ff;color:#1e40af;border-color:#bfdbfe}.b-info .dot{background:#2563eb}
+.sb{border-radius:12px;border:1px solid #fde68a;background:#fffbeb;padding:11px 13px}
+.sb .r1{display:flex;justify-content:space-between;align-items:center}.sb small{display:block;color:#92400e;margin-top:4px;font-size:12px}
+.pri{display:flex;justify-content:center;align-items:center;gap:7px;height:42px;border-radius:11px;background:linear-gradient(135deg,var(--b500),var(--b800));color:#fff;font-weight:800}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.sec{display:flex;justify-content:center;align-items:center;gap:6px;height:38px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;font-weight:700;font-size:12.5px;color:#334155}
+.sec.dg{border-color:#fecaca;color:#b91c1c}.sec.full{grid-column:1/-1}
+.kt{border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:10px 12px;font-size:12.5px;color:#92400e;margin-top:10px}
+.kt .row{display:flex;justify-content:space-between;margin-top:4px}
+.kt .bt{margin-top:8px;display:inline-flex;gap:6px;align-items:center;height:32px;border-radius:9px;background:#fff;border:1px solid #fcd34d;padding:0 10px;font-weight:700}
+.tl{list-style:none;margin:0;padding:0}.tl li{display:flex;gap:10px;position:relative;padding-bottom:14px}
+.tl li:not(:last-child):before{content:"";position:absolute;left:15px;top:32px;bottom:0;border-left:2px solid #a7f3d0}
+.tl li.w:not(:last-child):before{border-left:2px dashed #fcd34d}
+.tl .n{width:32px;height:32px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:800;flex-shrink:0;color:#fff}
+.tl .t{font-weight:700;font-size:13px}.tl .s{font-size:12px;color:#64748b;margin-top:2px}
+.prog{height:6px;background:#f1f5f9;border-radius:9px}.prog i{display:block;height:6px;border-radius:9px;background:#10b981;width:33%}
+.mr{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px dashed #f1f5f9}.mr span{color:#64748b}
+.qrm{display:inline-block;width:64px;height:64px;background:repeating-conic-gradient(#0f172a 0 25%,#fff 0 50%) 0 0/8px 8px;border:4px solid #fff;outline:1px solid #e2e8f0}
+.oh{display:flex;justify-content:space-between;align-items:center;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:12px 16px;margin-top:12px}
+.ow{width:40px;height:40px;border-radius:12px;background:#ffedd5;color:#ea580c;display:flex;align-items:center;justify-content:center}
+.og{display:grid;grid-template-columns:8fr 4fr;gap:16px;margin-top:14px}
+.oc{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:14px;margin-bottom:14px}
+.oc h5{margin:0 0 10px;font-size:14px;display:flex;gap:6px;align-items:center}.oc h5 svg{color:#ea580c}
+.otab{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:6px;display:flex;gap:4px}.otab span{padding:8px 14px;border-radius:12px;font-weight:700;font-size:13px;color:#475569}.otab span.on{background:#fff7ed;color:#c2410c;border:1px solid #fed7aa}
+.obt{display:inline-flex;gap:6px;align-items:center;height:36px;padding:0 12px;border-radius:12px;font-weight:700;font-size:13px}
+.ol{display:block;border:1px solid #fed7aa;background:#fff7ed;color:#c2410c;border-radius:12px;padding:9px;text-align:center;font-weight:700;margin-top:10px}
+.oline{border:1px solid #fed7aa;border-radius:12px;margin-top:10px}.oline .h{background:#fff7ed;padding:8px 10px;border-radius:12px 12px 0 0;font-weight:700;color:#9a3412}
+.phone{width:390px;background:var(--bg);border:10px solid #0f172a;border-radius:30px;padding:12px;margin:0 auto}
+.mtab{display:grid;grid-template-columns:1fr 1fr;background:#f1f5f9;border-radius:12px;padding:4px;margin-top:10px}.mtab span{text-align:center;padding:8px;border-radius:9px;font-weight:700;font-size:13px;color:#64748b}.mtab span.on{background:#fff;color:var(--m800)}
+.phone .ha{display:grid;grid-template-columns:1fr 1fr;width:100%}.phone .hb{justify-content:center}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="fc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m3 15 2 2 4-4"/></symbol>
+<symbol id="dl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></symbol>
+<symbol id="ft" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8"/></symbol>
+<symbol id="wr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z"/></symbol>
+<symbol id="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="m6 12 4 4 8-8"/></symbol>
+<symbol id="back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m12 19-7-7 7-7M19 12H5"/></symbol>
+<symbol id="qr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></symbol>
+<symbol id="pc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/></symbol>
+<symbol id="bx" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5zM3 8l9 5 9-5M12 13v8"/></symbol>
+<symbol id="xc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></symbol>
+<symbol id="rot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5"/></symbol>
+<symbol id="tr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+<symbol id="cart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2 2h2l2.7 12.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 1.9-1.6L22 7H5.1"/></symbol>
+<symbol id="ld" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+<symbol id="us" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="7" r="4"/><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+</defs></svg>
+<div class="doc">
+<h1 class="t">U1b — Trang chi tiết biên bản bảo trì</h1>
+<div class="note">Chỉ đổi <b>trình bày</b>. Giữ nguyên: dirty-tracking nút Lưu, lưu lần đầu (cửa sổ trước khi đóng banner KPI), banner gắn KPI, khối <b>Kho tạm KT</b> + khoá "Gửi ký duyệt" khi thiếu, quyền người tạo/admin/chỉ đọc, luồng ký – phê duyệt – xuất kho. Chế độ <b>Tạo/Sửa</b> giữ bố cục 2 cột hiện tại, chỉ đổi màu (cam/xanh lá → slate cho điều hướng, nút chính brand) và icon <code>Edit3 → Pencil</code>.</div>
+
+<h2 class="s">1. TRƯỚC — chế độ xem (hiện tại)</h2>
+<span class="tag old">TRƯỚC</span>
+<div class="frame">
+ <div class="otab"><span>Tổng quan</span><span class="on">Biên bản</span><span>Lý lịch thiết bị</span></div>
+ <div class="oh"><div style="display:flex;gap:10px;align-items:center"><svg class="i"><use href="#back"/></svg><div class="ow"><svg class="i"><use href="#wr"/></svg></div><div><b style="font-size:18px">MT-020926/001</b> <span class="badge b-pend"><span class="dot"></span>Chờ duyệt</span><div style="color:#64748b;font-size:12.5px">Mủ tạp · Bảo dưỡng · 02/09/2026</div></div></div>
+  <span class="obt" style="border:1px solid #fed7aa;color:#c2410c;background:#fff7ed"><svg class="i"><use href="#pc"/></svg> Chỉnh sửa</span></div>
+ <div class="og"><div>
+  <div class="oc"><h5><svg class="i"><use href="#ft"/></svg> Thông tin chung</h5><div class="kv"><div><span>Hạng mục</span><b>Bảo dưỡng</b></div><div><span>Ngày</span><b>02/09/2026</b></div><div><span>Giờ</span><b>07:30 → 11:00</b></div></div></div>
+  <div class="oc"><h5><svg class="i"><use href="#wr"/></svg> Thiết bị (2)</h5><div class="oline"><div class="h">1. Máy cán kéo số 2 · MT-CK02</div><div style="padding:10px">Nội dung: Thay dầu hộp số, siết bulong…</div></div><div class="oline"><div class="h">2. Máy băm thô · MT-BT01</div><div style="padding:10px">Nội dung: Kiểm tra dao băm…</div></div></div>
+  <div class="oc" style="display:flex;justify-content:space-between"><div><h5><svg class="i"><use href="#ft"/></svg> Ghi chú</h5>…</div><span class="qrm"></span></div>
+ </div><div>
+  <div class="oc"><h5><svg class="i"><use href="#fc"/></svg> Ký duyệt &amp; Chứng từ</h5><span class="badge b-pend"><span class="dot"></span>Chờ ký (1/3)</span>
+   <a class="ol">Xem file PDF đã ký điện tử</a><div style="margin-top:10px;display:grid;gap:6px"><span class="obt" style="border:1px solid #fecaca;color:#dc2626">Hủy biên bản</span><span class="obt" style="border:1px solid #fecaca;color:#dc2626"><svg class="i"><use href="#tr"/></svg> Xóa biên bản</span></div></div>
+  <div class="oc"><h5><svg class="i"><use href="#ld"/></svg> Chi phí</h5>…</div><div class="oc"><h5><svg class="i"><use href="#us"/></svg> Nhân sự</h5>…</div>
+ </div></div>
+ <div class="note bad">Vấn đề: tiêu đề + 4 thẻ dàn trải; cam/xanh lá lẫn với màu trạng thái; không xem được file ký ngay trên trang (phải mở tab mới); không thấy ai đã ký, đang chờ ai; QR nhỏ nằm cuối trang.</div>
+</div>
+
+<h2 class="s">2. SAU — chế độ xem, đã có file ký (máy tính)</h2>
+<span class="tag new">SAU</span>
+<div class="frame">
+ <div class="seg"><a>Tổng quan</a><a class="on">Biên bản</a><a>Lý lịch thiết bị</a></div>
+ <div class="hd"><div class="hl"><span class="bk"><svg class="i"><use href="#back"/></svg></span><div><div class="eb">Biên bản bảo trì</div>
+   <div class="ti">Bảo dưỡng · Mủ tạp <span class="code">MT-020926/001</span></div>
+   <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip">02/09/2026 · 07:30 → 11:00</span><span class="chip">2 thiết bị</span><span class="chip">Người tạo: Chau Nho</span></div></div></div>
+  <div class="ha"><span class="hb"><svg class="i"><use href="#eye"/></svg> Xem file ký</span><span class="hb"><svg class="i"><use href="#dl"/></svg> Tải file ký</span><span class="hb"><svg class="i"><use href="#pc"/></svg> Chỉnh sửa</span><span class="hb sq" title="Mã QR"><svg class="i"><use href="#qr"/></svg></span></div></div>
+ <div class="split">
+  <div>
+   <div class="card"><div class="vt"><div class="seg"><a class="on">File đã ký</a><a>Nội dung biên bản</a></div><span style="font-size:12px;color:#64748b">Bản đã ký · PDF · 3 trang</span></div>
+    <div class="pdf"><div class="page"><b>CÔNG TY TNHH PTCS PHƯỚC HÒA KAMPONG THOM</b><br>Bộ phận: Mủ tạp<h4>GIẤY ĐỀ NGHỊ BẢO TRÌ - SỬA CHỮA</h4><div class="ln"></div><div class="ln" style="width:80%"></div><div class="ln"></div><div class="ln" style="width:60%"></div><div class="ln"></div><div class="ln" style="width:70%"></div>
+     <div class="sigs"><div>NV phụ trách<i>Chau Nho</i></div><div>BGĐ phụ trách<i></i></div><div>Giám đốc NM<i></i></div></div></div></div>
+   </div>
+   <div class="note" style="margin-top:10px;font-size:12.5px">Khung xem PDF nhúng giống Văn bản/ISO (phóng to, toàn màn hình, trang dựng dần). Tab <b>Nội dung biên bản</b> = mục 3 bên dưới.</div>
+  </div>
+  <div style="display:grid;gap:12px;align-content:start">
+   <div class="sb"><div class="r1"><b style="font-size:13px">Trạng thái</b><span class="badge b-pend"><span class="dot"></span>Đang ký duyệt</span></div><small>Đã ký 1/3 · biên bản: Chờ duyệt</small></div>
+   <div class="card"><div class="ch"><b><svg class="i"><use href="#fc"/></svg> Hành động ký</b></div><div class="cb">
+     <div class="pri"><svg class="i"><use href="#pc"/></svg> Ký ngay</div>
+     <div class="g2"><span class="sec"><svg class="i"><use href="#ft"/></svg> In bản chưa ký</span><span class="sec"><svg class="i"><use href="#rot"/></svg> Gửi duyệt lại</span><span class="sec dg"><svg class="i"><use href="#xc"/></svg> Hủy yêu cầu ký</span><span class="sec dg"><svg class="i"><use href="#tr"/></svg> Xóa biên bản</span></div>
+     <div class="kt"><b style="display:flex;gap:6px;align-items:center"><svg class="i"><use href="#bx"/></svg> Vật tư mua ngoài — Kho tạm KT</b><div class="row"><span>Cần / Khả dụng</span><b>4 / 2</b></div><div class="row"><span>Đang đề nghị</span><b>2 (05/ĐNMVT)</b></div><span class="bt"><svg class="i"><use href="#cart"/></svg> Lập đề nghị mua</span></div>
+   </div></div>
+   <div class="card"><div class="ch"><b><svg class="i"><use href="#ck"/></svg> Tiến trình ký</b><span style="font-size:12px;color:#64748b">1/3 bước</span></div><div class="cb"><div class="prog"><i></i></div><ol class="tl" style="margin-top:12px">
+     <li><span class="n" style="background:#10b981"><svg class="i"><use href="#ok"/></svg></span><div><div class="t">NV phụ trách · Chau Nho</div><div class="s">Đã ký 02/09/2026 10:12</div></div></li>
+     <li class="w"><span class="n" style="background:#f59e0b">2</span><div><div class="t">BGĐ phụ trách · Trần Văn B</div><div class="s"><span class="badge b-pend" style="font-size:11px"><span class="dot"></span>Đến lượt bạn</span></div></div></li>
+     <li class="w"><span class="n" style="background:#94a3b8">3</span><div><div class="t">Giám đốc NM · Tô Thành Luân</div><div class="s">Đang chờ</div></div></li></ol></div></div>
+   <div class="card"><div class="ch"><b><svg class="i"><use href="#ld"/></svg> Chi phí</b></div><div class="cb"><div class="mr"><span>Chi phí dự kiến</span><b>$125</b></div><div class="mr"><span>Công thợ</span><b>$20</b></div><div class="mr"><span>Vật tư</span><b>6 dòng</b></div></div></div>
+   <div class="card"><div class="ch"><b><svg class="i"><use href="#us"/></svg> Nhân sự</b></div><div class="cb"><div class="mr"><span>Người thực hiện</span><b>Sok, Dara</b></div><div class="mr"><span>NV phụ trách</span><b>Chau Nho</b></div><div class="mr"><span>BGĐ phụ trách</span><b>Trần Văn B</b></div><div class="mr"><span>Giám đốc</span><b>Tô Thành Luân</b></div></div></div>
+  </div>
+ </div>
+</div>
+
+<h2 class="s">3. SAU — tab "Nội dung biên bản" (cũng là mặc định khi CHƯA có file ký)</h2>
+<span class="tag new">SAU</span>
+<div class="frame"><div class="split"><div class="card"><div class="vt"><div class="seg"><a>File đã ký</a><a class="on">Nội dung biên bản</a></div></div><div class="cb">
+ <div class="kv"><div><span>Hạng mục</span><b>Bảo dưỡng</b></div><div><span>Bộ phận</span><b>Mủ tạp</b></div><div><span>Thời gian</span><b>02/09 07:30 → 11:00</b></div></div>
+ <div class="line" style="border-left-color:#d97706"><span class="eb">Nội dung chung</span><div>Vệ sinh toàn bộ dây chuyền cán kéo, kiểm tra hệ thống bôi trơn.</div></div>
+ <div class="line"><div class="lh"><span>1. Máy cán kéo số 2 <span class="code" style="font-size:11px">MT-CK02</span></span><span class="badge b-info"><span class="dot"></span>$80</span></div><div style="font-size:13px;margin-top:4px;color:#475569">Thay dầu hộp số, siết bulong chân đế.</div>
+  <table class="mt"><tr><th>Vật tư</th><th>Nguồn</th><th style="text-align:right">SL</th></tr><tr><td>Dầu hộp số 80W-90</td><td>Trong kho · KA</td><td style="text-align:right">4 L</td></tr><tr><td>Bulong M16</td><td>Mua ngoài · KT</td><td style="text-align:right">8 cái</td></tr></table><div class="thumbs"><i></i><i></i><i></i></div></div>
+ <div class="line"><div class="lh"><span>2. Máy băm thô <span class="code" style="font-size:11px">MT-BT01</span></span><span class="badge b-info"><span class="dot"></span>$45</span></div><div style="font-size:13px;margin-top:4px;color:#475569">Kiểm tra, mài dao băm.</div></div>
+</div></div><div class="note">Bản <b>đọc gọn</b> của các khối hiện có (không đổi dữ liệu): thông tin chung, nội dung chung (Bảo dưỡng nhiều thiết bị), từng thiết bị kèm vật tư và ảnh (bấm phóng to). Chưa có file ký ⇒ chỉ có khối này; header hiện <b>In bản chưa ký</b> thay cho Xem/Tải file ký.</div></div></div>
+
+<h2 class="s">4. SAU — điện thoại (≤430px)</h2>
+<div class="cols2"><div class="phone">
+ <div class="eb">Biên bản bảo trì</div><div class="ti" style="font-size:17px">Bảo dưỡng · Mủ tạp</div><span class="code">MT-020926/001</span>
+ <div class="ha" style="margin-top:10px"><span class="hb"><svg class="i"><use href="#eye"/></svg> Xem file ký</span><span class="hb"><svg class="i"><use href="#dl"/></svg> Tải file ký</span><span class="hb"><svg class="i"><use href="#pc"/></svg> Chỉnh sửa</span><span class="hb"><svg class="i"><use href="#qr"/></svg> Mã QR</span></div>
+ <div class="mtab"><span>Tài liệu</span><span class="on">Ký duyệt</span></div>
+ <div class="sb" style="margin-top:10px"><div class="r1"><b>Trạng thái</b><span class="badge b-pend"><span class="dot"></span>Đang ký duyệt</span></div></div>
+ <div class="card" style="margin-top:10px"><div class="cb"><div class="pri"><svg class="i"><use href="#pc"/></svg> Ký ngay</div><div class="g2"><span class="sec">In bản chưa ký</span><span class="sec dg">Hủy yêu cầu ký</span><span class="sec dg full">Xóa biên bản</span></div></div></div>
+</div><div class="note">Dưới 1024px: 2 tab <b>Tài liệu / Ký duyệt</b> như Văn bản/ISO (mặc định Ký duyệt). Cụm nút header lưới 2 cột. Chế độ Tạo/Sửa trên điện thoại giữ như hiện tại.</div></div>
+
+<h2 class="s">5. Cần bạn chốt</h2>
+<div class="note ask"><b>(a)</b> Đã có file ký thì cột trái mở mặc định tab nào? — đề xuất <b>File đã ký</b>.<br>
+<b>(b)</b> Khung xem PDF nhúng cần 1 route nhỏ mới <code>GET /api/maintenance/records/[id]/file-url</code> (kiểm đăng nhập + đúng nhà máy, trả đường dẫn file ký hiện tại) — giống Văn bản/ISO. Đồng ý thêm?<br>
+<b>(c)</b> "Hủy biên bản" / "Hủy phê duyệt" / "Đảo xuất kho" / "Xóa" giữ đúng điều kiện cũ, gom vào nhóm nút đỏ; "Ký ngay" hoặc "Gửi ký duyệt" là nút chính duy nhất.</div>
+</div></body></html>

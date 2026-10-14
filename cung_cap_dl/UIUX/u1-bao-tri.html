@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>U1 Bảo trì — trước và sau</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--b50:#eef5f2;--b100:#d6e8e1;--b200:#aed1c4;--b500:#3c7565;--b600:#2f5d52;--b700:#264c43;--b800:#1c3a32;
+ --m50:#f1f5f9;--m200:#cbd5e1;--m600:#475569;--m800:#1e293b;--bg:#f2f8f5}
+*{box-sizing:border-box}
+body{margin:0;background:#e9eef0;font-family:"Plus Jakarta Sans",sans-serif;color:#1e293b;font-size:14px}
+.doc{max-width:1280px;margin:0 auto;padding:20px}
+h1.t{font-size:22px;margin:0 0 4px}h2.s{font-size:17px;margin:28px 0 10px;color:#0f172a}
+.note{background:#fff;border:1px solid #e2e8f0;border-left:4px solid var(--b600);border-radius:10px;padding:12px 16px;font-size:13.5px;line-height:1.6}
+.note b{color:var(--b800)}
+.pair{display:grid;grid-template-columns:1fr;gap:14px}
+.tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;padding:3px 10px;border-radius:999px;margin-bottom:6px}
+.tag.old{background:#fee2e2;color:#991b1b}.tag.new{background:var(--b100);color:var(--b800)}
+.frame{background:var(--bg);border:1px solid #cbd5e1;border-radius:14px;padding:16px;overflow:hidden}
+.frame img{width:100%;display:block;border-radius:8px}
+/* ---- app ---- */
+.seg{display:inline-flex;gap:4px;background:#f1f5f9;border-radius:12px;padding:4px}
+.seg a{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;font-size:13.5px;font-weight:600;color:#64748b;text-decoration:none;position:relative}
+.seg a.on{background:#fff;color:var(--m800);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg a.on svg{color:var(--m600)}
+.seg a.on:after{content:"";position:absolute;left:10px;right:10px;bottom:2px;height:2px;border-radius:2px;background:var(--m600)}
+.banner{margin-top:14px;border-radius:16px;padding:20px 22px;color:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+ background:repeating-linear-gradient(45deg,rgba(255,255,255,.14) 0 6px,transparent 6px 18px),linear-gradient(135deg,#475569,#1e293b)}
+.banner .ic{width:42px;height:42px;border-radius:999px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center}
+.banner h3{margin:0;font-size:21px;font-weight:800}.banner p{margin:2px 0 0;font-size:13px;opacity:.85}
+.bw{display:flex;gap:8px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:6px;border-radius:12px;padding:9px 14px;font-weight:700;font-size:13.5px;font-family:inherit;border:0}
+.btn.w{background:#fff;color:var(--b800)}.btn.g{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.4)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px}
+.stat{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;gap:12px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.stat .si{width:38px;height:38px;border-radius:10px;background:var(--m50);color:var(--m600);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.stat .l{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#64748b}
+.stat .v{font-size:24px;font-weight:800;line-height:1.2}.v.warn{color:#d97706}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;margin-top:14px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.ch{padding:13px 16px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center}
+.ch b{font-size:15px;color:#1e293b}.ch a{font-size:12.5px;font-weight:700;color:var(--b700);text-decoration:none}
+table.et{width:100%;border-collapse:separate;border-spacing:0;font-size:13.5px}
+.et th{background:#f8fafc;color:#64748b;font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;text-align:left;padding:11px 14px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+.et td{padding:11px 14px;border-bottom:1px solid #f1f5f9;color:#334155;vertical-align:middle;white-space:nowrap}
+.et tr.r:hover td{background:#eef5f2}
+.et th.rt,.et td.rt{text-align:right}
+.code{font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:600;background:var(--b50);color:var(--b800);padding:2px 8px;border-radius:6px;text-decoration:none}
+.muted{color:#64748b;font-size:12.5px}
+.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid;border-radius:999px;padding:1px 10px;font-size:12px;font-weight:600;line-height:20px;white-space:nowrap}
+.dot{width:6px;height:6px;border-radius:999px}
+.b-valid{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}.b-valid .dot{background:#15803d}
+.b-pend{background:#fffbeb;color:#92400e;border-color:#fde68a}.b-pend .dot{background:#d97706;animation:pd 1.8s infinite}
+.b-draft{background:#f8fafc;color:#475569;border-color:#e2e8f0}.b-draft .dot{background:#94a3b8}
+.b-ret{background:#fff1f2;color:#9f1239;border-color:#fecdd3}.b-ret .dot{background:#e11d48}
+.b-dang{background:#fef2f2;color:#991b1b;border-color:#fecaca}.b-dang .dot{background:#dc2626}
+@keyframes pd{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.45)}50%{box-shadow:0 0 0 4px rgba(217,119,6,0)}}
+.kn{display:inline-flex;align-items:center;gap:4px;border-radius:999px;background:linear-gradient(135deg,var(--b500),var(--b800));color:#fff;padding:3px 11px;font-size:12px;font-weight:700}
+.gk{display:inline-flex;align-items:center;gap:5px;border-radius:999px;border:1px solid var(--b200);background:var(--b50);color:var(--b800);padding:3px 11px;font-size:12px;font-weight:700}
+.ia{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;color:#94a3b8;vertical-align:middle}
+.ia:hover{background:#f1f5f9;color:#334155}.ia.br:hover{background:var(--b50);color:var(--b700)}.ia.sky:hover{background:#f0f9ff;color:#0369a1}
+.ia.hov{background:var(--b50);color:var(--b700)}
+.grp{display:inline-flex;gap:2px}
+.hm{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#334155}.hm svg{color:#94a3b8}
+.filters{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-top:14px;display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.fi{border:1px solid #cbd5e1;border-radius:10px;padding:8px 10px;font-size:13px;color:#94a3b8;background:#fff;display:flex;justify-content:space-between;align-items:center}
+.fi.focus{border-color:var(--m600);box-shadow:0 0 0 3px var(--m50);color:#334155}
+.chev{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;color:#64748b;transition:transform .15s}
+tr.open .chev{transform:rotate(180deg);color:var(--m800);background:var(--m50)}
+tr.r.click{cursor:pointer}
+tr.child td{background:#fafbfc;border-bottom:1px solid #e2e8f0;white-space:normal}
+.childbox{border-left:3px solid var(--m600);padding:6px 0 6px 14px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px 24px;font-size:12.5px}
+.childbox b{color:#475569}
+.hint{font-size:12px;color:#64748b;margin-top:6px}
+/* old */
+.old-tabs{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:8px;display:flex;gap:4px}
+.old-tabs span{padding:9px 16px;border-radius:12px;font-weight:700;font-size:13.5px;color:#475569}
+.old-tabs span.on{background:#fff7ed;color:#c2410c;border:1px solid #fed7aa}
+.oh{font-size:22px;font-weight:800;margin:14px 0 2px}.ohs{color:#64748b;font-size:13px}
+.obtn{background:#334155;color:#fff;border-radius:12px;padding:9px 14px;font-weight:700;font-size:13.5px}
+.obtn.g{background:#059669}
+table.ot{width:100%;border-collapse:collapse;font-size:13.5px}
+.ot th{background:#f8fafc;color:#64748b;font-size:11.5px;font-weight:700;text-transform:uppercase;padding:11px 14px;text-align:left;border-bottom:1px solid #e2e8f0}
+.ot td{padding:11px 14px;border-bottom:1px solid #f1f5f9;white-space:nowrap}
+.oc{font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:700;color:#047857}
+.osc{background:#fef2f2;color:#dc2626;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700}
+.ook{background:#ecfdf5;color:#047857;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700}
+.ope{background:#fffbeb;color:#b45309;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700}
+.olink{color:#2563eb;font-weight:700;font-size:12px}
+/* phone */
+.phone{width:390px;background:var(--bg);border:10px solid #0f172a;border-radius:30px;padding:12px;margin:0 auto}
+.phone .stats{grid-template-columns:1fr 1fr}
+.phone .banner{padding:14px}.phone .banner h3{font-size:18px}
+.mrow{background:#fff;border-bottom:1px solid #f1f5f9;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.scroll{overflow-x:auto}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.cols2{grid-template-columns:1fr}}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="fc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m3 15 2 2 4-4"/></symbol>
+<symbol id="dl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+<symbol id="ft" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+<symbol id="cd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="wr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z"/></symbol>
+<symbol id="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+<symbol id="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="pr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></symbol>
+<symbol id="ld" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+<symbol id="cl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/></symbol>
+<symbol id="hi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+<symbol id="rf" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+</defs></svg>
+<div class="doc">
+<h1 class="t">U1 — Module Bảo trì: trước và sau</h1>
+<p class="muted">Bản xem trước để duyệt trước khi sửa code. Chỉ đổi trình bày — quyền, truy vấn, luồng ký/huỷ/trả về giữ nguyên.</p>
+
+<div class="note" style="margin-top:12px">
+<b>Quy ước màu (phương án C):</b> banner + tab đang chọn + ô lọc khi bấm vào + ô icon thẻ số liệu theo màu module <b>xám xanh đá (slate)</b>;
+nút "Tạo biên bản", "Gửi ký duyệt", "Ký ngay", mã biên bản theo màu thương hiệu xanh rừng; trạng thái theo nghĩa (xanh lá / vàng nhấp nháy / hồng / đỏ).
+</div>
+
+<!-- ============ TỔNG QUAN ============ -->
+<h2 class="s">1. Tổng quan</h2>
+<div class="pair">
+ <div><span class="tag old">TRƯỚC</span><div class="frame"><img src="module_con_lai/bao_tri_inline.png" alt="Tổng quan Bảo trì hiện tại"></div></div>
+ <div><span class="tag new">SAU</span><div class="frame">
+  <div class="seg">
+   <a class="on"><svg width="15" height="15"><use href="#ld"/></svg>Tổng quan</a>
+   <a><svg width="15" height="15"><use href="#cl"/></svg>Biên bản</a>
+   <a><svg width="15" height="15"><use href="#hi"/></svg>Lý lịch thiết bị</a>
+  </div>
+  <div class="banner"><div style="display:flex;gap:12px;align-items:center"><div class="ic"><svg width="20" height="20"><use href="#wr"/></svg></div><div><h3>Bảo trì</h3><p>Quản lý sửa chữa và bảo dưỡng thiết bị, xe</p></div></div>
+   <div class="bw"><span class="btn w"><svg width="16" height="16"><use href="#plus"/></svg>Tạo biên bản</span></div></div>
+  <div class="stats">
+   <div class="stat"><div class="si"><svg width="18" height="18"><use href="#wr"/></svg></div><div><div class="l">Biên bản tháng này</div><div class="v">21</div></div></div>
+   <div class="stat"><div class="si"><svg width="18" height="18"><use href="#ck"/></svg></div><div><div class="l">Chờ duyệt</div><div class="v warn">7</div></div></div>
+   <div class="stat"><div class="si"><svg width="18" height="18"><use href="#ok"/></svg></div><div><div class="l">Đã duyệt tháng này</div><div class="v">14</div></div></div>
+   <div class="stat"><div class="si"><svg width="18" height="18"><use href="#cl"/></svg></div><div><div class="l">Biên bản gần đây</div><div class="v">8</div></div></div>
+  </div>
+  <div class="card"><div class="ch"><b>Biên bản gần đây</b><a>Xem tất cả →</a></div>
+   <div class="scroll"><table class="et"><thead><tr><th>Mã biên bản</th><th>Hạng mục</th><th>Bộ phận</th><th>Ngày</th><th>Trạng thái</th><th>Ký duyệt</th><th class="rt">Thao tác</th></tr></thead><tbody>
+    <tr class="r"><td><a class="code">MT-101026/003</a></td><td><span class="hm"><svg width="14" height="14"><use href="#wr"/></svg>Sửa chữa</span></td><td class="muted">Mủ tạp</td><td class="muted">10/10/2026</td><td><span class="badge b-valid"><span class="dot"></span>Đã duyệt</span></td><td><span class="badge b-valid"><span class="dot"></span>Đã ký duyệt (3/3)</span></td>
+     <td class="rt"><span class="grp"><span class="ia"><svg width="16" height="16"><use href="#eye"/></svg></span><span class="ia br"><svg width="16" height="16"><use href="#fc"/></svg></span><span class="ia sky"><svg width="16" height="16"><use href="#dl"/></svg></span></span></td></tr>
+    <tr class="r"><td><a class="code">MT-101026/002</a></td><td><span class="hm"><svg width="14" height="14"><use href="#wr"/></svg>Sửa chữa</span></td><td class="muted">Mủ tạp</td><td class="muted">10/10/2026</td><td><span class="badge b-pend"><span class="dot"></span>Chờ duyệt</span></td><td><span class="gk"><svg width="12" height="12"><use href="#pen"/></svg>Gửi ký duyệt</span></td>
+     <td class="rt"><span class="grp"><span class="ia"><svg width="16" height="16"><use href="#eye"/></svg></span><span class="ia"><svg width="16" height="16"><use href="#ft"/></svg></span></span></td></tr>
+    <tr class="r"><td><a class="code">MT-091026/001</a></td><td><span class="hm"><svg width="14" height="14"><use href="#wr"/></svg>Sửa chữa</span></td><td class="muted">Mủ tạp</td><td class="muted">9/10/2026</td><td><span class="badge b-pend"><span class="dot"></span>Chờ duyệt</span></td><td><span class="badge b-pend"><span class="dot"></span>Chờ ký (2/3)</span> <span class="kn"><svg width="12" height="12"><use href="#pen"/></svg>Ký ngay</span></td>
+     <td class="rt"><span class="grp"><span class="ia hov"><svg width="16" height="16"><use href="#eye"/></svg></span><span class="ia br"><svg width="16" height="16"><use href="#fc"/></svg></span><span class="ia sky"><svg width="16" height="16"><use href="#dl"/></svg></span></span></td></tr>
+    <tr class="r"><td><a class="code">DX-071026/001</a></td><td><span class="hm"><svg width="14" height="14"><use href="#rf"/></svg>Bảo dưỡng</span></td><td class="muted">Đội xe</td><td class="muted">7/10/2026</td><td><span class="badge b-valid"><span class="dot"></span>Đã duyệt</span></td><td><span class="badge b-pend"><span class="dot"></span>Chờ ký duyệt (1/3)</span></td>
+     <td class="rt"><span class="grp"><span class="ia"><svg width="16" height="16"><use href="#eye"/></svg></span><span class="ia br"><svg width="16" height="16"><use href="#fc"/></svg></span><span class="ia sky"><svg width="16" height="16"><use href="#dl"/></svg></span></span></td></tr>
+   </tbody></table></div></div>
+  <p class="hint">Con mắt = <b>mở trang chi tiết biên bản</b> (trước đây con mắt mở PDF đã ký). File đã ký = icon tài liệu có dấu tích. Chưa có file ký thì hiện icon "In biên bản (chưa ký)". Thêm cột <b>Trạng thái</b> biên bản (Chờ duyệt / Đã duyệt / Từ chối / Đã hủy).</p>
+ </div></div>
+</div>
+
+<!-- ============ BIÊN BẢN ============ -->
+<h2 class="s">2. Biên bản</h2>
+<div class="pair">
+ <div><span class="tag old">TRƯỚC</span><div class="frame">
+  <div class="old-tabs"><span>Tổng quan</span><span class="on">Biên bản</span><span>Lý lịch thiết bị</span></div>
+  <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="oh">Biên bản bảo trì</div><div class="ohs">Sửa chữa và bảo dưỡng thiết bị, xe</div></div>
+   <div style="display:flex;gap:8px"><span class="obtn">In Báo cáo theo kỳ (F07)</span><span class="obtn g">+ Tạo biên bản</span></div></div>
+  <div class="card"><div class="scroll"><table class="ot"><thead><tr><th>Mã biên bản</th><th>Hạng mục</th><th>Mã thiết bị</th><th>Bộ phận</th><th>Ngày</th><th>Người tạo</th><th>Ký duyệt</th><th></th></tr></thead><tbody>
+   <tr><td class="oc">MT-101026/003</td><td><span class="osc">Sửa chữa</span></td><td>MTA-01, MTA-04</td><td>Mủ tạp</td><td>10/10/2026</td><td>Nguyễn Hữu Thọ</td><td>👁 ⬇ <span class="ook">Đã ký duyệt (3/3)</span></td><td class="olink">Chi tiết</td></tr>
+   <tr><td class="oc">MT-101026/002</td><td><span class="osc">Sửa chữa</span></td><td>MTA-02</td><td>Mủ tạp</td><td>10/10/2026</td><td>Nguyễn Hữu Thọ</td><td>📄 <span class="ope" style="background:#ecfdf5;color:#047857">✎ Gửi ký duyệt</span></td><td class="olink">Chi tiết</td></tr>
+  </tbody></table></div></div>
+ </div></div>
+ <div><span class="tag new">SAU</span><div class="frame">
+  <div class="seg"><a><svg width="15" height="15"><use href="#ld"/></svg>Tổng quan</a><a class="on"><svg width="15" height="15"><use href="#cl"/></svg>Biên bản</a><a><svg width="15" height="15"><use href="#hi"/></svg>Lý lịch thiết bị</a></div>
+  <div class="banner"><div style="display:flex;gap:12px;align-items:center"><div class="ic"><svg width="20" height="20"><use href="#cl"/></svg></div><div><h3>Biên bản bảo trì</h3><p>Sửa chữa và bảo dưỡng thiết bị, xe</p></div></div>
+   <div class="bw"><span class="btn g"><svg width="15" height="15"><use href="#pr"/></svg>In Báo cáo theo kỳ (F07)</span><span class="btn w"><svg width="16" height="16"><use href="#plus"/></svg>Tạo biên bản</span></div></div>
+  <p class="hint">Báo cáo theo kỳ chỉ in các biên bản đã duyệt trong kỳ và bộ lọc đã chọn.</p>
+  <div class="filters"><div class="fi">Hạng mục ▾</div><div class="fi">Bộ phận ▾</div><div class="fi">Thiết bị / Xe ▾</div><div class="fi">Tất cả trạng thái ▾</div><div class="fi focus">01/10/2026 – 14/10/2026</div><div class="fi">Tìm mã biên bản…</div></div>
+  <div class="card"><div class="scroll"><table class="et"><thead><tr><th>Mã biên bản</th><th>Hạng mục</th><th>Thiết bị</th><th>Bộ phận</th><th>Ngày</th><th>Người tạo</th><th>Trạng thái</th><th>Ký duyệt</th><th class="rt">Thao tác</th></tr></thead><tbody>
+   <tr class="r"><td><a class="code">MT-101026/003</a></td><td><span class="hm"><svg width="14" height="14"><use href="#wr"/></svg>Sửa chữa</span></td><td class="muted">MTA-01, MTA-04</td><td class="muted">Mủ tạp</td><td class="muted">10/10/2026</td><td class="muted">Nguyễn Hữu Thọ</td><td><span class="badge b-valid"><span class="dot"></span>Đã duyệt</span></td><td><span class="badge b-valid"><span class="dot"></span>Đã ký duyệt (3/3)</span></td>
+    <td class="rt"><span class="grp"><span class="ia"><svg width="16" height="16"><use href="#eye"/></svg></span><span class="ia br"><svg width="16" height="16"><use href="#fc"/></svg></span><span class="ia sky"><svg width="16" height="16"><use href="#dl"/></svg></span></span></td></tr>
+   <tr class="r"><td><a class="code">MT-101026/002</a></td><td><span class="hm"><svg width="14" height="14"><use href="#wr"/></svg>Sửa chữa</span></td><td class="muted">MTA-02</td><td class="muted">Mủ tạp</td><td class="muted">10/10/2026</td><td class="muted">Nguyễn Hữu Thọ</td><td><span class="badge b-pend"><span class="dot"></span>Chờ duyệt</span></td><td><span class="gk"><svg width="12" height="12"><use href="#pen"/></svg>Gửi ký duyệt</span></td>
+    <td class="rt"><span class="grp"><span class="ia"><svg width="16" height="16"><use href="#eye"/></svg></span><span class="ia"><svg width="16" height="16"><use href="#ft"/></svg></span></span></td></tr>
+   <tr class="r"><td><a class="code">MN-081026/001</a></td><td><span class="hm"><svg width="14" height="14"><use href="#rf"/></svg>Bảo dưỡng</span></td><td class="muted">MNB-03 +2 khác</td><td class="muted">Mủ nước</td><td class="muted">8/10/2026</td><td class="muted">Trần Văn Bình</td><td><span class="badge b-ret"><span class="dot"></span>Từ chối</span></td><td><span class="badge b-ret"><span class="dot"></span>Trả về</span> <span style="font-size:12px;font-weight:700;color:#be123c">↺ Sửa &amp; ký lại</span></td>
+    <td class="rt"><span class="grp"><span class="ia"><svg width="16" height="16"><use href="#eye"/></svg></span><span class="ia br"><svg width="16" height="16"><use href="#fc"/></svg></span><span class="ia sky"><svg width="16" height="16"><use href="#dl"/></svg></span></span></td></tr>
+   <tr class="r"><td><a class="code">MT-021026/004</a></td><td><span class="hm"><svg width="14" height="14"><use href="#wr"/></svg>Sửa chữa</span></td><td class="muted">MTA-07</td><td class="muted">Mủ tạp</td><td class="muted">2/10/2026</td><td class="muted">Nguyễn Hữu Thọ</td><td><span class="badge b-dang"><span class="dot"></span>Đã hủy</span></td><td class="muted">—</td>
+    <td class="rt"><span class="grp"><span class="ia"><svg width="16" height="16"><use href="#eye"/></svg></span></span></td></tr>
+  </tbody></table></div></div>
+  <p class="hint">Bỏ link chữ "Chi tiết" (thay bằng con mắt cuối dòng + bấm vào mã). Hạng mục không còn tô đỏ — đỏ dành riêng cho trạng thái nguy hiểm/huỷ. Trạng thái rỗng/đang tải/lỗi dùng câu chuẩn ("Đang tải…", "Không có dữ liệu phù hợp", "Không tải được dữ liệu — Thử lại").</p>
+ </div></div>
+</div>
+
+<!-- ============ LÝ LỊCH ============ -->
+<h2 class="s">3. Lý lịch thiết bị — áp luôn quy tắc mới "dòng có chi tiết con"</h2>
+<div class="cols2">
+ <div><span class="tag old">TRƯỚC</span><div class="frame">
+  <div class="card" style="margin-top:0"><table class="ot"><thead><tr><th></th><th>Ngày</th><th>Nội dung</th><th>Giá trị</th><th>Biên bản</th></tr></thead><tbody>
+   <tr style="background:#fff7ed80"><td>▾</td><td>10/10/2026<br><b style="color:#ef4444">Sửa chữa</b></td><td>Thay bạc đạn…</td><td><b>$45</b></td><td class="oc">MT-101026/003</td></tr>
+   <tr style="background:#fff7ed"><td colspan="5" style="font-size:12px;padding-left:32px">Nội dung: Thay bạc đạn trục chính · Cách khắc phục: … · NV phụ trách: …</td></tr>
+   <tr><td>▸</td><td>2/10/2026<br><b style="color:#3b82f6">Bảo dưỡng</b></td><td>Tra mỡ…</td><td><b>$0</b></td><td class="oc">MT-021026/001</td></tr>
+  </tbody></table></div>
+  <p class="hint">Mũi tên ở <b>đầu</b> dòng, phần chi tiết nền cam.</p>
+ </div></div>
+ <div><span class="tag new">SAU</span><div class="frame">
+  <div class="card" style="margin-top:0"><div class="scroll"><table class="et"><thead><tr><th>Ngày</th><th>Nội dung</th><th>Giá trị</th><th>Biên bản</th><th class="rt"></th></tr></thead><tbody>
+   <tr class="r click open"><td>10/10/2026<div class="muted"><span class="hm" style="font-size:12px"><svg width="12" height="12"><use href="#wr"/></svg>Sửa chữa</span></div></td><td>Thay bạc đạn trục chính</td><td><b>$45</b></td><td><a class="code">MT-101026/003</a></td><td class="rt"><span class="chev"><svg width="16" height="16"><use href="#cd"/></svg></span></td></tr>
+   <tr class="child"><td colspan="5"><div class="childbox"><div><b>Nội dung:</b> Thay bạc đạn trục chính</div><div><b>Cách khắc phục:</b> Tháo, thay mới 2 bạc đạn 6205</div><div><b>Người thực hiện:</b> Lê A, Phạm B</div><div><b>NV phụ trách:</b> Nguyễn Hữu Thọ</div><div><b>Chi phí ước tính:</b> $45</div></div></td></tr>
+   <tr class="r click"><td>2/10/2026<div class="muted"><span class="hm" style="font-size:12px"><svg width="12" height="12"><use href="#rf"/></svg>Bảo dưỡng</span></div></td><td>Tra mỡ, vệ sinh</td><td><b>$0</b></td><td><a class="code">MT-021026/001</a></td><td class="rt"><span class="chev"><svg width="16" height="16"><use href="#cd"/></svg></span></td></tr>
+  </tbody></table></div></div>
+  <p class="hint">Mũi tên xuống ở <b>cuối dòng góc phải</b>, bấm cả dòng để mở/thu; dòng liền nhau trong 1 bảng; phần chi tiết thụt vào với viền trái màu module. Bấm mã biên bản vẫn mở trang chi tiết (không mở/thu dòng).</p>
+ </div></div>
+</div>
+
+<!-- ============ MOBILE ============ -->
+<h2 class="s">4. Điện thoại (390px) — Tổng quan sau</h2>
+<div class="phone">
+ <div class="seg" style="width:100%;overflow:hidden"><a class="on">Tổng quan</a><a>Biên bản</a><a>Lý lịch</a></div>
+ <div class="banner"><div><h3>Bảo trì</h3><p>Sửa chữa và bảo dưỡng</p></div><span class="btn w"><svg width="15" height="15"><use href="#plus"/></svg>Tạo biên bản</span></div>
+ <div class="stats">
+  <div class="stat"><div class="si"><svg width="18" height="18"><use href="#wr"/></svg></div><div><div class="l">Tháng này</div><div class="v">21</div></div></div>
+  <div class="stat"><div class="si"><svg width="18" height="18"><use href="#ck"/></svg></div><div><div class="l">Chờ duyệt</div><div class="v warn">7</div></div></div>
+ </div>
+ <div class="card"><div class="ch"><b>Biên bản gần đây</b><a>Xem tất cả →</a></div>
+  <div class="scroll"><table class="et"><thead><tr><th>Mã biên bản</th><th>Hạng mục</th><th>Trạng thái</th></tr></thead><tbody>
+   <tr class="r"><td><a class="code">MT-101026/003</a></td><td>Sửa chữa</td><td><span class="badge b-valid"><span class="dot"></span>Đã duyệt</span></td></tr>
+   <tr class="r"><td><a class="code">MT-091026/001</a></td><td>Sửa chữa</td><td><span class="badge b-pend"><span class="dot"></span>Chờ duyệt</span></td></tr>
+  </tbody></table></div></div>
+ <p class="hint">Bảng rộng cuộn ngang trong khung (không tràn trang), như hiện nay.</p>
+</div>
+</div></body></html>

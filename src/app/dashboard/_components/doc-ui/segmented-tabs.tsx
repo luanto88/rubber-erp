@@ -51,13 +51,14 @@ export function SegmentedTabs<K extends string>({
         const cls = `inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-semibold transition-all ${pad} ${
           fullWidth ? "flex-1" : ""
         } ${
+          // Màu điều hướng theo module (`mod-*`, phương án C U0) — không bọc ModuleThemeScope ⇒ brand.
           active
-            ? "bg-white text-brand-800 shadow-sm"
+            ? "relative bg-white text-mod-800 shadow-sm after:absolute after:inset-x-2.5 after:bottom-0.5 after:h-0.5 after:rounded-full after:bg-mod-600"
             : "text-slate-500 hover:bg-white/60 hover:text-slate-800"
         } ${item.disabled ? "pointer-events-none opacity-50" : ""}`
         const inner = (
           <>
-            {Icon && <Icon size={size === "sm" ? 14 : 15} className={active ? "text-brand-600" : ""} />}
+            {Icon && <Icon size={size === "sm" ? 14 : 15} className={active ? "text-mod-600" : ""} />}
             <span>{item.label}</span>
             {typeof item.count === "number" && item.count > 0 && (
               <span

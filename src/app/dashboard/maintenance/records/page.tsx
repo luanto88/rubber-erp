@@ -3,17 +3,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, Calendar, ChevronDown, Download, Eye, FileText, Filter, Loader2, Plus, Printer, Search, Wrench, X } from "lucide-react"
+import { Calendar, ChevronDown, ClipboardList, Filter, Plus, Search, X } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
-import { buildStorageDownloadUrl } from "@/lib/storage-download"
 import { getFirstDayOfMonthISO, getTodayISODate } from "@/lib/date-utils"
 import { MaintenanceShell } from "../_components/maintenance-shell"
 import { BO_PHAN_LIST, HANG_MUC_LIST } from "../_components/maintenance-data"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
-import { MaintenanceSignStatusBadge, type MaintenanceSigningStatus } from "./_components/maintenance-sign-status"
+import { type MaintenanceSigningStatus } from "./_components/maintenance-sign-types"
+import { MaintenanceRowActions, MaintenanceSignCell } from "../_components/maintenance-row-cells"
+import { HangMucLabel } from "../_components/hang-muc-label"
+import { BannerAction } from "../_components/banner-action"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
 import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
@@ -30,7 +38,17 @@ type RecordRow = {
   nguoi_tao: string | null
   created_by: string | null
   created_at: string
-  maintenance_record_lines: { ma_tb: string | null; loai_sua_chua: string | null }[]
+  maintenance_record_lines: {
+    ma_tb: string | null
+    ten_tb: string | null
+    noi_dung: string | null
+    cac_khac_phuc: string | null
+    chi_phi_dk: number | null
+    loai_tien: string | null
+    ten_tai_xe: string | null
+    loai_sua_chua: string | null
+    sort_order: number | null
+  }[]
 }
 
 // Suy ra bundle ký số (nếu có) từ hạng mục/bộ phận/loại sửa chữa — mirror đúng logic
@@ -66,6 +84,10 @@ export default function MaintenanceRecordsPage() {
   const signingReqSeq = useRef(0)
   const recordsRef = useRef<RecordRow[]>([])
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  // Biên bản đang xổ danh sách thiết bị (rule 29 — dòng có chi tiết con).
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const toggleExpanded = (id: string) =>
+    setExpandedIds((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next })
 
   useEffect(() => {
     if (!toast) return
@@ -183,7 +205,7 @@ export default function MaintenanceRecordsPage() {
 
       let q = supabase
         .from("maintenance_records")
-        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_by, created_at, maintenance_record_lines(ma_tb, loai_sua_chua)")
+        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_by, created_at, maintenance_record_lines(ma_tb, ten_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, ten_tai_xe, loai_sua_chua, sort_order)")
         .eq("factory_id", fid)
         .order("ngay", { ascending: false })
         .order("created_at", { ascending: false })
@@ -287,22 +309,6 @@ export default function MaintenanceRecordsPage() {
     return (r.ma_bb || "").toLowerCase().includes(q) || r.bo_phan.toLowerCase().includes(q)
   })
 
-  const hangMucBadge = (h: string) =>
-    h === "Sửa chữa"
-      ? <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-50 text-red-600">{h}</span>
-      : <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700">{h}</span>
-
-  // Báo cáo công tác bảo trì theo kỳ (F07) — dùng đúng bộ lọc Bộ phận/Hạng mục/Thiết bị-Xe/Từ
-  // ngày-Đến ngày đang áp dụng trên danh sách. LUÔN chỉ lấy biên bản "Đã duyệt" ở trang in, bất
-  // kể filter Trạng thái trên màn hình đang chọn gì — không truyền trang_thai qua URL.
-  const boPhanParam = filterBoPhan.length > 0 ? `&bo_phan=${encodeURIComponent(filterBoPhan.join(","))}` : ""
-  const hangMucParam = filterHangMuc.length > 0 ? `&hang_muc=${encodeURIComponent(filterHangMuc.join(","))}` : ""
-  const assetIdsParam = selectedAssetIds.length > 0 ? `&asset_ids=${selectedAssetIds.join(",")}` : ""
-  const vehicleIdsParam = selectedVehicleIds.length > 0 ? `&vehicle_ids=${selectedVehicleIds.join(",")}` : ""
-  const bcKyUrl = filterFrom && filterTo
-    ? `/dashboard/maintenance/print?type=bao_cao_ky&from=${filterFrom}&to=${filterTo}${boPhanParam}${hangMucParam}${assetIdsParam}${vehicleIdsParam}`
-    : null
-
   return (
     <MaintenanceShell>
       {toast && (
@@ -315,39 +321,18 @@ export default function MaintenanceRecordsPage() {
         </div>
       )}
       <div className="mb-3"><KtShortageBanner /></div>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-2">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Biên bản bảo trì</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Sửa chữa và bảo dưỡng thiết bị, xe</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canPrint && (
-            <Link
-              href={bcKyUrl ?? "#"}
-              target={bcKyUrl ? "_blank" : undefined}
-              onClick={!bcKyUrl ? (e) => e.preventDefault() : undefined}
-              className={`flex items-center gap-2 px-4 py-2.5 font-bold rounded-xl shadow-md transition-all ${
-                bcKyUrl ? "bg-slate-700 hover:bg-slate-800 text-white" : "bg-slate-200 text-slate-400 cursor-not-allowed"
-              }`}
-            >
-              <Printer size={15} /> In Báo cáo theo kỳ (F07)
-            </Link>
-          )}
-          {canCreate && (
-            <Link
-              href="/dashboard/maintenance/records/new"
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all"
-            >
-              <Plus size={16} /> Tạo biên bản
-            </Link>
-          )}
-        </div>
-      </div>
-      {canPrint && (
-        <p className="text-xs text-slate-400 mb-2">
-          Báo cáo theo kỳ chỉ in các biên bản đã duyệt trong kỳ và bộ lọc đã chọn (không phụ thuộc bộ lọc Trạng thái bên dưới).
-        </p>
-      )}
+      <PageBackgroundMotif theme="slate" />
+      <PageHeaderBanner
+        title="Biên bản bảo trì"
+        subtitle="Sửa chữa và bảo dưỡng thiết bị, xe"
+        theme="slate"
+        icon={ClipboardList}
+        action={
+          canCreate ? (
+            <BannerAction href="/dashboard/maintenance/records/new" icon={Plus} label="Tạo biên bản" variant="solid" />
+          ) : undefined
+        }
+      />
 
       {/* Filters */}
       <FilterBar
@@ -379,7 +364,7 @@ export default function MaintenanceRecordsPage() {
           <button
             type="button"
             onClick={() => setPickerOpen((o) => !o)}
-            className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-colors hover:border-slate-400 focus:border-emerald-500"
+            className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm outline-none transition-colors hover:border-slate-400 focus:border-mod-600"
           >
             <span className={`truncate text-left ${totalDeviceSelected > 0 ? "text-slate-700 font-semibold" : "text-slate-400"}`}>
               {totalDeviceSelected > 0 ? `${totalDeviceSelected} thiết bị/xe đã chọn` : "Thiết bị / Xe"}
@@ -414,7 +399,7 @@ export default function MaintenanceRecordsPage() {
                     if (toAddAssets.length > 0) setSelectedAssetIds((prev) => [...prev, ...toAddAssets])
                     if (toAddVehicles.length > 0) setSelectedVehicleIds((prev) => [...prev, ...toAddVehicles])
                   }}
-                  className="font-bold text-emerald-700 hover:text-emerald-800"
+                  className="font-bold text-mod-800 hover:underline"
                 >
                   Chọn tất cả ({pickerItems.length})
                 </button>
@@ -439,14 +424,14 @@ export default function MaintenanceRecordsPage() {
                       <label
                         key={`${item.kind}-${item.id}`}
                         className={`flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors ${
-                          checked ? "bg-emerald-50 text-emerald-700" : "hover:bg-slate-50"
+                          checked ? "bg-mod-50 text-mod-800" : "hover:bg-slate-50"
                         }`}
                       >
                         <input
                           type="checkbox"
                           checked={checked}
                           onChange={() => toggleItem(item)}
-                          className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 shrink-0"
+                          className="h-4 w-4 rounded border-slate-300 text-mod-600 focus:ring-mod-600 shrink-0"
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block text-xs font-bold font-mono text-slate-800 truncate">{item.primary}</span>
@@ -465,7 +450,7 @@ export default function MaintenanceRecordsPage() {
         <select
           value={filterTrangThai}
           onChange={(e) => setFilterTrangThai(e.target.value)}
-          className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+          className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
         >
           <option value="">Tất cả trạng thái</option>
           <option value="cho_duyet">Chờ duyệt</option>
@@ -480,14 +465,14 @@ export default function MaintenanceRecordsPage() {
             type="date"
             value={filterFrom}
             onChange={(e) => setFilterFrom(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
           />
           <span className="text-slate-400 text-sm">–</span>
           <input
             type="date"
             value={filterTo}
             onChange={(e) => setFilterTo(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
           />
         </div>
 
@@ -506,19 +491,19 @@ export default function MaintenanceRecordsPage() {
       {totalDeviceSelected > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
           {selectedAssetsChips.map((a) => (
-            <div key={a.id} className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs">
-              <span className="font-bold font-mono text-emerald-800">{a.ma_tb}</span>
-              <span className="text-emerald-700">{a.ten_tb}</span>
-              <button type="button" onClick={() => setSelectedAssetIds((prev) => prev.filter((id) => id !== a.id))} className="text-emerald-400 hover:text-red-500 transition-colors ml-1">
+            <div key={a.id} className="flex items-center gap-2 px-3 py-1.5 bg-mod-50 border border-mod-200 rounded-xl text-xs">
+              <span className="font-bold font-code text-mod-800">{a.ma_tb}</span>
+              <span className="text-slate-700">{a.ten_tb}</span>
+              <button type="button" onClick={() => setSelectedAssetIds((prev) => prev.filter((id) => id !== a.id))} className="text-slate-400 hover:text-red-600 transition-colors ml-1">
                 <X size={12} />
               </button>
             </div>
           ))}
           {selectedVehiclesChips.map((v) => (
-            <div key={v.id} className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs">
-              <span className="font-bold font-mono text-emerald-800">{v.code}</span>
-              <span className="text-emerald-700">{v.name}</span>
-              <button type="button" onClick={() => setSelectedVehicleIds((prev) => prev.filter((id) => id !== v.id))} className="text-emerald-400 hover:text-red-500 transition-colors ml-1">
+            <div key={v.id} className="flex items-center gap-2 px-3 py-1.5 bg-mod-50 border border-mod-200 rounded-xl text-xs">
+              <span className="font-bold font-code text-mod-800">{v.code}</span>
+              <span className="text-slate-700">{v.name}</span>
+              <button type="button" onClick={() => setSelectedVehicleIds((prev) => prev.filter((id) => id !== v.id))} className="text-slate-400 hover:text-red-600 transition-colors ml-1">
                 <X size={12} />
               </button>
             </div>
@@ -529,112 +514,118 @@ export default function MaintenanceRecordsPage() {
       {/* Table */}
       <ResponsiveTableWrapper>
         {loading && records.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          <ListState kind="loading" />
         ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">
-            <Wrench size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Không có biên bản nào</p>
-          </div>
+          <ListState kind="empty" message="Không có biên bản phù hợp" />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+          <>
+          {(() => {
+            const ids = filtered.filter((r) => (r.maintenance_record_lines || []).length > 0).map((r) => r.id)
+            const allExpanded = ids.length > 0 && ids.every((id) => expandedIds.has(id))
+            return (
+              <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+                <ExpandAllToggle
+                  allExpanded={allExpanded}
+                  disabled={ids.length === 0}
+                  onExpandAll={() => setExpandedIds(new Set(ids))}
+                  onCollapseAll={() => setExpandedIds(new Set())}
+                />
+              </div>
+            )
+          })()}
+          <table className="enterprise-table dense">
+            <thead>
               <tr>
-                {["Mã biên bản", "Hạng mục", "Mã thiết bị", "Bộ phận", "Ngày", "Người tạo", "Ký duyệt", ""].map((h) => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
-                ))}
+                <th>Mã biên bản</th>
+                <th>Hạng mục</th>
+                <th>Thiết bị</th>
+                <th>Bộ phận</th>
+                <th>Ngày</th>
+                <th>Người tạo</th>
+                <th>Trạng thái</th>
+                <th>Ký duyệt</th>
+                <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filtered.map((r) => (
-                <tr key={r.id} className="row-hover">
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/maintenance/records/${r.id}`} className="font-mono text-xs font-bold text-emerald-700 hover:underline">
-                      {r.ma_bb || "—"}
+            <tbody>
+              {filtered.map((r) => {
+                const sign = {
+                  bundle: resolveSignBundle(r),
+                  status: signingStatusByRecord.get(r.id),
+                  loaded: signingStatusLoaded,
+                  error: signingStatusError,
+                }
+                const codes = (r.maintenance_record_lines || []).map((l) => l.ma_tb).filter(Boolean) as string[]
+                const shownCodes = codes.length === 0
+                  ? "—"
+                  : codes.length > 2 ? `${codes.slice(0, 2).join(", ")} +${codes.length - 2} khác` : codes.join(", ")
+                const lines = [...(r.maintenance_record_lines || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+                const isXe = r.bo_phan === "Đội xe"
+                const detail = (
+                  <table className="enterprise-table dense">
+                    <thead>
+                      <tr>
+                        <th>{isXe ? "Mã xe" : "Mã TB"}</th>
+                        <th>{isXe ? "Xe" : "Thiết bị"}</th>
+                        {isXe && <th>Tài xế</th>}
+                        <th>Nội dung</th>
+                        <th className="text-right">Chi phí dự kiến</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((l, i) => (
+                        <tr key={`${l.ma_tb}-${i}`}>
+                          <td className="whitespace-nowrap font-code text-xs">{l.ma_tb || "—"}</td>
+                          <td className="whitespace-nowrap">{l.ten_tb || "—"}</td>
+                          {isXe && <td className="whitespace-nowrap">{l.ten_tai_xe || "—"}</td>}
+                          <td className="max-w-md">{l.cac_khac_phuc || l.noi_dung || "—"}</td>
+                          <td className="whitespace-nowrap text-right tabular-nums">
+                            {l.chi_phi_dk ? `${Number(l.chi_phi_dk).toLocaleString()} ${l.loai_tien || ""}` : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+                return (
+                <ExpandableRow
+                  key={r.id}
+                  expanded={expandedIds.has(r.id)}
+                  onToggle={() => toggleExpanded(r.id)}
+                  canExpand={lines.length > 0}
+                  colSpan={9}
+                  label="Xem thiết bị trong biên bản"
+                  endCell={<MaintenanceRowActions recordId={r.id} maBb={r.ma_bb} sign={sign} canPrint={canPrint} onError={(msg) => setToast({ msg, ok: false })} />}
+                  detail={detail}
+                >
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <Link href={`/dashboard/maintenance/records/${r.id}`} className="hover:opacity-80">
+                      <DocCodePill code={r.ma_bb} />
                     </Link>
                   </td>
-                  <td className="px-4 py-3">{hangMucBadge(r.hang_muc)}</td>
-                  <td className="px-4 py-3 text-slate-600 text-xs">
-                    {(() => {
-                      const codes = (r.maintenance_record_lines || []).map((l) => l.ma_tb).filter(Boolean) as string[]
-                      if (codes.length === 0) return "—"
-                      const shown = codes.slice(0, 2).join(", ")
-                      return codes.length > 2 ? `${shown} +${codes.length - 2} khác` : shown
-                    })()}
+                  <td><HangMucLabel hangMuc={r.hang_muc} /></td>
+                  <td className="text-slate-600 text-xs">{shownCodes}</td>
+                  <td className="text-slate-600">{r.bo_phan}</td>
+                  <td className="text-slate-500 text-xs whitespace-nowrap">{r.ngay ? new Date(r.ngay).toLocaleDateString("vi-VN") : "—"}</td>
+                  <td className="text-slate-500 text-xs">{r.nguoi_tao || "—"}</td>
+                  <td><StatusBadge domain="maintenance" status={r.trang_thai} /></td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <MaintenanceSignCell
+                      sign={sign}
+                      user={user}
+                      canCreate={canCreate && canOwnerAct(r)}
+                      onRetry={() => { if (factoryId) void loadSigningStatuses(factoryId, records) }}
+                      onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
+                      onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, records) }}
+                      showToast={(msg, ok = true) => setToast({ msg, ok })}
+                    />
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{r.bo_phan}</td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">{r.ngay ? new Date(r.ngay).toLocaleDateString("vi-VN") : "—"}</td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">{r.nguoi_tao || "—"}</td>
-                  <td className="px-4 py-3">
-                    {(() => {
-                      const bundle = resolveSignBundle(r)
-                      if (!bundle) return <span className="text-xs text-slate-300">—</span>
-                      if (!signingStatusLoaded) return <Loader2 size={14} className="animate-spin text-slate-300" />
-                      const status = signingStatusByRecord.get(r.id)
-                      if (!status && signingStatusError) {
-                        return (
-                          <button
-                            onClick={() => { if (factoryId) void loadSigningStatuses(factoryId, records) }}
-                            title="Không tải được trạng thái ký — bấm để thử lại"
-                            className="inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold text-amber-700 hover:bg-amber-50"
-                          >
-                            <AlertTriangle size={14} /> Thử lại
-                          </button>
-                        )
-                      }
-                      return (
-                        <div className="flex items-center gap-1.5">
-                          {status?.fileHienTai ? (
-                            <>
-                              <a
-                                href={status.fileHienTai}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={status.trangThai === "hoan_tat" ? "Xem file đã ký duyệt" : "Xem file đã ký (đang chờ ký tiếp)"}
-                                className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                              >
-                                <Eye size={15} />
-                              </a>
-                              {/* Tải về máy: dùng ?download= của Supabase Storage — thuộc tính HTML
-                                  `download` KHÔNG có tác dụng vì file khác origin với app. */}
-                              <a
-                                href={buildStorageDownloadUrl(status.fileHienTai, `Biên bản ${r.ma_bb || r.id}`)}
-                                title={status.trangThai === "hoan_tat" ? "Tải file đã ký duyệt về máy" : "Tải file đã ký (đang chờ ký tiếp)"}
-                                className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 transition-colors"
-                              >
-                                <Download size={15} />
-                              </a>
-                            </>
-                          ) : canPrint ? (
-                            <Link
-                              href={`/dashboard/maintenance/print?type=${bundle}&record_id=${r.id}`}
-                              target="_blank"
-                              title="In biên bản (chưa ký)"
-                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                            >
-                              <FileText size={15} />
-                            </Link>
-                          ) : null}
-                          {user && (
-                            <MaintenanceSignStatusBadge
-                              status={status}
-                              currentUser={user}
-                              canCreate={canCreate && canOwnerAct(r)}
-                              onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
-                              onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, records) }}
-                              showToast={(msg, ok = true) => setToast({ msg, ok })}
-                            />
-                          )}
-                        </div>
-                      )
-                    })()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/maintenance/records/${r.id}`} className="text-xs font-bold text-blue-600 hover:underline">Chi tiết</Link>
-                  </td>
-                </tr>
-              ))}
+                </ExpandableRow>
+                )
+              })}
             </tbody>
           </table>
+          </>
         )}
       </ResponsiveTableWrapper>
     </MaintenanceShell>

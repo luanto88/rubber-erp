@@ -1,14 +1,33 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import dynamic from "next/dynamic"
 import Link from "next/link"
-import { Calendar, ChevronDown, ChevronRight, Filter, History, Printer, Search, X } from "lucide-react"
+import { ChevronDown, FileBarChart, History, Printer, QrCode, Search, X } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../_components/maintenance-shell"
 import { BO_PHAN_LIST, currencySymbol, type MaintenanceAsset } from "../_components/maintenance-data"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { ExpandAllToggle, ExpandableRow, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
+import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { HangMucLabel } from "../_components/hang-muc-label"
+import { BannerAction } from "../_components/banner-action"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+
+// html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client (mirror inventory/item/page.tsx).
+const QrScanner = dynamic(
+  () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
+  { ssr: false },
+)
+
+// QR in trên biên bản = `{origin}/dashboard/maintenance/records/{uuid}` (rule 14). Nhận cả URL đó,
+// UUID trần, hoặc chuỗi mã biên bản (vd "MT-101026/003").
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 
 type HistoryRow = {
   record_id: string
@@ -36,7 +55,11 @@ type DispatchVehicleOption = { id: string; code: string; name: string; vehicle_t
 
 export default function MaintenanceHistoryPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
+  const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [scanNotice, setScanNotice] = useState<{ text: string; tone: "ok" | "warn"; recordId?: string } | null>(null)
   const [assets, setAssets] = useState<AssetOption[]>([])
   const [vehicles, setVehicles] = useState<DispatchVehicleOption[]>([])
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
@@ -303,6 +326,7 @@ export default function MaintenanceHistoryPage() {
     const bootstrap = async () => {
       try {
         const authState = await hydrateActiveSession().catch(() => ({ session: null, user: null as SessionUser | null }))
+        setUser(authState.user)
         if (!hasPermission(authState.user, "maintenance.view")) {
           setLoading(false)
           window.location.replace("/dashboard")
@@ -371,6 +395,66 @@ export default function MaintenanceHistoryPage() {
         ? `In lý lịch (${selectedAssetIds.length} thiết bị)`
         : "In lý lịch"
 
+  // Báo cáo công tác bảo trì theo kỳ (F07) — cùng tham số với trang Biên bản; trang in luôn chỉ
+  // lấy biên bản "Đã duyệt". Bắt buộc có Từ ngày + Đến ngày.
+  const canPrintF07 = hasPermission(user, "maintenance.print")
+  const bcKyUrl = filterFrom && filterTo
+    ? `/dashboard/maintenance/print?type=bao_cao_ky&from=${filterFrom}&to=${filterTo}` +
+      (filterBoPhan ? `&bo_phan=${encodeURIComponent(filterBoPhan)}` : "") +
+      (selectedAssetIds.length > 0 ? `&asset_ids=${selectedAssetIds.join(",")}` : "") +
+      (selectedVehicleIds.length > 0 ? `&vehicle_ids=${selectedVehicleIds.join(",")}` : "")
+    : null
+
+  // Quét QR biên bản đã in → chọn đúng thiết bị/xe của biên bản + lọc theo mã biên bản.
+  const handleScanDecoded = async (text: string) => {
+    if (!factoryId) return
+    setScanError(null)
+    const raw = text.trim()
+    const uuid = raw.match(UUID_RE)?.[0] ?? null
+    let q = supabase
+      .from("maintenance_records")
+      .select("id, ma_bb, bo_phan, trang_thai, maintenance_record_lines(asset_id, dispatch_vehicle_id)")
+      .eq("factory_id", factoryId)
+    q = uuid ? q.eq("id", uuid) : q.eq("ma_bb", raw)
+    const { data, error } = await q.maybeSingle()
+    if (error || !data) {
+      setScanError("Không tìm thấy biên bản từ mã QR này trong nhà máy hiện tại.")
+      return
+    }
+    const rec = data as {
+      id: string
+      ma_bb: string | null
+      bo_phan: string
+      trang_thai: string
+      maintenance_record_lines: { asset_id: string | null; dispatch_vehicle_id: string | null }[]
+    }
+    const lines = rec.maintenance_record_lines || []
+    const vehicleIds = [...new Set(lines.map((l) => l.dispatch_vehicle_id).filter(Boolean) as string[])]
+    const assetIds = [...new Set(lines.map((l) => l.asset_id).filter(Boolean) as string[])]
+    if (vehicleIds.length > 0) {
+      setFilterBoPhan("Đội xe")
+      setSelectedAssetIds([])
+      setSelectedVehicleIds(vehicleIds)
+    } else {
+      setFilterBoPhan(rec.bo_phan || "")
+      setSelectedVehicleIds([])
+      setSelectedAssetIds(assetIds)
+    }
+    setFilterFrom("")
+    setFilterTo("")
+    setFilterSearch(rec.ma_bb || "")
+    setScanning(false)
+    setScanNotice(
+      rec.trang_thai === "da_duyet"
+        ? { text: `Đã quét biên bản ${rec.ma_bb || ""} — đang hiển thị lý lịch của thiết bị/xe trong biên bản.`, tone: "ok" }
+        : {
+            text: `Biên bản ${rec.ma_bb || ""} chưa được duyệt nên chưa có trong lý lịch.`,
+            tone: "warn",
+            recordId: rec.id,
+          },
+    )
+  }
+
   // Chips display
   const selectedVehicles = vehicles.filter((v) => selectedVehicleIds.includes(v.id))
   const selectedAssets = assets.filter((a) => selectedAssetIds.includes(a.id))
@@ -378,238 +462,277 @@ export default function MaintenanceHistoryPage() {
 
   return (
     <MaintenanceShell>
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Lý lịch thiết bị</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Lịch sử sửa chữa và bảo dưỡng theo thiết bị / xe</p>
-        </div>
-        <Link
-          href={printUrl ?? "#"}
-          target={printUrl ? "_blank" : undefined}
-          onClick={!printUrl ? (e) => e.preventDefault() : undefined}
-          className={`flex items-center gap-2 px-4 py-2.5 font-bold rounded-xl shadow-md ${
-            printUrl
-              ? "bg-slate-700 hover:bg-slate-800 text-white"
-              : "bg-slate-200 text-slate-400 cursor-not-allowed"
-          }`}
-        >
-          <Printer size={15} />
-          {printLabel}
-        </Link>
-      </div>
+      {scanning && typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
+            <QrScanner
+              onDecoded={(t) => void handleScanDecoded(t)}
+              onCancel={() => { setScanning(false); setScanError(null) }}
+              hintText="Đưa camera vào mã QR trên biên bản đã in"
+              cancelText="Hủy quét"
+              cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+              uploadButtonText="Tải ảnh chứa QR"
+              uploadScanningText="Đang xử lý ảnh..."
+              uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+              orDividerText="hoặc"
+              scanError={scanError}
+            />
+          </div>,
+          document.body,
+        )}
 
-      {/* Filters */}
+      <PageBackgroundMotif theme="slate" />
+      <PageHeaderBanner
+        title="Lý lịch thiết bị"
+        subtitle="Lịch sử sửa chữa và bảo dưỡng theo thiết bị / xe"
+        theme="slate"
+        icon={History}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            {canPrintF07 && (
+              <BannerAction
+                href={bcKyUrl}
+                icon={FileBarChart}
+                label="Báo cáo theo kỳ (F07)"
+                disabledHint="Chọn Từ ngày và Đến ngày để in báo cáo theo kỳ"
+                newTab
+              />
+            )}
+            <BannerAction
+              href={printUrl}
+              icon={Printer}
+              label={printLabel}
+              variant="solid"
+              disabledHint="Chọn thiết bị / xe để in lý lịch"
+              newTab
+            />
+          </div>
+        }
+      />
+
+      {/* Filters — Tìm/Quét QR đứng đầu; mọi ô cùng chiều cao 40px */}
       <FilterBar
+        layout="grid"
         activeCount={
           selectedAssetIds.length + selectedVehicleIds.length + [filterFrom, filterTo, filterSearch].filter(Boolean).length
         }
       >
-        <Filter size={15} className="text-slate-400 self-center" />
-
-        {/* Unified Thiết bị / Xe multi-select picker */}
-        <div className="flex flex-col gap-1 min-w-[320px] flex-1" ref={pickerRef}>
-          <label className="text-xs font-bold text-slate-500">Thiết bị / Xe</label>
-          <div className="relative z-10">
-            {/* Trigger button */}
-            <button
-              type="button"
-              onClick={() => setPickerOpen((o) => !o)}
-              className="w-full flex items-center justify-between px-3 py-2.5 border border-slate-300 rounded-xl text-sm bg-white hover:border-orange-400 focus:border-orange-400 outline-none transition-colors"
-            >
-              <span className={totalSelected > 0 ? "text-slate-700 font-semibold" : "text-slate-400"}>
-                {selectedVehicleIds.length > 0
-                  ? `${selectedVehicleIds.length} xe đã chọn`
-                  : selectedAssetIds.length > 0
-                    ? `${selectedAssetIds.length} thiết bị đã chọn`
-                    : "Chọn thiết bị / xe để xem lý lịch..."}
-              </span>
-              <ChevronDown
-                size={16}
-                className={`text-slate-400 shrink-0 transition-transform ${pickerOpen ? "rotate-180" : ""}`}
-              />
-            </button>
-
-            {/* Dropdown */}
-            {pickerOpen && (
-              <div className="absolute z-[80] mt-2 w-full rounded-2xl border border-slate-200 bg-white shadow-xl p-3">
-                {/* Bộ phận filter inside dropdown */}
-                <select
-                  value={filterBoPhan}
-                  onChange={(e) => handleBoPhanChange(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs outline-none focus:border-orange-400 bg-slate-50 mb-2"
-                >
-                  <option value="">— Tất cả bộ phận —</option>
-                  {BO_PHAN_LIST.map((bp) => (
-                    <option key={bp} value={bp}>
-                      {bp}
-                    </option>
-                  ))}
-                </select>
-
-                {/* Search */}
-                <input
-                  autoFocus
-                  value={assetSearch}
-                  onChange={(e) => setAssetSearch(e.target.value)}
-                  placeholder={
-                    isVehicleMode
-                      ? "Tìm nhanh mã hoặc tên xe..."
-                      : "Tìm nhanh mã hoặc tên thiết bị..."
-                  }
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-400 mb-2"
-                />
-
-                {/* Quick actions */}
-                <div className="flex items-center justify-between mb-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const toAdd = filteredPickerItems.filter((item) => !selectedIds.includes(item.id))
-                      setSelectedIds((prev) => [...prev, ...toAdd.map((item) => item.id)])
-                    }}
-                    className="text-xs font-bold text-orange-600 hover:bg-orange-50 px-2.5 py-1 rounded-lg transition-colors"
-                  >
-                    Chọn tất cả ({filteredPickerItems.length})
-                  </button>
-                  {selectedIds.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedIds(() => [])}
-                      className="text-xs font-bold text-slate-500 hover:bg-slate-100 px-2.5 py-1 rounded-lg transition-colors"
-                    >
-                      Bỏ chọn tất cả
-                    </button>
-                  )}
-                </div>
-
-                {/* Item list */}
-                <div className="max-h-64 overflow-y-auto space-y-1 pr-0.5">
-                  {filteredPickerItems.length === 0 ? (
-                    <div className="text-sm text-slate-400 text-center py-4">
-                      {assetSearch
-                        ? "Không tìm thấy phù hợp"
-                        : isVehicleMode
-                          ? "Không có xe"
-                          : "Không có thiết bị"}
-                    </div>
-                  ) : (
-                    filteredPickerItems.map((item) => {
-                      const selected = selectedIds.includes(item.id)
-                      return (
-                        <label
-                          key={item.id}
-                          className={`flex items-center gap-3 px-3 py-2 rounded-xl border cursor-pointer transition-all ${
-                            selected
-                              ? "border-orange-200 bg-orange-50"
-                              : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() => toggleItem(item.id)}
-                            className="h-4 w-4 rounded border-slate-300 text-orange-500 focus:ring-orange-400 shrink-0"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-xs font-bold font-mono text-slate-800 truncate">
-                              {item.primary}
-                            </span>
-                            <span className="block text-[11px] text-slate-600 truncate">{item.secondary}</span>
-                          </span>
-                          <span className="text-[10px] text-slate-400 shrink-0">{item.sub}</span>
-                        </label>
-                      )
-                    })
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Selected chips */}
-          {(selectedAssets.length > 0 || selectedVehicles.length > 0) && (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {selectedAssets.map((a) => (
-                <div
-                  key={a.id}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border border-orange-200 rounded-xl text-xs"
-                >
-                  <span className="font-bold font-mono text-orange-800">{a.ma_tb}</span>
-                  <span className="text-orange-700">{a.ten_tb}</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedAssetIds((prev) => prev.filter((id) => id !== a.id))}
-                    className="text-orange-400 hover:text-red-500 transition-colors ml-1"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-              {selectedVehicles.map((v) => (
-                <div
-                  key={v.id}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border border-orange-200 rounded-xl text-xs"
-                >
-                  <span className="font-bold font-mono text-orange-800">{v.code}</span>
-                  <span className="text-orange-700">{v.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedVehicleIds((prev) => prev.filter((id) => id !== v.id))}
-                    className="text-orange-400 hover:text-red-500 transition-colors ml-1"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Date range */}
-        <div className="flex items-center gap-2">
-          <Calendar size={14} className="text-slate-400" />
-          <input
-            type="date"
-            value={filterFrom}
-            onChange={(e) => setFilterFrom(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-400"
-          />
-          <span className="text-slate-400 text-sm">–</span>
-          <input
-            type="date"
-            value={filterTo}
-            onChange={(e) => setFilterTo(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-orange-400"
-          />
-        </div>
-
-        {/* Content search */}
-        <div className="flex items-center gap-2 border border-slate-300 rounded-xl px-3 py-2 min-w-[200px]">
-          <Search size={14} className="text-slate-400" />
+        <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white pl-3 pr-1 focus-within:border-mod-600 sm:col-span-2">
+          <Search size={15} className="shrink-0 text-slate-400" />
           <input
             value={filterSearch}
             onChange={(e) => setFilterSearch(e.target.value)}
             placeholder="Tìm nội dung, mã biên bản..."
-            className="flex-1 text-sm outline-none bg-transparent"
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none"
           />
+          {filterSearch && (
+            <button
+              type="button"
+              aria-label="Xoá tìm kiếm"
+              onClick={() => setFilterSearch("")}
+              className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <X size={13} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => { setScanError(null); setScanning(true) }}
+            title="Quét QR biên bản đã in"
+            aria-label="Quét QR biên bản đã in"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-mod-50 px-2.5 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-200"
+          >
+            <QrCode size={15} />
+            <span className="hidden sm:inline">Quét QR</span>
+          </button>
         </div>
+
+        {/* Thiết bị / Xe — không còn nhãn riêng để cùng chiều cao với các ô khác */}
+        <div className="relative w-full sm:col-span-2" ref={pickerRef}>
+          <button
+            type="button"
+            onClick={() => setPickerOpen((o) => !o)}
+            className="flex h-10 w-full items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none transition-colors hover:border-mod-200 focus:border-mod-600"
+          >
+            <span className={`truncate ${totalSelected > 0 ? "font-semibold text-slate-700" : "text-slate-400"}`}>
+              {selectedVehicleIds.length > 0
+                ? `${selectedVehicleIds.length} xe đã chọn`
+                : selectedAssetIds.length > 0
+                  ? `${selectedAssetIds.length} thiết bị đã chọn`
+                  : "Thiết bị / Xe — chọn để xem lý lịch"}
+            </span>
+            <ChevronDown size={16} className={`shrink-0 text-slate-400 transition-transform ${pickerOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {pickerOpen && (
+            <div className="absolute z-[80] mt-2 w-full min-w-64 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+              <select
+                value={filterBoPhan}
+                onChange={(e) => handleBoPhanChange(e.target.value)}
+                className="mb-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none focus:border-mod-600"
+              >
+                <option value="">— Tất cả bộ phận —</option>
+                {BO_PHAN_LIST.map((bp) => (
+                  <option key={bp} value={bp}>
+                    {bp}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                autoFocus
+                value={assetSearch}
+                onChange={(e) => setAssetSearch(e.target.value)}
+                placeholder={isVehicleMode ? "Tìm nhanh mã hoặc tên xe..." : "Tìm nhanh mã hoặc tên thiết bị..."}
+                className="mb-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-mod-600"
+              />
+
+              <div className="mb-2 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const toAdd = filteredPickerItems.filter((item) => !selectedIds.includes(item.id))
+                    setSelectedIds((prev) => [...prev, ...toAdd.map((item) => item.id)])
+                  }}
+                  className="rounded-lg px-2.5 py-1 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-50"
+                >
+                  Chọn tất cả ({filteredPickerItems.length})
+                </button>
+                {selectedIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedIds(() => [])}
+                    className="rounded-lg px-2.5 py-1 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100"
+                  >
+                    Bỏ chọn tất cả
+                  </button>
+                )}
+              </div>
+
+              <div className="max-h-64 space-y-1 overflow-y-auto pr-0.5">
+                {filteredPickerItems.length === 0 ? (
+                  <div className="py-4 text-center text-sm text-slate-400">
+                    {assetSearch ? "Không tìm thấy phù hợp" : isVehicleMode ? "Không có xe" : "Không có thiết bị"}
+                  </div>
+                ) : (
+                  filteredPickerItems.map((item) => {
+                    const selected = selectedIds.includes(item.id)
+                    return (
+                      <label
+                        key={item.id}
+                        className={`flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 transition-all ${
+                          selected ? "border-mod-200 bg-mod-50" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleItem(item.id)}
+                          className="h-4 w-4 shrink-0 rounded border-slate-300 text-mod-600 focus:ring-mod-600"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="font-code block truncate text-xs font-bold text-slate-800">{item.primary}</span>
+                          <span className="block truncate text-[11px] text-slate-600">{item.secondary}</span>
+                        </span>
+                        <span className="shrink-0 text-[10px] text-slate-400">{item.sub}</span>
+                      </label>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <input
+          type="date"
+          value={filterFrom}
+          onChange={(e) => setFilterFrom(e.target.value)}
+          aria-label="Từ ngày"
+          title="Từ ngày"
+          className="h-10 w-full rounded-xl border border-slate-300 px-3 text-sm outline-none focus:border-mod-600"
+        />
+        <input
+          type="date"
+          value={filterTo}
+          onChange={(e) => setFilterTo(e.target.value)}
+          aria-label="Đến ngày"
+          title="Đến ngày"
+          className="h-10 w-full rounded-xl border border-slate-300 px-3 text-sm outline-none focus:border-mod-600"
+        />
       </FilterBar>
+
+      {/* Thiết bị / xe đã chọn (chuyển ra ngoài bộ lọc để các ô lọc thẳng hàng) */}
+      {(selectedAssets.length > 0 || selectedVehicles.length > 0) && (
+        <div className="flex flex-wrap gap-2">
+          {selectedAssets.map((a) => (
+            <div key={a.id} className="flex items-center gap-2 rounded-xl border border-mod-200 bg-mod-50 px-3 py-1.5 text-xs">
+              <span className="font-code font-bold text-mod-800">{a.ma_tb}</span>
+              <span className="text-slate-700">{a.ten_tb}</span>
+              <button
+                type="button"
+                aria-label={`Bỏ ${a.ma_tb}`}
+                onClick={() => setSelectedAssetIds((prev) => prev.filter((id) => id !== a.id))}
+                className="ml-1 text-slate-400 transition-colors hover:text-red-600"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          {selectedVehicles.map((v) => (
+            <div key={v.id} className="flex items-center gap-2 rounded-xl border border-mod-200 bg-mod-50 px-3 py-1.5 text-xs">
+              <span className="font-code font-bold text-mod-800">{v.code}</span>
+              <span className="text-slate-700">{v.name}</span>
+              <button
+                type="button"
+                aria-label={`Bỏ ${v.code}`}
+                onClick={() => setSelectedVehicleIds((prev) => prev.filter((id) => id !== v.id))}
+                className="ml-1 text-slate-400 transition-colors hover:text-red-600"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {scanNotice && (
+        <div
+          role="status"
+          className={`flex flex-wrap items-center gap-3 rounded-xl border px-4 py-2.5 text-sm ${
+            scanNotice.tone === "ok"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-amber-200 bg-amber-50 text-amber-800"
+          }`}
+        >
+          <QrCode size={16} className="shrink-0" />
+          <span className="flex-1">{scanNotice.text}</span>
+          {scanNotice.recordId && (
+            <Link href={`/dashboard/maintenance/records/${scanNotice.recordId}`} className="font-bold underline">
+              Mở biên bản
+            </Link>
+          )}
+          <button type="button" aria-label="Đóng" onClick={() => setScanNotice(null)} className="rounded-md p-1 hover:bg-black/5">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Selected devices banner */}
       {showBanner && (
-        <div className="bg-orange-50 border border-orange-200 rounded-xl px-5 py-3 flex items-center gap-4">
-          <div className="w-9 h-9 rounded-full bg-orange-100 flex items-center justify-center">
-            <History size={16} className="text-orange-600" />
+        <div className="bg-white border border-slate-200 border-l-4 border-l-mod-600 rounded-xl px-5 py-3 flex items-center gap-4 shadow-sm">
+          <div className="w-9 h-9 rounded-full bg-mod-50 flex items-center justify-center">
+            <History size={16} className="text-mod-600" />
           </div>
           <div className="flex-1">
             {selectedVehicles.length > 0 ? (
               <>
-                <div className="font-extrabold text-orange-800 text-sm">
+                <div className="font-extrabold text-slate-800 text-sm">
                   {selectedVehicles.length === 1
                     ? `${selectedVehicles[0].code} - ${selectedVehicles[0].name}`
                     : `${selectedVehicles.length} xe đã chọn`}
                 </div>
-                <div className="text-xs text-orange-600">
+                <div className="text-xs text-slate-500">
                   {selectedVehicles.length === 1
                     ? selectedVehicles[0].plate_number || selectedVehicles[0].vehicle_type || "Đội xe"
                     : selectedVehicles.map((v) => v.code).join(", ")}
@@ -617,12 +740,12 @@ export default function MaintenanceHistoryPage() {
               </>
             ) : (
               <>
-                <div className="font-extrabold text-orange-800 text-sm">
+                <div className="font-extrabold text-slate-800 text-sm">
                   {selectedAssets.length === 1
                     ? selectedAssets[0].ten_tb
                     : `${selectedAssets.length} thiết bị đã chọn`}
                 </div>
-                <div className="text-xs text-orange-600">
+                <div className="text-xs text-slate-500">
                   {selectedAssets.length === 1
                     ? `Mã: ${selectedAssets[0].ma_tb} · ${selectedAssets[0].bo_phan}`
                     : selectedAssets.map((a) => a.ma_tb).join(", ")}
@@ -630,150 +753,128 @@ export default function MaintenanceHistoryPage() {
               </>
             )}
           </div>
-          <div className="text-sm font-bold text-orange-700">{filtered.length} lần bảo trì</div>
+          <div className="text-sm font-bold text-mod-800">{filtered.length} lần bảo trì</div>
         </div>
       )}
 
-      {/* History table */}
+      {/* History table — dòng có chi tiết con: mũi tên ở CUỐI dòng (quy tắc U1) */}
+      {!loading && filtered.length > 0 && (
+        <div className="flex justify-end">
+          <ExpandAllToggle
+            allExpanded={filtered.every((r) => expandedRows.has(r.line_id))}
+            onExpandAll={() => setExpandedRows(new Set(filtered.map((r) => r.line_id)))}
+            onCollapseAll={() => setExpandedRows(new Set())}
+          />
+        </div>
+      )}
       <ResponsiveTableWrapper>
         {loading ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          <ListState kind="loading" />
         ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">
-            <History size={40} className="mx-auto mb-3 opacity-30" />
-            <p>
-              {totalSelected > 0
+          <ListState
+            kind="empty"
+            message={
+              totalSelected > 0
                 ? "Chưa có lịch sử bảo trì cho thiết bị / xe đã chọn"
-                : "Chọn thiết bị / xe để xem lịch sử bảo trì"}
-            </p>
-          </div>
+                : "Chọn thiết bị / xe để xem lịch sử bảo trì"
+            }
+          />
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+          <table className="enterprise-table">
+            <thead>
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide w-8" />
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  Ngày
-                </th>
-                {totalSelected !== 1 && (
-                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
-                    Thiết bị / Xe
-                  </th>
-                )}
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  Nội dung sửa chữa / thay thế
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  Giá trị
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  Người thực hiện
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  Người theo dõi
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  Biên bản
-                </th>
+                <th>Ngày</th>
+                {totalSelected !== 1 && <th>Thiết bị / Xe</th>}
+                <th>Nội dung sửa chữa / thay thế</th>
+                <th>Giá trị</th>
+                <th>Người thực hiện</th>
+                <th>Người theo dõi</th>
+                <th>Biên bản</th>
+                <ExpandHeaderCell />
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filtered.map((row) => {
-                const expanded = expandedRows.has(row.line_id)
-                return (
-                  <>
-                    <tr
-                      key={row.line_id}
-                      className="row-hover cursor-pointer"
-                      onClick={() => toggleExpand(row.line_id)}
-                    >
-                      <td className="px-4 py-3 text-slate-400">
-                        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">
-                        {row.ngay ? new Date(row.ngay).toLocaleDateString("vi-VN") : "—"}
-                        <div className="mt-0.5">
-                          {row.hang_muc === "Sửa chữa" ? (
-                            <span className="text-red-500 font-bold">{row.hang_muc}</span>
-                          ) : (
-                            <span className="text-blue-500 font-bold">{row.hang_muc}</span>
-                          )}
+            <tbody>
+              {filtered.map((row) => (
+                <ExpandableRow
+                  key={row.line_id}
+                  expanded={expandedRows.has(row.line_id)}
+                  onToggle={() => toggleExpand(row.line_id)}
+                  colSpan={totalSelected === 1 ? 7 : 8}
+                  label="Xem chi tiết lần bảo trì"
+                  detail={
+                    <div className="grid grid-cols-1 gap-x-6 gap-y-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                      {row.noi_dung && (
+                        <div>
+                          <span className="font-bold text-slate-600">Nội dung: </span>
+                          <span className="text-slate-700">{row.noi_dung}</span>
                         </div>
-                      </td>
-                      {totalSelected !== 1 && (
-                        <td className="px-4 py-3">
-                          <div className="font-bold text-slate-700 text-xs">{row.ten_tb}</div>
-                          <div className="text-slate-400 text-xs">{row.ma_tb}</div>
-                        </td>
                       )}
-                      <td className="px-4 py-3 text-slate-700 max-w-xs">
-                        <div className="line-clamp-2">{row.noi_dung || "—"}</div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700 text-xs font-bold whitespace-nowrap">
-                        {formatValue(row)}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 text-xs">
-                        {row.nguoi_thuc_hien.length > 0
-                          ? row.nguoi_thuc_hien.slice(0, 2).join(", ") +
-                            (row.nguoi_thuc_hien.length > 2 ? ` +${row.nguoi_thuc_hien.length - 2}` : "")
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 text-xs">{nguoiTheoDoiOf(row)}</td>
-                      <td className="px-4 py-3">
-                        <Link
-                          href={`/dashboard/maintenance/records/${row.record_id}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="font-mono text-xs font-bold text-emerald-700 hover:underline"
-                        >
-                          {row.ma_bb || "—"}
-                        </Link>
-                      </td>
-                    </tr>
-                    {expanded && (
-                      <tr key={`${row.line_id}-detail`} className="bg-orange-50/50">
-                        <td colSpan={totalSelected === 1 ? 7 : 8} className="px-8 py-3">
-                          <div className="grid grid-cols-2 gap-4 text-xs">
-                            {row.noi_dung && (
-                              <div>
-                                <span className="font-bold text-slate-600">Nội dung: </span>
-                                <span className="text-slate-700">{row.noi_dung}</span>
-                              </div>
-                            )}
-                            {row.cac_khac_phuc && (
-                              <div>
-                                <span className="font-bold text-slate-600">Cách khắc phục: </span>
-                                <span className="text-slate-700">{row.cac_khac_phuc}</span>
-                              </div>
-                            )}
-                            {row.nguoi_thuc_hien.length > 0 && (
-                              <div>
-                                <span className="font-bold text-slate-600">Người thực hiện: </span>
-                                <span className="text-slate-700">{row.nguoi_thuc_hien.join(", ")}</span>
-                              </div>
-                            )}
-                            {row.nv_phu_trach && (
-                              <div>
-                                <span className="font-bold text-slate-600">NV phụ trách: </span>
-                                <span className="text-slate-700">{row.nv_phu_trach}</span>
-                              </div>
-                            )}
-                            {row.phu_trach_bao_tri && (
-                              <div>
-                                <span className="font-bold text-slate-600">Phụ trách bảo trì: </span>
-                                <span className="text-slate-700">{row.phu_trach_bao_tri}</span>
-                              </div>
-                            )}
-                            <div>
-                              <span className="font-bold text-slate-600">Chi phí ước tính: </span>
-                              <span className="text-slate-700">{formatValue(row)}</span>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )
-              })}
+                      {row.cac_khac_phuc && (
+                        <div>
+                          <span className="font-bold text-slate-600">Cách khắc phục: </span>
+                          <span className="text-slate-700">{row.cac_khac_phuc}</span>
+                        </div>
+                      )}
+                      {row.nguoi_thuc_hien.length > 0 && (
+                        <div>
+                          <span className="font-bold text-slate-600">Người thực hiện: </span>
+                          <span className="text-slate-700">{row.nguoi_thuc_hien.join(", ")}</span>
+                        </div>
+                      )}
+                      {row.nv_phu_trach && (
+                        <div>
+                          <span className="font-bold text-slate-600">NV phụ trách: </span>
+                          <span className="text-slate-700">{row.nv_phu_trach}</span>
+                        </div>
+                      )}
+                      {row.phu_trach_bao_tri && (
+                        <div>
+                          <span className="font-bold text-slate-600">Phụ trách bảo trì: </span>
+                          <span className="text-slate-700">{row.phu_trach_bao_tri}</span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="font-bold text-slate-600">Chi phí ước tính: </span>
+                        <span className="text-slate-700">{formatValue(row)}</span>
+                      </div>
+                    </div>
+                  }
+                >
+                  <td className="text-slate-600 text-xs whitespace-nowrap">
+                    {row.ngay ? new Date(row.ngay).toLocaleDateString("vi-VN") : "—"}
+                    <div className="mt-0.5">
+                      <HangMucLabel hangMuc={row.hang_muc} size="sm" />
+                    </div>
+                  </td>
+                  {totalSelected !== 1 && (
+                    <td>
+                      <div className="font-bold text-slate-700 text-xs">{row.ten_tb}</div>
+                      <div className="text-slate-400 text-xs">{row.ma_tb}</div>
+                    </td>
+                  )}
+                  <td className="text-slate-700 max-w-xs">
+                    <div className="line-clamp-2">{row.noi_dung || "—"}</div>
+                  </td>
+                  <td className="text-slate-700 text-xs font-bold whitespace-nowrap">{formatValue(row)}</td>
+                  <td className="text-slate-600 text-xs">
+                    {row.nguoi_thuc_hien.length > 0
+                      ? row.nguoi_thuc_hien.slice(0, 2).join(", ") +
+                        (row.nguoi_thuc_hien.length > 2 ? ` +${row.nguoi_thuc_hien.length - 2}` : "")
+                      : "—"}
+                  </td>
+                  <td className="text-slate-600 text-xs">{nguoiTheoDoiOf(row)}</td>
+                  <td>
+                    <Link
+                      href={`/dashboard/maintenance/records/${row.record_id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="hover:opacity-80"
+                      title="Mở biên bản"
+                    >
+                      <DocCodePill code={row.ma_bb} />
+                    </Link>
+                  </td>
+                </ExpandableRow>
+              ))}
             </tbody>
           </table>
         )}
@@ -786,13 +887,13 @@ export default function MaintenanceHistoryPage() {
           <span className="text-slate-400">|</span>
           <span className="text-slate-600">
             Sửa chữa:{" "}
-            <strong className="text-red-600">
+            <strong className="text-slate-800">
               {filtered.filter((r) => r.hang_muc === "Sửa chữa").length}
             </strong>
           </span>
           <span className="text-slate-600">
             Bảo dưỡng:{" "}
-            <strong className="text-blue-600">
+            <strong className="text-slate-800">
               {filtered.filter((r) => r.hang_muc === "Bảo dưỡng").length}
             </strong>
           </span>

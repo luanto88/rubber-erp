@@ -48,11 +48,23 @@ export function QrScanner({
 
   useEffect(() => {
     let cancelled = false;
-    const instance = new Html5Qrcode(REGION_ID);
+    let instance: Html5Qrcode;
+    try {
+      instance = new Html5Qrcode(REGION_ID);
+    } catch {
+      setCameraError(true);
+      return;
+    }
     scannerRef.current = instance;
 
-    instance
-      .start(
+    // Html5Qrcode ném CHUỖI đồng bộ (không phải Promise reject) ở nhiều chỗ — vd stop() khi camera
+    // chưa chạy xong: "Cannot stop, scanner is not running or paused." Lỗi ném đồng bộ trong
+    // effect/cleanup lọt thẳng vào error boundary ⇒ màn "Lỗi không xác định". Mọi lời gọi thư viện
+    // vì vậy phải bọc try/catch, và cleanup phải CHỜ start() xong mới stop() (dev StrictMode chạy
+    // effect 2 lần liền — cleanup lần 1 luôn rơi vào lúc camera đang xin quyền).
+    let startPromise: Promise<unknown>;
+    try {
+      startPromise = instance.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 260, height: 260 }, aspectRatio: 1 },
         (decodedText) => {
@@ -69,23 +81,31 @@ export function QrScanner({
         () => {
           // lỗi decode từng khung hình — bỏ qua, chỉ là chưa thấy QR trong khung
         },
-      )
-      .catch(() => {
-        if (!cancelled) setCameraError(true);
-      });
+      );
+    } catch {
+      startPromise = Promise.reject(new Error("start failed"));
+    }
+    startPromise.catch(() => {
+      if (!cancelled) setCameraError(true);
+    });
 
     return () => {
       cancelled = true;
       const current = scannerRef.current;
       scannerRef.current = null;
-      if (current) {
-        current
-          .stop()
-          .then(() => current.clear())
-          .catch(() => {
-            /* camera có thể đã dừng sẵn, bỏ qua lỗi cleanup */
-          });
-      }
+      if (!current) return;
+      startPromise
+        .then(() => current.stop())
+        .then(() => {
+          try {
+            current.clear();
+          } catch {
+            /* bỏ qua */
+          }
+        })
+        .catch(() => {
+          /* start lỗi hoặc camera đã dừng sẵn — không còn gì để dừng */
+        });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

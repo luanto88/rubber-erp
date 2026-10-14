@@ -460,3 +460,131 @@ Bố cục theo mẫu `previews/enterprise-iso-vanban-unified-preview.html`, **m
 - 2026-10-13 (tiếp): **đã xoá modal đặt vị trí cũ** ở `iso/documents/[id]` (~1.400 dòng: state
   `placementModal`, `openPlacementForTask`, `handlePlacementConfirm`, JSX). Có PDF ⇒ luôn
   `IsoBatchSignModal`; không có PDF ⇒ `PinDialog` rồi `doTransition` trực tiếp.
+
+## Quy chuẩn giao diện toàn app — U0 nền tảng (2026-10-14)
+
+Kế hoạch tổng: `.claude/plans/ke-hoach-dong-bo-ui-toan-app.md`. Trang mẫu đã duyệt:
+`cung_cap_dl/UIUX/chuan-ui.html` (+ ảnh `chuan-ui-desktop.png`, `chuan-ui-mobile.png`,
+`chuan-ui-mau-module.png`). U0 chỉ THÊM nền tảng — chưa module nào đổi bố cục (U1+ mới áp).
+
+### Màu — phương án C "lai" (người dùng chốt, thay quyết định "brand cho mọi thứ" cũ)
+- **Banner** mỗi module giữ màu + hoa văn riêng (`PageHeaderBanner theme`).
+- **Điều hướng** (tab đang chọn, ô nhập khi focus, icon thẻ số liệu, viền nhóm ngày) dùng utility
+  `*-mod-50/200/600/800` → theo màu module. Bọc vùng module bằng `<ModuleThemeScope theme="ocean">`
+  hoặc class `moduleThemeClass(theme)` (`doc-ui/module-theme.tsx`). Không bọc ⇒ rơi về brand
+  (Văn bản/ISO không đổi). Bộ màu: `.mod-theme-*` cuối `globals.css`, khai báo qua `@theme inline`
+  (bắt buộc `inline` để đổi được theo tổ tiên). Thêm theme banner mới ⇒ thêm `.mod-theme-<x>` +
+  một dòng trong `THEME_CLASS`.
+- **Hành động** (nút chính, Ký ngay, link mã, Gửi ký duyệt) LUÔN `brand-*` ở mọi module — tránh nút
+  vàng/cam trùng badge "Đang chờ"/"Huỷ" ở Kho vật tư, Kho TP, Ghi chú.
+- **Trạng thái** chỉ qua `StatusBadge` — 7 tông: valid · pending (chấm nhấp nháy) · warn (vàng,
+  không nhấp nháy) · draft · danger · returned · info (**xanh dương** từ 2026-10-14, trước là brand).
+
+### Domain trạng thái (`doc-ui/status-registry.ts`)
+`doc` `iso` `form` (cũ) + `maintenance`, `dispatch_progress`, `quality`, `purchase`, `inventory`
+(`cho_duyet` phái sinh = posted && !approved_at), `export` (NULL ⇒ caller coi là duyệt), `lot` (key
+= nhãn đã `normalizeLotStatus`), `storage` (có key legacy "Đang nhận (Cần cập nhật)"). Nhãn giữ
+đúng như màn hình hiện tại. Helper cũ (`PURCHASE_STATUS_CLASS`, `getLotStatusBadgeClass`,
+`badgeClass()` kho NL…) CHƯA xoá — mỗi module thay ở giai đoạn của nó.
+
+### Từ điển thao tác (`doc-ui/action-registry.ts` + `row-action.tsx`)
+`<RowAction kind=… />` — một icon = một nghĩa: view `Eye` (CHỈ xem chi tiết) · signed `FileCheck2` ·
+download `Download` · draft `FileText` · print `Printer` · edit `Pencil` (bỏ `Edit2`) · copy `Copy` ·
+delete `Trash2` · add `Plus` · approve `CircleCheck` / cancel `Ban` (`variant="text"`, nút có chữ).
+Thứ tự: [Ký ngay] → view → signed → download → draft/print → riêng module → edit → copy → delete.
+
+### Component mới (`src/app/dashboard/_components/doc-ui/`)
+- `StatCard` / `StatGrid cols={3|4|5}` — 2 cột điện thoại → 3 (sm) → 3/4/5 (lg).
+- `DateGroupCard` — nhóm theo ngày; bấm header mở/thu, `sign`/`actions` chặn nổi bọt; thân là
+  `enterprise-table dense`; mở ra có viền trái `mod-600`.
+- `ListState kind="loading|empty|error" onRetry asRow colSpan` — 3 câu chuẩn.
+- `src/app/dashboard/_components/sign-status-badge.tsx` — `SignStatusBadge` gộp 3 badge ký
+  (`continueRule="approver"|"participant"`, `showProgress`, `hideWhenCannotCreate`, `blockedReason`,
+  `cancelMessage`, `dataChangedTitle`). Tới lượt mình ⇒ chip "Chờ ký" + nút **Ký ngay** brand (kể cả
+  người lập chưa ký ở luồng approver — trước chỉ thấy chip tĩnh). 3 badge cũ vẫn còn, thay ở U1-U3.
+
+### Khác
+- Bảng gọn: `<table className="enterprise-table dense">` (đệm 8×12px, chữ 13px) cho bảng nhiều cột.
+- Font Plus Jakarta Sans cho toàn dashboard: `font-doc` ở div gốc `dashboard/layout.tsx` (sidebar +
+  nội dung). Nhánh `/print`, `/product/confirm`, `/ky/` KHÔNG đổi.
+- `SegmentedTabs`: tab đang chọn chữ `mod-800` + gạch chân `mod-600` (Văn bản/ISO thêm gạch chân brand).
+
+## Quy tắc dòng có chi tiết con + U1 Bảo trì (2026-10-14)
+
+Người dùng chốt, áp cho MỌI danh sách có dòng mở rộng (thay cách mỗi nhóm một khung như Thành phẩm):
+- Mũi tên XUỐNG ở **ô cuối dòng, góc phải**; mũi tên CHỈ để mở/thu, không bao giờ chuyển trang
+  (vào chi tiết = con mắt `RowAction kind="view"`). Bấm bất kỳ đâu trên dòng cũng mở/thu; nút/link
+  trong dòng tự `stopPropagation`.
+- Các dòng liền nhau trong MỘT `enterprise-table`, chi tiết thụt vào ngay dưới, viền trái `mod-600`.
+- Dòng không có con vẫn giữ ô cuối trống để cột thẳng hàng.
+- Có nút "Mở tất cả / Thu gọn tất cả" (`ExpandAllToggle`).
+- Điện thoại: cột cuối (thao tác + mũi tên) **ghim phải** bằng class `sticky-end` (CSS ở globals.css,
+  chỉ `<768px`); header cột đó cũng phải có `sticky-end`.
+- Component: `doc-ui/expandable-row.tsx` — `ExpandableRow` (children = các `<td>` của dòng cha,
+  `endCell` = cụm thao tác đặt trước mũi tên), `ExpandHeaderCell`, `ExpandAllToggle`.
+- Danh sách nhóm theo ngày (Kiểm nghiệm U3, Thành phẩm/Sản lượng U7): dòng cha = dòng ngày + số liệu
+  + nút của ngày, con = bảng con lồng trong ô colSpan. `DateGroupCard` (U0, dạng khung) phải chuyển
+  sang quy tắc này trước U3. ISO/Văn bản hiện đặt mũi tên ĐẦU dòng — đồng bộ sau.
+
+U1 Bảo trì đã áp (chờ test tay): `MaintenanceShell` bọc `ModuleThemeScope theme="slate"` +
+`SegmentedTabs`; Tổng quan → `StatGrid`; Biên bản có `PageHeaderBanner` slate (F07 + Tạo biên bản ở
+banner); 2 bảng danh sách thêm cột Trạng thái (`StatusBadge domain="maintenance"`), cột Thao tác cuối
+(`maintenance/_components/maintenance-row-cells.tsx`: Eye chi tiết → FileCheck2 file ký → Download →
+FileText in chưa ký) + ô Ký duyệt `SignStatusBadge continueRule="participant" showProgress
+hideWhenCannotCreate`; hạng mục là chữ + icon xám (`hang-muc-label.tsx`), không tô đỏ/xanh; Lý lịch
+dùng `ExpandableRow`. Danh sách KHÔNG truyền `blockedReason` KT (như cũ — banner đầu trang + trang chi
+tiết đã khoá). `MaintenanceSignStatusBadge` cũ còn dùng ở `records/[id]`.
+
+Bổ sung sau test U1 (2026-10-14): `BannerAction` (`maintenance/_components/banner-action.tsx`) — nút
+trên banner màu đậm: `solid` (nút chính, nền trắng chữ brand) / `ghost` (trong suốt viền trắng), cao
+40px, chữ 13.5px đậm; thiếu điều kiện ⇒ mờ + tooltip lý do, không điều hướng. Trang Lý lịch: banner
+slate (F07 + In lý lịch), bộ lọc lưới mọi ô `h-10`, ô Tìm + nút **Quét QR** đứng đầu (QR biên bản =
+URL `/dashboard/maintenance/records/{uuid}`; cũng nhận UUID trần hoặc mã biên bản), máy quét
+`QrScanner` render qua `createPortal` ra `document.body` (tránh landmine containing-block của `fixed`).
+
+Sau test U1 (2026-10-14, tiếp): trang Biên bản **bỏ nút F07** (chỉ còn "Tạo biên bản"); F07 chỉ ở
+banner trang Lý lịch. `qr-scanner.tsx` (dùng chung Lý lịch + màn quét Thành phẩm) đã vá lỗi màn
+"Lỗi không xác định": `Html5Qrcode.stop()` ném CHUỖI đồng bộ khi camera chưa chạy (dev StrictMode,
+Hủy sớm, máy không webcam) — cleanup nay chờ `start()` xong mới `stop()`, mọi lời gọi thư viện bọc
+try/catch. Code mới dùng html5-qrcode phải theo đúng cách này.
+
+## U1b trang chi tiết biên bản + DateGroupRow + U2 Điều xe (2026-10-14, chờ test tay)
+
+- `maintenance/records/[id]/page.tsx` CHẾ ĐỘ XEM (`!inEditMode && record`) = `renderViewMode()`:
+  `DetailPageHeader` (mã, chip ngày/giờ · số thiết bị · người tạo; Xem/Tải file ký hoặc "In bản chưa
+  ký"; Chỉnh sửa `Pencil`; `HeaderQr`) + `DetailSplitLayout`. Cột trái: tab "File đã ký" (mặc định khi
+  có file, `DocViewer` qua route mới `GET /api/maintenance/records/[id]/file-url` — `maintenance.view`
+  + đúng nhà máy, mint Signed URL bucket `signing-documents` từ `yeu_cau_ky.file_hien_tai`) / "Nội
+  dung biên bản". Cột phải: `StatusSummaryBar` (trạng thái biên bản + ô ký `SignStatusBadge chipOnly`)
+  → `SignActionBox` (chính DUY NHẤT: Ký ngay / Sửa & ký lại / Gửi ký duyệt — khoá khi thiếu KT; phụ:
+  In bản chưa ký, Gửi duyệt lại; đỏ: Hủy biên bản, Hủy đã duyệt, Đảo xuất kho, Xóa — điều kiện cũ)
+  → khối KT → `TimelineSteps` (NV phụ trách → BGĐ → GĐ; chưa gửi ký ⇒ người ký dự kiến) → Chi phí →
+  Nhân sự. Tạo/Sửa giữ bố cục cũ, chỉ đổi màu `mod-*`/`brand-*`, `Edit3` → `Pencil`.
+- Link "In bản chưa ký" = `/dashboard/maintenance/print?type=…&record_id={effectiveId}` (trước trỏ
+  nhầm `/records/{id}/print` không tồn tại).
+- `SignStatusBadge` thêm prop `chipOnly`: chỉ chip + lý do trả về + "Hủy yêu cầu", không có nút
+  Gửi ký duyệt / Ký ngay / Sửa & ký lại (các nút đó nằm ở `SignActionBox`).
+- Đã xoá `maintenance-sign-status.tsx`; kiểu dữ liệu ở `records/_components/maintenance-sign-types.ts`.
+- `DateGroupCard` → `DateGroupRow` + `DateGroupHead` (`doc-ui/date-group-card.tsx`): mỗi ngày là 1
+  `ExpandableRow` trong MỘT `enterprise-table dense` (cột Ngày · Tóm tắt · Ký duyệt · Thao tác+mũi
+  tên), bảng con là `children`. `hideSign` cho module không ký theo ngày.
+- U2 Điều xe (danh sách): bọc `moduleThemeClass("ocean")`; tab → `SegmentedTabs`; KPI → `StatGrid`;
+  bảng `enterprise-table dense`, bỏ `onClick` từng ô (mã ĐX là link, `Eye` xem chi tiết); tiến độ →
+  `StatusBadge domain="dispatch_progress"`; ký → `SignStatusBadge continueRule="approver"`; thao tác
+  view → signed → download → draft → Ảnh (sky) → edit → copy → delete (cột cuối `sticky-end`).
+  `DispatchSignStatusBadge` còn file nhưng không còn dùng (chỉ còn type).
+
+### Sau test U1b/U2 (2026-10-14, chờ test tay)
+- **Xem file ký đúng tên**: Signed URL Supabase xem inline luôn lưu ra tên object (`v4.pdf`). Nay
+  "Xem" đi qua route app `GET /api/files/view/<token>/<tên>` (`src/lib/file-view-token.ts`: JWT HS256
+  `SIGN_JWT_SECRET`, sống 120s, payload bucket/path/tên) — trả `Content-Disposition: inline;
+  filename*=UTF-8''…`. File > 4MB (hoặc không rõ dung lượng) ⇒ 302 về Signed URL (giới hạn Vercel).
+  Token chỉ được mint bởi route đã xác thực: `api/maintenance/records/[id]/file-url?view=1` và route
+  chung `api/signing/requests/[yeuCauId]/file-url?view=1&name=…` (admin / người ký / quyền view module).
+  Cột "Xem file đã ký" ở danh sách Bảo trì + Điều xe dùng route chung (onClick, không href thẳng).
+  Văn bản/ISO **cùng lỗi, chưa sửa** — thêm `?view=1` vào 2 route `file-url` của chúng khi được duyệt.
+- Biên bản đã có file ký ⇒ bỏ "In bản chưa ký" khỏi hộp hành động.
+- Danh sách Điều xe theo `ExpandableRow`: mũi tên cuối dòng xổ bảng chuyến (Số xe · Chuyến · Tài xế ·
+  Đội · Điểm GN/Phiên · KL tươi · KL khô · Ghi chú), `ExpandAllToggle` trên bảng, mã ĐX/con mắt mở chi
+  tiết, ô Ký duyệt chặn nổi bọt.
+- Còn lệch quy tắc: danh sách Biên bản + Tổng quan Bảo trì chưa xổ danh sách thiết bị của biên bản.

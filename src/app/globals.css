@@ -58,6 +58,16 @@
   --color-moss-700: #444d26;
 }
 
+/* Màu điều hướng theo module (phương án C) — `inline` để utility ghi thẳng
+   `var(--mod-600, #2f5d52)` vào chỗ dùng, nhờ vậy đổi được theo class `.mod-theme-*` ở tổ tiên.
+   Không có class nào ⇒ rơi về brand. Định nghĩa các bộ màu: cuối file, mục `.mod-theme-*`. */
+@theme inline {
+  --color-mod-50: var(--mod-50, #eef5f2);
+  --color-mod-200: var(--mod-200, #aed1c4);
+  --color-mod-600: var(--mod-600, #2f5d52);
+  --color-mod-800: var(--mod-800, #1c3a32);
+}
+
 html, body { max-width: 100%; overflow-x: hidden; }
 body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 
@@ -207,6 +217,39 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 .enterprise-table tbody tr { transition: background-color .15s ease; }
 .enterprise-table tbody tr:hover { background: #eef5f2; }
 .enterprise-table tbody tr:last-child td { border-bottom: 0; }
+/* Bảng gọn (U0, 2026-10-14) — bảng nhiều cột / nhiều dòng (Điều xe, Thành phẩm, Kiểm nghiệm). */
+.enterprise-table.dense { font-size: 13px; }
+.enterprise-table.dense thead th { padding: 9px 12px; }
+.enterprise-table.dense tbody td { padding: 8px 12px; }
+/* Dòng có chi tiết con (U1, 2026-10-14) — mũi tên mở/thu ở ô CUỐI dòng, chi tiết thụt vào ngay dưới. */
+.enterprise-table tbody tr.expand-detail:hover { background: transparent; }
+.enterprise-table tbody tr.expand-detail > td { background: #fafbfc; border-bottom: 1px solid #e2e8f0; padding-top: 10px; padding-bottom: 12px; }
+/* Ghim cột cuối (thao tác + mũi tên) khi bảng phải cuộn ngang trên điện thoại. */
+@media (max-width: 767px) {
+  .enterprise-table .sticky-end { position: sticky; right: 0; z-index: 1; box-shadow: -8px 0 8px -8px rgba(15, 23, 42, .18); }
+  .enterprise-table thead th.sticky-end { background: #f8fafc; }
+  .enterprise-table tbody td.sticky-end { background: #fff; }
+  .enterprise-table tbody tr:hover > td.sticky-end { background: #eef5f2; }
+}
+
+/* ─── Màu điều hướng theo module (U0, phương án C "lai", 2026-10-14) ───────────
+   Phần ĐIỀU HƯỚNG (tab đang chọn, ô nhập khi focus, icon thẻ số liệu, viền nhóm ngày) lấy màu
+   banner của module; phần HÀNH ĐỘNG (nút chính, Ký ngay, link mã) luôn brand. Bọc vùng module
+   bằng class `mod-theme-<theme>` (xem doc-ui/module-theme.tsx); không bọc ⇒ rơi về brand nên
+   Văn bản/ISO không đổi. Class (không phải style inline) nên không vướng bài học var() 2026-08-24. */
+.mod-theme-forest { --mod-50: #f0fdf4; --mod-200: #bbf7d0; --mod-600: #166534; --mod-800: #093719; }
+.mod-theme-ocean { --mod-50: #e3f0fb; --mod-200: #c3ddf5; --mod-600: #1b5590; --mod-800: #144171; }
+.mod-theme-mint { --mod-50: #eafbf5; --mod-200: #a7ead5; --mod-600: #24806b; --mod-800: #1f6a58; }
+.mod-theme-moss { --mod-50: #eef1e0; --mod-200: #d9e0bd; --mod-600: #596532; --mod-800: #444d26; }
+.mod-theme-amber { --mod-50: #fffbeb; --mod-200: #fde68a; --mod-600: #b45309; --mod-800: #92400e; }
+.mod-theme-slate { --mod-50: #f1f5f9; --mod-200: #cbd5e1; --mod-600: #475569; --mod-800: #1e293b; }
+.mod-theme-violet { --mod-50: #f5f3ff; --mod-200: #ddd6fe; --mod-600: #7c3aed; --mod-800: #5b21b6; }
+.mod-theme-rose { --mod-50: #fff1f2; --mod-200: #fecdd3; --mod-600: #e11d48; --mod-800: #9f1239; }
+.mod-theme-orange { --mod-50: #fff7ed; --mod-200: #fed7aa; --mod-600: #c2410c; --mod-800: #9a3412; }
+.mod-theme-teal { --mod-50: #f0fdfa; --mod-200: #99f6e4; --mod-600: #0d9488; --mod-800: #115e59; }
+.mod-theme-indigo { --mod-50: #eef2ff; --mod-200: #c7d2fe; --mod-600: #4f46e5; --mod-800: #3730a3; }
+.mod-theme-cyan { --mod-50: #ecfeff; --mod-200: #a5f3fc; --mod-600: #0891b2; --mod-800: #155e75; }
+.mod-theme-rubber { --mod-50: #eef5f2; --mod-200: #aed1c4; --mod-600: #2f5d52; --mod-800: #1c3a32; }
 
 @keyframes docPulseDot {
   0%, 100% { box-shadow: 0 0 0 0 rgba(217,119,6,.45); }

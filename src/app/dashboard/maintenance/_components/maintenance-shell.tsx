@@ -1,9 +1,10 @@
 "use client"
 
-import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ClipboardList, History, LayoutDashboard, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { ModuleThemeScope } from "@/app/dashboard/_components/doc-ui/module-theme"
 
 type NavTab = {
   href: string
@@ -44,37 +45,21 @@ type MaintenanceShellProps = {
   children?: ReactNode
 }
 
+// U1 (2026-10-14): bọc màu module "slate" (phương án C — điều hướng theo màu module, hành động
+// luôn brand) + tab module bằng SegmentedTabs dùng chung.
 export function MaintenanceShell({ children }: MaintenanceShellProps) {
   const pathname = usePathname()
+  const activeTab = tabs.find((tab) => isActive(pathname, tab))
 
   return (
-    <div className="space-y-4">
-      {/* Tab navigation */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex gap-1 p-2 overflow-x-auto">
-          {tabs.map((tab) => {
-            const active = isActive(pathname, tab)
-            const Icon = tab.icon
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                className={
-                  "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border " +
-                  (active
-                    ? "bg-orange-50 text-orange-700 border-orange-200"
-                    : "bg-white text-slate-600 border-transparent hover:bg-slate-50")
-                }
-              >
-                <Icon size={14} />
-                {tab.label}
-              </Link>
-            )
-          })}
-        </div>
-      </div>
+    <ModuleThemeScope theme="slate" className="space-y-4">
+      <SegmentedTabs
+        ariaLabel="Chức năng Bảo trì"
+        value={activeTab?.href ?? null}
+        items={tabs.map((tab) => ({ key: tab.href, label: tab.label, icon: tab.icon, href: tab.href }))}
+      />
 
       {children}
-    </div>
+    </ModuleThemeScope>
   )
 }

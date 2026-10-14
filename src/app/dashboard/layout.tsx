@@ -647,7 +647,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen">
+    // font-doc (Plus Jakarta Sans) cho toàn dashboard — U0 đồng bộ giao diện 2026-10-14.
+    // Các nhánh /print, /product/confirm, /ky/ ở trên KHÔNG đổi font (PDF/in giữ nguyên).
+    <div className="font-doc flex min-h-screen">
       {mobileNavOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 md:hidden"

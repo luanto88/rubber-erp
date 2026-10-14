@@ -293,6 +293,7 @@ Vi du:
 
 ## Rules can doc khi lam viec
 
+- **QUY CHUẨN GIAO DIỆN MODULE (danh sách, dòng xổ, chi tiết 70/30 + PDF nhúng, thao tác, bàn giao) — áp dụng tự động mọi module**: `.claude/rules/29-ui-standard.md`
 - Tong quan: `.claude/rules/01-project-overview.md`
 - An toan: `.claude/rules/02-safety-rules.md`
 - Schema DB: `.claude/rules/03-database-schema.md`
@@ -7892,3 +7893,20 @@ Kế hoạch đầy đủ (quy chuẩn màu, font, bảng, từ điển icon, gi
 riêng từng module, còn lại dùng `brand-*`; font Plus Jakarta Sans toàn app; thứ tự Bảo trì → Điều xe
 → Kiểm nghiệm → Đề nghị mua → Kho vật tư → Xuất hàng → Thành phẩm/Sản lượng/Kho NL. Phiên sau bắt
 đầu từ U0 (nền tảng) — dựng `cung_cap_dl/UIUX/chuan-ui.html` cho người dùng duyệt trước khi code.
+
+### U0 xong (2026-10-14, chờ test tay)
+Nền tảng đồng bộ giao diện đã code (chưa module nào đổi bố cục): màu **phương án C** (banner + điều
+hướng theo màu module qua `mod-*`/`ModuleThemeScope`, hành động luôn brand), 8 domain trạng thái mới,
+tông `warn`, `info` đổi xanh dương, `RowAction`, `StatCard/StatGrid`, `DateGroupCard`, `ListState`,
+`SignStatusBadge`, `enterprise-table dense`, font Plus Jakarta toàn dashboard. Xem rule 05 mục "Quy
+chuẩn giao diện toàn app — U0". Tiếp theo: U1 Bảo trì.
+
+### U1 Bảo trì xong (2026-10-14, chờ test tay)
+Tổng quan / Biên bản / Lý lịch theo chuẩn U0 + quy tắc mới "dòng có chi tiết con" (mũi tên cuối dòng,
+ghim cột cuối trên điện thoại, nút Mở tất cả — `doc-ui/expandable-row.tsx`). Chi tiết + backlog: rule 05
+mục "Quy tắc dòng có chi tiết con + U1 Bảo trì" và plan mục U1/Backlog. Bổ sung sau test: banner + Quét QR
+trang Lý lịch, `BannerAction`. Tiếp theo: U1b (trang chi tiết biên bản, xem plan) rồi U2 Điều xe.
+
+### U1b + DateGroupRow + U2 Điều xe (2026-10-14, chờ test tay)
+Trang chi tiết biên bản chế độ xem 70/30 + route `api/maintenance/records/[id]/file-url`;
+`DateGroupRow`; danh sách Điều xe theo chuẩn U0. Chi tiết: rule 05 mục "U1b trang chi tiết biên bản".
