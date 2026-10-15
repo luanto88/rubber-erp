@@ -2117,7 +2117,7 @@ export default function DispatchPage() {
               </div>
             )
           })()}
-          <table className="enterprise-table dense">
+          <table className="enterprise-table dense min-w-[980px]">
             <thead>
               <tr>
                 <th>Mã ĐX</th>
@@ -2151,7 +2151,7 @@ export default function DispatchPage() {
                 const signDone = signStatus?.trangThai === "hoan_tat"
                 const openDetail = () => { setSelected(entry); setDetailDocTab("file"); setDetailMobileTab("info"); setView("detail") }
                 const tripDetail = (
-                  <table className="enterprise-table dense">
+                  <table className="enterprise-table dense min-w-[760px]">
                     <thead>
                       <tr>
                         <th>Số xe</th>
@@ -2370,7 +2370,7 @@ export default function DispatchPage() {
 
     const tripTable = (
       <ResponsiveTableWrapper>
-        <table className="enterprise-table dense">
+        <table className="enterprise-table dense min-w-[960px]">
           <thead>
             <tr>
               <th>Xe</th>
@@ -2386,7 +2386,7 @@ export default function DispatchPage() {
               <th className="text-right">KL khô</th>
               <th>Ký hiệu KT</th>
               <th>Ghi chú</th>
-              <th className="sticky-end text-right">PDF</th>
+              <th className="text-right">PDF</th>
             </tr>
           </thead>
           <tbody>
@@ -2407,7 +2407,7 @@ export default function DispatchPage() {
                 <td className="whitespace-nowrap text-right tabular-nums font-semibold text-slate-800">{getDispatchRowDry(row).toLocaleString()} kg</td>
                 <td className="whitespace-nowrap">{row.ghi_chu || "—"}</td>
                 <td className="max-w-48 truncate" title={row.ghi_chu_tu_do}>{row.ghi_chu_tu_do || "—"}</td>
-                <td className="sticky-end text-right">
+                <td className="text-right">
                   <RowAction kind="draft" label="Xuất PDF chuyến (chưa ký)" onClick={() => void exportTripPdf(selected, row)} />
                 </td>
               </tr>

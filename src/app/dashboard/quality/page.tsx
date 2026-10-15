@@ -1,7 +1,6 @@
 "use client"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
-import Link from "next/link"
 import dynamic from "next/dynamic"
 import { createPortal } from "react-dom"
 import * as XLSX from "xlsx"
@@ -2396,44 +2395,79 @@ export default function QualityPage() {
                 </StatGrid>
               </div>
 
-              {/* Filter bar */}
-              <FilterBar activeCount={[search,filterLoai,filterTT,filterFrom,filterTo].filter(Boolean).length}>
-                <div className="flex items-center gap-2 flex-1 min-w-40">
-                  <Search size={14} className="text-slate-400"/>
-                  <input value={search} onChange={e=>setSearch(e.target.value)}
-                    placeholder="Tìm mã lô, PKN..." className="flex-1 text-sm outline-none"/>
+              {/* Filter bar — layout="grid" dàn đều 100% chiều rộng, không bị dồn lệch trái */}
+              <FilterBar layout="grid" activeCount={[search,filterLoai,filterTT,filterFrom,filterTo].filter(Boolean).length}>
+                <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 transition-colors focus-within:border-mod-600 focus-within:ring-2 focus-within:ring-mod-100 sm:col-span-2 xl:col-span-2">
+                  <Search size={15} className="shrink-0 text-slate-400"/>
+                  <input
+                    value={search}
+                    onChange={e=>setSearch(e.target.value)}
+                    placeholder="Tìm mã lô, PKN..."
+                    className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 placeholder-slate-400 outline-none"
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setScanning(true)}
                     title="Quét QR phiếu kiểm nghiệm đã in"
                     aria-label="Quét QR phiếu kiểm nghiệm đã in"
-                    className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-mod-50 px-2.5 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-200"
+                    className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-mod-50 px-2 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-100 active:scale-95"
                   >
-                    <QrCode size={15} />
+                    <QrCode size={13} />
                     <span className="hidden sm:inline">Quét QR</span>
                   </button>
                 </div>
-                <select value={filterLoai} onChange={e=>setFilterLoai(e.target.value)}
-                  className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none">
+                <select
+                  value={filterLoai}
+                  onChange={e=>setFilterLoai(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-mod-600"
+                >
                   <option value="">Tất cả loại</option>
                   {CHUNG_LOAI.map(c=><option key={c} value={getLoaiCSR(c,factoryCode)}>{getLoaiCSR(c,factoryCode)}</option>)}
                 </select>
-                <select value={filterTT} onChange={e=>setFilterTT(e.target.value)}
-                  className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none">
+                <select
+                  value={filterTT}
+                  onChange={e=>setFilterTT(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-mod-600"
+                >
                   <option value="">Tất cả KQ</option>
                   <option value="dat_hang">Đạt hạng</option>
                   <option value="rot_hang">Rớt hạng</option>
                 </select>
-                <input type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)}
-                  className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none"/>
-                <span className="text-slate-400">→</span>
-                <input type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)}
-                  className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none"/>
+                <input
+                  type="date"
+                  value={filterFrom}
+                  onChange={e=>setFilterFrom(e.target.value)}
+                  aria-label="Từ ngày"
+                  title="Từ ngày"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-mod-600"
+                />
+                <input
+                  type="date"
+                  value={filterTo}
+                  onChange={e=>setFilterTo(e.target.value)}
+                  aria-label="Đến ngày"
+                  title="Đến ngày"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-mod-600"
+                />
                 {(search||filterLoai||filterTT||filterFrom||filterTo) && (
-                  <button onClick={()=>{setSearch("");setFilterLoai("");setFilterTT("");setFilterFrom("");setFilterTo("")}}
-                    className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
-                    <X size={13}/> Xóa lọc
-                  </button>
+                  <div className="col-span-full flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={()=>{setSearch("");setFilterLoai("");setFilterTT("");setFilterFrom("");setFilterTo("")}}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-red-600"
+                    >
+                      <X size={14}/> Xóa tất cả bộ lọc
+                    </button>
+                  </div>
                 )}
               </FilterBar>
 
@@ -2454,7 +2488,7 @@ export default function QualityPage() {
                       onCollapseAll={() => setExpandedDates(new Set())}
                     />
                   </div>
-                  <table className="enterprise-table dense">
+                  <table className="enterprise-table dense min-w-[640px]">
                     <DateGroupHead dateLabel="Ngày KN" summaryLabel="Phiếu & kết quả" />
                     <tbody>
                   {dateGroups.map(([date, dateResults]) => {
@@ -2615,7 +2649,7 @@ export default function QualityPage() {
                         sign={sign}
                         actions={actions}
                       >
-                          <table className="enterprise-table dense">
+                          <table className="enterprise-table dense min-w-[850px]">
                             <thead>
                               <tr>
                                 {inDeleteMode && (
@@ -2632,9 +2666,14 @@ export default function QualityPage() {
                                     />
                                   </th>
                                 )}
-                                {["Lô PKN","Lô KN","Loại","Tiêu chuẩn","Tạp chất","Tro","PRI","Kết quả"].map(h=>(
-                                  <th key={h}>{h}</th>
-                                ))}
+                                <th>Lô PKN</th>
+                                <th>Lô KN</th>
+                                <th>Loại</th>
+                                <th>Tiêu chuẩn</th>
+                                <th className="text-right">Độ nhớt</th>
+                                <th className="text-right">Po</th>
+                                <th className="text-right">Tạp chất</th>
+                                <th>Kết quả</th>
                                 <ExpandHeaderCell />
                               </tr>
                             </thead>
@@ -2725,23 +2764,29 @@ export default function QualityPage() {
                                       <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs font-bold">{effectiveR.loai_csr}</span>
                                     </td>
                                     <td className="text-slate-400 text-xs">{effectiveR.tieu_chuan}</td>
-                                    <td className="text-xs text-slate-600">
-                                      {effectiveR.grade?.tap_chat?.tb?.toFixed(3)??"-"}
-                                      <span className={`ml-1 ${effectiveR.grade?.tap_chat?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {effectiveR.grade?.tap_chat?.dat!=null?(effectiveR.grade.tap_chat.dat?"✓":"✗"):""}
-                                      </span>
+                                    <td className="text-xs text-slate-600 text-right whitespace-nowrap font-mono">
+                                      {effectiveR.grade?.mooney?.tb != null ? effectiveR.grade.mooney.tb.toFixed(1) : "-"}
+                                      {effectiveR.grade?.mooney?.dat != null && (
+                                        <span className={`ml-1 ${effectiveR.grade.mooney.dat ? "text-emerald-500" : "text-red-500"}`}>
+                                          {effectiveR.grade.mooney.dat ? "✓" : "✗"}
+                                        </span>
+                                      )}
                                     </td>
-                                    <td className="text-xs text-slate-600">
-                                      {effectiveR.grade?.tro?.tb?.toFixed(3)??"-"}
-                                      <span className={`ml-1 ${effectiveR.grade?.tro?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {effectiveR.grade?.tro?.dat!=null?(effectiveR.grade.tro.dat?"✓":"✗"):""}
-                                      </span>
+                                    <td className="text-xs text-slate-600 text-right whitespace-nowrap font-mono">
+                                      {effectiveR.grade?.po?.tb != null ? effectiveR.grade.po.tb.toFixed(1) : "-"}
+                                      {effectiveR.grade?.po?.dat != null && (
+                                        <span className={`ml-1 ${effectiveR.grade.po.dat ? "text-emerald-500" : "text-red-500"}`}>
+                                          {effectiveR.grade.po.dat ? "✓" : "✗"}
+                                        </span>
+                                      )}
                                     </td>
-                                    <td className="text-xs text-slate-600">
-                                      {effectiveR.grade?.pri?.tb?.toFixed(1)??"-"}
-                                      <span className={`ml-1 ${effectiveR.grade?.pri?.dat?"text-emerald-500":"text-red-500"}`}>
-                                        {effectiveR.grade?.pri?.dat!=null?(effectiveR.grade.pri.dat?"✓":"✗"):""}
-                                      </span>
+                                    <td className="text-xs text-slate-600 text-right whitespace-nowrap font-mono">
+                                      {effectiveR.grade?.tap_chat?.tb != null ? effectiveR.grade.tap_chat.tb.toFixed(3) : "-"}
+                                      {effectiveR.grade?.tap_chat?.dat != null && (
+                                        <span className={`ml-1 ${effectiveR.grade.tap_chat.dat ? "text-emerald-500" : "text-red-500"}`}>
+                                          {effectiveR.grade.tap_chat.dat ? "✓" : "✗"}
+                                        </span>
+                                      )}
                                     </td>
                                     <td>
                                       <StatusBadge

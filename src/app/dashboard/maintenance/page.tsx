@@ -251,7 +251,7 @@ export default function MaintenanceDashboardPage() {
           <ListState kind="empty" message="Chưa có biên bản nào" />
         ) : (
           <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-          <table className="enterprise-table dense">
+          <table className="enterprise-table dense min-w-[800px]">
             <thead>
               <tr>
                 <th>Mã biên bản</th>

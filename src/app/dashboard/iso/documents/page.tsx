@@ -509,7 +509,7 @@ export default function IsoDocumentsPage() {
                           <th className="hidden lg:table-cell">Lần BH</th>
                           <th>Trạng thái</th>
                           <th className="hidden md:table-cell">Ngày HLực</th>
-                          <th className="sticky-end text-right">Thao tác</th>
+                          <th className="text-right">Thao tác</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -525,7 +525,7 @@ export default function IsoDocumentsPage() {
                             <td className="hidden lg:table-cell text-center text-slate-600 text-xs font-mono">{child.lan_ban_hanh}</td>
                             <td>{renderStatusBadge(child.trang_thai)}</td>
                             <td className="hidden md:table-cell text-xs text-slate-500">{fmtDate(child.ngay_hieu_luc)}</td>
-                            <td className="sticky-end text-right">{renderDocActions(child, true)}</td>
+                            <td className="text-right">{renderDocActions(child, true)}</td>
                           </tr>
                         ))}
                       </tbody>

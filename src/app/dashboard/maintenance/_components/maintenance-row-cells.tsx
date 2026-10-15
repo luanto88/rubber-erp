@@ -148,7 +148,7 @@ export type MaintenanceLineSummary = {
 export function MaintenanceLinesDetail({ lines, isXe }: { lines: MaintenanceLineSummary[]; isXe: boolean }) {
   const sorted = [...lines].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
   return (
-    <table className="enterprise-table dense">
+    <table className="enterprise-table dense min-w-[540px]">
       <thead>
         <tr>
           <th>{isXe ? "Mã xe" : "Mã TB"}</th>

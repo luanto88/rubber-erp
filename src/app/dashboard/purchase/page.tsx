@@ -1,9 +1,11 @@
 "use client"
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import dynamic from "next/dynamic"
+import { createPortal } from "react-dom"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { AlertTriangle, Bell, ClipboardList, Clock, PenTool, Plus, Search, ShoppingCart } from "lucide-react"
+import { AlertTriangle, Bell, ClipboardList, Clock, PenTool, Plus, QrCode, Search, ShoppingCart, X } from "lucide-react"
 import { hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
 import { getFactoryTodayISO } from "@/lib/date-utils"
@@ -27,6 +29,15 @@ import {
   formatMoney, formatQty, formatSoPhieuFull, isPurchaseActive, purchaseDownloadBaseName, purchaseUrgency,
   type PurchaseRequestRow,
 } from "@/lib/purchase/types"
+
+// html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client (mirror maintenance/history, dispatch)
+const QrScanner = dynamic(
+  () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
+  { ssr: false },
+)
+
+// QR in trên phiếu Đề nghị mua = `{origin}/dashboard/purchase/{uuid}` (hoặc mã phiếu)
+const PURCHASE_ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 import { readJson } from "./_components/purchase-client"
 import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
 
@@ -78,6 +89,18 @@ function PurchaseListInner() {
   const [boPhanFilter, setBoPhanFilter] = useState<string[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
+  const [scanning, setScanning] = useState(false)
+
+  const handleScanDecoded = (text: string) => {
+    const raw = text.trim()
+    setScanning(false)
+    const idMatch = raw.match(PURCHASE_ID_RE)?.[0]
+    if (idMatch) {
+      router.push(`/dashboard/purchase/${idMatch}`)
+      return
+    }
+    setSearch(raw)
+  }
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -187,6 +210,25 @@ function PurchaseListInner() {
         ) : undefined}
       />
 
+      {scanning && typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
+            <QrScanner
+              onDecoded={(t) => handleScanDecoded(t)}
+              onCancel={() => setScanning(false)}
+              hintText="Đưa camera vào mã QR trên phiếu Đề nghị mua đã in"
+              cancelText="Hủy quét"
+              cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+              uploadButtonText="Tải ảnh chứa QR"
+              uploadScanningText="Đang xử lý ảnh..."
+              uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+              orDividerText="hoặc"
+              scanError={null}
+            />
+          </div>,
+          document.body,
+        )}
+
       <KtShortageBanner />
 
       <SegmentedTabs
@@ -204,29 +246,61 @@ function PurchaseListInner() {
       </StatGrid>
 
       <FilterBar layout="grid" activeCount={[search, to].filter(Boolean).length + (boPhanFilter.length ? 1 : 0)}>
-        <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-mod-600">
+        <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-mod-600 sm:col-span-2 lg:col-span-2 xl:col-span-2">
           <Search size={15} className="shrink-0 text-slate-400" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Tìm số phiếu, người đề nghị, vật tư..."
-            className="w-full min-w-0 text-sm outline-none"
+            className="w-full min-w-0 bg-transparent text-sm outline-none"
+          />
+          {search && (
+            <button
+              type="button"
+              aria-label="Xóa tìm kiếm"
+              onClick={() => setSearch("")}
+              className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <X size={13} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setScanning(true)}
+            title="Quét QR phiếu đề nghị mua"
+            aria-label="Quét QR phiếu đề nghị mua"
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-mod-50 px-2 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-200"
+          >
+            <QrCode size={15} />
+            <span className="hidden sm:inline">Quét QR</span>
+          </button>
+        </div>
+        <div className="h-10 w-full sm:col-span-1 lg:col-span-1 xl:col-span-2">
+          <FilterMultiSelect
+            placeholder="Tất cả bộ phận"
+            options={[...BO_PHAN_LIST]}
+            selected={boPhanFilter}
+            onChange={setBoPhanFilter}
+            searchPlaceholder="Tìm bộ phận..."
+            fullWidth
           />
         </div>
-        <FilterMultiSelect
-          placeholder="Tất cả bộ phận"
-          options={[...BO_PHAN_LIST]}
-          selected={boPhanFilter}
-          onChange={setBoPhanFilter}
-          searchPlaceholder="Tìm bộ phận..."
-          fullWidth
-        />
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 sm:col-span-2">
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="Từ ngày"
-            className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-mod-600" />
-          <span className="text-sm text-slate-400">→</span>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="Đến ngày"
-            className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-mod-600" />
+        <div className="grid h-10 grid-cols-[1fr_auto_1fr] items-center gap-2 sm:col-span-1 lg:col-span-1 xl:col-span-2">
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            aria-label="Từ ngày"
+            className="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
+          />
+          <span className="text-center text-sm text-slate-400">→</span>
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            aria-label="Đến ngày"
+            className="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
+          />
         </div>
       </FilterBar>
 
@@ -247,7 +321,7 @@ function PurchaseListInner() {
                 onCollapseAll={() => setExpanded(new Set())}
               />
             </div>
-            <table className="enterprise-table dense">
+            <table className="enterprise-table dense min-w-[980px]">
               <thead>
                 <tr>
                   <th>Số phiếu</th>
@@ -270,7 +344,7 @@ function PurchaseListInner() {
                   const openDetail = () => router.push(`/dashboard/purchase/${r.id}`)
                   const urg = r.ngay_can_hang && isPurchaseActive(r.trang_thai) ? purchaseUrgency(r.ngay_can_hang, today) : null
                   const detail = (
-                    <table className="enterprise-table dense">
+                    <table className="enterprise-table dense min-w-[760px]">
                       <thead>
                         <tr>
                           <th>#</th>

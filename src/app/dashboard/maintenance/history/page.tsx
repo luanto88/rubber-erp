@@ -780,7 +780,7 @@ export default function MaintenanceHistoryPage() {
             }
           />
         ) : (
-          <table className="enterprise-table">
+          <table className="enterprise-table min-w-[780px]">
             <thead>
               <tr>
                 <th>Ngày</th>

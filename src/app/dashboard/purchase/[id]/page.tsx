@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   AlertTriangle, Ban, BarChart3, Bell, CalendarClock, Download, FileCheck2, FilePen, History, ImagePlus, Images, Info, Loader2, Lock, PackageCheck,
-  Pencil, PenTool, Send, ShoppingCart, Workflow,
+  Pencil, PenTool, Printer, Send, ShoppingCart, Workflow,
 } from "lucide-react"
 import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
@@ -23,7 +23,6 @@ import { InspectorCard, MetaList, MetaRow, StatusSummaryBar } from "@/app/dashbo
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { SignActionBox, type SignAction } from "@/app/dashboard/_components/doc-ui/sign-action-box"
 import { TimelineProgress, TimelineSteps, type TimelineStepItem } from "@/app/dashboard/_components/doc-ui/timeline-steps"
-import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { useIsDesktop } from "@/app/dashboard/_components/doc-ui/use-is-desktop"
 import {
   formatMoney, formatQty, formatSoPhieuFull, isPurchaseActive, PURCHASE_SIGN_ORDER,
@@ -95,6 +94,13 @@ function PurchaseDetailInner() {
   const isDesktop = useIsDesktop()
   const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
   const [docTab, setDocTab] = useState<"file" | "content">("file")
+  const [origin, setOrigin] = useState("")
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOrigin(window.location.origin)
+    }
+  }, [])
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -236,8 +242,8 @@ function PurchaseDetailInner() {
   const docLabel = isAdjustment ? "Phiếu điều chỉnh" : "Phiếu đề nghị mua"
   const nguoiDeNghiTen = req.nguoi_de_nghi_ten || detail.names[req.nguoi_de_nghi_id] || ""
   const hasSignedFile = !!(detail.fileHienTai && req.yeu_cau_ky_id)
-  // Bản chưa ký: chỉ khi CHƯA có yêu cầu ký (nháp). Phiếu đã huỷ/đóng không có file vẫn chỉ xem nội dung.
-  const hasDraft = !hasSignedFile && !req.yeu_cau_ky_id && req.trang_thai === "nhap" && detail.lines.length > 0 && !!factoryId
+  // Bản PDF: Luôn cho phép hiển thị bản xem trước PDF qua buildPurchaseDraftPdfBytes khi chưa có file ký (Rule 29)
+  const hasDraft = !hasSignedFile && detail.lines.length > 0 && !!factoryId
   const effectiveDocTab: "file" | "content" = hasSignedFile || hasDraft ? docTab : "content"
   const anyModalOpen = receiveOpen || adjustOpen || closeOpen || cancelOpen || !!imageEdit
   const viewerActive = (isDesktop || mobileTab === "doc") && !anyModalOpen
@@ -247,6 +253,17 @@ function PurchaseDetailInner() {
     void openSecureFile(`/api/signing/requests/${req.yeu_cau_ky_id}/file-url?view=1&name=${encodeURIComponent(viewFileName)}`).then((r) => {
       if (!r.ok) setActionError(r.error)
     })
+  }
+  const handlePrintDraft = async () => {
+    if (!factoryId) return
+    try {
+      const bytes = await buildPurchaseDraftPdfBytes(detail, factoryId)
+      const blob = new Blob([bytes as unknown as BlobPart], { type: "application/pdf" })
+      const blobUrl = URL.createObjectURL(blob)
+      window.open(blobUrl, "_blank")
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Không tạo được bản in PDF")
+    }
   }
 
   const bannersNode = (
@@ -441,11 +458,12 @@ function PurchaseDetailInner() {
   const doneCount = timeline.filter((t) => t.state === "done").length
 
   // ── Hành động: 1 nút chính duy nhất ──
+  const isApproved = req.trang_thai === "da_duyet" || req.trang_thai === "hoan_tat" || doneCount === timeline.length
   const actions: SignAction[] = []
-  if (myTurn && req.yeu_cau_ky_id) {
+  if (myTurn && req.yeu_cau_ky_id && !isApproved) {
     actions.push({ key: "sign", label: "Ký ngay", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
   }
-  if (detail.perms.canSubmit) {
+  if (detail.perms.canSubmit && !isApproved) {
     actions.push({
       key: "submit",
       label: req.trang_thai === "tra_ve" ? "Gửi ký lại" : "Gửi ký duyệt",
@@ -458,10 +476,10 @@ function PurchaseDetailInner() {
   if (detail.perms.canReceive) {
     actions.push({ key: "receive", label: "Ghi nhận mua / Nhập kho", icon: <PackageCheck size={16} />, onClick: () => { setNotice(null); setReceiveOpen(true) } })
   }
-  if (!myTurn && req.trang_thai === "cho_ky" && req.yeu_cau_ky_id) {
+  if (!myTurn && req.trang_thai === "cho_ky" && req.yeu_cau_ky_id && !isApproved) {
     actions.push({ key: "kyscreen", label: "Mở màn ký", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
   }
-  if (detail.perms.canEdit) {
+  if (detail.perms.canEdit && !isApproved) {
     actions.push({ key: "edit", label: detail.perms.canTakeOver ? "Nhận xử lý" : "Sửa phiếu", icon: <Pencil size={16} />, onClick: () => setEditing(true) })
   }
   if (detail.perms.canAdjust) {
@@ -472,7 +490,7 @@ function PurchaseDetailInner() {
   }
   const primary = actions[0] ?? null
   const secondary = actions.slice(1)
-  const danger: SignAction[] = detail.perms.canCancel
+  const danger: SignAction[] = (detail.perms.canCancel && !isApproved)
     ? [{ key: "cancel", label: "Huỷ phiếu", icon: <Ban size={16} />, onClick: () => setCancelOpen(true) }]
     : []
 
@@ -523,12 +541,19 @@ function PurchaseDetailInner() {
     </>
   )
 
+  const headerChip = "rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11.5px] font-medium text-slate-600"
+
   const documentNode = (
     <div className="space-y-3">
       {(hasSignedFile || hasDraft) && (
         <SegmentedTabs
           items={[
-            { key: "file", label: hasSignedFile ? (req.trang_thai === "cho_ky" || req.trang_thai === "tra_ve" ? "File đang ký" : "File đã ký") : "Bản xem trước (chưa ký)" },
+            {
+              key: "file",
+              label: hasSignedFile
+                ? (req.trang_thai === "cho_ky" || req.trang_thai === "tra_ve" ? "File đang ký" : "File đã ký")
+                : (req.trang_thai === "da_duyet" || req.trang_thai === "hoan_tat" ? "Bản PDF đề nghị mua" : "Bản xem trước (chưa ký)"),
+            },
             { key: "content", label: "Nội dung phiếu" },
           ]}
           value={effectiveDocTab}
@@ -550,10 +575,10 @@ function PurchaseDetailInner() {
           key={`draft-${req.id}`}
           active={viewerActive}
           loadBytes={() => buildPurchaseDraftPdfBytes(detail, factoryId)}
-          sourceKey={`draft-${req.id}-${detail.lines.length}-${req.tong_tien}`}
+          sourceKey={`draft-${req.id}-${detail.lines.length}-${req.tong_tien}-${req.trang_thai}`}
           kind="pdf"
           fileExt="pdf"
-          label="Bản chưa ký · PDF"
+          label={req.trang_thai === "da_duyet" || req.trang_thai === "hoan_tat" ? "Bản PDF đề nghị mua · PDF" : "Bản chưa ký · PDF"}
         />
       ) : contentNode}
     </div>
@@ -567,25 +592,45 @@ function PurchaseDetailInner() {
         header={
           <DetailPageHeader
             backHref="/dashboard/purchase"
-            backLabel="Danh sách"
+            backLabel="Quay lại danh sách"
             eyebrow="Đề nghị mua vật tư"
             title={docLabel}
             code={soPhieu}
-            subtitle={`Ngày ${fmtDate(req.ngay)} · ${nguoiDeNghiTen}${req.bo_phan ? ` · ${req.bo_phan}` : ""}`}
-            tags={<StatusBadge domain="purchase" status={req.trang_thai} />}
+            tags={
+              <>
+                <span className={headerChip}>Ngày {fmtDate(req.ngay)}</span>
+                <span className={headerChip}>{detail.lines.length} dòng vật tư</span>
+                <span className={headerChip}>Tổng: {formatMoney(req.tong_tien, req.loai_tien)} {req.loai_tien}</span>
+                {req.bo_phan && <span className={headerChip}>Bộ phận: {req.bo_phan}</span>}
+                {nguoiDeNghiTen && <span className={headerChip}>Đề nghị: {nguoiDeNghiTen}</span>}
+              </>
+            }
             actions={
               <>
-                {hasSignedFile && (
+                {hasSignedFile ? (
                   <>
-                    <HeaderButton icon={<FileCheck2 size={16} />} label="Xem file ký" onClick={openSignedFile} />
+                    <HeaderButton icon={<FileCheck2 size={15} />} label="Xem file ký" onClick={openSignedFile} />
                     <HeaderButton
-                      icon={<Download size={16} />}
+                      icon={<Download size={15} />}
                       label="Tải file ký"
                       href={buildStorageDownloadUrl(detail.fileHienTai as string, fileName)}
                     />
                   </>
+                ) : (
+                  <HeaderButton icon={<Printer size={15} />} label="In bản chưa ký" onClick={handlePrintDraft} />
                 )}
-                <HeaderQr value={`${typeof window !== "undefined" ? window.location.origin : ""}/dashboard/purchase/${req.id}`} code={soPhieu} title={docLabel} />
+                {detail.perms.canEdit && (
+                  <HeaderButton
+                    icon={<Pencil size={15} />}
+                    label={detail.perms.canTakeOver ? "Nhận xử lý" : "Sửa phiếu"}
+                    onClick={() => setEditing(true)}
+                  />
+                )}
+                <HeaderQr
+                  value={`${origin || (typeof window !== "undefined" ? window.location.origin : "")}/dashboard/purchase/${req.id}`}
+                  code={soPhieu}
+                  title={docLabel}
+                />
               </>
             }
           />

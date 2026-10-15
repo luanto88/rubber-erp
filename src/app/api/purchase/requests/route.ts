@@ -71,15 +71,47 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // File PDF hiện tại (đã ký 1 phần / đã duyệt) để tải ngay ở danh sách.
+    // File PDF hiện tại (đã ký 1 phần / đã duyệt) để tải ngay ở danh sách + trạng thái yêu cầu ký.
     const allYcIds = rows.map((r) => r.yeu_cau_ky_id).filter(Boolean) as string[]
     const fileByYc = new Map<string, string | null>()
+    const ycStatusByYc = new Map<string, string>()
     for (let i = 0; i < allYcIds.length; i += 100) {
       const { data } = await supabaseAdmin
         .from("yeu_cau_ky")
-        .select("id, file_hien_tai")
+        .select("id, file_hien_tai, trang_thai")
         .in("id", allYcIds.slice(i, i + 100))
-      for (const y of (data || []) as { id: string; file_hien_tai: string | null }[]) fileByYc.set(y.id, y.file_hien_tai)
+      for (const y of (data || []) as { id: string; file_hien_tai: string | null; trang_thai: string }[]) {
+        fileByYc.set(y.id, y.file_hien_tai)
+        ycStatusByYc.set(y.id, y.trang_thai)
+      }
+    }
+
+    // Tự động đồng bộ (auto-reconcile): Nếu yeu_cau_ky đã hoan_tat hoặc signers đã ký 3/3
+    // mà purchase_requests vẫn là 'cho_ky', tự động update DB và sửa trạng thái trong bộ nhớ.
+    const reconcileRows: { id: string; nextStatus: string }[] = []
+    const nowIso = new Date().toISOString()
+    for (const r of rows) {
+      if (r.yeu_cau_ky_id && (r.trang_thai === "cho_ky" || r.trang_thai === "tra_ve")) {
+        const ycTrangThai = ycStatusByYc.get(r.yeu_cau_ky_id)
+        const signers = signersByYc.get(r.yeu_cau_ky_id) || []
+        const allDone = (signers.length > 0 && signers.every((s) => s.trang_thai === "da_ky")) || ycTrangThai === "hoan_tat"
+        if (allDone) {
+          const nextStatus = r.loai === "dieu_chinh" ? "hoan_tat" : "da_duyet"
+          r.trang_thai = nextStatus
+          r.ngay_duyet = nowIso
+          reconcileRows.push({ id: r.id, nextStatus })
+        }
+      }
+    }
+    if (reconcileRows.length > 0) {
+      void Promise.all(
+        reconcileRows.map((item) =>
+          supabaseAdmin
+            .from("purchase_requests")
+            .update({ trang_thai: item.nextStatus, ngay_duyet: nowIso, updated_at: nowIso })
+            .eq("id", item.id),
+        ),
+      ).catch((e) => console.error("[purchase/reconcile] Lỗi auto-reconcile danh sách:", e))
     }
 
     // Dòng vật tư rút gọn — cho dòng xổ ở danh sách (rule 29 mục A.3).

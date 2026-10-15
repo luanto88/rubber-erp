@@ -533,7 +533,7 @@ export default function MaintenanceRecordsPage() {
               </div>
             )
           })()}
-          <table className="enterprise-table dense">
+          <table className="enterprise-table dense min-w-[900px]">
             <thead>
               <tr>
                 <th>Mã biên bản</th>

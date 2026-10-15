@@ -5,23 +5,30 @@ vào BẤT KỲ module nào có danh sách hoặc trang chi tiết, tự áp d�
 chờ người dùng nhắc. Mẫu tham chiếu đã chạy: Bảo trì (`maintenance/records/[id]`), Điều xe
 (`dispatch/page.tsx`). Chi tiết component: rule 05.
 
-## A. Danh sách
+## A. Danh sách & Cân chỉnh bố cục
 1. Banner `PageHeaderBanner` màu module; vùng module bọc `moduleThemeClass(theme)`; tab
    `SegmentedTabs`; KPI `StatGrid`/`StatCard`; bộ lọc `FilterBar layout="grid"`.
-2. Bảng `enterprise-table dense` trong `ResponsiveTableWrapper`. Trạng thái CHỈ qua `StatusBadge
+2. **Cân chỉnh Header & Action (Desktop & Mobile)**:
+   - Các trường header và các action luôn phải cân chỉnh vừa vặn với desktop hoặc mobile, không lệch trái, lệch phải hoặc xuống dòng vô điều kiện.
+   - Header bảng và ô dữ liệu bên dưới phải gióng hàng đồng nhất: văn bản căn trái, số liệu căn phải, cột thao tác/mũi tên căn phải.
+   - Ô tìm kiếm và các action trong thanh lọc/header phải có kích thước vừa vặn (`w-full sm:w-72` hoặc `sm:w-80`), không để ô tìm kiếm phình to chiếm hết diện tích làm xô lệch hoặc đẩy các bộ lọc/nút bấm xuống dòng vô lý trên desktop.
+3. Bảng `enterprise-table dense` trong `ResponsiveTableWrapper`. Trạng thái CHỈ qua `StatusBadge
    domain=…`; ký duyệt CHỈ qua `SignStatusBadge`.
-3. **Dòng có chi tiết con ⇒ `ExpandableRow`** (phiếu có chuyến, biên bản có thiết bị, ngày có lô…):
+4. **Dòng có chi tiết con ⇒ `ExpandableRow`** (phiếu có chuyến, biên bản có thiết bị, ngày có lô…):
    mũi tên XUỐNG ở ô CUỐI (sau cụm thao tác, `endCell`), bấm dòng mở/thu, mũi tên KHÔNG chuyển
    trang, header cột cuối `ExpandHeaderCell`, có `ExpandAllToggle` trên bảng, chi tiết = bảng con
    `enterprise-table dense`. Không có con ⇒ `canExpand={false}`. Ô có nút riêng (mã, badge ký) phải
    `stopPropagation`.
-4. Cột cuối "Thao tác" ghim phải (`sticky-end`) — `IconActionGroup` + `RowAction`.
+5. Cột cuối "Thao tác" — `IconActionGroup` + `RowAction`:
+   - Hiển thị tự nhiên ở cuối dòng, KHÔNG ghim cố định (`position: sticky`) trên cả Desktop lẫn Mobile.
+   - Kết hợp với khai báo `min-w-[...]` phù hợp (`min-w-[640px]` đến `min-w-[980px]`) trên `enterprise-table dense` trong `ResponsiveTableWrapper` để bảng cuộn ngang tự nhiên, tuyệt đối không để cụm nút thao tác đè lên nội dung các cột dữ liệu.
 
 ## B. Thao tác (từ điển `action-registry.ts`) — một icon = một nghĩa
 Thứ tự: [Ký ngay] → **view** `Eye` → signed `FileCheck2` → download `Download` → draft `FileText` /
 print `Printer` → riêng module → edit `Pencil` → copy `Copy` → delete `Trash2`.
-- **Con mắt (`view`) = MỞ TRANG CHI TIẾT trong app**, không bao giờ mở file. Mã bản ghi (link) cũng
-  mở chi tiết.
+- **Con mắt (`view`): BẮT BUỘC mở trang/khung xem CHI TIẾT (Detail View) có kèm nhúng file PDF** (`DocViewer`), không bao giờ mở file tải về riêng lẻ hay mở form sửa:
+  + Nếu đã gửi ký duyệt / có file ký: nhúng file PDF đã ký.
+  + Nếu chưa gửi ký duyệt (hoặc đang là bản nháp): BẮT BUỘC render bản xem trước PDF chưa ký duyệt (qua `loadBytes` dựng PDF trực tiếp trong trình duyệt).
 - `signed` = xem file ĐÃ KÝ trong tab mới qua route token (mục D). `download` = tải đúng tên.
 - `draft`/`print` = bản CHƯA ký — CHỈ hiện khi chưa có file ký.
 - Sửa/Xoá: giữ nguyên điều kiện quyền + chủ sở hữu + khoá sau ký của module; không hiện khi chưa
@@ -69,10 +76,11 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | Bảo trì | ✅ | Lý lịch ✅ · Biên bản ✅ · Tổng quan ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ (quét ở Lý lịch) |
 | Điều xe | ✅ | ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ |
 | Kiểm nghiệm | ✅ | ✅ (ngày → lô → số liệu mẫu) | ✅ `/dashboard/quality/[date]` | ✅ | ✅ (tab Xếp hạng) |
-| Đề nghị mua | ✅ | ✅ (dòng vật tư) | ✅ (+ bản chưa ký nhúng khi Nháp) | ✅ | QR có từ trước; chưa có Quét QR |
+| Đề nghị mua | ✅ | ✅ (dòng vật tư) | ✅ (+ bản chưa ký nhúng khi Nháp) | ✅ | ✅ (Đã tích hợp Quét QR ở ô tìm) |
+| Sản lượng | ✅ | ✅ (ngày → xe / chuyến) | (chế độ gom ngày + bảng con) | ✅ | ✅ (Hỗ trợ kỹ thuật converter) |
 | Văn bản | (Doc-UI riêng) | ✅ tiến trình ký | ✅ | ❌ (lưu tên object) | — |
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
-| Kho vật tư, Xuất hàng, Thành phẩm, Sản lượng, Kho NL | ❌ | ❌ | ❌ | ❌ | — |
+| Kho vật tư, Xuất hàng, Kho thành phẩm, Thành phẩm, Kho NL | ❌ | ❌ | ❌ | ❌ | — |
 
 ## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)
 Chưa gửi ký ⇒ tab "Bản xem trước (chưa ký)" dựng PDF ngay trong trình duyệt: `DocViewer`

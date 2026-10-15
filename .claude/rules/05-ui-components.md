@@ -588,3 +588,18 @@ try/catch. Code mới dùng html5-qrcode phải theo đúng cách này.
   Đội · Điểm GN/Phiên · KL tươi · KL khô · Ghi chú), `ExpandAllToggle` trên bảng, mã ĐX/con mắt mở chi
   tiết, ô Ký duyệt chặn nổi bọt.
 - Còn lệch quy tắc: danh sách Biên bản + Tổng quan Bảo trì chưa xổ danh sách thiết bị của biên bản.
+
+## Quy tắc Cân chỉnh Header/Action và Hình mắt xem chi tiết kèm PDF (2026-10-15)
+
+1. **Cân chỉnh Header & Action (Desktop & Mobile)**:
+   - Các trường header và các action luôn phải cân chỉnh vừa vặn với desktop hoặc mobile, không lệch trái, lệch phải hoặc xuống dòng vô điều kiện.
+   - Header bảng và ô dữ liệu phải thẳng hàng tuyệt đối (chữ căn trái, số liệu căn phải, cột thao tác/mũi tên căn phải).
+   - Thanh lọc (FilterBar) và header: Ô tìm kiếm phải có độ rộng hợp lý (`w-full sm:w-72` hoặc `sm:w-80`), không co giãn chiếm hết diện tích làm xô lệch hoặc đẩy các bộ lọc, nút action xuống dòng tùy tiện trên màn hình desktop.
+2. **Hình mắt (`Eye` / `RowAction kind="view"`): BẮT BUỘC vào View Detail có kèm nhúng file PDF**:
+   - Bấm hình mắt PHẢI mở trang/khung xem CHI TIẾT (Detail View) có kèm khung nhúng file PDF (`DocViewer`), không bao giờ mở file riêng lẻ hay mở form sửa.
+   - Nếu bản ghi đã gửi ký duyệt / có file ký: nhúng file PDF đã ký.
+   - Nếu bản ghi chưa gửi ký duyệt (hoặc đang là bản nháp): BẮT BUỘC render file PDF chưa ký duyệt (bản nháp xem trước được dựng trực tiếp qua `loadBytes`).
+3. **Cột Thao tác không ghim cố định (Hiển thị tự nhiên ở cuối dòng, không dùng `position: sticky`)**:
+   - Cột Thao tác (kèm mũi tên mở rộng nếu có) **KHÔNG ghim cố định** (`position: sticky`) trên cả Desktop lẫn Mobile. Cột nằm tự nhiên ở vị trí cuối dòng của bảng như cũ.
+   - Tránh tuyệt đối việc ghim cố định cụm nút thao tác (do cụm nút dài 160px – 280px sẽ chiếm diện tích lớn và che đè mất nội dung các cột dữ liệu khác khi bảng cuộn ngang).
+   - Mọi bảng `enterprise-table dense` nhiều cột (Điều xe, Chất lượng, Bảo trì, Đề nghị mua...) BẮT BUỘC bọc trong `ResponsiveTableWrapper` và khai báo `min-w-[...]` phù hợp (`min-w-[640px]` đến `min-w-[980px]`). Người dùng cuộn ngang xem dữ liệu sạch sẽ, rõ ràng và thấy cụm thao tác ở cuối dòng mà không bị đè lên bất kỳ nội dung nào.

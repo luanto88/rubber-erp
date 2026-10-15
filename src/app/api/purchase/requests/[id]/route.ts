@@ -60,11 +60,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (request.yeu_cau_ky_id) {
       const { data: yc } = await supabaseAdmin
         .from("yeu_cau_ky")
-        .select("file_hien_tai, tra_ve_ly_do")
+        .select("trang_thai, file_hien_tai, tra_ve_ly_do")
         .eq("id", request.yeu_cau_ky_id)
         .maybeSingle()
       fileHienTai = (yc?.file_hien_tai as string) || null
       traVeLyDo = (yc?.tra_ve_ly_do as string) || null
+
+      // Tự động đồng bộ (auto-reconcile): Nếu yeu_cau_ky đã hoàn tất hoặc 3/3 signer đã ký
+      // mà purchase_requests vẫn là 'cho_ky', tự động cập nhật sang da_duyet / hoan_tat.
+      const allSignersDone = signers.length > 0 && signers.every((s) => s.trangThai === "da_ky")
+      if ((yc?.trang_thai === "hoan_tat" || allSignersDone) && (request.trang_thai === "cho_ky" || request.trang_thai === "tra_ve")) {
+        const nextStatus = request.loai === "dieu_chinh" ? "hoan_tat" : "da_duyet"
+        const now = new Date().toISOString()
+        await supabaseAdmin.from("purchase_requests").update({
+          trang_thai: nextStatus,
+          ngay_duyet: now,
+          updated_at: now,
+        }).eq("id", id)
+        request.trang_thai = nextStatus
+        request.ngay_duyet = now
+      }
     }
 
     const status = request.trang_thai as PurchaseStatus
@@ -166,7 +181,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         // đã nhập kho một phần (dùng "Đóng phiếu").
         canCancel:
           (isOwner && (status === "nhap" || (status === "tra_ve" && !anySigned))) ||
-          (actor.isAdmin && status !== "huy" && status !== "hoan_tat" && status !== "dang_mua" && status !== "dong"),
+          (actor.isAdmin && status !== "huy" && status !== "hoan_tat" && status !== "da_duyet" && status !== "dang_mua" && status !== "dong"),
         // Ghi nhận mua / nhập kho: CHỈ người đề nghị + admin (GĐ2f — bỏ quyền inventory.create).
         canReceive: buying && hasRemaining && (isOwner || actor.isAdmin),
         canAdjust: buying && hasAdjustable && isOwner && !pendingAdjustmentId,

@@ -10,8 +10,8 @@ import { ChevronDown, ChevronsDownUp, ChevronsUpDown } from "lucide-react"
  *   RowAction, DocCodeLink...). Nút tự viết trong dòng phải `e.stopPropagation()`.
  * - Các dòng liền nhau trong MỘT bảng (`enterprise-table`), không chia khung; chi tiết thụt vào
  *   với viền trái màu module (`mod-600`).
- * - Ô cuối có class `sticky-end` ⇒ ghim phải khi bảng cuộn ngang trên điện thoại. Header của cột
- *   đó cũng phải mang `sticky-end` (dùng <ExpandHeaderCell/>).
+ * - Ô cuối chứa cụm thao tác + mũi tên mở/thu ở góc phải, hiển thị tự nhiên ở cuối dòng (không ghim sticky).
+ *   Header của cột đó dùng <ExpandHeaderCell/>.
  * - `canExpand=false` ⇒ vẫn giữ ô cuối (trống) để cột thẳng hàng.
  * `children` là các <td> của dòng cha (KHÔNG gồm ô mũi tên). `colSpan` = tổng số cột kể cả ô mũi tên.
  */
@@ -44,7 +44,7 @@ export function ExpandableRow({
         onClick={canExpand ? onToggle : undefined}
       >
         {children}
-        <td className="sticky-end w-px whitespace-nowrap text-right">
+        <td className="w-px whitespace-nowrap text-right">
           <div className="flex items-center justify-end gap-0.5">
             {endCell}
             {canExpand ? (
@@ -79,9 +79,9 @@ export function ExpandableRow({
   )
 }
 
-/** Ô tiêu đề cho cột cuối (thao tác + mũi tên) — ghim phải cùng ô dữ liệu trên điện thoại. */
+/** Ô tiêu đề cho cột cuối (thao tác + mũi tên). */
 export function ExpandHeaderCell({ children }: { children?: ReactNode }) {
-  return <th className="sticky-end text-right">{children}</th>
+  return <th className="w-px whitespace-nowrap text-right">{children}</th>
 }
 
 /** Nút "Mở tất cả / Thu gọn tất cả" cho bảng có dòng mở rộng. */

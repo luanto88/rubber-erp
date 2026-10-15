@@ -545,6 +545,49 @@ export async function signField(params: {
     }
   }
 
+  // Side-effect riêng của module Đề nghị mua (purchase): khi hồ sơ ký hoàn tất (3/3 bước đã ký),
+  // tự động cập nhật purchase_requests sang da_duyet (hoặc hoan_tat nếu là phiếu điều chỉnh),
+  // lưu ngay_duyet, giải phóng trạng thái chờ ký.
+  if (allDone && yeuCau.modun === "purchase" && targetBanGhiId) {
+    try {
+      const { data: pr } = await supabase
+        .from("purchase_requests")
+        .select("id, trang_thai, loai, parent_request_id, so, nam")
+        .eq("id", targetBanGhiId)
+        .maybeSingle()
+      if (pr && (pr.trang_thai === "cho_ky" || pr.trang_thai === "tra_ve" || pr.trang_thai === "nhap")) {
+        const nextStatus = pr.loai === "dieu_chinh" ? "hoan_tat" : "da_duyet"
+        await supabase
+          .from("purchase_requests")
+          .update({
+            trang_thai: nextStatus,
+            ngay_duyet: signedAt,
+            updated_at: signedAt,
+          })
+          .eq("id", targetBanGhiId)
+        await supabase.from("purchase_request_logs").insert({
+          request_id: targetBanGhiId,
+          factory_id: yeuCau.factory_id,
+          user_id: params.userId,
+          hanh_dong: "da_duyet",
+          noi_dung: "Đã ký duyệt hoàn tất đủ các bước ký số",
+        })
+        if (pr.loai === "dieu_chinh" && pr.parent_request_id) {
+          await supabase.from("purchase_request_logs").insert({
+            request_id: pr.parent_request_id,
+            factory_id: yeuCau.factory_id,
+            user_id: params.userId,
+            hanh_dong: "dieu_chinh_duyet",
+            noi_dung: `Phiếu điều chỉnh ${String(pr.so).padStart(2, "0")}/ĐNMVT (${pr.nam}) đã duyệt — áp dụng thông số mới`,
+          })
+          await supabase.rpc("purchase_recompute_request", { p_request_id: pr.parent_request_id })
+        }
+      }
+    } catch (err) {
+      console.error("[signing/purchase] Lỗi cập nhật trạng thái purchase_requests:", err)
+    }
+  }
+
   await supabase.from("nhat_ky_ky").insert({
     factory_id: yeuCau.factory_id,
     yeu_cau_id: params.yeuCauId,

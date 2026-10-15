@@ -224,13 +224,7 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 /* Dòng có chi tiết con (U1, 2026-10-14) — mũi tên mở/thu ở ô CUỐI dòng, chi tiết thụt vào ngay dưới. */
 .enterprise-table tbody tr.expand-detail:hover { background: transparent; }
 .enterprise-table tbody tr.expand-detail > td { background: #fafbfc; border-bottom: 1px solid #e2e8f0; padding-top: 10px; padding-bottom: 12px; }
-/* Ghim cột cuối (thao tác + mũi tên) khi bảng phải cuộn ngang trên điện thoại. */
-@media (max-width: 767px) {
-  .enterprise-table .sticky-end { position: sticky; right: 0; z-index: 1; box-shadow: -8px 0 8px -8px rgba(15, 23, 42, .18); }
-  .enterprise-table thead th.sticky-end { background: #f8fafc; }
-  .enterprise-table tbody td.sticky-end { background: #fff; }
-  .enterprise-table tbody tr:hover > td.sticky-end { background: #eef5f2; }
-}
+
 
 /* ─── Màu điều hướng theo module (U0, phương án C "lai", 2026-10-14) ───────────
    Phần ĐIỀU HƯỚNG (tab đang chọn, ô nhập khi focus, icon thẻ số liệu, viền nhóm ngày) lấy màu
