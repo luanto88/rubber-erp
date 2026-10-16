@@ -306,3 +306,13 @@ bản gốc ra `../rubber-erp-backups/export-orders-backup-*.json` trước khi 
   - Phần còn lại của lô tính từ `allOrderAssignments` = MỌI đơn của nhà máy (phân trang, không theo
     bộ lọc danh sách). Trước đây dùng `orders` đang hiển thị ⇒ lọc ngày là xuất trùng được.
   - `openEdit` ưu tiên bọc ghi trên đơn; chỉ khi đơn trống bọc mới suy từ bọc kiện đã gán.
+
+## Chuẩn hoá danh sách theo rule 29 (2026-10-16, chờ test tay)
+- Danh sách bọc `moduleThemeClass("ocean")`; banner ocean, nút "Tạo đơn xuất" gate `export.create`.
+- `StatGrid cols={4}`: Tổng đơn / Chờ phê duyệt (warn khi >0) / Tổng bành / Tổng xe.
+- `SegmentedTabs` Tất cả / Chờ phê duyệt / Đã phê duyệt (lọc ở `filtered`, trang thái NULL = đã duyệt).
+- `FilterBar layout="grid"`: tìm + **Quét QR** (QR biên bản `…/dashboard/eudr?order=<ma_don>` → lấy `order`
+  hoặc mã `XH-…`, đặt ô tìm + tự xổ đơn; chuỗi khác → ô tìm), CSR, từ/đến ngày, Xóa lọc.
+- Bảng `enterprise-table dense min-w-[980px]` + `ExpandableRow` (xe + ảnh phóng to, lô gán, chỉ tiêu, QR
+  EUDR, KH được cấp quyền). Thao tác cuối: Duyệt → In → Cấp quyền KH → Sửa (`Pencil`) → Xoá. Không ghim cột.
+- Đã bỏ `getExportOrderStatusLabel/Classes`; trạng thái qua `StatusBadge domain="export"`.

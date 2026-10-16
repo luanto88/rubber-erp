@@ -1,6 +1,8 @@
 "use client";
-import { Fragment, useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Image from "next/image";
+import dynamic from "next/dynamic";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { prepareImageForUpload } from "@/lib/image-upload";
@@ -19,20 +21,17 @@ import {
   Search,
   Truck,
   Package,
-  ChevronDown,
-  ChevronUp,
-  Edit2,
-  Trash2,
   Check,
   QrCode,
   UserPlus,
   AlertTriangle,
   GripVertical,
-  Printer,
   ImagePlus,
   ArrowLeftRight,
   ShieldCheck,
   Loader2,
+  Clock,
+  ScanLine,
 } from "lucide-react";
 import { QRCodeSVG as QRCode } from "qrcode.react";
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
@@ -42,6 +41,23 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
 import { CustomerGrantModal } from "@/app/dashboard/export/_components/customer-grant-modal";
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt";
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme";
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card";
+import { SegmentedTabs, type SegmentedTabItem } from "@/app/dashboard/_components/doc-ui/segmented-tabs";
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge";
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state";
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action";
+import { IconAction, IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action";
+import {
+  ExpandableRow,
+  ExpandHeaderCell,
+  ExpandAllToggle,
+} from "@/app/dashboard/_components/doc-ui/expandable-row";
+
+const QrScanner = dynamic(
+  () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
+  { ssr: false },
+);
 import {
   fetchGrantCandidates,
   fetchFactoryGrants,
@@ -191,6 +207,7 @@ const CHI_TIEU_KEY: Record<string, string> = {
 const EXPORT_DRAFT_SESSION_KEY = "export_order_draft_v1";
 const EXPORT_ORDER_STATUS_PENDING = "cho_phe_duyet";
 const EXPORT_ORDER_STATUS_APPROVED = "da_phe_duyet";
+type ExportStatusTab = "all" | typeof EXPORT_ORDER_STATUS_PENDING | typeof EXPORT_ORDER_STATUS_APPROVED;
 const EXPORT_ORDER_APPROVER_TITLES = new Set([
   "giam doc nha may",
   "pho giam doc nha may",
@@ -315,18 +332,6 @@ function getExportOrderStatus(order?: Pick<ExportOrder, "trang_thai"> | null) {
   return order?.trang_thai || EXPORT_ORDER_STATUS_APPROVED;
 }
 
-function getExportOrderStatusLabel(status?: string | null) {
-  return getExportOrderStatus({ trang_thai: status }) === EXPORT_ORDER_STATUS_PENDING
-    ? "Chờ phê duyệt"
-    : "Đã phê duyệt";
-}
-
-function getExportOrderStatusClasses(status?: string | null) {
-  return getExportOrderStatus({ trang_thai: status }) === EXPORT_ORDER_STATUS_PENDING
-    ? "bg-amber-100 text-amber-700"
-    : "bg-emerald-100 text-emerald-700";
-}
-
 function getQcMetricValue(grade?: QcGrade | null) {
   if (!grade) return null;
   if (typeof grade.tb === "number" && !Number.isNaN(grade.tb)) return grade.tb;
@@ -408,7 +413,10 @@ export default function ExportPage() {
   const [form, setForm] = useState<ExportForm>(emptyForm());
   const [editId, setEditId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const [statusTab, setStatusTab] = useState<ExportStatusTab>("all");
+  const [scanning, setScanning] = useState(false);
+  const [zoomImg, setZoomImg] = useState<string | null>(null);
   const [delConfirm, setDelConfirm] = useState<string | null>(null);
   const [pendingRetestAttach, setPendingRetestAttach] =
     useState<PendingRetestAttach | null>(null);
@@ -922,6 +930,7 @@ export default function ExportPage() {
     total: orders.length,
     tongBanh: orders.reduce((s, o) => s + (o.tong_banh || 0), 0),
     tongXe: orders.reduce((s, o) => s + (o.vehicles?.length || 0), 0),
+    pending: orders.filter((o) => getExportOrderStatus(o) === EXPORT_ORDER_STATUS_PENDING).length,
   };
 
   const canEditOrder = useCallback(
@@ -1687,11 +1696,13 @@ export default function ExportPage() {
 
   // -- Filtered orders -------------------------------------------------------
   const filtered = useMemo(() => {
-    if (!search.trim()) return orders;
+    const byStatus =
+      statusTab === "all" ? orders : orders.filter((o) => getExportOrderStatus(o) === statusTab);
+    if (!search.trim()) return byStatus;
     const query = search.trim().toLowerCase();
     const normQuery = normalizeLotCode(query);
 
-    return orders.filter((o) => {
+    return byStatus.filter((o) => {
       if (o.ma_don?.toLowerCase().includes(query)) return true;
       if (
         o.customers?.ten_kh_en?.toLowerCase().includes(query) ||
@@ -1722,7 +1733,39 @@ export default function ExportPage() {
       if (hasVehicle) return true;
       return false;
     });
-  }, [orders, search]);
+  }, [orders, search, statusTab]);
+
+  // -- Quét QR biên bản xuất hàng -------------------------------------------
+  // QR in trên biên bản = `${origin}/dashboard/eudr?order=${ma_don}`.
+  const handleScanDecoded = useCallback(
+    (text: string) => {
+      setScanning(false);
+      const raw = (text || "").trim();
+      if (!raw) return;
+      let code: string | null = null;
+      try {
+        const url = new URL(raw);
+        code = url.searchParams.get("order");
+      } catch {
+        /* không phải URL */
+      }
+      if (!code) {
+        const m = raw.match(/XH-[^\s?&#]+/i);
+        if (m) code = m[0];
+      }
+      if (code) {
+        const found = orders.find(
+          (o) => (o.ma_don || "").toLowerCase() === code!.toLowerCase(),
+        );
+        setStatusTab("all");
+        setSearch(found?.ma_don || code);
+        if (found) setExpandedIds((prev) => new Set(prev).add(found.id));
+        return;
+      }
+      setSearch(raw);
+    },
+    [orders],
+  );
 
   // -- RENDER: Toast ---------------------------------------------------------
   const Toast = () =>
@@ -1740,9 +1783,28 @@ export default function ExportPage() {
     ) : null;
 
   // -- RENDER: LIST ----------------------------------------------------------
-  if (view === "list")
+  if (view === "list") {
+    const canCreateOrder = hasPermission(currentUser, "export.create");
+    const searchTrim = search.trim();
+    const searchNorm = normalizeLotCode(searchTrim);
+    const LIST_COLS = 8;
+    const allExpanded =
+      filtered.length > 0 && filtered.every((o) => expandedIds.has(o.id));
+    const statusTabs: SegmentedTabItem<ExportStatusTab>[] = [
+      { key: "all", label: "Tất cả đơn", icon: FileOutput, count: stats.total },
+      { key: EXPORT_ORDER_STATUS_PENDING, label: "Chờ phê duyệt", icon: Clock, count: stats.pending },
+      { key: EXPORT_ORDER_STATUS_APPROVED, label: "Đã phê duyệt", icon: Check, count: stats.total - stats.pending },
+    ];
+    const toggleExpanded = (id: string) =>
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+
     return (
-      <div>
+      <div className={moduleThemeClass("ocean")}>
         <PageBackgroundMotif theme="ocean"/>
         <Toast />
         {kpiPrompt && (
@@ -1761,76 +1823,85 @@ export default function ExportPage() {
           theme="ocean"
           icon={FileOutput}
           action={
-            <button
-              onClick={() => {
-                setForm(emptyForm());
-                setEditId(null);
-                setView("add");
-              }}
-              className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-50 text-ocean-700 font-bold rounded-xl shadow-md transition-all"
-            >
-              <Plus size={16} /> Tạo đơn xuất
-            </button>
+            canCreateOrder ? (
+              <button
+                onClick={() => {
+                  setForm(emptyForm());
+                  setEditId(null);
+                  setView("add");
+                }}
+                className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-50 text-brand-700 font-bold rounded-xl shadow-md transition-all"
+              >
+                <Plus size={16} /> Tạo đơn xuất
+              </button>
+            ) : undefined
           }
         />
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          {[
-            {
-              label: "Tổng đơn xuất",
-              value: stats.total,
-              color: "text-slate-700",
-              Icon: FileOutput,
-              ic: "text-slate-400",
-            },
-            {
-              label: "Tổng bành xuất",
-              value: stats.tongBanh.toLocaleString(),
-              color: "text-emerald-600",
-              Icon: Package,
-              ic: "text-emerald-400",
-            },
-            {
-              label: "Tổng xe",
-              value: stats.tongXe,
-              color: "text-blue-600",
-              Icon: Truck,
-              ic: "text-blue-400",
-            },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center"
-            >
-              <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`} />
-              <div className={`text-2xl font-extrabold ${s.color}`}>
-                {s.value}
-              </div>
-              <div className="text-xs text-slate-500 mt-1">{s.label}</div>
-            </div>
-          ))}
-        </div>
+        <StatGrid cols={4} className="mb-4">
+          <StatCard icon={FileOutput} label="Tổng đơn xuất" value={stats.total.toLocaleString("vi-VN")} loading={loading} />
+          <StatCard
+            icon={Clock}
+            label="Chờ phê duyệt"
+            value={stats.pending.toLocaleString("vi-VN")}
+            valueTone={stats.pending > 0 ? "warn" : "default"}
+            loading={loading}
+          />
+          <StatCard
+            icon={Package}
+            label="Tổng bành xuất"
+            value={stats.tongBanh.toLocaleString("vi-VN")}
+            valueTone="good"
+            loading={loading}
+          />
+          <StatCard icon={Truck} label="Tổng xe vận chuyển" value={stats.tongXe.toLocaleString("vi-VN")} loading={loading} />
+        </StatGrid>
 
-        {/* Filters */}
+        <SegmentedTabs
+          items={statusTabs}
+          value={statusTab}
+          onChange={setStatusTab}
+          className="mb-4"
+          ariaLabel="Lọc theo trạng thái phê duyệt"
+        />
+
         <FilterBar
+          layout="grid"
           activeCount={[search, filterLoai, filterFrom, filterTo].filter(Boolean).length}
         >
-          <div className="flex items-center gap-2 flex-1 min-w-48">
-            <Search size={15} className="text-slate-400" />
+          <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-mod-600 sm:col-span-2">
+            <Search size={15} className="shrink-0 text-slate-400" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Tìm mã đơn, khách hàng, số lô..."
-              className="flex-1 text-sm outline-none"
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
             />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="shrink-0 text-slate-400 hover:text-slate-600"
+                aria-label="Xóa ô tìm"
+              >
+                <X size={14} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setScanning(true)}
+              className="flex h-7 shrink-0 items-center gap-1 rounded-lg bg-mod-50 px-2 text-xs font-bold text-mod-800 hover:bg-mod-200"
+              title="Quét QR biên bản xuất hàng"
+            >
+              <ScanLine size={14} /> Quét QR
+            </button>
           </div>
           <select
             value={filterLoai}
             onChange={(e) => setFilterLoai(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
           >
-            <option value="">Tất cả loại</option>
+            <option value="">Tất cả loại CSR</option>
             {csrOpts.map((l) => (
               <option key={l}>{l}</option>
             ))}
@@ -1839,14 +1910,15 @@ export default function ExportPage() {
             type="date"
             value={filterFrom}
             onChange={(e) => setFilterFrom(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            title="Từ ngày"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
           />
-          <span className="text-slate-400 text-sm">→</span>
           <input
             type="date"
             value={filterTo}
             onChange={(e) => setFilterTo(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+            title="Đến ngày"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
           />
           {(search || filterLoai || filterFrom || filterTo) && (
             <button
@@ -1856,452 +1928,349 @@ export default function ExportPage() {
                 setFilterFrom("");
                 setFilterTo("");
               }}
-              className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500"
+              className="flex h-10 w-full items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 hover:border-red-300 hover:text-red-600"
             >
               <X size={14} /> Xóa lọc
             </button>
           )}
         </FilterBar>
 
-        {/* Table */}
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-500">
+            {loading ? "" : `${filtered.length.toLocaleString("vi-VN")} đơn`}
+          </span>
+          <ExpandAllToggle
+            allExpanded={allExpanded}
+            disabled={filtered.length === 0}
+            onExpandAll={() => setExpandedIds(new Set(filtered.map((o) => o.id)))}
+            onCollapseAll={() => setExpandedIds(new Set())}
+          />
+        </div>
+
         <ResponsiveTableWrapper>
-          {loading ? (
-            <div className="p-12 text-center text-slate-400">Đang tải...</div>
-          ) : filtered.length === 0 ? (
-            <div className="p-12 text-center text-slate-400">
-              <FileOutput size={40} className="mx-auto mb-3 opacity-30" />
-              <p>Không có đơn xuất hàng nào</p>
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  {[
-                    "Mã đơn",
-                    "Ngày",
-                    "Khách hàng",
-                    "Loại",
-                    "Xe",
-                    "Tổng bành",
-                    "Hợp đồng",
-                    "",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtered.map((order) => {
+          <table className="enterprise-table dense min-w-[980px]">
+            <thead>
+              <tr>
+                <th>Mã đơn</th>
+                <th>Ngày</th>
+                <th>Khách hàng</th>
+                <th>Loại / Trạng thái</th>
+                <th className="text-right">Xe</th>
+                <th className="text-right">Tổng bành</th>
+                <th>Hợp đồng</th>
+                <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <ListState kind="loading" asRow colSpan={LIST_COLS} />
+              ) : filtered.length === 0 ? (
+                <ListState
+                  kind="empty"
+                  message="Không có đơn xuất hàng nào phù hợp"
+                  asRow
+                  colSpan={LIST_COLS}
+                />
+              ) : (
+                filtered.map((order) => {
                   const orderStatus = getExportOrderStatus(order);
                   const allowEdit = canEditOrder(order);
                   const allowDelete = canDeleteOrder(order);
                   const allowApprove =
                     canApproveOrders && orderStatus === EXPORT_ORDER_STATUS_PENDING;
+                  const orderGrants = grantsByOrderId[order.id] || [];
 
-                  return (
-                  <Fragment key={order.id}>
-                    <tr
-                      className="hover:bg-slate-50 cursor-pointer transition-colors"
-                      onClick={() =>
-                        setExpandedId(expandedId === order.id ? null : order.id)
-                      }
-                    >
-                      <td className="px-4 py-3 font-bold text-emerald-700">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span>{order.ma_don}</span>
-                          {(grantsByOrderId[order.id] || []).length > 0 && (
-                            <span
-                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 text-[10px] font-bold"
-                              title={`Đã cấp quyền cho ${(grantsByOrderId[order.id] || []).length} tài khoản khách hàng`}
-                            >
-                              <ShieldCheck size={10} /> {(grantsByOrderId[order.id] || []).length}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {order.ngay
-                          ? new Date(order.ngay).toLocaleDateString("vi-VN")
-                          : "-"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-700">
+                  const detail = (
+                    <div className="grid grid-cols-1 gap-4 text-xs lg:grid-cols-3">
+                      {/* Khách hàng & hợp đồng */}
+                      <div className="space-y-1">
+                        <div className="mb-2 font-bold text-slate-600">Khách hàng &amp; hợp đồng</div>
+                        <div className="text-sm font-bold text-slate-800">
                           {order.customers?.ten_kh_en || "-"}
                         </div>
-                        <div className="text-xs text-slate-400">
-                          {order.customers?.ma_kh}
+                        {order.customers?.dia_chi && (
+                          <div className="whitespace-pre-line text-slate-500">{order.customers.dia_chi}</div>
+                        )}
+                        {order.customers?.nguoi_lien_he && (
+                          <div className="text-slate-500">Liên hệ: {order.customers.nguoi_lien_he}</div>
+                        )}
+                        {order.customers?.email && <div className="text-slate-500">{order.customers.email}</div>}
+                        {order.customers?.quoc_gia && <div className="text-slate-500">{order.customers.quoc_gia}</div>}
+                        <div className="mt-2 space-y-1 border-t border-slate-200 pt-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-24 text-slate-400">Trạng thái:</span>
+                            <StatusBadge domain="export" status={orderStatus} size="xs" />
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="w-24 text-slate-400">Số thông báo:</span>
+                            <span className="font-semibold">{order.so_thong_bao || "-"}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="w-24 text-slate-400">Số hóa đơn:</span>
+                            <span className="font-semibold">{order.so_hoa_don || "-"}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="w-24 text-slate-400">Số hợp đồng:</span>
+                            <span className="font-semibold">{order.so_hop_dong || "-"}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="w-24 text-slate-400">Loại pallet:</span>
+                            <span className="font-semibold">{order.loai_pallet || "-"}</span>
+                          </div>
                         </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col gap-1">
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold w-fit">
-                            {order.chung_loai}
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[11px] font-bold w-fit ${getExportOrderStatusClasses(orderStatus)}`}
-                          >
-                            {getExportOrderStatusLabel(orderStatus)}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {order.vehicles?.length || 0} xe
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-700">
-                        {(order.tong_banh || 0).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 text-xs">
-                        {order.so_hop_dong || "-"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
-                          {allowApprove && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleApproveOrder(order);
-                              }}
-                              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100 hover:border-emerald-300"
-                              title="Phê duyệt đơn"
-                            >
-                              <Check size={13} />
-                              <span>Duyệt</span>
-                            </button>
-                          )}
-                          {allowEdit && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEdit(order);
-                            }}
-                            className="p-1.5 rounded-lg transition-colors hover:bg-blue-50 text-blue-500"
-                            title="Sửa"
-                          >
-                            <Edit2 size={14} />
-                          </button>
-                          )}
-                          {allowDelete && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDelConfirm(order.id);
-                            }}
-                            className="p-1.5 rounded-lg transition-colors hover:bg-red-50 text-red-400"
-                            title="Xóa"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                          )}
-                          {expandedId === order.id ? (
-                            <ChevronUp size={16} className="text-slate-400" />
-                          ) : (
-                            <ChevronDown size={16} className="text-slate-400" />
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                    {expandedId === order.id && (
-                      <tr>
-                        <td
-                          colSpan={8}
-                          className="px-4 py-4 bg-slate-50 border-t border-slate-100"
-                        >
-                          <div className="grid grid-cols-3 gap-4 text-xs">
-                            {/* Customer info */}
-                            <div className="space-y-1">
-                              <div className="font-bold text-slate-600 mb-2">
-                                Khách hàng
+                        {(order.yeu_cau_chi_tieu || []).length > 0 && (
+                          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+                            <div className="mb-1 font-bold text-amber-700">Yêu cầu chỉ tiêu</div>
+                            {(order.yeu_cau_chi_tieu || []).map((r) => (
+                              <div key={r.ten} className="text-amber-700">
+                                {r.ten}: {r.min ? `Min ${r.min}` : ""}
+                                {r.min && r.max ? " - " : ""}
+                                {r.max ? `Max ${r.max}` : ""}
                               </div>
-                              <div className="font-bold text-slate-700 text-sm">
-                                {order.customers?.ten_kh_en || "-"}
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Xe + lô */}
+                      <div className="space-y-3">
+                        <div className="font-bold text-slate-600">Xe vận chuyển ({order.vehicles?.length || 0})</div>
+                        {(order.vehicles || []).map((v, i) => {
+                          const vAssignments = (order.assignments || []).filter((a) => a.vehicleIdx === i);
+                          const totalLots = new Set(vAssignments.map((a) => a.lot_id)).size;
+                          const totalBanh = vAssignments.reduce(
+                            (s, a) => s + (a.kien_a || 0) + (a.kien_b || 0) + (a.kien_c || 0) + (a.kien_d || 0),
+                            0,
+                          );
+                          const totalTan = (totalBanh * (order.loai_banh || 0)) / 1000;
+                          const imgs = [
+                            ...(v.image_urls ?? []),
+                            ...(!v.image_urls?.length
+                              ? ([v.image_url_1, v.image_url_2, v.image_url_3].filter(Boolean) as string[])
+                              : []),
+                          ];
+                          return (
+                            <div key={v.id} className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Truck size={14} className="text-slate-400" />
+                                <span className="font-semibold text-slate-700">Xe {i + 1} · {v.loai_xe}</span>
+                                <span className="text-slate-500">{v.bien_truoc}</span>
+                                {v.bien_sau && (
+                                  <>
+                                    <span className="text-slate-300">/</span>
+                                    <span className="text-slate-500">{v.bien_sau}</span>
+                                  </>
+                                )}
                               </div>
-                              {order.customers?.dia_chi && (
-                                <div className="text-slate-500 whitespace-pre-line">
-                                  {order.customers.dia_chi}
-                                </div>
-                              )}
-                              {order.customers?.nguoi_lien_he && (
-                                <div className="text-slate-500">
-                                  Liên hệ: {order.customers.nguoi_lien_he}
-                                </div>
-                              )}
-                              {order.customers?.email && (
-                                <div className="text-slate-500">
-                                  {order.customers.email}
-                                </div>
-                              )}
-                              {order.customers?.quoc_gia && (
-                                <div className="text-slate-500">
-                                  {order.customers.quoc_gia}
-                                </div>
-                              )}
-                              <div className="pt-2 space-y-0.5 border-t border-slate-200 mt-2">
-                                <div className="flex gap-2">
-                                  <span className="text-slate-400 w-24">
-                                    Trạng thái:
-                                  </span>
-                                  <span
-                                    className={`inline-flex px-2 py-0.5 rounded-full font-bold ${getExportOrderStatusClasses(orderStatus)}`}
-                                  >
-                                    {getExportOrderStatusLabel(orderStatus)}
-                                  </span>
-                                </div>
-                                <div className="flex gap-2">
-                                  <span className="text-slate-400 w-24">
-                                    Số thông báo:
-                                  </span>
-                                  <span className="font-semibold">
-                                    {order.so_thong_bao || "-"}
-                                  </span>
-                                </div>
-                                <div className="flex gap-2">
-                                  <span className="text-slate-400 w-24">
-                                    Số hóa đơn:
-                                  </span>
-                                  <span className="font-semibold">
-                                    {order.so_hoa_don || "-"}
-                                  </span>
-                                </div>
-                                <div className="flex gap-2">
-                                  <span className="text-slate-400 w-24">
-                                    Loại pallet:
-                                  </span>
-                                  <span className="font-semibold">
-                                    {order.loai_pallet || "-"}
-                                  </span>
-                                </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-lg bg-slate-100 px-2 py-0.5 font-bold text-slate-700">{totalLots} lô</span>
+                                <span className="rounded-lg bg-slate-100 px-2 py-0.5 font-bold text-slate-700">
+                                  {totalBanh.toLocaleString("vi-VN")} bành
+                                </span>
+                                <span className="rounded-lg bg-slate-100 px-2 py-0.5 font-bold text-slate-700">
+                                  {totalTan.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 3 })} tấn
+                                </span>
                               </div>
-                            </div>
-                            {/* Vehicles + lots */}
-                            <div>
-                              <div className="font-bold text-slate-600 mb-2">
-                                Xe ({order.vehicles?.length})
-                              </div>
-                              <div className="space-y-3">
-                                {(order.vehicles || []).map((v, i) => (
-                                  <div
-                                    key={v.id}
-                                    className="flex flex-col gap-3 bg-white rounded-lg px-3 py-3 border border-slate-200 shadow-sm"
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <Truck
-                                        size={14}
-                                        className="text-slate-400"
-                                      />
-                                      <span className="font-semibold text-slate-700">
-                                        {v.loai_xe}
-                                      </span>
-                                      <span className="text-slate-500">
-                                        {v.bien_truoc}
-                                      </span>
-                                      {v.bien_sau && (
-                                        <>
-                                          <span className="text-slate-300">
-                                            /
-                                          </span>
-                                          <span className="text-slate-500">
-                                            {v.bien_sau}
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                    {/* Thống kê xe + ảnh thumbnail */}
-                                    {(() => {
-                                      const vAssignments = (order.assignments || []).filter(
-                                        (a) => a.vehicleIdx === i,
-                                      );
-                                      const totalLots = new Set(vAssignments.map((a) => a.lot_id)).size;
-                                      const totalBanh = vAssignments.reduce(
-                                        (s, a) => s + (a.kien_a || 0) + (a.kien_b || 0) + (a.kien_c || 0) + (a.kien_d || 0),
-                                        0,
-                                      );
-                                      const totalTan = totalBanh * (order.loai_banh || 0) / 1000;
-                                      const imgs = [
-                                        ...(v.image_urls ?? []),
-                                        ...(!v.image_urls?.length
-                                          ? ([v.image_url_1, v.image_url_2, v.image_url_3].filter(Boolean) as string[])
-                                          : []),
-                                      ];
-                                      return (
-                                        <div className="flex items-center gap-3 pt-2 border-t border-slate-100 flex-wrap">
-                                          <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-lg">
-                                            {totalLots} lô
-                                          </span>
-                                          <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg">
-                                            {totalBanh.toLocaleString("vi-VN")} bành
-                                          </span>
-                                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg">
-                                            {totalTan.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 3 })} tấn
-                                          </span>
-                                          {imgs.map((url, imgIdx) => (
-                                            <a
-                                              key={imgIdx}
-                                              href={url}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              title="Xem ảnh lớn"
-                                              className="block w-14 h-14 rounded-lg border border-slate-200 overflow-hidden hover:opacity-80 hover:ring-2 hover:ring-emerald-400 transition-all"
-                                            >
-                                              <Image
-                                                src={url}
-                                                alt=""
-                                                width={56}
-                                                height={56}
-                                                unoptimized
-                                                className="w-full h-full object-cover"
-                                              />
-                                            </a>
-                                          ))}
-                                        </div>
-                                      );
-                                    })()}
-                                  </div>
-                                ))}
-                              </div>
-                              {(order.assignments || []).length > 0 && (
-                                <div className="mt-2">
-                                  <div className="font-bold text-slate-600 mb-1">
-                                    Lô hàng
-                                  </div>
-                                  <div className="flex flex-wrap gap-1">
-                                    {(order.assignments || []).map((a) => {
-                                      const isMatchedLot =
-                                        Boolean(search.trim()) &&
-                                        (a.ma_lo?.toLowerCase().includes(search.trim().toLowerCase()) ||
-                                          (normalizeLotCode(search.trim()) &&
-                                            normalizeLotCode(a.ma_lo).includes(normalizeLotCode(search.trim()))));
-                                      return (
-                                        <span
-                                          key={a.lot_id + a.vehicleIdx}
-                                          className={`px-2 py-0.5 rounded-lg text-xs font-semibold ${
-                                            isMatchedLot
-                                              ? "bg-amber-100 border-2 border-amber-400 text-amber-900 font-bold shadow-sm ring-2 ring-amber-300"
-                                              : "bg-white border border-slate-200 text-slate-700"
-                                          }`}
-                                        >
-                                          {a.ma_lo} · Xe {a.vehicleIdx + 1}
-                                        </span>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                              {(order.yeu_cau_chi_tieu || []).length > 0 && (
-                                <div className="mt-2 p-2 bg-amber-50 rounded-lg border border-amber-200">
-                                  <div className="font-bold text-amber-700 mb-1">
-                                    Yêu cầu chỉ tiêu
-                                  </div>
-                                  {(order.yeu_cau_chi_tieu || []).map((r) => (
-                                    <div key={r.ten} className="text-amber-600">
-                                      {r.ten}: {r.min ? `Min ${r.min}` : ""}
-                                      {r.min && r.max ? " - " : ""}
-                                      {r.max ? `Max ${r.max}` : ""}
-                                    </div>
+                              {imgs.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {imgs.map((url, imgIdx) => (
+                                    <button
+                                      key={imgIdx}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setZoomImg(url);
+                                      }}
+                                      title="Xem ảnh lớn"
+                                      className="block h-14 w-14 overflow-hidden rounded-lg border border-slate-200 transition-all hover:ring-2 hover:ring-mod-600"
+                                    >
+                                      <Image src={url} alt="" width={56} height={56} unoptimized className="h-full w-full object-cover" />
+                                    </button>
                                   ))}
                                 </div>
                               )}
                             </div>
-                            {/* QR Code */}
-                            <div className="flex flex-col items-center justify-start gap-2">
-                              <div className="font-bold text-slate-600 mb-1 self-start">
-                                Mã QR EUDR
-                              </div>
-                              <div className="p-2 bg-white border border-slate-200 rounded-xl">
-                                <QRCode
-                                  value={`https://qlsxkpt.vercel.app/dashboard/eudr?order=${order.ma_don}`}
-                                  size={100}
-                                  level="M"
-                                />
-                              </div>
-                              <div className="text-[10px] text-slate-400 text-center break-all max-w-[130px]">
-                                {order.ma_don}
-                              </div>
-                              <a
-                                href={`/dashboard/eudr?order=${encodeURIComponent(order.ma_don)}`}
-                                className="flex items-center gap-1 text-xs text-emerald-600 hover:underline font-bold"
-                              >
-                                <QrCode size={11} /> Xem EUDR
-                              </a>
-                              <a
-                                href={`/dashboard/export/print?id=${order.id}`}
-                                target="_blank"
-                                className="flex items-center gap-1 text-xs text-blue-600 hover:underline font-bold mt-1"
-                              >
-                                <Printer size={11} /> Tải PDF biên bản
-                              </a>
-                              {canGrantCustomer && (
-                                <button
-                                  type="button"
-                                  onClick={() => setGrantModalOrder(order)}
-                                  className="flex items-center gap-1 text-xs text-violet-600 hover:underline font-bold mt-1"
-                                >
-                                  <UserPlus size={11} /> Cấp quyền KH
-                                </button>
-                              )}
-
-                              {/* Danh sách tài khoản khách hàng đã được cấp quyền */}
-                              {(() => {
-                                const orderGrants = grantsByOrderId[order.id] || [];
-                                return (
-                                  <div className="mt-2.5 w-full pt-2 border-t border-slate-200 flex flex-col items-center">
-                                    <div className="text-[11px] font-bold text-slate-600 mb-1.5 flex items-center gap-1 self-start">
-                                      <ShieldCheck size={12} className="text-violet-600" />
-                                      <span>Đã cấp quyền KH ({orderGrants.length}):</span>
-                                    </div>
-                                    {orderGrants.length === 0 ? (
-                                      <div className="text-[11px] text-slate-400 italic self-start">
-                                        Chưa cấp quyền KH
-                                      </div>
-                                    ) : (
-                                      <div className="flex flex-col gap-1 w-full max-w-[150px]">
-                                        {orderGrants.map((g) => (
-                                          <div
-                                            key={g.id}
-                                            className="flex items-center justify-between gap-1 px-2 py-1 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800"
-                                          >
-                                            <span className="truncate font-medium text-[11px]" title={g.userName}>
-                                              {g.userName}
-                                            </span>
-                                            {canGrantCustomer && (
-                                              <button
-                                                type="button"
-                                                disabled={revokingGrantId === g.id}
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  void handleRevokeGrant(order.id, g.id, g.userName);
-                                                }}
-                                                className="text-violet-400 hover:text-red-600 transition-colors p-0.5 rounded hover:bg-violet-100 disabled:opacity-50 shrink-0"
-                                                title={`Xóa quyền của ${g.userName}`}
-                                              >
-                                                {revokingGrantId === g.id ? (
-                                                  <Loader2 size={11} className="animate-spin" />
-                                                ) : (
-                                                  <X size={11} />
-                                                )}
-                                              </button>
-                                            )}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </div>
+                          );
+                        })}
+                        {(order.assignments || []).length > 0 && (
+                          <div>
+                            <div className="mb-1 font-bold text-slate-600">Lô hàng</div>
+                            <table className="enterprise-table dense">
+                              <thead>
+                                <tr>
+                                  <th>Mã lô</th>
+                                  <th>Xe</th>
+                                  <th className="text-right">A</th>
+                                  <th className="text-right">B</th>
+                                  <th className="text-right">C</th>
+                                  <th className="text-right">D</th>
+                                  <th className="text-right">Tổng</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(order.assignments || []).map((a, aIdx) => {
+                                  const isMatchedLot =
+                                    Boolean(searchTrim) &&
+                                    (a.ma_lo?.toLowerCase().includes(searchTrim.toLowerCase()) ||
+                                      (Boolean(searchNorm) && normalizeLotCode(a.ma_lo).includes(searchNorm)));
+                                  const tong = (a.kien_a || 0) + (a.kien_b || 0) + (a.kien_c || 0) + (a.kien_d || 0);
+                                  return (
+                                    <tr key={`${a.lot_id}-${a.vehicleIdx}-${aIdx}`} className={isMatchedLot ? "bg-amber-50" : undefined}>
+                                      <td className={isMatchedLot ? "font-bold text-amber-900" : "font-semibold"}>{a.ma_lo}</td>
+                                      <td>Xe {a.vehicleIdx + 1}</td>
+                                      <td className="text-right">{a.kien_a || ""}</td>
+                                      <td className="text-right">{a.kien_b || ""}</td>
+                                      <td className="text-right">{a.kien_c || ""}</td>
+                                      <td className="text-right">{a.kien_d || ""}</td>
+                                      <td className="text-right font-semibold">{tong.toLocaleString("vi-VN")}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                )})}
-              </tbody>
-            </table>
-          )}
+                        )}
+                      </div>
+
+                      {/* QR EUDR + quyền khách hàng */}
+                      <div className="flex flex-col items-start gap-2">
+                        <div className="font-bold text-slate-600">Mã QR EUDR</div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-2">
+                          <QRCode
+                            value={`https://qlsxkpt.vercel.app/dashboard/eudr?order=${order.ma_don}`}
+                            size={100}
+                            level="M"
+                          />
+                        </div>
+                        <a
+                          href={`/dashboard/eudr?order=${encodeURIComponent(order.ma_don)}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center gap-1 text-xs font-bold text-brand-700 hover:underline"
+                        >
+                          <QrCode size={11} /> Xem EUDR
+                        </a>
+                        <div className="mt-1 w-full border-t border-slate-200 pt-2">
+                          <div className="mb-1.5 flex items-center gap-1 text-[11px] font-bold text-slate-600">
+                            <ShieldCheck size={12} className="text-violet-600" />
+                            <span>Đã cấp quyền KH ({orderGrants.length}):</span>
+                          </div>
+                          {orderGrants.length === 0 ? (
+                            <div className="text-[11px] italic text-slate-400">Chưa cấp quyền KH</div>
+                          ) : (
+                            <div className="flex w-full max-w-[220px] flex-col gap-1">
+                              {orderGrants.map((g) => (
+                                <div
+                                  key={g.id}
+                                  className="flex items-center justify-between gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1 text-violet-800"
+                                >
+                                  <span className="truncate text-[11px] font-medium" title={g.userName}>{g.userName}</span>
+                                  {canGrantCustomer && (
+                                    <button
+                                      type="button"
+                                      disabled={revokingGrantId === g.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        void handleRevokeGrant(order.id, g.id, g.userName);
+                                      }}
+                                      className="shrink-0 rounded p-0.5 text-violet-400 transition-colors hover:bg-violet-100 hover:text-red-600 disabled:opacity-50"
+                                      title={`Xóa quyền của ${g.userName}`}
+                                    >
+                                      {revokingGrantId === g.id ? (
+                                        <Loader2 size={11} className="animate-spin" />
+                                      ) : (
+                                        <X size={11} />
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+
+                  return (
+                    <ExpandableRow
+                      key={order.id}
+                      expanded={expandedIds.has(order.id)}
+                      onToggle={() => toggleExpanded(order.id)}
+                      colSpan={LIST_COLS}
+                      detail={detail}
+                      label="Xem chi tiết đơn"
+                      endCell={
+                        <IconActionGroup>
+                          {allowApprove && (
+                            <RowAction
+                              kind="approve"
+                              variant="text"
+                              label="Duyệt"
+                              onClick={() => void handleApproveOrder(order)}
+                            />
+                          )}
+                          <RowAction
+                            kind="print"
+                            label="Tải PDF biên bản"
+                            href={`/dashboard/export/print?id=${order.id}`}
+                            target="_blank"
+                          />
+                          {canGrantCustomer && (
+                            <IconAction
+                              icon={UserPlus}
+                              label="Cấp quyền khách hàng"
+                              tone="sky"
+                              onClick={() => setGrantModalOrder(order)}
+                            />
+                          )}
+                          {allowEdit && (
+                            <RowAction kind="edit" label="Sửa đơn" onClick={() => openEdit(order)} />
+                          )}
+                          {allowDelete && (
+                            <RowAction kind="delete" label="Xóa đơn" onClick={() => setDelConfirm(order.id)} />
+                          )}
+                        </IconActionGroup>
+                      }
+                    >
+                      <td className="font-bold text-brand-700">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span>{order.ma_don}</span>
+                          {orderGrants.length > 0 && (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700"
+                              title={`Đã cấp quyền cho ${orderGrants.length} tài khoản khách hàng`}
+                            >
+                              <ShieldCheck size={10} /> {orderGrants.length}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap text-slate-600">
+                        {order.ngay ? new Date(order.ngay).toLocaleDateString("vi-VN") : "-"}
+                      </td>
+                      <td>
+                        <div className="font-semibold text-slate-700">{order.customers?.ten_kh_en || "-"}</div>
+                        <div className="text-xs text-slate-400">{order.customers?.ma_kh}</div>
+                      </td>
+                      <td>
+                        <div className="flex flex-col gap-1">
+                          <span className="w-fit rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
+                            {order.chung_loai}
+                          </span>
+                          <StatusBadge domain="export" status={orderStatus} size="xs" />
+                        </div>
+                      </td>
+                      <td className="text-right text-slate-600">{order.vehicles?.length || 0}</td>
+                      <td className="text-right font-semibold text-slate-700">
+                        {(order.tong_banh || 0).toLocaleString("vi-VN")}
+                      </td>
+                      <td className="text-xs text-slate-500">{order.so_hop_dong || "-"}</td>
+                    </ExpandableRow>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </ResponsiveTableWrapper>
 
         {/* Delete confirm */}
@@ -2332,6 +2301,49 @@ export default function ExportPage() {
           </div>
         )}
 
+        {zoomImg && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
+            onClick={() => setZoomImg(null)}
+          >
+            <button
+              type="button"
+              onClick={() => setZoomImg(null)}
+              className="absolute right-4 top-4 rounded-full bg-white/15 p-2 text-white hover:bg-white/25"
+              aria-label="Đóng ảnh"
+            >
+              <X size={20} />
+            </button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={zoomImg}
+              alt=""
+              className="max-h-[90vh] max-w-[95vw] rounded-xl object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
+
+        {scanning &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
+              <QrScanner
+                onDecoded={handleScanDecoded}
+                onCancel={() => setScanning(false)}
+                hintText="Đưa mã QR trên biên bản xuất hàng vào khung"
+                cancelText="Hủy quét"
+                cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+                uploadButtonText="Tải ảnh chứa QR"
+                uploadScanningText="Đang xử lý ảnh..."
+                uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+                orDividerText="hoặc"
+                scanError={null}
+              />
+            </div>,
+            document.body,
+          )}
+
         {grantModalOrder && factoryId && currentUser?.id && (
           <CustomerGrantModal
             orderId={grantModalOrder.id}
@@ -2346,6 +2358,7 @@ export default function ExportPage() {
         )}
       </div>
     );
+  }
 
   // -- RENDER: ADD / EDIT ----------------------------------------------------
   const selCust = customers.find((c) => c.id === form.customer_id);

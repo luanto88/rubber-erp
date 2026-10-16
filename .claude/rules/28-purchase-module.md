@@ -215,3 +215,8 @@ Danh sách + chi tiết theo rule 29 (mục F). GET danh sách trả thêm `line
 70/30: file ký qua `/api/signing/requests/{yeu_cau_ky_id}/file-url` (quyền: người ký /
 `purchase.view_all` / admin), Nháp xem bản chưa ký `buildPurchaseDraftPdfBytes` (dùng bản chụp bằng
 chứng đã lưu, KHÔNG gọi insight-snapshot). Mọi điều kiện quyền/nút giữ nguyên `detail.perms`.
+
+## Sửa gợi ý giá cho vật tư MỚI (2026-10-16)
+Vật tư chưa từng mua + danh mục `don_gia = 0` từng tự điền trung vị nhóm (vd 0,75$) và cảnh báo lệch giá.
+Nay `Suggestion.binding`: chỉ giá của CHÍNH vật tư (lần mua gần nhất / giá danh mục) mới tự điền + kiểm lệch
+>10%; trung vị nhóm chỉ hiện "Tham khảo: … (vật tư khác nhau, không kiểm tra lệch giá)".

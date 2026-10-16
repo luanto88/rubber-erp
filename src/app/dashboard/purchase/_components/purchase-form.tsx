@@ -59,7 +59,12 @@ type DraftLine = {
   showInsight: boolean
 }
 
-type Suggestion = { value: number; source: "lan_mua_truoc" | "cung_nhom" | "danh_muc"; label: string }
+/**
+ * `binding` = giá gợi ý dùng để tự điền + kiểm tra lệch giá ±10%. Trung vị cùng nhóm KHÔNG ràng buộc
+ * (chỉ tham khảo): một nhóm gồm nhiều vật tư khác hẳn nhau về giá, vật tư mới chưa có lịch sử bị kéo về
+ * giá của vật tư khác (vd "Nhông đề xe nâng" bị gợi ý 0,75$ rồi báo lệch giá khi nhập giá thật).
+ */
+type Suggestion = { value: number; source: "lan_mua_truoc" | "cung_nhom" | "danh_muc"; label: string; binding: boolean }
 
 let keySeq = 0
 const newKey = () => `l${Date.now()}_${keySeq++}`
@@ -111,6 +116,7 @@ function computeSuggestion(line: DraftLine, item: ItemOpt | undefined, currency:
       value: roundPrice(convertCurrency(last.donGia, last.loaiTien, currency), currency),
       source: "lan_mua_truoc",
       label: `theo phiếu ${formatSoPhieuFull(last.so, last.nam)} (${fmtDate(last.ngay)})`,
+      binding: true,
     }
   }
   if (item && Number(item.don_gia) > 0) {
@@ -118,6 +124,7 @@ function computeSuggestion(line: DraftLine, item: ItemOpt | undefined, currency:
       value: roundPrice(convertCurrency(Number(item.don_gia), item.loai_tien || "USD", currency), currency),
       source: "danh_muc",
       label: "giá danh mục kho",
+      binding: true,
     }
   }
   const raw = (ins?.categorySamples || []).filter((s) => convertCurrency(s.donGia, s.loaiTien, currency) > 0)
@@ -126,7 +133,7 @@ function computeSuggestion(line: DraftLine, item: ItemOpt | undefined, currency:
   const enoughRequests = reqIds.size === 0 || reqIds.size >= CATEGORY_MIN_REQUESTS
   if (raw.length >= CATEGORY_MIN_SAMPLES && enoughRequests) {
     const med = median(raw.map((s) => convertCurrency(s.donGia, s.loaiTien, currency)))
-    if (med) return { value: roundPrice(med, currency), source: "cung_nhom", label: `trung vị ${raw.length} lần mua vật tư cùng nhóm` }
+    if (med) return { value: roundPrice(med, currency), source: "cung_nhom", label: `trung vị ${raw.length} lần mua vật tư cùng nhóm`, binding: false }
   }
   return null
 }
@@ -365,7 +372,7 @@ export function PurchaseForm({
         const next = { ...l, insight: ins, insightLoading: false }
         if (autoPrice && !l.don_gia) {
           const s = computeSuggestion(next, itemById.get(itemId), loaiTien)
-          if (s) next.don_gia = String(s.value)
+          if (s?.binding) next.don_gia = String(s.value)
         }
         return next
       }))
@@ -465,7 +472,8 @@ export function PurchaseForm({
       if (!l.ngay_can_hang) errs.push(`Dòng ${i + 1}: chưa chọn thời gian cần hàng`)
       else if (l.ngay_can_hang < today) errs.push(`Dòng ${i + 1}: thời gian cần hàng không được trước hôm nay`)
       if (!(gia >= 0) || l.don_gia === "") errs.push(`Dòng ${i + 1}: chưa nhập đơn giá`)
-      const s = computeSuggestion(l, itemById.get(l.item_id), loaiTien)
+      const sAll = computeSuggestion(l, itemById.get(l.item_id), loaiTien)
+      const s = sAll?.binding ? sAll : null
       const pct = priceDeviationPct(gia, s?.value)
       if (isPriceDeviationExceeded(pct) && !l.ly_do_lech_gia.trim()) {
         errs.push(`Dòng ${i + 1}: đơn giá lệch ${pct!.toFixed(0)}% — cần nhập lý do`)
@@ -566,7 +574,7 @@ export function PurchaseForm({
           const item = l.item_id ? itemById.get(l.item_id) : undefined
           const sug = l.item_id ? computeSuggestion(l, item, loaiTien) : null
           const gia = Number(l.don_gia)
-          const pct = l.don_gia !== "" ? priceDeviationPct(gia, sug?.value) : null
+          const pct = l.don_gia !== "" && sug?.binding ? priceDeviationPct(gia, sug.value) : null
           const exceeded = isPriceDeviationExceeded(pct)
           const thanhTien = (Number(l.so_luong) || 0) * (gia || 0)
           return (
@@ -626,8 +634,11 @@ export function PurchaseForm({
                     </span>
                   ) : (
                     <span className="flex items-center gap-1">
-                      <Sparkles size={12} className="text-emerald-500" /> Giá gợi ý {formatMoney(sug.value, loaiTien)} {loaiTien} — {sug.label}
-                      {l.don_gia === "" && (
+                      <Sparkles size={12} className="text-emerald-500" />
+                      {sug.binding
+                        ? <>Giá gợi ý {formatMoney(sug.value, loaiTien)} {loaiTien} — {sug.label}</>
+                        : <>Tham khảo: {formatMoney(sug.value, loaiTien)} {loaiTien} — {sug.label} (vật tư khác nhau, không kiểm tra lệch giá)</>}
+                      {l.don_gia === "" && sug.binding && (
                         <button type="button" className="ml-1 text-emerald-700 font-bold underline" onClick={() => patchLine(l.key, { don_gia: String(sug.value) })}>Dùng giá này</button>
                       )}
                     </span>
