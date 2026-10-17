@@ -316,3 +316,17 @@ bản gốc ra `../rubber-erp-backups/export-orders-backup-*.json` trước khi 
 - Bảng `enterprise-table dense min-w-[980px]` + `ExpandableRow` (xe + ảnh phóng to, lô gán, chỉ tiêu, QR
   EUDR, KH được cấp quyền). Thao tác cuối: Duyệt → In → Cấp quyền KH → Sửa (`Pencil`) → Xoá. Không ghim cột.
 - Đã bỏ `getExportOrderStatusLabel/Classes`; trạng thái qua `StatusBadge domain="export"`.
+
+## Quét QR kiện lên xe + QR PNG + trang chi tiết 70/30 (2026-10-17, chờ test tay)
+- **Quét QR kiện** (`export/page.tsx`): mỗi thẻ xe chưa xác nhận có nút "Quét QR kiện lên xe này" → portal
+  `QrScanner` (đổi `key` sau mỗi mã để quét tiếp), thanh trạng thái sticky (xe, số kiện đã quét, "Xong").
+  `assignScannedKien` nhận URL `/product-label?f=&lo=&kien=`: đúng nhà máy; lô phải "Hoàn thành"/"Xuất hàng"
+  (= đã xác nhận sản xuất, có `lot_transactions`), KN mới nhất đạt (`qcRequirementFailure`, cùng điều kiện
+  kéo-thả, lô rớt hạng bị từ chối), kiện còn bành chưa gán, khớp CSR/bọc đơn theo kiện. Thêm nguyên số còn
+  lại của kiện vào xe; trùng kiện trên xe → báo, không cộng.
+- **QR PNG** trong dòng xổ: `_components/order-qr-download.tsx` (nền trắng, lề 32px, mã đơn dưới QR).
+- **Trang chi tiết** `/dashboard/export/[id]`: header (chip ngày/xe/bành/CSR, Tải PDF, `HeaderQr` EUDR) +
+  `DetailSplitLayout`; trái tab "Biên bản PDF" (`DocViewer loadBytes` = `buildExportOrderPdfBytes`) / "Nội dung"
+  (xe, lô gán A-D, chỉ tiêu); phải `StatusSummaryBar domain="export"` → `SignActionBox` (Tải PDF, "Mở trong danh
+  sách" `?search=<ma_don>`, Truy xuất EUDR) → Thông tin đơn. Duyệt/Sửa/Cấp quyền vẫn ở danh sách (duyệt có
+  reconcile lô — không chép). Danh sách có `RowAction kind="view"` trỏ trang này.

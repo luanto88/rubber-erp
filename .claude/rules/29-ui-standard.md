@@ -80,7 +80,7 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | Sản lượng | ✅ | ✅ (ngày → xe / chuyến) | (chế độ gom ngày + bảng con) | ✅ | ✅ (Hỗ trợ kỹ thuật converter) |
 | Văn bản | (Doc-UI riêng) | ✅ tiến trình ký | ✅ | ❌ (lưu tên object) | — |
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
-| Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | (chưa — chỉ có trang in PDF) | — | ✅ (quét QR EUDR trên biên bản) |
+| Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | ✅ `/dashboard/export/[id]` (PDF nhúng loadBytes) | — | ✅ (quét QR EUDR + quét QR kiện lên xe) |
 | Kho vật tư, Kho thành phẩm, Thành phẩm, Kho NL | ❌ | ❌ | ❌ | ❌ | — |
 
 ## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)

@@ -120,7 +120,8 @@ function getVehiclePhotoUrls(v: ExportOrderPdfVehicle): string[] {
   return [v.image_url_1, v.image_url_2, v.image_url_3].filter(Boolean) as string[]
 }
 
-export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factoryName?: string | null) {
+/** Dựng biên bản giao nhận (dùng chung cho tải file và khung xem nhúng ở trang chi tiết). */
+async function buildExportOrderDoc(order: ExportOrderPdfInput, factoryName?: string | null): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
 
@@ -328,5 +329,19 @@ export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factory
     doc.text("(Ký và ghi rõ họ tên)", cx, sigY, { align: "center" })
   })
 
+  return doc
+}
+
+export async function downloadExportOrderPdf(order: ExportOrderPdfInput, factoryName?: string | null) {
+  const doc = await buildExportOrderDoc(order, factoryName)
   doc.save(`bien-ban-giao-nhan-${safeName(order.ma_don)}.pdf`)
+}
+
+/** Bytes PDF biên bản để nhúng vào `DocViewer loadBytes`. */
+export async function buildExportOrderPdfBytes(
+  order: ExportOrderPdfInput,
+  factoryName?: string | null,
+): Promise<Uint8Array> {
+  const doc = await buildExportOrderDoc(order, factoryName)
+  return new Uint8Array(doc.output("arraybuffer"))
 }

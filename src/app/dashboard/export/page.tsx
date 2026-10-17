@@ -33,7 +33,7 @@ import {
   Clock,
   ScanLine,
 } from "lucide-react";
-import { QRCodeSVG as QRCode } from "qrcode.react";
+import { OrderQrDownload } from "./_components/order-qr-download";
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif";
 import { FilterBar } from "@/app/dashboard/_components/filter-bar";
@@ -416,6 +416,11 @@ export default function ExportPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [statusTab, setStatusTab] = useState<ExportStatusTab>("all");
   const [scanning, setScanning] = useState(false);
+  // Quét QR nhãn kiện trong form: xe đang quét + thông báo kết quả lần quét gần nhất.
+  const [kienScanVehicleIdx, setKienScanVehicleIdx] = useState<number | null>(null);
+  const [kienScanMsg, setKienScanMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [kienScanCount, setKienScanCount] = useState(0);
+  const [kienScanKey, setKienScanKey] = useState(0);
   const [zoomImg, setZoomImg] = useState<string | null>(null);
   const [delConfirm, setDelConfirm] = useState<string | null>(null);
   const [pendingRetestAttach, setPendingRetestAttach] =
@@ -1210,6 +1215,155 @@ export default function ExportPage() {
       ],
     }));
     return true;
+  };
+
+  // -- Quét QR nhãn kiện để gán thẳng lên xe ---------------------------------
+  // QR nhãn = `/product-label?f=<factoryId>&lo=<ma_lo>&kien=A|B|C|D` (nhãn dự đoán).
+  // Chỉ nhận kiện đã xác nhận sản xuất (lô Hoàn thành), có KN mới nhất đạt hạng,
+  // khớp CSR / loại bành / bọc / yêu cầu chỉ tiêu của đơn và còn bành chưa xuất.
+  const qcRequirementFailure = (lotId: string): string | null => {
+    if (form.yeu_cau_chi_tieu.length === 0) return null;
+    const latestQc = latestQcByLotId.get(lotId);
+    if (!latestQc) return "chưa có kết quả kiểm nghiệm";
+    for (const req of form.yeu_cau_chi_tieu) {
+      const key = CHI_TIEU_KEY[req.ten];
+      if (!key) continue;
+      const g = latestQc.grade?.[key];
+      const metric = g ? getQcMetricValue(g) : null;
+      if (metric === null) return `thiếu chỉ tiêu ${req.ten}`;
+      if (req.min !== "" && !Number.isNaN(+req.min) && metric < +req.min) {
+        return `${req.ten} = ${metric} thấp hơn yêu cầu ${req.min}`;
+      }
+      if (req.max !== "" && !Number.isNaN(+req.max) && metric > +req.max) {
+        return `${req.ten} = ${metric} cao hơn yêu cầu ${req.max}`;
+      }
+    }
+    return null;
+  };
+
+  const assignScannedKien = (
+    raw: string,
+    vIdx: number,
+  ): { ok: boolean; msg: string } => {
+    const text = (raw || "").trim();
+    if (!text) return { ok: false, msg: "Không đọc được mã QR." };
+    let f: string | null = null;
+    let lo: string | null = null;
+    let kienRaw: string | null = null;
+    try {
+      const url = new URL(text, window.location.origin);
+      f = url.searchParams.get("f");
+      lo = url.searchParams.get("lo");
+      kienRaw = url.searchParams.get("kien");
+    } catch {
+      /* không phải URL */
+    }
+    if (!lo || !kienRaw) {
+      return {
+        ok: false,
+        msg: "Đây không phải QR nhãn kiện thành phẩm.",
+      };
+    }
+    if (f && factoryId && f !== factoryId) {
+      return { ok: false, msg: "Nhãn kiện thuộc nhà máy khác." };
+    }
+    const kienUpper = kienRaw.trim().toUpperCase();
+    const k = kienUpper.toLowerCase() as (typeof KIEN_KEYS)[number];
+    if (!KIEN_KEYS.includes(k)) {
+      return { ok: false, msg: `Kiện "${kienRaw}" không hợp lệ.` };
+    }
+    const label = `${lo} kiện ${kienUpper}`;
+    const code = normalizeLotCode(lo);
+    const rawLot = dedupeLotsByMaLo(lotsRaw).find(
+      (l) => normalizeLotCode(l.ma_lo) === code,
+    );
+    if (!rawLot) {
+      return {
+        ok: false,
+        msg: `${label}: lô chưa xác nhận sản xuất / chưa hoàn thành.`,
+      };
+    }
+    if (normalizeCsrCode(rawLot.loai_csr) !== normalizeCsrCode(form.chung_loai)) {
+      return {
+        ok: false,
+        msg: `${label}: lô ${rawLot.loai_csr}, đơn đang xuất ${form.chung_loai || "—"}.`,
+      };
+    }
+    if (Number(rawLot.loai_banh) !== Number(form.loai_banh)) {
+      return {
+        ok: false,
+        msg: `${label}: bành ${rawLot.loai_banh}kg, đơn đang xuất bành ${form.loai_banh}kg.`,
+      };
+    }
+    const latestQc = latestQcByLotId.get(rawLot.id);
+    if (!latestQc) {
+      return { ok: false, msg: `${label}: lô chưa có kết quả kiểm nghiệm.` };
+    }
+    if (latestQc.dat_hang?.endsWith("RH") || latestQc.trang_thai === "khong_dat") {
+      return {
+        ok: false,
+        msg: `${label}: lô rớt hạng — cần kiểm nghiệm lại trước khi xuất.`,
+      };
+    }
+    const qcFail = qcRequirementFailure(rawLot.id);
+    if (qcFail) return { ok: false, msg: `${label}: ${qcFail}.` };
+    const lot = lotsExt.find((l) => l.id === rawLot.id);
+    const remKien = lot ? getFormRemaining(lot)[k] : 0;
+    if (!lot || remKien <= 0) {
+      const kienBanh = Number(rawLot[`kien_${k}` as const] || 0);
+      if (kienBanh <= 0) {
+        return { ok: false, msg: `${label}: kiện chưa sản xuất.` };
+      }
+      return {
+        ok: false,
+        msg: `${label}: đã gán hết (đơn này hoặc đơn khác) hoặc khác loại bọc của đơn.`,
+      };
+    }
+    const kienField = `kien_${k}` as const;
+    setForm((prev) => {
+      const existing = prev.assignments.find(
+        (a) => a.lot_id === lot.id && a.vehicleIdx === vIdx,
+      );
+      if (existing) {
+        return {
+          ...prev,
+          assignments: prev.assignments.map((a) =>
+            a === existing
+              ? { ...a, [kienField]: (a[kienField] || 0) + remKien }
+              : a,
+          ),
+        };
+      }
+      return {
+        ...prev,
+        assignments: [
+          ...prev.assignments,
+          {
+            lot_id: lot.id,
+            ma_lo: lot.ma_lo,
+            vehicleIdx: vIdx,
+            kien_a: 0,
+            kien_b: 0,
+            kien_c: 0,
+            kien_d: 0,
+            [kienField]: remKien,
+          },
+        ],
+      };
+    });
+    return {
+      ok: true,
+      msg: `Đã gán ${lot.ma_lo} kiện ${kienUpper} (${remKien} bành) lên xe ${vIdx + 1}.`,
+    };
+  };
+
+  const handleKienScanDecoded = (text: string) => {
+    if (kienScanVehicleIdx === null) return;
+    const result = assignScannedKien(text, kienScanVehicleIdx);
+    setKienScanMsg({ text: result.msg, ok: result.ok });
+    if (result.ok) setKienScanCount((c) => c + 1);
+    // Dựng lại máy quét để quét kiện tiếp theo (mỗi lần mở chỉ đọc 1 mã).
+    setKienScanKey((key) => key + 1);
   };
 
   const handleDrop = (e: React.DragEvent, vIdx: number) => {
@@ -2135,13 +2289,10 @@ export default function ExportPage() {
                       {/* QR EUDR + quyền khách hàng */}
                       <div className="flex flex-col items-start gap-2">
                         <div className="font-bold text-slate-600">Mã QR EUDR</div>
-                        <div className="rounded-xl border border-slate-200 bg-white p-2">
-                          <QRCode
-                            value={`https://qlsxkpt.vercel.app/dashboard/eudr?order=${order.ma_don}`}
-                            size={100}
-                            level="M"
-                          />
-                        </div>
+                        <OrderQrDownload
+                          value={`https://qlsxkpt.vercel.app/dashboard/eudr?order=${order.ma_don}`}
+                          code={order.ma_don}
+                        />
                         <a
                           href={`/dashboard/eudr?order=${encodeURIComponent(order.ma_don)}`}
                           onClick={(e) => e.stopPropagation()}
@@ -2209,6 +2360,11 @@ export default function ExportPage() {
                               onClick={() => void handleApproveOrder(order)}
                             />
                           )}
+                          <RowAction
+                            kind="view"
+                            label="Xem chi tiết đơn"
+                            href={`/dashboard/export/${order.id}`}
+                          />
                           <RowAction
                             kind="print"
                             label="Tải PDF biên bản"
@@ -3173,6 +3329,62 @@ export default function ExportPage() {
                           </>
                         )}
                       </label>
+                      {!v.confirmed && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setKienScanVehicleIdx(idx);
+                            setKienScanMsg(null);
+                            setKienScanCount(0);
+                            setKienScanKey((key) => key + 1);
+                          }}
+                          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white hover:bg-brand-700"
+                        >
+                          <QrCode size={13} /> Quét QR kiện lên xe này
+                        </button>
+                      )}
+                      {kienScanVehicleIdx === idx &&
+                        typeof document !== "undefined" &&
+                        createPortal(
+                          <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
+                            <div className="sticky top-0 z-10 space-y-2 bg-slate-900 px-4 py-3 text-white">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="text-sm font-bold">
+                                  Xe {idx + 1}
+                                  {v.bien_truoc ? ` · ${v.bien_truoc}` : ""} · đã quét {kienScanCount} kiện
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setKienScanVehicleIdx(null)}
+                                  className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-brand-700"
+                                >
+                                  Xong
+                                </button>
+                              </div>
+                              {kienScanMsg && (
+                                <div
+                                  className={`rounded-lg px-3 py-2 text-xs font-bold ${kienScanMsg.ok ? "bg-emerald-600" : "bg-red-600"}`}
+                                >
+                                  {kienScanMsg.text}
+                                </div>
+                              )}
+                            </div>
+                            <QrScanner
+                              key={kienScanKey}
+                              onDecoded={handleKienScanDecoded}
+                              onCancel={() => setKienScanVehicleIdx(null)}
+                              hintText="Đưa mã QR trên nhãn kiện thành phẩm vào khung"
+                              cancelText="Đóng"
+                              cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+                              uploadButtonText="Tải ảnh chứa QR"
+                              uploadScanningText="Đang xử lý ảnh..."
+                              uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+                              orDividerText="hoặc"
+                              scanError={null}
+                            />
+                          </div>,
+                          document.body,
+                        )}
                     </div>
 
                     {/* Drop hint or assigned lots */}
@@ -3184,9 +3396,9 @@ export default function ExportPage() {
                           size={14}
                           className="mx-auto mb-1 opacity-50 hidden lg:block"
                         />
-                        <span className="hidden lg:inline">Kéo lô hàng vào đây</span>
+                        <span className="hidden lg:inline">Kéo lô hàng vào đây hoặc quét QR kiện</span>
                         <span className="lg:hidden">
-                          Chọn xe ở lô bên dưới để gán vào đây
+                          Quét QR kiện hoặc chọn xe ở lô bên dưới để gán
                         </span>
                       </div>
                     ) : (
