@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ArrowRightLeft,
   Ban,
+  BookCheck,
   Check,
-  Eye,
+  Clock,
+  FilePen,
   FileText,
   PackageMinus,
   PackagePlus,
-  Printer,
   RotateCcw,
   type LucideIcon,
 } from "lucide-react"
@@ -19,6 +20,13 @@ import { getFactoryTodayISO, getFirstDayOfMonthISO } from "@/lib/date-utils"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
+import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { ExpandableRow, ExpandAllToggle, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { InventoryPageShell } from "./inventory-shell"
 import { InventoryActionButton, InventoryActionLink, MultiSelectField, type InventoryActionTone } from "./inventory-ui"
 import {
@@ -111,12 +119,6 @@ const APPROVAL_OPTIONS = [
   { value: "approved", label: "Đã phê duyệt" },
 ]
 
-const STATUS_BADGE: Record<DocStatus, { label: string; className: string }> = {
-  draft: { label: "Nháp", className: "bg-slate-100 text-slate-600" },
-  posted: { label: "Đã ghi sổ", className: "bg-emerald-100 text-emerald-700" },
-  cancelled: { label: "Đã hủy", className: "bg-red-100 text-red-600" },
-}
-
 const PAGE_SIZE = 1000
 const CHUNK_SIZE = 200
 const INPUT_CLASS =
@@ -198,6 +200,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
   const [cancelTarget, setCancelTarget] = useState<DocumentRow | null>(null)
   const [cancelReason, setCancelReason] = useState("")
   const [busy, setBusy] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
 
   // Bootstrap: chỉ lấy session + danh mục, việc tải danh sách phiếu để effect bên dưới lo.
   useEffect(() => {
@@ -319,6 +322,19 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     return result
   }, [filteredDocuments])
 
+  const expandableIds = useMemo(
+    () => filteredDocuments.filter((doc) => (linesByDocument.get(doc.id) || []).length > 0).map((doc) => doc.id),
+    [filteredDocuments, linesByDocument],
+  )
+
+  const toggleExpanded = (id: string) =>
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
   const activeFilterCount =
     [warehouseIds, categoryIds, itemIds, statuses, approvalStates].filter((value) => value.length > 0).length
 
@@ -424,6 +440,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
         ) : null
       }
     >
+      <div className={`${moduleThemeClass("amber")} space-y-4`}>
       {toast ? (
         <div
           className={`fixed bottom-4 right-4 z-[140] max-w-sm rounded-2xl px-4 py-3 text-sm font-bold text-white shadow-xl ${
@@ -501,112 +518,151 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
         ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-2 text-xs font-bold">
-        <span className="rounded-full bg-white px-3 py-1.5 text-slate-700 shadow-sm ring-1 ring-slate-200">
-          {counts.total} phiếu
-        </span>
-        <span className="rounded-full bg-slate-100 px-3 py-1.5 text-slate-600">Nháp: {counts.draft}</span>
-        <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">Đã ghi sổ: {counts.posted}</span>
-        <span className="rounded-full bg-red-50 px-3 py-1.5 text-red-600">Đã hủy: {counts.cancelled}</span>
+      <StatGrid cols={4}>
+        <StatCard icon={FileText} label="Tổng phiếu" value={counts.total} loading={loading} />
+        <StatCard icon={FilePen} label="Nháp" value={counts.draft} loading={loading} />
+        <StatCard icon={BookCheck} label="Đã ghi sổ" value={counts.posted} valueTone="good" loading={loading} />
         {config.supportsApproval ? (
-          <button
-            type="button"
+          <StatCard
+            icon={Clock}
+            label="Chờ phê duyệt"
+            value={counts.pending}
+            valueTone={counts.pending > 0 ? "warn" : "default"}
+            loading={loading}
             onClick={() => setApprovalStates(["pending"])}
-            className="rounded-full bg-amber-50 px-3 py-1.5 text-amber-700 ring-1 ring-amber-200 hover:bg-amber-100"
-          >
-            Chờ phê duyệt: {counts.pending}
-          </button>
-        ) : null}
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        {error ? (
-          <div className="p-6 text-sm text-red-600">{error}</div>
-        ) : loading ? (
-          <div className="p-12 text-center text-slate-400">Đang tải danh sách phiếu...</div>
-        ) : filteredDocuments.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">
-            <FileText size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Không có phiếu phù hợp bộ lọc.</p>
-          </div>
+            active={approvalStates.length === 1 && approvalStates[0] === "pending"}
+          />
         ) : (
-          <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+          <StatCard icon={Ban} label="Đã hủy" value={counts.cancelled} valueTone={counts.cancelled > 0 ? "danger" : "default"} loading={loading} />
+        )}
+      </StatGrid>
+
+      <ResponsiveTableWrapper>
+        {error ? (
+          <ListState kind="error" message={error} onRetry={() => void loadDocuments()} />
+        ) : loading ? (
+          <ListState kind="loading" message="Đang tải danh sách phiếu..." />
+        ) : filteredDocuments.length === 0 ? (
+          <ListState kind="empty" message="Không có phiếu phù hợp bộ lọc." />
+        ) : (
+          <>
+            <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+              <ExpandAllToggle
+                allExpanded={expandableIds.length > 0 && expandableIds.every((id) => expanded.has(id))}
+                onExpandAll={() => setExpanded(new Set(expandableIds))}
+                onCollapseAll={() => setExpanded(new Set())}
+                disabled={expandableIds.length === 0}
+              />
+            </div>
+            <table className="enterprise-table dense min-w-[900px]">
+              <thead>
                 <tr>
-                  <th className="px-4 py-3">Mã phiếu</th>
-                  <th className="px-4 py-3">Ngày</th>
-                  <th className="px-4 py-3">Kho</th>
-                  <th className="px-4 py-3">{config.partyLabel}</th>
-                  <th className="px-4 py-3">Vật tư</th>
-                  <th className="px-4 py-3 text-right">Số lượng</th>
-                  <th className="px-4 py-3">Trạng thái</th>
-                  <th className="px-4 py-3 text-right">Thao tác</th>
+                  <th>Mã phiếu</th>
+                  <th>Ngày</th>
+                  <th>Kho</th>
+                  <th>{config.partyLabel}</th>
+                  <th>Vật tư</th>
+                  <th className="text-right">Số lượng</th>
+                  <th>Trạng thái</th>
+                  <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {filteredDocuments.map((doc) => {
                   const summary = itemSummary(doc)
-                  const badge = STATUS_BADGE[doc.status] || STATUS_BADGE.draft
+                  const docLines = linesByDocument.get(doc.id) || []
                   const openHref = `${config.route}?documentId=${encodeURIComponent(doc.id)}`
                   const showApprove = config.supportsApproval && canApprove && doc.status === "posted" && !doc.approved_at
+                  const statusKey =
+                    config.supportsApproval && doc.status === "posted" && !doc.approved_at ? "cho_duyet" : doc.status
                   return (
-                    <tr key={doc.id} className="transition-colors hover:bg-amber-50/40">
-                      <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-800">
-                        <a href={openHref} className="hover:text-amber-700 hover:underline">
+                    <ExpandableRow
+                      key={doc.id}
+                      expanded={expanded.has(doc.id)}
+                      onToggle={() => toggleExpanded(doc.id)}
+                      canExpand={docLines.length > 0}
+                      colSpan={8}
+                      label="Xem dòng vật tư"
+                      detail={
+                        <table className="enterprise-table dense">
+                          <thead>
+                            <tr>
+                              <th className="w-10">#</th>
+                              <th>Mã vật tư</th>
+                              <th>Tên vật tư</th>
+                              <th className="text-right">Số lượng</th>
+                              <th>ĐVT</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {docLines.map((line, index) => {
+                              const item = itemById.get(line.item_id)
+                              return (
+                                <tr key={`${line.item_id}-${index}`}>
+                                  <td className="text-slate-500">{index + 1}</td>
+                                  <td className="font-code font-semibold text-slate-800">{line.item_code || item?.code || "?"}</td>
+                                  <td className="text-slate-600">{item?.name || "—"}</td>
+                                  <td className="text-right font-semibold text-slate-700">
+                                    {Number(line.quantity || 0).toLocaleString("vi-VN")}
+                                  </td>
+                                  <td className="text-slate-600">{line.unit || "—"}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      }
+                      endCell={
+                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          {showApprove ? (
+                            <RowAction kind="approve" label="Duyệt" variant="text" onClick={() => setApproveTarget(doc)} />
+                          ) : null}
+                          <IconActionGroup>
+                            <RowAction kind="view" label={doc.status === "draft" ? "Mở / sửa phiếu" : "Xem phiếu"} href={openHref} />
+                            <RowAction
+                              kind="print"
+                              label="In phiếu"
+                              href={`/dashboard/inventory/print?type=${kind}&documentId=${encodeURIComponent(doc.id)}`}
+                            />
+                            {doc.status === "posted" && canCancel ? (
+                              <RowAction kind="cancel" label="Hủy phiếu" onClick={() => setCancelTarget(doc)} />
+                            ) : null}
+                          </IconActionGroup>
+                        </div>
+                      }
+                    >
+                      <td className="whitespace-nowrap font-bold text-slate-800">
+                        <a href={openHref} onClick={(e) => e.stopPropagation()} className="hover:text-brand-700 hover:underline">
                           {doc.document_code}
                         </a>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">{formatDate(doc.document_date)}</td>
-                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">{warehouseLabel(doc)}</td>
-                      <td className="max-w-[180px] truncate px-4 py-3 text-slate-600" title={partyLabel(doc)}>
+                      <td className="whitespace-nowrap text-slate-600">{formatDate(doc.document_date)}</td>
+                      <td className="whitespace-nowrap font-semibold text-slate-700">{warehouseLabel(doc)}</td>
+                      <td className="max-w-[180px] truncate text-slate-600" title={partyLabel(doc)}>
                         {partyLabel(doc)}
                       </td>
-                      <td className="max-w-[220px] truncate px-4 py-3 text-slate-600" title={summary.text}>
+                      <td className="max-w-[220px] truncate text-slate-600" title={summary.text}>
                         {summary.text}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-slate-700">{summary.total}</td>
-                      <td className="px-4 py-3">
+                      <td className="whitespace-nowrap text-right font-semibold text-slate-700">{summary.total}</td>
+                      <td>
                         <div className="flex flex-col items-start gap-1">
-                          <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${badge.className}`}>{badge.label}</span>
+                          <StatusBadge domain="inventory" status={statusKey} />
                           {config.supportsApproval && doc.approved_at ? (
-                            <span
-                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600"
-                              title={doc.approved_by_name ? `Phê duyệt bởi ${doc.approved_by_name}` : undefined}
-                            >
-                              <Check size={11} /> Đã phê duyệt
+                            <span title={doc.approved_by_name ? `Phê duyệt bởi ${doc.approved_by_name}` : undefined}>
+                              <StatusBadge tone="info" label="Đã phê duyệt" size="xs" />
                             </span>
-                          ) : config.supportsApproval && doc.status === "posted" ? (
-                            <span className="text-[11px] font-semibold text-amber-600">Chờ phê duyệt</span>
                           ) : null}
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <InventoryActionLink href={openHref} icon={Eye} label={doc.status === "draft" ? "Mở / sửa phiếu" : "Xem phiếu"} tone="sky" size="icon" />
-                          <InventoryActionLink
-                            href={`/dashboard/inventory/print?type=${kind}&documentId=${encodeURIComponent(doc.id)}`}
-                            icon={Printer}
-                            label="In phiếu"
-                            tone="slate"
-                            size="icon"
-                          />
-                          {showApprove ? (
-                            <InventoryActionButton icon={Check} label="Duyệt" tone="emerald" onClick={() => setApproveTarget(doc)} size="sm" />
-                          ) : null}
-                          {doc.status === "posted" && canCancel ? (
-                            <InventoryActionButton icon={Ban} label="Hủy phiếu" tone="rose" size="icon" onClick={() => setCancelTarget(doc)} />
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
+                    </ExpandableRow>
                   )
                 })}
               </tbody>
             </table>
-          </ResponsiveTableWrapper>
+          </>
         )}
-      </div>
+      </ResponsiveTableWrapper>
 
       {approveTarget ? (
         <ModalShell
@@ -656,6 +712,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
           />
         </ModalShell>
       ) : null}
+      </div>
     </InventoryPageShell>
   )
 }

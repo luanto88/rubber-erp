@@ -81,7 +81,8 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | Văn bản | (Doc-UI riêng) | ✅ tiến trình ký | ✅ | ❌ (lưu tên object) | — |
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
 | Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | ✅ `/dashboard/export/[id]` (PDF nhúng loadBytes) | — | ✅ (quét QR EUDR + quét QR kiện lên xe) |
-| Kho vật tư, Kho thành phẩm, Thành phẩm, Kho NL | ❌ | ❌ | ❌ | ❌ | — |
+| Kho vật tư (Nhập/Xuất/Chuyển) | ✅ | ✅ (dòng vật tư của phiếu) | ❌ (vẫn mở form cũ) | — | ❌ |
+| Kho thành phẩm, Thành phẩm, Kho NL | ❌ | ❌ | ❌ | ❌ | — |
 
 ## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)
 Chưa gửi ký ⇒ tab "Bản xem trước (chưa ký)" dựng PDF ngay trong trình duyệt: `DocViewer`

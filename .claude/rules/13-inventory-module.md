@@ -365,3 +365,15 @@ dùng chung bồn (`uses_shared_oil_stock`) gộp **1 nhãn/kho** (không phải
 Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng chung bộ lọc giữa 2 thẻ Báo cáo qua URL; `inventory/settings/page.tsx` (không có link nào trỏ tới) vẫn GIỮ — chỉ xóa khi người dùng xác nhận.
 
 **Cụm nút cân đối (2026-10-03, tiếp)** — mọi cụm nút đặt trong `InventoryActionBar` (hoặc class `INVENTORY_ACTION_BAR_CLASS`): mobile lưới 2 cột (số nút lẻ thì nút cuối trải 2 cột), từ `md` 1 hàng các cột bằng nhau; chữ dài bị cắt "…" chứ không xuống dòng. `InventoryPageShell` tự bọc `action` bằng cụm này. Giữ nhãn nút ngắn (≤ ~14 ký tự): "Lưu", "Ghi sổ", "Ghi sổ N kho", "In nhãn (N)".
+
+## Chuẩn hoá danh sách phiếu theo rule 29 (2026-10-17, chờ test tay)
+`_components/inventory-document-list.tsx` (dùng chung Nhập/Xuất/Chuyển):
+- Nội dung bọc `moduleThemeClass("amber")`; chip đếm → `StatGrid cols={4}`: Tổng phiếu · Nháp · Đã ghi sổ ·
+  ô 4 = "Chờ phê duyệt" (Nhập/Xuất, bấm để lọc `approvalStates=["pending"]`, warn khi >0) hoặc "Đã hủy" (Chuyển).
+- Bảng `enterprise-table dense min-w-[900px]` trong `ResponsiveTableWrapper`, mỗi phiếu là `ExpandableRow`
+  (xổ bảng con #/Mã/Tên/SL/ĐVT; phiếu không có dòng ⇒ không xổ) + `ExpandAllToggle`. Đang tải/lỗi/rỗng = `ListState`.
+- Trạng thái `StatusBadge domain="inventory"` (`cho_duyet` = posted && !approved_at với Nhập/Xuất), phiếu đã duyệt
+  thêm badge "Đã phê duyệt" (tooltip người duyệt). Bỏ `STATUS_BADGE` cũ.
+- Thao tác cuối: Duyệt (`RowAction approve` chữ) → view `Eye` (mở form phiếu) → print → cancel. Điều kiện quyền,
+  modal duyệt/hủy, `handleApprove`/`handleCancel` không đổi.
+- Chưa làm: trang chi tiết 70/30 (con mắt vẫn mở form `?documentId=`), Quét QR ở ô tìm.
