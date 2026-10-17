@@ -56,6 +56,41 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .maybeSingle()
     if (existingDraft) return NextResponse.json({ id: existingDraft.id, existed: true })
 
+    // Chặn sớm — TRƯỚC khi cấp số/tạo phiếu: mọi vật tư mua ngoài phải có mã trong danh mục kho.
+    // Trước đây id vật tư nằm ở bảng cũ maintenance_external_materials ⇒ insert dòng phiếu lỗi khoá
+    // ngoại item_id và để lại 1 phiếu "Đã hủy" vô nghĩa.
+    const { data: extMats } = await supabaseAdmin
+      .from("maintenance_materials")
+      .select("inventory_item_id, ten_vat_tu")
+      .eq("record_id", id)
+      .eq("nguon", "ben_ngoai")
+    const extRows = (extMats || []) as { inventory_item_id: string | null; ten_vat_tu: string | null }[]
+    const extIds = Array.from(new Set(extRows.map((m) => m.inventory_item_id).filter((v): v is string => !!v)))
+    const knownIds = new Set<string>()
+    if (extIds.length) {
+      const { data: known } = await supabaseAdmin
+        .from("inventory_items")
+        .select("id")
+        .eq("factory_id", factoryId)
+        .in("id", extIds)
+      for (const k of (known || []) as { id: string }[]) knownIds.add(k.id)
+    }
+    const noCode = Array.from(
+      new Set(
+        extRows
+          .filter((m) => (m.ten_vat_tu || "").trim() && (!m.inventory_item_id || !knownIds.has(m.inventory_item_id)))
+          .map((m) => (m.ten_vat_tu || "").trim()),
+      ),
+    )
+    if (noCode.length) {
+      return NextResponse.json(
+        {
+          error: `Vật tư ${noCode.join(", ")} chưa có mã trong danh mục kho — sửa biên bản, chọn hoặc tạo mã vật tư ("+ Thêm mã vật tư ngoài") rồi lưu lại.`,
+        },
+        { status: 400 },
+      )
+    }
+
     const [status] = await computeKtStatuses(factoryId, id)
     const needs = (status?.items || [])
       .map((it) => ({ ...it, qty: Math.max(0, it.shortage - it.pendingRequested) }))

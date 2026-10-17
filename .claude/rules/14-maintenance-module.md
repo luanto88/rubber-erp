@@ -896,7 +896,7 @@ Tab `Bảo trì` trong `/dashboard/settings` có 4 sub-tab:
 - `Thiết bị`: CRUD `maintenance_assets` (filter theo bộ phận, phân loại máy móc/xe)
 - `Nhân sự bảo trì`: CRUD `maintenance_staff`
 - `Xe & Tài xế`: CRUD `dispatch_vehicles` + `dispatch_vehicle_driver_assignments` — chuyển từ tab "Cấu hình nhà máy" (2026-05), dữ liệu và logic không thay đổi
-- `Vật tư ngoài`: CRUD `maintenance_external_materials` — fields: mã (`code`), tên, ĐVT, quy cách (`specification`), nhóm vật tư (`category_id` → `inventory_item_categories`), trạng thái (`is_active`)
+- `Vật tư ngoài`: từ 2026-10-17 là `inventory_items` có `nguon_tao = 'bao_tri_mua_ngoai'` (xem mục "Vật tư mua ngoài tạo vào inventory_items" cuối file); `maintenance_external_materials` chỉ còn là dữ liệu lịch sử
 
 ---
 
@@ -1281,3 +1281,25 @@ Trước đây vật tư `nguon='ben_ngoai'` chỉ lưu tên + giá, KHÔNG đi 
   Xem trước 2026-10-06 (phuochoa_kt): 73 biên bản có mua ngoài, 23 đủ điều kiện (có mã vật tư), 13 vật tư,
   1 bỏ qua (lô). CHƯA `--apply`.
 - Chưa làm: hiện "Tồn KT" ngay trong dropdown chọn vật tư mua ngoài (khối thẻ ký đã hiện đủ số liệu).
+
+## Vật tư mua ngoài tạo vào `inventory_items` (2026-10-17)
+
+**Lỗi đã sửa**: "+ Thêm mã vật tư ngoài" (biên bản) và Cài đặt → Bảo trì → Vật tư mua ngoài từng ghi
+vào bảng cũ `maintenance_external_materials`, rồi gán id đó vào `maintenance_materials.inventory_item_id`
+(không có FK). "Lập đề nghị mua" ghi id vào `purchase_request_lines.item_id` (FK `inventory_items`) ⇒
+lỗi `purchase_request_lines_item_id_fkey`, phiếu đã tạo header nên route tự chuyển "Đã hủy"
+(vd DX-141026/001).
+
+- API chung `POST /api/maintenance/external-items` (`resolveIsoActor`; quyền `maintenance.create` |
+  `maintenance.edit` | `settings.maintenance_config` | `settings.manage_config`): bắt buộc Mã, Tên,
+  Phân loại, ĐVT, Đơn giá > 0; tuỳ chọn Quy cách, Hình ảnh (link http/https), Loại tiền (mặc định USD).
+  Chặn trùng mã và trùng tên (chuẩn hoá) — 409 kèm `existing`. Ghi `inventory_items`
+  (`nguon_tao='bao_tri_mua_ngoai'`, `default_warehouse_ids=[KT]`) + rule kho `is_primary`. Thiếu kho KT ⇒ 400.
+- Biên bản: modal gọi API, thêm vật tư vào danh sách chọn và tự điền tên/ĐVT/đơn giá/loại tiền. Đã bỏ khối
+  tự lưu tên vật tư ngoài vào bảng cũ. Lưu biên bản (chưa duyệt) bị chặn nếu dòng mua ngoài có tên nhưng
+  không có mã hợp lệ trong `inventory_items`.
+- Cài đặt: danh sách đọc `inventory_items` lọc `nguon_tao`; tạo qua API; sửa cập nhật thẳng
+  `inventory_items`; "xoá" = `is_active=false` (giữ lịch sử kho/đề nghị mua).
+- `purchase-draft`: kiểm mã vật tư mua ngoài TRƯỚC khi cấp số/tạo phiếu ⇒ thiếu mã trả 400, không còn
+  phiếu "Đã hủy" rác.
+- Chẩn đoán dữ liệu cũ: `supabase/migrations/20261017_ext_materials_to_inventory.sql` (chỉ SELECT).
