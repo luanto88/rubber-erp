@@ -1,6 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { createPortal } from "react-dom"
+import dynamic from "next/dynamic"
+import { useRouter } from "next/navigation"
 import {
   ArrowRightLeft,
   Ban,
@@ -11,6 +14,9 @@ import {
   FileText,
   PackageMinus,
   PackagePlus,
+  QrCode,
+  Search,
+  X,
   RotateCcw,
   type LucideIcon,
 } from "lucide-react"
@@ -119,6 +125,23 @@ const APPROVAL_OPTIONS = [
   { value: "approved", label: "Đã phê duyệt" },
 ]
 
+// html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client.
+const QrScanner = dynamic(
+  () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
+  { ssr: false },
+)
+
+const KIND_BY_ROUTE_SEGMENT: Record<string, InventoryDocumentKind> = {
+  receipts: "import",
+  issues: "export",
+  transfers: "transfer",
+}
+
+/** Đường dẫn trang chi tiết phiếu (QR in trên phiếu PDF cũng trỏ về đây). */
+export function inventoryDocumentDetailHref(kind: InventoryDocumentKind, id: string) {
+  return `/dashboard/inventory/document/${kind}/${encodeURIComponent(id)}`
+}
+
 const PAGE_SIZE = 1000
 const CHUNK_SIZE = 200
 const INPUT_CLASS =
@@ -176,6 +199,10 @@ async function fetchLines(factoryId: string, documentIds: string[]) {
 
 export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind }) {
   const config = KIND_CONFIG[kind]
+  const router = useRouter()
+  const [search, setSearch] = useState("")
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [user, setUser] = useState<SessionUser | null>(null)
   const [canApprove, setCanApprove] = useState(false)
@@ -290,7 +317,9 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
   const filteredDocuments = useMemo(() => {
     const itemSet = new Set(itemIds)
     const categorySet = new Set(categoryIds)
+    const keyword = search.trim().toLowerCase()
     return documents.filter((doc) => {
+      if (keyword && !doc.document_code.toLowerCase().includes(keyword)) return false
       if (statuses.length > 0 && !statuses.includes(doc.status)) return false
       if (warehouseIds.length > 0) {
         const touched = [doc.source_warehouse_id, doc.target_warehouse_id].filter(Boolean) as string[]
@@ -311,7 +340,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
       }
       return true
     })
-  }, [documents, statuses, warehouseIds, approvalStates, itemIds, categoryIds, linesByDocument, itemById, config.supportsApproval])
+  }, [documents, statuses, warehouseIds, approvalStates, itemIds, categoryIds, linesByDocument, itemById, config.supportsApproval, search])
 
   const counts = useMemo(() => {
     const result = { total: filteredDocuments.length, draft: 0, posted: 0, cancelled: 0, pending: 0 }
@@ -336,7 +365,8 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     })
 
   const activeFilterCount =
-    [warehouseIds, categoryIds, itemIds, statuses, approvalStates].filter((value) => value.length > 0).length
+    [warehouseIds, categoryIds, itemIds, statuses, approvalStates].filter((value) => value.length > 0).length +
+    (search.trim() ? 1 : 0)
 
   const warehouseLabel = (doc: DocumentRow) => {
     const code = (id: string | null) => (id ? warehouseById.get(id)?.code || "?" : "—")
@@ -420,6 +450,37 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     setItemIds([])
     setStatuses([])
     setApprovalStates([])
+    setSearch("")
+  }
+
+  // QR phiếu: trang chi tiết mới `/dashboard/inventory/document/{type}/{id}`, hoặc URL cũ
+  // `/dashboard/inventory/{receipts|issues|transfers}?documentId=...|code=...`. Chuỗi khác → ô tìm.
+  const handleScanDecoded = (text: string) => {
+    const raw = text.trim()
+    setScanning(false)
+    setScanError(null)
+    try {
+      const url = new URL(raw, window.location.origin)
+      if (url.pathname.startsWith("/dashboard/inventory/document/")) {
+        router.push(url.pathname)
+        return
+      }
+      const segment = url.pathname.split("/").filter(Boolean).pop() || ""
+      const scannedKind = KIND_BY_ROUTE_SEGMENT[segment] || kind
+      const documentId = url.searchParams.get("documentId")
+      if (documentId) {
+        router.push(inventoryDocumentDetailHref(scannedKind, documentId))
+        return
+      }
+      const code = url.searchParams.get("code")
+      if (code) {
+        setSearch(code)
+        return
+      }
+    } catch {
+      // không phải URL → coi là mã phiếu
+    }
+    setSearch(raw)
   }
 
   const canCreate = hasPermission(user, "inventory.create") || hasPermission(user, "inventory.edit") || user?.role === "admin"
@@ -441,6 +502,28 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
       }
     >
       <div className={`${moduleThemeClass("amber")} space-y-4`}>
+      {scanning && typeof document !== "undefined"
+        ? createPortal(
+            <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
+              <QrScanner
+                onDecoded={handleScanDecoded}
+                onCancel={() => {
+                  setScanning(false)
+                  setScanError(null)
+                }}
+                hintText="Đưa camera vào mã QR trên phiếu kho đã in"
+                cancelText="Hủy quét"
+                cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+                uploadButtonText="Tải ảnh chứa QR"
+                uploadScanningText="Đang xử lý ảnh..."
+                uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+                orDividerText="hoặc"
+                scanError={scanError}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
       {toast ? (
         <div
           className={`fixed bottom-4 right-4 z-[140] max-w-sm rounded-2xl px-4 py-3 text-sm font-bold text-white shadow-xl ${
@@ -453,6 +536,38 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
 
       <div className="relative z-20 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
         <FilterBar activeCount={activeFilterCount} className="!m-0 !border-0 !p-0 !shadow-none">
+          <div className="mb-3 flex h-10 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white pl-3 pr-1 focus-within:border-mod-600 sm:w-80">
+            <Search size={15} className="shrink-0 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Tìm mã phiếu..."
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+            />
+            {search ? (
+              <button
+                type="button"
+                aria-label="Xoá tìm kiếm"
+                onClick={() => setSearch("")}
+                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={13} />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                setScanError(null)
+                setScanning(true)
+              }}
+              title="Quét QR phiếu đã in"
+              aria-label="Quét QR phiếu đã in"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-mod-50 px-2.5 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-200"
+            >
+              <QrCode size={15} />
+              <span className="hidden sm:inline">Quét QR</span>
+            </button>
+          </div>
           <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
             <div>
               <label className="mb-1.5 block text-xs font-bold text-slate-600">Từ ngày</label>
@@ -571,7 +686,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
                 {filteredDocuments.map((doc) => {
                   const summary = itemSummary(doc)
                   const docLines = linesByDocument.get(doc.id) || []
-                  const openHref = `${config.route}?documentId=${encodeURIComponent(doc.id)}`
+                  const openHref = inventoryDocumentDetailHref(kind, doc.id)
                   const showApprove = config.supportsApproval && canApprove && doc.status === "posted" && !doc.approved_at
                   const statusKey =
                     config.supportsApproval && doc.status === "posted" && !doc.approved_at ? "cho_duyet" : doc.status
@@ -618,7 +733,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
                             <RowAction kind="approve" label="Duyệt" variant="text" onClick={() => setApproveTarget(doc)} />
                           ) : null}
                           <IconActionGroup>
-                            <RowAction kind="view" label={doc.status === "draft" ? "Mở / sửa phiếu" : "Xem phiếu"} href={openHref} />
+                            <RowAction kind="view" label="Xem chi tiết phiếu" href={openHref} />
                             <RowAction
                               kind="print"
                               label="In phiếu"

@@ -377,3 +377,13 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
 - Thao tác cuối: Duyệt (`RowAction approve` chữ) → view `Eye` (mở form phiếu) → print → cancel. Điều kiện quyền,
   modal duyệt/hủy, `handleApprove`/`handleCancel` không đổi.
 - Chưa làm: trang chi tiết 70/30 (con mắt vẫn mở form `?documentId=`), Quét QR ở ô tìm.
+
+## Trang chi tiết phiếu 70/30 + QR (2026-10-18, chờ test tay)
+- Route mới `/dashboard/inventory/document/[type]/[id]` (`type` = receipt|issue|transfer): `DetailPageHeader`
+  (mã phiếu, ngày, kho, Tải PDF, `HeaderQr`) + `DetailSplitLayout`; trái "Bản PDF" (`DocViewer loadBytes` =
+  `buildInventoryDocumentPdfBytes`) / "Nội dung" (bảng dòng vật tư); phải `StatusSummaryBar domain="inventory"`
+  → `SignActionBox` (Duyệt / Hủy phiếu cùng điều kiện quyền + RPC như danh sách; "Mở form phiếu" `?documentId=`).
+- PDF `src/lib/inventory-document-pdf.ts`: A5 ngang, QR góc phải trên trỏ đúng trang chi tiết.
+- Danh sách: con mắt + mã phiếu mở trang chi tiết (`inventoryDocumentDetailHref`); ô tìm có **Quét QR** — nhận
+  URL trang chi tiết mới và cả QR cũ `?documentId=` / `?code=` (đã in trên giấy) rồi chuyển sang trang chi tiết.
+- Form `?documentId=` / `?mode=new` không đổi.

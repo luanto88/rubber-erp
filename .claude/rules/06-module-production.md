@@ -772,3 +772,9 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - Quyền: tạo F09 = `product.create | product.confirm_scan | product.approve_shift` (thêm người khóa ca vào
   `REPORT_SHIFT_PERMISSIONS`); tạo F11/F12 = `product.report_daily`; xem = `product.view` hoặc các quyền trên.
 - `ShiftLockModal` hiện khung "Ngày đã khóa đủ tất cả các ca — bản cứng PDF" + nút Xem từng bản.
+
+## 4.16. Rule 29 — bước đầu Thành phẩm + Kho thành phẩm (2026-10-18, chờ test tay)
+- `product/page.tsx` bọc `moduleThemeClass("forest")`; badge trạng thái lô → `StatusBadge domain="lot"`
+  (đã xoá `getLotStatusBadgeClass`). "Xuất hàng" nay tông info (xanh dương, trước tím).
+- `warehouse/page.tsx` bọc `moduleThemeClass("orange")`.
+- Chưa làm: bảng gom ngày → `DateGroupRow`/`ExpandableRow`, `StatGrid` cho KPI, trang chi tiết lô.

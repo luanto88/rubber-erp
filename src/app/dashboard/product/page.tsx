@@ -92,6 +92,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge";
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme";
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif";
 
 // Types
@@ -614,16 +616,6 @@ function isProjectedPctBlocked(pct: number) {
   return normalizeProjectedPct(pct) > PRODUCTION_READY_MAX_PCT + PRODUCTION_PCT_EPSILON;
 }
 
-function getLotStatusBadgeClass(status?: string | null) {
-  switch (normalizeLotStatus(status)) {
-    case "Hoàn thành":
-      return "bg-emerald-100 text-emerald-700";
-    case "Xuất hàng":
-      return "bg-purple-100 text-purple-700";
-    default:
-      return "bg-amber-100 text-amber-700";
-  }
-}
 
 // Business Logic
 function getLoaiBanhConfig(loai_csr: string, selected_banh?: number) {
@@ -4911,7 +4903,7 @@ export default function ProductPage() {
   // LIST VIEW
   // ------------------------------
   return (
-    <div>
+    <div className={moduleThemeClass("forest")}>
       <PageBackgroundMotif theme="forest"/>
       {saveError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
@@ -5669,11 +5661,7 @@ export default function ProductPage() {
                                         </span>
                                       </td>
                                       <td className="px-4 py-2.5">
-                                        <span
-                                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${getLotStatusBadgeClass(g.trangThai)}`}
-                                        >
-                                          {normalizeLotStatus(g.trangThai)}
-                                        </span>
+                                        <StatusBadge domain="lot" status={normalizeLotStatus(g.trangThai)} size="xs" />
                                       </td>
                                     </tr>
                                     );
@@ -6396,11 +6384,7 @@ export default function ProductPage() {
                                     {contributionNganDetail}
                                   </span>
                                 ) : null}
-                                <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${getLotStatusBadgeClass(c.trang_thai)}`}
-                                >
-                                  {normalizeLotStatus(c.trang_thai)}
-                                </span>
+                                <StatusBadge domain="lot" status={normalizeLotStatus(c.trang_thai)} size="xs" />
                               </div>
                               {canEdit && lot ? (
                                 <button

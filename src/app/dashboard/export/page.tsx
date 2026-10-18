@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
@@ -13,7 +13,17 @@ import {
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
 import { fetchAllPaginated } from "@/lib/supabase-helpers";
-import { buildLotKienBocMap, KIEN_KEYS, kienBocOf, type KienBoc, type KienTxRow } from "@/lib/lot-kien-boc";
+import {
+  applyTxToKienPallet,
+  buildLotKienBocMap,
+  KIEN_KEYS,
+  kienBocOf,
+  kienPalletOf,
+  type KienBoc,
+  type KienPallet,
+  type KienKey,
+  type KienPalletTxRow,
+} from "@/lib/lot-kien-boc";
 import {
   FileOutput,
   Plus,
@@ -53,6 +63,52 @@ import {
   ExpandHeaderCell,
   ExpandAllToggle,
 } from "@/app/dashboard/_components/doc-ui/expandable-row";
+
+// Nhãn kiện dạng "1722csA/26" (mã lô + chữ kiện + "/năm").
+const kienLabelOf = (maLo: string, kien: string) => {
+  const m = String(maLo || "").trim().match(/^(.*?)\/(\d{2,4})$/);
+  return m ? `${m[1]}${kien.toUpperCase()}/${m[2]}` : `${maLo} kiện ${kien.toUpperCase()}`;
+};
+
+type KienScanCandidate = {
+  raw: string;
+  lotId: string;
+  maLo: string;
+  k: KienKey;
+  label: string;
+  rem: number;
+  onVehicle: number;
+  boc: string;
+  pallet: string[];
+  csr: string;
+  loaiBanh: number;
+  vIdx: number;
+};
+
+type KienScanEntry = {
+  id: string;
+  vIdx: number;
+  round: number;
+  ok: boolean;
+  label: string;
+  msg?: string;
+  lotId?: string;
+  k?: KienKey;
+  banh?: number;
+  boc?: string;
+  pallet?: string[];
+  at: number;
+  undone?: boolean;
+  added?: boolean;
+};
+
+const vibrate = (pattern: number | number[]) => {
+  try {
+    navigator.vibrate?.(pattern);
+  } catch {
+    /* không hỗ trợ rung */
+  }
+};
 
 const QrScanner = dynamic(
   () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
@@ -130,6 +186,7 @@ type LotRaw = {
   loai_csr: string;
   loai_banh: number;
   boc?: string | null;
+  pallet?: string[] | null;
   kien_a: number;
   kien_b: number;
   kien_c: number;
@@ -362,8 +419,12 @@ export default function ExportPage() {
   // Toàn bộ dòng gán của MỌI đơn trong nhà máy (không theo bộ lọc danh sách, có phân trang) — nguồn
   // để tính phần còn lại của lô. `orders` chỉ là danh sách đang hiển thị nên không dùng được.
   const [allOrderAssignments, setAllOrderAssignments] = useState<
-    { id: string; assignments: Assignment[] | null }[]
+    { id: string; ma_don?: string | null; assignments: Assignment[] | null }[]
   >([]);
+  // Trạng thái MỌI lô (kể cả chưa hoàn thành) theo mã lô chuẩn hoá — để báo lỗi rõ khi quét nhãn kiện.
+  const [lotStatusByCode, setLotStatusByCode] = useState<Map<string, string>>(() => new Map());
+  // Pallet theo từng kiện (hiển thị khi quét QR kiện).
+  const [kienPalletMap, setKienPalletMap] = useState<Map<string, KienPallet>>(() => new Map());
   // Bọc theo từng kiện (lots.boc chỉ là bản chụp giao dịch cuối).
   const [kienBocMap, setKienBocMap] = useState<Map<string, KienBoc>>(() => new Map());
   const [qcResults, setQcResults] = useState<QcResult[]>([]);
@@ -418,9 +479,15 @@ export default function ExportPage() {
   const [scanning, setScanning] = useState(false);
   // Quét QR nhãn kiện trong form: xe đang quét + thông báo kết quả lần quét gần nhất.
   const [kienScanVehicleIdx, setKienScanVehicleIdx] = useState<number | null>(null);
-  const [kienScanMsg, setKienScanMsg] = useState<{ text: string; ok: boolean } | null>(null);
-  const [kienScanCount, setKienScanCount] = useState(0);
   const [kienScanKey, setKienScanKey] = useState(0);
+  // Danh sách kiện đã quét (chỉ hiển thị, không lưu vào đơn) — chia theo lượt mỗi lần mở máy quét.
+  const [kienScanEntries, setKienScanEntries] = useState<KienScanEntry[]>([]);
+  const [kienScanRoundByVehicle, setKienScanRoundByVehicle] = useState<Record<number, number>>({});
+  const [kienScanPending, setKienScanPending] = useState<KienScanCandidate | null>(null);
+  const [kienScanPendingBanh, setKienScanPendingBanh] = useState(0);
+  const [kienQuickConfirm, setKienQuickConfirm] = useState(false);
+  const [kienScanOpenRounds, setKienScanOpenRounds] = useState<Set<number>>(() => new Set());
+  const lastKienScanRef = useRef<{ text: string; at: number } | null>(null);
   const [zoomImg, setZoomImg] = useState<string | null>(null);
   const [delConfirm, setDelConfirm] = useState<string | null>(null);
   const [pendingRetestAttach, setPendingRetestAttach] =
@@ -501,7 +568,7 @@ export default function ExportPage() {
       supabase
         .from("lots")
         .select(
-          "id,factory_id,ma_lo,loai_csr,loai_banh,boc,kien_a,kien_b,kien_c,kien_d,tong_banh,tong_kg,trang_thai,created_at,updated_at",
+          "id,factory_id,ma_lo,loai_csr,loai_banh,boc,pallet,kien_a,kien_b,kien_c,kien_d,tong_banh,tong_kg,trang_thai,created_at,updated_at",
         )
         .eq("factory_id", fid)
         .order("num", { ascending: false })
@@ -512,18 +579,18 @@ export default function ExportPage() {
       return status === "Hoàn thành" || status === "Xuất hàng";
     });
     const [assignRows, txRows] = await Promise.all([
-      fetchAllPaginated<{ id: string; assignments: Assignment[] | null }>((from, to) =>
+      fetchAllPaginated<{ id: string; ma_don?: string | null; assignments: Assignment[] | null }>((from, to) =>
         supabase
           .from("export_orders")
-          .select("id,assignments")
+          .select("id,ma_don,assignments")
           .eq("factory_id", fid)
           .order("id", { ascending: true })
           .range(from, to),
       ),
-      fetchAllPaginated<KienTxRow & { id: string }>((from, to) =>
+      fetchAllPaginated<KienPalletTxRow & { id: string }>((from, to) =>
         supabase
           .from("lot_transactions")
-          .select("id,lot_id,boc,kien_a,kien_b,kien_c,kien_d,lots!inner(factory_id)")
+          .select("id,lot_id,boc,pallet,kien_a,kien_b,kien_c,kien_d,lots!inner(factory_id)")
           .eq("lots.factory_id", fid)
           .not("boc", "is", null)
           .order("created_at", { ascending: true })
@@ -534,6 +601,12 @@ export default function ExportPage() {
     setLotsRaw(filteredLots);
     setAllOrderAssignments(assignRows);
     setKienBocMap(buildLotKienBocMap(txRows));
+    const palletMap = new Map<string, KienPallet>();
+    for (const tx of txRows) applyTxToKienPallet(palletMap, tx);
+    setKienPalletMap(palletMap);
+    setLotStatusByCode(
+      new Map((data || []).map((lot) => [normalizeLotCode(lot.ma_lo), normalizeLotStatus(lot.trang_thai)] as const)),
+    );
   }, []);
 
   const loadQcResults = useCallback(async (fid: string) => {
@@ -685,6 +758,7 @@ export default function ExportPage() {
       setForm(snapshot.form);
       setEditId(snapshot.editId);
       setView("add");
+      setKienScanEntries([]);
       if (
         snapshot.form.loai_pallet &&
         !PALLET_XUAT_BASE.includes(snapshot.form.loai_pallet)
@@ -1018,6 +1092,7 @@ export default function ExportPage() {
     }
     setEditId(order.id);
     setView("add");
+    setKienScanEntries([]);
   };
 
   // -- Assignment helpers ----------------------------------------------------
@@ -1241,12 +1316,15 @@ export default function ExportPage() {
     return null;
   };
 
-  const assignScannedKien = (
+  const formatBanhKg = (v: number | string) =>
+    String(v ?? "").replace(".", ",");
+
+  // Kiểm tra 1 mã QR nhãn kiện: trả lỗi rõ ràng hoặc thông tin kiện để xác nhận.
+  const validateScannedKien = (
     raw: string,
     vIdx: number,
-  ): { ok: boolean; msg: string } => {
+  ): { ok: false; label: string; msg: string } | { ok: true; cand: KienScanCandidate } => {
     const text = (raw || "").trim();
-    if (!text) return { ok: false, msg: "Không đọc được mã QR." };
     let f: string | null = null;
     let lo: string | null = null;
     let kienRaw: string | null = null;
@@ -1258,79 +1336,155 @@ export default function ExportPage() {
     } catch {
       /* không phải URL */
     }
-    if (!lo || !kienRaw) {
-      return {
-        ok: false,
-        msg: "Đây không phải QR nhãn kiện thành phẩm.",
-      };
+    if (!text || !lo || !kienRaw) {
+      return { ok: false, label: "Mã không hợp lệ", msg: "Đây không phải QR nhãn kiện thành phẩm." };
     }
-    if (f && factoryId && f !== factoryId) {
-      return { ok: false, msg: "Nhãn kiện thuộc nhà máy khác." };
-    }
-    const kienUpper = kienRaw.trim().toUpperCase();
-    const k = kienUpper.toLowerCase() as (typeof KIEN_KEYS)[number];
+    const k = kienRaw.trim().toLowerCase() as KienKey;
     if (!KIEN_KEYS.includes(k)) {
-      return { ok: false, msg: `Kiện "${kienRaw}" không hợp lệ.` };
+      return { ok: false, label: lo, msg: `Kiện "${kienRaw}" không hợp lệ (chỉ A, B, C, D).` };
     }
-    const label = `${lo} kiện ${kienUpper}`;
+    const label = kienLabelOf(lo, k);
+    if (f && factoryId && f !== factoryId) {
+      return { ok: false, label, msg: `Kiện ${label} thuộc nhà máy khác.` };
+    }
     const code = normalizeLotCode(lo);
-    const rawLot = dedupeLotsByMaLo(lotsRaw).find(
-      (l) => normalizeLotCode(l.ma_lo) === code,
-    );
+    const rawLot = dedupeLotsByMaLo(lotsRaw).find((l) => normalizeLotCode(l.ma_lo) === code);
     if (!rawLot) {
-      return {
-        ok: false,
-        msg: `${label}: lô chưa xác nhận sản xuất / chưa hoàn thành.`,
-      };
+      const status = lotStatusByCode.get(code);
+      return status
+        ? { ok: false, label, msg: `Lô ${lo} chưa hoàn thành (${status}) — chưa xuất được.` }
+        : { ok: false, label, msg: `Kiện ${label} chưa sản xuất.` };
+    }
+    if (!form.chung_loai) {
+      return { ok: false, label, msg: "Chọn chủng loại (CSR) của đơn trước khi quét." };
     }
     if (normalizeCsrCode(rawLot.loai_csr) !== normalizeCsrCode(form.chung_loai)) {
       return {
         ok: false,
-        msg: `${label}: lô ${rawLot.loai_csr}, đơn đang xuất ${form.chung_loai || "—"}.`,
+        label,
+        msg: `Lô ${rawLot.ma_lo} khác chủng loại: ${rawLot.loai_csr}, đơn cần ${form.chung_loai}.`,
       };
     }
     if (Number(rawLot.loai_banh) !== Number(form.loai_banh)) {
       return {
         ok: false,
-        msg: `${label}: bành ${rawLot.loai_banh}kg, đơn đang xuất bành ${form.loai_banh}kg.`,
+        label,
+        msg: `Lô ${rawLot.ma_lo} bành ${formatBanhKg(rawLot.loai_banh)} kg, đơn cần ${formatBanhKg(form.loai_banh)} kg.`,
       };
+    }
+    if (Number(rawLot[`kien_${k}`] || 0) <= 0) {
+      return { ok: false, label, msg: `Kiện ${label} chưa sản xuất.` };
     }
     const latestQc = latestQcByLotId.get(rawLot.id);
     if (!latestQc) {
-      return { ok: false, msg: `${label}: lô chưa có kết quả kiểm nghiệm.` };
+      return { ok: false, label, msg: `Lô ${rawLot.ma_lo} chưa có kết quả kiểm nghiệm.` };
     }
     if (latestQc.dat_hang?.endsWith("RH") || latestQc.trang_thai === "khong_dat") {
       return {
         ok: false,
-        msg: `${label}: lô rớt hạng — cần kiểm nghiệm lại trước khi xuất.`,
+        label,
+        msg: `Lô ${rawLot.ma_lo} rớt hạng — cần kiểm nghiệm lại trước khi xuất.`,
       };
     }
     const qcFail = qcRequirementFailure(rawLot.id);
-    if (qcFail) return { ok: false, msg: `${label}: ${qcFail}.` };
-    const lot = lotsExt.find((l) => l.id === rawLot.id);
-    const remKien = lot ? getFormRemaining(lot)[k] : 0;
-    if (!lot || remKien <= 0) {
-      const kienBanh = Number(rawLot[`kien_${k}` as const] || 0);
-      if (kienBanh <= 0) {
-        return { ok: false, msg: `${label}: kiện chưa sản xuất.` };
-      }
+    if (qcFail) {
+      return { ok: false, label, msg: `Lô ${rawLot.ma_lo} không đạt chỉ tiêu: ${qcFail}.` };
+    }
+    const boc = kienBocOf(kienBocMap, rawLot.id, k, rawLot.boc) || "";
+    if (
+      form.loai_boc &&
+      normalizeText(boc) !== normalizeText(form.loai_boc) &&
+      !editOriginalKien.has(`${rawLot.id}|${k}`)
+    ) {
       return {
         ok: false,
-        msg: `${label}: đã gán hết (đơn này hoặc đơn khác) hoặc khác loại bọc của đơn.`,
+        label,
+        msg: `Kiện ${label} khác bọc: kiện là ${boc || "—"}, đơn cần ${form.loai_boc}.`,
       };
     }
-    const kienField = `kien_${k}` as const;
+    const field = `kien_${k}` as const;
+    const onVehicle = form.assignments
+      .filter((a) => a.lot_id === rawLot.id && a.vehicleIdx === vIdx)
+      .reduce((s, a) => s + (Number(a[field]) || 0), 0);
+    const lot = lotsExt.find((l) => l.id === rawLot.id);
+    const rem = lot ? getFormRemaining(lot)[k] : 0;
+    if (rem <= 0) {
+      if (onVehicle > 0) {
+        const last = [...kienScanEntries]
+          .reverse()
+          .find((e) => e.ok && !e.undone && e.vIdx === vIdx && e.lotId === rawLot.id && e.k === k);
+        return {
+          ok: false,
+          label,
+          msg: last
+            ? `Kiện ${label} đã được chọn trên xe ${vIdx + 1} (lượt ${last.round}).`
+            : `Kiện ${label} đã có đủ trên xe ${vIdx + 1}.`,
+        };
+      }
+      const otherVehicle = form.assignments.find(
+        (a) => a.lot_id === rawLot.id && a.vehicleIdx !== vIdx && (Number(a[field]) || 0) > 0,
+      );
+      if (otherVehicle) {
+        return {
+          ok: false,
+          label,
+          msg: `Kiện ${label} đang ở xe ${otherVehicle.vehicleIdx + 1} của đơn này.`,
+        };
+      }
+      const otherOrders = allOrderAssignments.filter(
+        (o) =>
+          o.id !== editId &&
+          (o.assignments || []).some((a) => {
+            const resolved = resolveAssignmentLot(a);
+            return resolved?.id === rawLot.id && (Number(a[field]) || 0) > 0;
+          }),
+      );
+      if (otherOrders.length > 0) {
+        const first = otherOrders[0].ma_don || "khác";
+        const more = otherOrders.length > 1 ? ` và ${otherOrders.length - 1} đơn khác` : "";
+        return { ok: false, label, msg: `Kiện ${label} đã xuất hết ở đơn ${first}${more}.` };
+      }
+      return { ok: false, label, msg: `Kiện ${label} đã hết bành để xuất.` };
+    }
+    return {
+      ok: true,
+      cand: {
+        raw: text,
+        lotId: rawLot.id,
+        maLo: rawLot.ma_lo,
+        k,
+        label,
+        rem,
+        onVehicle,
+        boc,
+        pallet: kienPalletOf(kienPalletMap, rawLot.id, k, rawLot.pallet || []),
+        csr: rawLot.loai_csr,
+        loaiBanh: Number(rawLot.loai_banh),
+        vIdx,
+      },
+    };
+  };
+
+  const pushKienScanEntry = (entry: Omit<KienScanEntry, "id" | "at" | "round">) => {
+    const round = kienScanRoundByVehicle[entry.vIdx] || 1;
+    setKienScanEntries((prev) => [
+      ...prev,
+      { ...entry, round, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now() },
+    ]);
+  };
+
+  const commitKienAssign = (cand: KienScanCandidate, banhInput: number) => {
+    const banh = Math.max(1, Math.min(cand.rem, Math.round(banhInput) || 0));
+    const field = `kien_${cand.k}` as const;
     setForm((prev) => {
       const existing = prev.assignments.find(
-        (a) => a.lot_id === lot.id && a.vehicleIdx === vIdx,
+        (a) => a.lot_id === cand.lotId && a.vehicleIdx === cand.vIdx,
       );
       if (existing) {
         return {
           ...prev,
           assignments: prev.assignments.map((a) =>
-            a === existing
-              ? { ...a, [kienField]: (a[kienField] || 0) + remKien }
-              : a,
+            a === existing ? { ...a, [field]: (a[field] || 0) + banh } : a,
           ),
         };
       }
@@ -1339,31 +1493,359 @@ export default function ExportPage() {
         assignments: [
           ...prev.assignments,
           {
-            lot_id: lot.id,
-            ma_lo: lot.ma_lo,
-            vehicleIdx: vIdx,
+            lot_id: cand.lotId,
+            ma_lo: cand.maLo,
+            vehicleIdx: cand.vIdx,
             kien_a: 0,
             kien_b: 0,
             kien_c: 0,
             kien_d: 0,
-            [kienField]: remKien,
+            [field]: banh,
           },
         ],
       };
     });
-    return {
+    pushKienScanEntry({
+      vIdx: cand.vIdx,
       ok: true,
-      msg: `Đã gán ${lot.ma_lo} kiện ${kienUpper} (${remKien} bành) lên xe ${vIdx + 1}.`,
-    };
+      label: cand.label,
+      lotId: cand.lotId,
+      k: cand.k,
+      banh,
+      boc: cand.boc,
+      pallet: cand.pallet,
+      added: cand.onVehicle > 0,
+    });
+    vibrate(60);
+  };
+
+  const undoKienScan = (entry: KienScanEntry) => {
+    if (!entry.ok || entry.undone || !entry.lotId || !entry.k || !entry.banh) return;
+    const field = `kien_${entry.k}` as const;
+    const banh = entry.banh;
+    setForm((prev) => ({
+      ...prev,
+      assignments: prev.assignments
+        .map((a) =>
+          a.lot_id === entry.lotId && a.vehicleIdx === entry.vIdx
+            ? { ...a, [field]: Math.max(0, (a[field] || 0) - banh) }
+            : a,
+        )
+        .filter(
+          (a) =>
+            !(a.lot_id === entry.lotId && a.vehicleIdx === entry.vIdx) ||
+            (a.kien_a || 0) + (a.kien_b || 0) + (a.kien_c || 0) + (a.kien_d || 0) > 0,
+        ),
+    }));
+    setKienScanEntries((prev) => prev.map((e) => (e.id === entry.id ? { ...e, undone: true } : e)));
+  };
+
+  const restartKienScanner = (delay = 0) => {
+    if (delay > 0) window.setTimeout(() => setKienScanKey((key) => key + 1), delay);
+    else setKienScanKey((key) => key + 1);
   };
 
   const handleKienScanDecoded = (text: string) => {
     if (kienScanVehicleIdx === null) return;
-    const result = assignScannedKien(text, kienScanVehicleIdx);
-    setKienScanMsg({ text: result.msg, ok: result.ok });
-    if (result.ok) setKienScanCount((c) => c + 1);
-    // Dựng lại máy quét để quét kiện tiếp theo (mỗi lần mở chỉ đọc 1 mã).
+    const trimmed = (text || "").trim();
+    const now = Date.now();
+    const last = lastKienScanRef.current;
+    // Camera đọc lại cùng nhãn trong 3 giây → bỏ qua, không ghi lỗi trùng.
+    if (last && last.text === trimmed && now - last.at < 3000) {
+      lastKienScanRef.current = { text: trimmed, at: now };
+      restartKienScanner(1200);
+      return;
+    }
+    lastKienScanRef.current = { text: trimmed, at: now };
+    const result = validateScannedKien(trimmed, kienScanVehicleIdx);
+    if (!result.ok) {
+      pushKienScanEntry({ vIdx: kienScanVehicleIdx, ok: false, label: result.label, msg: result.msg });
+      vibrate([80, 60, 80]);
+      restartKienScanner();
+      return;
+    }
+    if (kienQuickConfirm) {
+      commitKienAssign(result.cand, result.cand.rem);
+      restartKienScanner();
+      return;
+    }
+    setKienScanPending(result.cand);
+    setKienScanPendingBanh(result.cand.rem);
+  };
+
+  const closeKienScanPending = (confirm: boolean) => {
+    if (!kienScanPending) return;
+    if (confirm) commitKienAssign(kienScanPending, kienScanPendingBanh);
+    lastKienScanRef.current = { text: kienScanPending.raw, at: Date.now() };
+    setKienScanPending(null);
+    restartKienScanner();
+  };
+
+  const openKienScanner = (idx: number) => {
+    setKienScanRoundByVehicle((prev) => ({ ...prev, [idx]: (prev[idx] || 0) + 1 }));
+    setKienScanPending(null);
+    setKienScanOpenRounds(new Set());
+    lastKienScanRef.current = null;
+    setKienScanVehicleIdx(idx);
     setKienScanKey((key) => key + 1);
+  };
+
+  const renderKienScanOverlay = (idx: number, bienTruoc: string) => {
+    const round = kienScanRoundByVehicle[idx] || 1;
+    const vehicleEntries = kienScanEntries.filter((e) => e.vIdx === idx);
+    const timeOf = (at: number) =>
+      new Date(at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    // Tổng trên xe theo (lô, kiện).
+    const onVehicle = new Map<string, { lotId: string; k: KienKey; banh: number }>();
+    for (const a of form.assignments.filter((x) => x.vehicleIdx === idx)) {
+      for (const k of KIEN_KEYS) {
+        const n = Number(a[`kien_${k}`]) || 0;
+        if (n <= 0) continue;
+        const key = `${a.lot_id}|${k}`;
+        const cur = onVehicle.get(key);
+        onVehicle.set(key, { lotId: a.lot_id, k, banh: (cur?.banh || 0) + n });
+      }
+    }
+    const totalKien = onVehicle.size;
+    const totalBanhOnVehicle = [...onVehicle.values()].reduce((s, x) => s + x.banh, 0);
+    // Phần đã có trên xe trước đó = trên xe − bành quét được (chưa hoàn tác) ở các lượt.
+    const scannedBanh = new Map<string, number>();
+    for (const e of vehicleEntries) {
+      if (!e.ok || e.undone || !e.lotId || !e.k) continue;
+      const key = `${e.lotId}|${e.k}`;
+      scannedBanh.set(key, (scannedBanh.get(key) || 0) + (e.banh || 0));
+    }
+    const preExisting = [...onVehicle.entries()]
+      .map(([key, x]) => ({ ...x, banh: x.banh - (scannedBanh.get(key) || 0) }))
+      .filter((x) => x.banh > 0);
+    const currentEntries = vehicleEntries.filter((e) => e.round === round).reverse();
+    const currentOk = currentEntries.filter((e) => e.ok && !e.undone);
+    const pastRounds = [...new Set(vehicleEntries.map((e) => e.round))]
+      .filter((r) => r !== round)
+      .sort((a, b) => b - a);
+    const lotCodeOf = (lotId: string) => lotsRaw.find((l) => l.id === lotId)?.ma_lo || "";
+
+    const renderEntry = (e: KienScanEntry) =>
+      e.ok ? (
+        <li
+          key={e.id}
+          className={`flex items-start justify-between gap-3 rounded-lg border px-3 py-2 ${e.undone ? "border-slate-200 bg-slate-50 opacity-60" : "border-emerald-200 bg-emerald-50"}`}
+        >
+          <div className="min-w-0 text-xs text-slate-600">
+            <div className={`text-sm font-extrabold text-slate-800 ${e.undone ? "line-through" : ""}`}>
+              {e.label}
+              {e.added && !e.undone && (
+                <span className="ml-1.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">
+                  cộng thêm
+                </span>
+              )}
+            </div>
+            <div>
+              {e.banh} bành · {e.boc || "—"}
+              {e.pallet && e.pallet.length > 0 ? ` · ${e.pallet.join(", ")}` : ""}
+            </div>
+            <div className="text-[11px] text-slate-400">
+              {timeOf(e.at)}
+              {e.undone ? " · đã hoàn tác" : ""}
+            </div>
+          </div>
+          {!e.undone && (
+            <button
+              type="button"
+              onClick={() => undoKienScan(e)}
+              className="shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-bold text-slate-600 hover:bg-slate-100"
+            >
+              Hoàn tác
+            </button>
+          )}
+        </li>
+      ) : (
+        <li key={e.id} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+          <div className="text-xs font-bold text-red-700">{e.msg}</div>
+          <div className="text-[11px] text-red-400">{timeOf(e.at)}</div>
+        </li>
+      );
+
+    return (
+      <div className="fixed inset-0 z-[90] overflow-y-auto bg-slate-100">
+        <div className="sticky top-0 z-10 bg-slate-900 px-4 py-3 text-white">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 text-sm font-bold">
+              Xe {idx + 1}
+              {bienTruoc ? ` · ${bienTruoc}` : ""} · lượt {round}: {currentOk.length} kiện
+              <div className="text-xs font-semibold text-slate-300">
+                Tổng trên xe: {totalKien} kiện / {totalBanhOnVehicle} bành
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setKienScanPending(null);
+                setKienScanVehicleIdx(null);
+              }}
+              className="shrink-0 rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-brand-700"
+            >
+              Xong
+            </button>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-200">
+            <input
+              type="checkbox"
+              checked={kienQuickConfirm}
+              onChange={(e) => setKienQuickConfirm(e.target.checked)}
+              className="h-4 w-4 accent-emerald-500"
+            />
+            Xác nhận nhanh (gán đủ số bành còn lại, không hỏi lại)
+          </label>
+        </div>
+
+        <div className="bg-black">
+          {kienScanPending ? (
+            <div className="flex h-40 items-center justify-center text-sm font-semibold text-slate-300">
+              Đã tạm dừng quét — xác nhận kiện bên dưới
+            </div>
+          ) : (
+            <QrScanner
+              key={kienScanKey}
+              onDecoded={handleKienScanDecoded}
+              onCancel={() => setKienScanVehicleIdx(null)}
+              hintText="Đưa mã QR trên nhãn kiện thành phẩm vào khung"
+              cancelText="Đóng"
+              cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+              uploadButtonText="Tải ảnh chứa QR"
+              uploadScanningText="Đang xử lý ảnh..."
+              uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+              orDividerText="hoặc"
+              scanError={null}
+            />
+          )}
+        </div>
+
+        <div className="space-y-4 p-4 pb-40">
+          <section>
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+              Lượt {round} (đang quét)
+            </h3>
+            {currentEntries.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-300 bg-white px-3 py-4 text-center text-xs text-slate-400">
+                Chưa quét kiện nào trong lượt này.
+              </p>
+            ) : (
+              <ul className="space-y-2">{currentEntries.map(renderEntry)}</ul>
+            )}
+          </section>
+
+          {pastRounds.map((r) => {
+            const entries = vehicleEntries.filter((e) => e.round === r).reverse();
+            const ok = entries.filter((e) => e.ok && !e.undone);
+            const open = kienScanOpenRounds.has(r);
+            return (
+              <section key={r} className="rounded-xl border border-slate-200 bg-white">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setKienScanOpenRounds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(r)) next.delete(r);
+                      else next.add(r);
+                      return next;
+                    })
+                  }
+                  className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-bold text-slate-700"
+                >
+                  <span>
+                    Lượt {r} · {ok.length} kiện · {ok.reduce((s, e) => s + (e.banh || 0), 0)} bành
+                  </span>
+                  <span className="text-xs text-slate-400">{open ? "Thu gọn" : "Xem"}</span>
+                </button>
+                {open && <ul className="space-y-2 px-3 pb-3">{entries.map(renderEntry)}</ul>}
+              </section>
+            );
+          })}
+
+          {preExisting.length > 0 && (
+            <section className="rounded-xl border border-slate-200 bg-white p-3">
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                Đã có trên xe trước đó
+              </h3>
+              <ul className="space-y-1 text-xs text-slate-600">
+                {preExisting.map((x) => (
+                  <li key={`${x.lotId}|${x.k}`} className="flex justify-between gap-3">
+                    <span className="font-bold text-slate-700">{kienLabelOf(lotCodeOf(x.lotId), x.k)}</span>
+                    <span>{x.banh} bành</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+
+        {kienScanPending && (
+          <div className="fixed inset-x-0 bottom-0 z-20 rounded-t-2xl bg-white p-4 shadow-2xl">
+            <div className="mx-auto max-w-md space-y-3">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                  {kienScanPending.onVehicle > 0 ? "Cộng thêm vào xe" : "Xác nhận kiện"} {kienScanPending.vIdx + 1}
+                </div>
+                <div className="text-xl font-extrabold text-slate-800">{kienScanPending.label}</div>
+                <div className="mt-1 text-xs text-slate-600">
+                  {kienScanPending.csr} · bành {formatBanhKg(kienScanPending.loaiBanh)} kg · {kienScanPending.boc || "—"}
+                  {kienScanPending.pallet.length > 0 ? ` · ${kienScanPending.pallet.join(", ")}` : ""}
+                </div>
+                <div className="text-xs text-slate-600">
+                  Còn lại: <b>{kienScanPending.rem} bành</b>
+                  {kienScanPending.onVehicle > 0 ? ` · đã có ${kienScanPending.onVehicle} bành trên xe` : ""}
+                </div>
+              </div>
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setKienScanPendingBanh((n) => Math.max(1, n - 1))}
+                  className="h-12 w-12 rounded-xl border border-slate-300 text-2xl font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={kienScanPending.rem}
+                  value={kienScanPendingBanh}
+                  onChange={(e) => {
+                    const n = Number(e.target.value) || 0;
+                    setKienScanPendingBanh(Math.max(1, Math.min(kienScanPending.rem, n)));
+                  }}
+                  className="h-12 w-24 rounded-xl border border-slate-300 text-center text-xl font-extrabold outline-none focus:border-brand-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => setKienScanPendingBanh((n) => Math.min(kienScanPending.rem, n + 1))}
+                  className="h-12 w-12 rounded-xl border border-slate-300 text-2xl font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  +
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => closeKienScanPending(false)}
+                  className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  Bỏ qua
+                </button>
+                <button
+                  type="button"
+                  onClick={() => closeKienScanPending(true)}
+                  className="rounded-xl bg-brand-600 px-4 py-3 text-sm font-bold text-white hover:bg-brand-700"
+                >
+                  Xác nhận
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handleDrop = (e: React.DragEvent, vIdx: number) => {
@@ -1983,6 +2465,7 @@ export default function ExportPage() {
                   setForm(emptyForm());
                   setEditId(null);
                   setView("add");
+                  setKienScanEntries([]);
                 }}
                 className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-slate-50 text-brand-700 font-bold rounded-xl shadow-md transition-all"
               >
@@ -2023,7 +2506,7 @@ export default function ExportPage() {
           layout="grid"
           activeCount={[search, filterLoai, filterFrom, filterTo].filter(Boolean).length}
         >
-          <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-mod-600 sm:col-span-2">
+          <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-mod-600 sm:col-span-2 lg:col-span-4 xl:col-span-2">
             <Search size={15} className="shrink-0 text-slate-400" />
             <input
               value={search}
@@ -2074,19 +2557,24 @@ export default function ExportPage() {
             title="Đến ngày"
             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
           />
-          {(search || filterLoai || filterFrom || filterTo) && (
+          {(() => {
+            const hasFilter = !!(search || filterLoai || filterFrom || filterTo);
+            return (
             <button
+              type="button"
+              disabled={!hasFilter}
               onClick={() => {
                 setSearch("");
                 setFilterLoai("");
                 setFilterFrom("");
                 setFilterTo("");
               }}
-              className="flex h-10 w-full items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 hover:border-red-300 hover:text-red-600"
+              className="flex h-10 w-full items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-600"
             >
               <X size={14} /> Xóa lọc
             </button>
-          )}
+            );
+          })()}
         </FilterBar>
 
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -3332,12 +3820,7 @@ export default function ExportPage() {
                       {!v.confirmed && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setKienScanVehicleIdx(idx);
-                            setKienScanMsg(null);
-                            setKienScanCount(0);
-                            setKienScanKey((key) => key + 1);
-                          }}
+                          onClick={() => openKienScanner(idx)}
                           className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white hover:bg-brand-700"
                         >
                           <QrCode size={13} /> Quét QR kiện lên xe này
@@ -3345,46 +3828,7 @@ export default function ExportPage() {
                       )}
                       {kienScanVehicleIdx === idx &&
                         typeof document !== "undefined" &&
-                        createPortal(
-                          <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
-                            <div className="sticky top-0 z-10 space-y-2 bg-slate-900 px-4 py-3 text-white">
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="text-sm font-bold">
-                                  Xe {idx + 1}
-                                  {v.bien_truoc ? ` · ${v.bien_truoc}` : ""} · đã quét {kienScanCount} kiện
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => setKienScanVehicleIdx(null)}
-                                  className="rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-brand-700"
-                                >
-                                  Xong
-                                </button>
-                              </div>
-                              {kienScanMsg && (
-                                <div
-                                  className={`rounded-lg px-3 py-2 text-xs font-bold ${kienScanMsg.ok ? "bg-emerald-600" : "bg-red-600"}`}
-                                >
-                                  {kienScanMsg.text}
-                                </div>
-                              )}
-                            </div>
-                            <QrScanner
-                              key={kienScanKey}
-                              onDecoded={handleKienScanDecoded}
-                              onCancel={() => setKienScanVehicleIdx(null)}
-                              hintText="Đưa mã QR trên nhãn kiện thành phẩm vào khung"
-                              cancelText="Đóng"
-                              cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
-                              uploadButtonText="Tải ảnh chứa QR"
-                              uploadScanningText="Đang xử lý ảnh..."
-                              uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
-                              orDividerText="hoặc"
-                              scanError={null}
-                            />
-                          </div>,
-                          document.body,
-                        )}
+                        createPortal(renderKienScanOverlay(idx, v.bien_truoc || ""), document.body)}
                     </div>
 
                     {/* Drop hint or assigned lots */}

@@ -5,6 +5,7 @@ import { Forklift, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import WarehouseKpi from "./_components/warehouse-kpi"
 import WarehouseFloorPlan from "./_components/warehouse-floor-plan"
@@ -283,7 +284,7 @@ export default function WarehousePage() {
   }
 
   return (
-    <div className="p-4 h-full flex flex-col">
+    <div className={`p-4 h-full flex flex-col ${moduleThemeClass("orange")}`}>
       <PageBackgroundMotif theme="orange"/>
       {/* Toast */}
       {toast && (

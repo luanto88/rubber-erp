@@ -301,3 +301,9 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
   }, [dispatchTrips, requiredNotes])
   ```
   Lý do KHÔNG chỉ dùng riêng `required_notes`: đây là **filter**, không phải input tạo dữ liệu mới — cần giữ khả năng lọc các chuyến điều xe cũ mang ghi chú tự do (trước khi ô Ghi chú của Điều xe chuyển sang dropdown cứng, xem `.claude/rules/19-dispatch-module.md`). Đánh đổi: danh sách filter có thể tạm thời có nhiều option gần giống nhau (đúng vấn đề gốc mà `required_notes` sinh ra để giải quyết) nhưng giảm dần theo thời gian khi dữ liệu điều xe mới luôn khớp danh mục.
+
+## 17. Rule 29 — bước đầu (2026-10-18, chờ test tay)
+- Trang bọc `moduleThemeClass("amber")`; tab Đang hoạt động / Lịch sử / In QR → `SegmentedTabs`.
+- Badge trạng thái ngăn (thẻ, thẻ In QR, form) → `StatusBadge domain="storage"`; đã xoá `badgeClass()`.
+  Lưu ý màu: "Đóng" nay tông returned (hồng), "Chờ SX" pending (amber nhấp nháy), "Đã SX" info (xanh dương).
+- Chưa làm: chuyển card ngăn sang bảng `ExpandableRow`, trang chi tiết 70/30.

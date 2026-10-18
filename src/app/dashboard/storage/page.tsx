@@ -55,6 +55,9 @@ import {
   ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw, Trash2
 } from "lucide-react"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -110,15 +113,6 @@ const headerStyle = (tt: string) => {
   if (tt === STORAGE_STATUS_CLOSED) return { grad: "from-rose-50 to-orange-50", icon: "text-rose-500" }
   if (tt === STORAGE_STATUS_RECEIVING) return { grad: "from-slate-50 to-gray-100", icon: "text-slate-400" }
   return { grad: "from-slate-50 to-gray-100", icon: "text-slate-400" }
-}
-
-const badgeClass = (tt: string) => {
-  if (tt === STORAGE_STATUS_IN_PRODUCTION) return "bg-emerald-100 text-emerald-700"
-  if (tt === STORAGE_STATUS_PRODUCED) return "bg-blue-100 text-blue-700"
-  if (tt === STORAGE_STATUS_WAITING) return "bg-amber-100 text-amber-700"
-  if (tt === STORAGE_STATUS_CLOSED) return "bg-rose-100 text-rose-700"
-  if (tt === STORAGE_STATUS_RECEIVING) return "bg-slate-100 text-slate-500"
-  return "bg-slate-100 text-slate-600"
 }
 
 const genMaNgan = (f: ReturnType<typeof emptyForm>) => {
@@ -1200,7 +1194,7 @@ export default function StoragePage() {
 
   // ? Render ????
   return (
-    <div>
+    <div className={moduleThemeClass("amber")}>
       <PageBackgroundMotif theme="amber"/>
       {kpiPrompt && (
         <KpiLinkPrompt
@@ -1281,42 +1275,18 @@ export default function StoragePage() {
           ))}
         </div>
 
-        {/* Tab nav: Đang hoạt động / Lịch sử */}
-        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit overflow-x-auto max-w-full">
-          <button
-            type="button"
-            onClick={() => setNganTab("active")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
-              nganTab === "active" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"}`}>
-            <Warehouse size={14}/> Đang hoạt động
-            <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
-              nganTab === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-              {activeNgans.length}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setNganTab("history")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
-              nganTab === "history" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"}`}>
-            <History size={14}/> Lịch sử
-            <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
-              nganTab === "history" ? "bg-blue-100 text-blue-700" : "bg-slate-200 text-slate-500"}`}>
-              {historyNgans.length}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setNganTab("print")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
-              nganTab === "print" ? "bg-white shadow text-slate-800" : "text-slate-500 hover:text-slate-700"}`}>
-            <Printer size={14}/> In QR hàng loạt
-            <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
-              nganTab === "print" ? "bg-violet-100 text-violet-700" : "bg-slate-200 text-slate-500"}`}>
-              {activeNgans.length}
-            </span>
-          </button>
-        </div>
+        {/* Tab nav: Đang hoạt động / Lịch sử / In QR */}
+        <SegmentedTabs
+          className="mb-5"
+          ariaLabel="Nhóm ngăn lưu"
+          value={nganTab}
+          onChange={setNganTab}
+          items={[
+            { key: "active", label: "Đang hoạt động", icon: Warehouse, count: activeNgans.length },
+            { key: "history", label: "Lịch sử", icon: History, count: historyNgans.length },
+            { key: "print", label: "In QR hàng loạt", icon: Printer, count: activeNgans.length },
+          ]}
+        />
 
         {/* Filters */}
         <FilterBar
@@ -1471,9 +1441,7 @@ export default function StoragePage() {
                     <div className="flex items-center gap-2 min-w-0 flex-wrap">
                       <Warehouse size={16} className={`${hs.icon} shrink-0`} />
                       <span className="font-extrabold text-slate-800 text-base truncate">{n.ten_ngan}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${badgeClass(n.trang_thai)}`}>
-                        {n.trang_thai}
-                      </span>
+                      <StatusBadge domain="storage" status={n.trang_thai} size="sm" />
                     </div>
                     <div className="flex items-center gap-1 shrink-0 ml-2">
                       {nextManualStatus && isAdmin && (
@@ -1849,9 +1817,7 @@ export default function StoragePage() {
                     <div className="pr-7">
                       <div className="truncate text-sm font-extrabold text-slate-800">{n.ten_ngan}</div>
                       <div className="mt-1 break-all text-[11px] text-slate-500">{n.ma_ngan || "—"}</div>
-                      <span className={`mt-2 inline-block px-1.5 py-0.5 rounded-full text-[10px] font-bold ${badgeClass(n.trang_thai)}`}>
-                        {n.trang_thai}
-                      </span>
+                      <StatusBadge domain="storage" status={n.trang_thai} size="xs" className="mt-2" />
                     </div>
                   </button>
                 )
@@ -2201,9 +2167,7 @@ export default function StoragePage() {
               {/* Trạng thái (read-only, tự tính từ ngày) */}
               <div className="bg-slate-50 rounded-xl px-4 py-3 flex items-center gap-2">
                 <span className="text-xs text-slate-500">Trạng thái:</span>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${badgeClass(deriveStorageStatus({ ngayBd: form.ngay_bd, ngayKt: form.ngay_kt, current: form.trang_thai, nowMs: todayMs }))}`}>
-                  {deriveStorageStatus({ ngayBd: form.ngay_bd, ngayKt: form.ngay_kt, current: form.trang_thai, nowMs: todayMs })}
-                </span>
+                <StatusBadge domain="storage" status={deriveStorageStatus({ ngayBd: form.ngay_bd, ngayKt: form.ngay_kt, current: form.trang_thai, nowMs: todayMs })} size="sm" />
                 <span className="text-xs text-slate-400">(tự động)</span>
               </div>
             </div>

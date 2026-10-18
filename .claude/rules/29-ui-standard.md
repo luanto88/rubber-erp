@@ -70,7 +70,7 @@ print `Printer` → riêng module → edit `Pencil` → copy `Copy` → delete `
 lại / lệch chuẩn đã thấy. 4. Prompt bàn giao cho phiên sau (đọc rule 29 + phần còn lại).
 Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 
-## F. Tình trạng áp dụng (cập nhật 2026-10-14, U4)
+## F. Tình trạng áp dụng (cập nhật 2026-10-18)
 | Module | Danh sách | Dòng xổ | Chi tiết 70/30 + PDF | Xem file token | QR phiếu + Quét QR |
 |---|---|---|---|---|---|
 | Bảo trì | ✅ | Lý lịch ✅ · Biên bản ✅ · Tổng quan ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ (quét ở Lý lịch) |
@@ -81,8 +81,10 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | Văn bản | (Doc-UI riêng) | ✅ tiến trình ký | ✅ | ❌ (lưu tên object) | — |
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
 | Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | ✅ `/dashboard/export/[id]` (PDF nhúng loadBytes) | — | ✅ (quét QR EUDR + quét QR kiện lên xe) |
-| Kho vật tư (Nhập/Xuất/Chuyển) | ✅ | ✅ (dòng vật tư của phiếu) | ❌ (vẫn mở form cũ) | — | ❌ |
-| Kho thành phẩm, Thành phẩm, Kho NL | ❌ | ❌ | ❌ | ❌ | — |
+| Kho vật tư (Nhập/Xuất/Chuyển) | ✅ | ✅ (dòng vật tư của phiếu) | ✅ `/dashboard/inventory/document/[type]/[id]` (PDF A5 nhúng loadBytes) | — | ✅ (QR phiếu mới + nhận QR cũ `?documentId=`) |
+| Thành phẩm | 🟡 theme + StatusBadge lot | ❌ (giữ bảng gom ngày cũ) | ❌ | — | — |
+| Kho nguyên liệu | 🟡 theme + StatusBadge storage + SegmentedTabs | ❌ (card ngăn) | ❌ | — | — |
+| Kho thành phẩm | 🟡 theme orange | — (sơ đồ kho) | — | — | — |
 
 ## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)
 Chưa gửi ký ⇒ tab "Bản xem trước (chưa ký)" dựng PDF ngay trong trình duyệt: `DocViewer`
