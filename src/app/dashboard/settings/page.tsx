@@ -17,13 +17,13 @@ const PolygonDrawMap = dynamic(
 )
 import { supabase } from "@/lib/supabase"
 import { fetchSecureUrl } from "@/app/dashboard/_components/secure-file-open"
-import { authFetch } from "@/lib/auth-fetch"
 import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
 import { isBlankNoteContent } from "@/lib/note-filter"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { prepareForestPlotGeometry, mergeGeometryPieces, computeGeometryHash } from "@/lib/eudr-write-gate"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
+import { ExtMaterialModal, emptyExtMaterialForm, type ExtMaterialFormValues } from "../maintenance/_components/ext-material-modal"
 import { CategoryNameClashWarning, findCategoryNameClashes, isClashConfirmed } from "../_components/category-name-clash"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
@@ -311,9 +311,6 @@ type MaintenanceExtMaterialRow = {
   is_active: boolean
 }
 
-function emptyExtMatForm() {
-  return { ten_vat_tu: "", dvt: "", code: "", specification: "", category_id: "", don_gia: "", loai_tien: "USD", image_url: "", is_active: true }
-}
 
 type CustomerRow = {
   id: string
@@ -1036,7 +1033,7 @@ export default function SettingsPage() {
     sort_order: "0",
     is_active: true,
   })
-  const [extMatForm, setExtMatForm] = useState(emptyExtMatForm)
+  const [extMatForm, setExtMatForm] = useState<ExtMaterialFormValues>(emptyExtMaterialForm)
 
   // Customers state
   const [customers, setCustomers] = useState<CustomerRow[]>([])
@@ -1573,61 +1570,6 @@ export default function SettingsPage() {
         ? await supabase.from("personnel_groups").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
         : await supabase.from("personnel_groups").insert(payload)
       if (result.error) { setMaintError(result.error.message); return }
-      setMaintModal(null)
-      void loadMaintenanceData(factoryId)
-    } catch (e) { setMaintError(e instanceof Error ? e.message : "Lỗi") } finally { setMaintSaving(false) }
-  }
-
-  const saveMaintExtMat = async () => {
-    if (!factoryId) return
-    const f = extMatForm
-    const missing: string[] = []
-    if (!f.code.trim()) missing.push("Mã vật tư")
-    if (!f.ten_vat_tu.trim()) missing.push("Tên vật tư")
-    if (!f.category_id) missing.push("Phân loại vật tư")
-    if (!f.dvt.trim()) missing.push("Đơn vị tính")
-    if (!(parseFloat(f.don_gia) > 0)) missing.push("Đơn giá (> 0)")
-    if (missing.length > 0) { setMaintError(`Vui lòng nhập: ${missing.join(", ")}`); return }
-    const imageUrl = f.image_url.trim()
-    if (imageUrl && !/^https?:\/\//i.test(imageUrl)) { setMaintError("Link hình ảnh phải bắt đầu bằng http:// hoặc https://"); return }
-    setMaintSaving(true); setMaintError("")
-    try {
-      if (!maintEditId) {
-        // Tạo mới đi qua API dùng chung với biên bản (chặn trùng mã/tên, gắn kho tạm KT).
-        const res = await authFetch("/api/maintenance/external-items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            code: f.code.trim(),
-            name: f.ten_vat_tu.trim(),
-            categoryId: f.category_id,
-            unit: f.dvt.trim(),
-            donGia: parseFloat(f.don_gia),
-            loaiTien: f.loai_tien,
-            specification: f.specification.trim() || null,
-            imageUrl: imageUrl || null,
-          }),
-        })
-        const json = (await res.json().catch(() => ({}))) as { error?: string }
-        if (!res.ok) { setMaintError(json.error || "Không tạo được vật tư"); return }
-      } else {
-        const { error } = await supabase
-          .from("inventory_items")
-          .update({
-            code: f.code.trim().toUpperCase(),
-            name: f.ten_vat_tu.trim(),
-            unit: f.dvt.trim(),
-            specification: f.specification.trim() || null,
-            category_id: f.category_id,
-            image_url: imageUrl || null,
-            don_gia: parseFloat(f.don_gia),
-            loai_tien: f.loai_tien,
-            is_active: f.is_active,
-          })
-          .eq("id", maintEditId)
-          .eq("factory_id", factoryId)
-        if (error) { setMaintError(error.message); return }
-      }
       setMaintModal(null)
       void loadMaintenanceData(factoryId)
     } catch (e) { setMaintError(e instanceof Error ? e.message : "Lỗi") } finally { setMaintSaving(false) }
@@ -4803,7 +4745,7 @@ export default function SettingsPage() {
                       if (maintTab === "assets") { setAssetForm({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" }); setMaintModal("asset") }
                       else if (maintTab === "staff") openNewStaffModal()
                       else if (maintTab === "vehicles") { setConfigEditId(null); setConfigError(""); setDispatchVehicleForm(emptyDispatchVehicleForm(String((dispatchVehicles.length > 0 ? Math.max(...dispatchVehicles.map(v => v.sort_order || 0)) + 1 : 1)))); setConfigModal("vehicle") }
-                      else { setExtMatForm(emptyExtMatForm()); setMaintModal("ext-mat") }
+                      else { setExtMatForm(emptyExtMaterialForm()); setMaintModal("ext-mat") }
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-sm transition-all"
                   >
@@ -5041,7 +4983,15 @@ export default function SettingsPage() {
                     ) : maintExtMats.map((m) => (
                       <tr key={m.id} className="row-hover">
                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.code || "—"}</td>
-                        <td className="px-4 py-3 font-medium text-slate-700">{m.ten_vat_tu}</td>
+                        <td className="px-4 py-3 font-medium text-slate-700">
+                          <div className="flex items-center gap-2">
+                            {m.image_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={m.image_url} alt="" className="h-8 w-8 shrink-0 rounded-md border border-slate-200 object-cover" />
+                            ) : null}
+                            <span>{m.ten_vat_tu}</span>
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{m.dvt || "—"}</td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">{m.don_gia > 0 ? `${m.don_gia.toLocaleString("vi-VN")} ${m.loai_tien}` : "—"}</td>
                         <td className="px-4 py-3 text-slate-500 text-xs">{m.specification || "—"}</td>
@@ -5051,7 +5001,7 @@ export default function SettingsPage() {
                         <td className="px-4 py-3">
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => { setMaintEditId(m.id); setMaintError(""); setExtMatForm({ ten_vat_tu: m.ten_vat_tu, dvt: m.dvt || "", code: m.code || "", specification: m.specification || "", category_id: m.category_id || "", don_gia: m.don_gia > 0 ? String(m.don_gia) : "", loai_tien: m.loai_tien || "USD", image_url: m.image_url || "", is_active: m.is_active !== false }); setMaintModal("ext-mat") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => { setMaintEditId(m.id); setMaintError(""); setExtMatForm({ ...emptyExtMaterialForm(), ten_vat_tu: m.ten_vat_tu, dvt: m.dvt || "", code: m.code || "", specification: m.specification || "", category_id: m.category_id || "", don_gia: m.don_gia > 0 ? String(m.don_gia) : "", loai_tien: m.loai_tien || "USD", image_url: m.image_url || "", is_active: m.is_active !== false }); setMaintModal("ext-mat") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setMaintDelConfirm({ type: "ext-mat", id: m.id, label: m.ten_vat_tu })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
                             </div>
                           )}
@@ -5378,76 +5328,17 @@ export default function SettingsPage() {
         </ModalShell>
       )}
 
-      {maintModal === "ext-mat" && (
-        <ModalShell
-          title={maintEditId ? "Sửa vật tư mua ngoài" : "Thêm vật tư mua ngoài"}
+      {maintModal === "ext-mat" && factoryId && (
+        <ExtMaterialModal
+          key={maintEditId || "new"}
+          factoryId={factoryId}
+          categories={invCategories}
+          initial={extMatForm}
+          editItemId={maintEditId}
           onClose={() => setMaintModal(null)}
-          maxWidth="lg"
-          footer={
-            <>
-              <button onClick={() => setMaintModal(null)} className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={saveMaintExtMat} disabled={maintSaving} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50">{maintSaving ? "Đang lưu..." : "Lưu"}</button>
-            </>
-          }
-        >
-            <div className="space-y-4">
-              {maintError && <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600 flex items-center gap-2"><AlertTriangle size={14} />{maintError}</div>}
-              <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-                Vật tư lưu vào danh mục kho (kho mặc định: Kho tạm KT) để biên bản bảo trì lập Đề nghị mua và nhập/xuất kho. Các trường có dấu * là bắt buộc.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư *</label>
-                  <input value={extMatForm.code} onChange={e => setExtMatForm(p => ({ ...p, code: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 font-mono" placeholder="VD: BD22211" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Phân loại vật tư *</label>
-                  <select value={extMatForm.category_id} onChange={e => setExtMatForm(p => ({ ...p, category_id: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white">
-                    <option value="">— Chọn phân loại —</option>
-                    {invCategories.map(c => <option key={c.id} value={c.id}>{c.code} - {c.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
-                  <input value={extMatForm.ten_vat_tu} onChange={e => setExtMatForm(p => ({ ...p, ten_vat_tu: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Bạc đạn 22211" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính *</label>
-                  <input value={extMatForm.dvt} onChange={e => setExtMatForm(p => ({ ...p, dvt: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: cái, kg" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn giá *</label>
-                  <input type="number" min="0" step="any" value={extMatForm.don_gia} onChange={e => setExtMatForm(p => ({ ...p, don_gia: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="0" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại tiền</label>
-                  <select value={extMatForm.loai_tien} onChange={e => setExtMatForm(p => ({ ...p, loai_tien: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white">
-                    <option value="USD">USD</option>
-                    <option value="VND">VND</option>
-                    <option value="KHR">KHR</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy cách / Đặc tính</label>
-                <input value={extMatForm.specification} onChange={e => setExtMatForm(p => ({ ...p, specification: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: 110x50x40, 6204-2RS" />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Hình ảnh (link)</label>
-                <input value={extMatForm.image_url} onChange={e => setExtMatForm(p => ({ ...p, image_url: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="https://..." />
-              </div>
-              {maintEditId && (
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" id="extmat-active" checked={extMatForm.is_active} onChange={e => setExtMatForm(p => ({ ...p, is_active: e.target.checked }))} className="rounded" />
-                  <label htmlFor="extmat-active" className="text-sm font-bold text-slate-600">Đang sử dụng</label>
-                </div>
-              )}
-            </div>
-        </ModalShell>
+          onCreated={() => { setMaintModal(null); void loadMaintenanceData(factoryId) }}
+          onUpdated={() => { setMaintModal(null); void loadMaintenanceData(factoryId) }}
+        />
       )}
 
       {maintDelConfirm && (

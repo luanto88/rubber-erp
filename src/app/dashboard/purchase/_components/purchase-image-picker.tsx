@@ -17,7 +17,7 @@ export function PurchaseImagePicker({
   factoryId: string
   images: string[]
   onChange: (urls: string[]) => void
-  documentType: "purchase-requests" | "purchase-receipts"
+  documentType: "purchase-requests" | "purchase-receipts" | "inventory-items"
   label?: string
   max?: number
   /** Ô nhỏ hơn (giữ để tương thích — tương đương variant="compact"). */

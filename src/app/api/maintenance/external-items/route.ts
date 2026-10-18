@@ -7,7 +7,8 @@ import { findKtWarehouse } from "@/lib/maintenance-kt"
 export const dynamic = "force-dynamic"
 
 // POST — tạo vật tư MUA NGOÀI cho Bảo trì (từ biên bản hoặc Cài đặt → Bảo trì → Vật tư mua ngoài).
-// Ghi thẳng `inventory_items` (nguon_tao = 'bao_tri_mua_ngoai'), kho mặc định = Kho tạm KT, để
+// Ghi thẳng `inventory_items` (nguon_tao = 'bao_tri_mua_ngoai'), kho mặc định do người dùng chọn
+// (để trống = Kho tạm KT), để
 // luồng Đề nghị mua → nhập KT → xuất KT dùng được mã này (purchase_request_lines.item_id có FK
 // tới inventory_items). Trước đây vật tư mới nằm ở `maintenance_external_materials` ⇒ lập đề nghị
 // mua bị lỗi `purchase_request_lines_item_id_fkey`.
@@ -21,6 +22,13 @@ type Body = {
   loaiTien?: string | null
   specification?: string | null
   imageUrl?: string | null
+  warehouseId?: string | null
+}
+
+// Ảnh đại diện chỉ nhận URL public của Storage dự án (ảnh upload/chụp qua app), không nhận link ngoài.
+function isOwnStorageUrl(url: string): boolean {
+  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/+$/, "")
+  return !!base && url.startsWith(`${base}/storage/v1/object/public/`)
 }
 
 const PERMISSIONS = [
@@ -56,8 +64,8 @@ export async function POST(req: NextRequest) {
     if (missing.length) {
       return NextResponse.json({ error: `Cần nhập: ${missing.join(", ")}` }, { status: 400 })
     }
-    if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
-      return NextResponse.json({ error: "Link hình ảnh phải bắt đầu bằng http:// hoặc https://" }, { status: 400 })
+    if (imageUrl && !isOwnStorageUrl(imageUrl)) {
+      return NextResponse.json({ error: "Hình ảnh phải được tải lên hoặc chụp trực tiếp trong ứng dụng" }, { status: 400 })
     }
 
     const factoryId = actor.factoryId
@@ -65,12 +73,22 @@ export async function POST(req: NextRequest) {
       .from("inventory_item_categories").select("id").eq("id", categoryId).eq("factory_id", factoryId).maybeSingle()
     if (!category) return NextResponse.json({ error: "Phân loại vật tư không hợp lệ" }, { status: 400 })
 
-    const kt = await findKtWarehouse(factoryId)
-    if (!kt) {
-      return NextResponse.json(
-        { error: "Chưa có kho tạm mã KT — vào Cài đặt → Cấu hình nhà máy → Kho để tạo trước." },
-        { status: 400 },
-      )
+    // Kho mặc định: kho người dùng chọn (phải thuộc nhà máy), để trống = Kho tạm KT.
+    const warehouseId = String(body.warehouseId || "").trim()
+    let warehouse: { id: string; code: string } | null = null
+    if (warehouseId) {
+      const { data: wh } = await supabaseAdmin
+        .from("inventory_warehouses").select("id, code").eq("id", warehouseId).eq("factory_id", factoryId).maybeSingle()
+      if (!wh) return NextResponse.json({ error: "Kho mặc định không hợp lệ" }, { status: 400 })
+      warehouse = wh as { id: string; code: string }
+    } else {
+      warehouse = await findKtWarehouse(factoryId)
+      if (!warehouse) {
+        return NextResponse.json(
+          { error: "Chưa có kho tạm mã KT — chọn kho mặc định khác hoặc vào Cài đặt → Cấu hình nhà máy → Kho để tạo trước." },
+          { status: 400 },
+        )
+      }
     }
 
     // Trùng tuyệt đối tên (sau chuẩn hoá bỏ dấu) hoặc trùng mã → chặn, trả vật tư đang có.
@@ -112,7 +130,7 @@ export async function POST(req: NextRequest) {
         unit,
         specification: body.specification?.trim() || null,
         image_url: imageUrl || null,
-        default_warehouse_ids: [kt.id],
+        default_warehouse_ids: [warehouse.id],
         manages_lot: false,
         manages_expiry: false,
         min_stock: 0,
@@ -131,7 +149,7 @@ export async function POST(req: NextRequest) {
     const { error: ruleErr } = await supabaseAdmin.from("inventory_item_warehouse_rules").insert({
       factory_id: factoryId,
       item_id: item.id,
-      warehouse_id: kt.id,
+      warehouse_id: warehouse.id,
       min_stock: 0,
       max_stock: 0,
       reorder_point: 0,
@@ -140,7 +158,7 @@ export async function POST(req: NextRequest) {
     })
     if (ruleErr) console.warn("[maintenance/external-items] Không tạo được rule kho:", ruleErr.message)
 
-    return NextResponse.json({ item, warehouse: { id: kt.id, code: kt.code } })
+    return NextResponse.json({ item, warehouse: { id: warehouse.id, code: warehouse.code } })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: isoAuthErrorStatus(err) })
   }

@@ -1303,3 +1303,25 @@ lỗi `purchase_request_lines_item_id_fkey`, phiếu đã tạo header nên rout
 - `purchase-draft`: kiểm mã vật tư mua ngoài TRƯỚC khi cấp số/tạo phiếu ⇒ thiếu mã trả 400, không còn
   phiếu "Đã hủy" rác.
 - Chẩn đoán dữ liệu cũ: `supabase/migrations/20261017_ext_materials_to_inventory.sql` (chỉ SELECT).
+
+## Modal vật tư mua ngoài dùng chung — ảnh upload, gợi ý gần giống, lịch sử, kho mặc định (2026-10-18, Bước 1)
+
+Kế hoạch đầy đủ: `.claude/plans/vat-tu-mua-ngoai-gia-cong-2026-10-18.md`; bàn giao Bước 2–3:
+`.claude/plans/ban-giao-vat-tu-mua-ngoai-buoc-2-3.md`.
+
+- Component dùng chung `maintenance/_components/ext-material-modal.tsx` (`ExtMaterialModal`) cho biên bản
+  (`records/[id]`) và Cài đặt → Bảo trì → Vật tư mua ngoài. Đã xoá 2 modal + 2 hàm lưu cũ.
+  - Tự nạp danh mục `inventory_items` (phân trang, **kể cả vật tư ngừng dùng** vì server chặn trùng với
+    cả chúng) + kho của nhà máy. Không thêm API GET — so trùng/gần giống chạy ở client.
+  - Gõ Tên → tối đa 5 vật tư gần giống (`findSimilarNames`, ngưỡng 0,8). Mỗi dòng: ảnh, mã, ĐVT, % giống,
+    nút **Lịch sử** (`PurchaseInsightPanel` qua `GET /api/purchase/item-insight`) và **Dùng mã này** (chỉ
+    biên bản, vật tư đang dùng). Trùng tuyệt đối tên/mã ⇒ khoá nút Lưu ngay ở client; 409 của server
+    (`existing`) cũng được đưa vào danh sách gợi ý.
+  - **Ảnh = 1 ảnh upload/chụp** (`PurchaseImagePicker max={1}`, `documentType="inventory-items"`, bucket
+    `inventory-files`). Không còn ô dán link.
+  - **Kho mặc định** (chỉ khi tạo mới), mặc định KT. Chọn kho khác hiện cảnh báo: biên bản vẫn nhập/xuất
+    vật tư mua ngoài qua KT (ép KT ở `receive/route.ts` + `maintenance-kt.ts` sẽ gỡ ở Bước 2).
+  - Sửa (Cài đặt) vẫn cập nhật thẳng `inventory_items`, không đổi kho mặc định.
+- API `POST /api/maintenance/external-items`: nhận `warehouseId` (kiểm thuộc nhà máy; trống = KT);
+  `imageUrl` chỉ nhận URL public Storage của dự án (`NEXT_PUBLIC_SUPABASE_URL/storage/v1/object/public/`).
+- Cài đặt: cột Tên vật tư có ảnh thu nhỏ.

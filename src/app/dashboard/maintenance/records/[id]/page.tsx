@@ -45,7 +45,7 @@ import {
   type MaintenanceRecordLine,
   type MaintenanceStaff,
 } from "../../_components/maintenance-data"
-import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { ExtMaterialModal, type CreatedExtMaterial, type ExtCatalogItem, type ExtMaterialFormValues } from "../../_components/ext-material-modal"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { prepareImageForUpload, withRetry } from "@/lib/image-upload"
 import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
@@ -147,11 +147,6 @@ const NGUOI_THUC_HIEN_GROUP_NAMES = ["Cơ điện", "Bảo trì", "Cơ khí"]
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_")
-}
-
-// Form "Thêm vật tư mua ngoài" — tạo thẳng inventory_items (kho mặc định = Kho tạm KT).
-function emptyNewExtMatForm() {
-  return { code: "", ten_vat_tu: "", dvt: "", specification: "", category_id: "", don_gia: "", loai_tien: "USD", image_url: "" }
 }
 
 function emptyMaterial(): DraftMaterial {
@@ -274,8 +269,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   type NewItemModalContext = { lineId: string; matId: string }
 
   const [newExtMatModal, setNewExtMatModal] = useState<NewItemModalContext | null>(null)
-  const [newExtMatForm, setNewExtMatForm] = useState(emptyNewExtMatForm)
-  const [savingNewExtMat, setSavingNewExtMat] = useState(false)
+  const [newExtMatInitial, setNewExtMatInitial] = useState<Partial<ExtMaterialFormValues>>({})
 
   // Header form
   const [hangMuc, setHangMuc] = useState<"Sửa chữa" | "Bảo dưỡng">("Sửa chữa")
@@ -1417,72 +1411,47 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
-  const handleSaveNewExtMat = async () => {
-    if (!factoryId || !newExtMatModal) return
-    const f = newExtMatForm
-    const missing: string[] = []
-    if (!f.code.trim()) missing.push("Mã vật tư")
-    if (!f.ten_vat_tu.trim()) missing.push("Tên vật tư")
-    if (!f.category_id) missing.push("Phân loại vật tư")
-    if (!f.dvt.trim()) missing.push("Đơn vị tính")
-    if (!(parseFloat(f.don_gia) > 0)) missing.push("Đơn giá (> 0)")
-    if (missing.length > 0) {
-      setSaveError(`Vui lòng nhập: ${missing.join(", ")}`)
-      return
+  // Modal "Thêm vật tư mua ngoài": tạo mã mới (API) hoặc "Dùng mã này" với vật tư gần giống đã có.
+  const applyExtMatToLine = (item: { id: string; name: string; unit: string | null; don_gia: number | null; loai_tien: string | null }) => {
+    if (!newExtMatModal) return
+    updateMaterial(newExtMatModal.lineId, newExtMatModal.matId, {
+      inventory_item_id: item.id,
+      ten_vat_tu: item.name,
+      dvt: item.unit || "",
+      don_gia: item.don_gia ? String(item.don_gia) : "",
+      loai_tien: item.loai_tien || "USD",
+    })
+    setNewExtMatModal(null)
+  }
+
+  const handleExtMatCreated = ({ item: it, warehouse }: CreatedExtMaterial) => {
+    const option: InventoryItemOption = {
+      id: it.id,
+      code: it.code,
+      name: it.name,
+      unit: it.unit,
+      specification: it.specification,
+      default_warehouse_ids: it.default_warehouse_ids || [],
+      manages_lot: false,
+      category_id: it.category_id,
+      currentStock: 0,
+      primaryWarehouseId: warehouse?.id || null,
+      primaryWarehouseCode: warehouse?.code || null,
+      don_gia: Number(it.don_gia) || 0,
+      loai_tien: it.loai_tien || "USD",
     }
-    setSavingNewExtMat(true)
-    try {
-      const res = await authFetch("/api/maintenance/external-items", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: f.code.trim(),
-          name: f.ten_vat_tu.trim(),
-          categoryId: f.category_id,
-          unit: f.dvt.trim(),
-          donGia: parseFloat(f.don_gia),
-          loaiTien: f.loai_tien,
-          specification: f.specification.trim() || null,
-          imageUrl: f.image_url.trim() || null,
-        }),
-      })
-      const json = (await res.json().catch(() => ({}))) as {
-        error?: string
-        item?: { id: string; code: string; name: string; unit: string; specification: string | null; category_id: string | null; don_gia: number | null; loai_tien: string | null; default_warehouse_ids: string[] | null }
-        warehouse?: { id: string; code: string }
-      }
-      if (!res.ok || !json.item) { setSaveError(json.error || "Không tạo được vật tư mua ngoài"); return }
-      const it = json.item
-      const option: InventoryItemOption = {
-        id: it.id,
-        code: it.code,
-        name: it.name,
-        unit: it.unit,
-        specification: it.specification,
-        default_warehouse_ids: it.default_warehouse_ids || [],
-        manages_lot: false,
-        category_id: it.category_id,
-        currentStock: 0,
-        primaryWarehouseId: json.warehouse?.id || null,
-        primaryWarehouseCode: json.warehouse?.code || null,
-        don_gia: Number(it.don_gia) || 0,
-        loai_tien: it.loai_tien || "USD",
-      }
-      setInventoryItems((prev) => [...prev, option].sort((a, b) => a.code.localeCompare(b.code)))
-      updateMaterial(newExtMatModal.lineId, newExtMatModal.matId, {
-        inventory_item_id: it.id,
-        ten_vat_tu: it.name,
-        dvt: it.unit || "",
-        don_gia: String(option.don_gia || ""),
-        loai_tien: option.loai_tien,
-      })
-      setNewExtMatModal(null)
-      setNewExtMatForm(emptyNewExtMatForm())
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Lỗi tạo vật tư mua ngoài")
-    } finally {
-      setSavingNewExtMat(false)
-    }
+    setInventoryItems((prev) => [...prev, option].sort((a, b) => a.code.localeCompare(b.code)))
+    applyExtMatToLine({ id: it.id, name: it.name, unit: it.unit, don_gia: option.don_gia, loai_tien: option.loai_tien })
+  }
+
+  const handleUseExistingExtMat = (it: ExtCatalogItem) => {
+    // Ưu tiên số liệu đã nạp (đơn giá/kho chính); vật tư chưa có trong danh sách đang hoạt động
+    // của trang (mới tạo ở nơi khác) thì dùng số liệu từ danh mục của modal.
+    const opt = inventoryItems.find((o) => o.id === it.id)
+    applyExtMatToLine(opt
+      ? { id: opt.id, name: opt.name, unit: opt.unit, don_gia: opt.don_gia, loai_tien: opt.loai_tien }
+      : { id: it.id, name: it.name, unit: it.unit, don_gia: it.don_gia, loai_tien: it.loai_tien })
+    if (!opt && factoryId) void loadInventoryItems(factoryId)
   }
 
   // U1b — chế độ xem: tab mobile (Tài liệu/Ký duyệt) + tab cột tài liệu (File đã ký/Nội dung).
@@ -2537,7 +2506,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               type="button"
                               onClick={() => {
                                 setNewExtMatModal({ lineId: line.id, matId: mat.id })
-                                setNewExtMatForm({ ...emptyNewExtMatForm(), ten_vat_tu: mat.ten_vat_tu || "", dvt: mat.dvt || "", loai_tien: mat.loai_tien || "USD" })
+                                setNewExtMatInitial({ ten_vat_tu: mat.ten_vat_tu || "", dvt: mat.dvt || "", loai_tien: mat.loai_tien || "USD" })
                               }}
                               className="flex items-center gap-0.5 text-[10px] font-bold text-brand-700 hover:text-brand-800"
                             >
@@ -3659,127 +3628,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       )}
 
-      {/* Modal tạo vật tư bên ngoài */}
-      {newExtMatModal && (
-        <ModalShell
-          title="Thêm vật tư mua ngoài"
+      {/* Modal tạo vật tư mua ngoài (dùng chung với Cài đặt → Bảo trì) */}
+      {newExtMatModal && factoryId && (
+        <ExtMaterialModal
+          factoryId={factoryId}
+          categories={inventoryCategories}
+          initial={newExtMatInitial}
           onClose={() => setNewExtMatModal(null)}
-          maxWidth="lg"
-          footer={
-            <>
-              <button
-                type="button"
-                onClick={() => setNewExtMatModal(null)}
-                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSaveNewExtMat()}
-                disabled={savingNewExtMat}
-                className="px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
-              >
-                {savingNewExtMat ? "Đang lưu..." : "Lưu vật tư"}
-              </button>
-            </>
-          }
-        >
-          <div className="space-y-4">
-            <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-              Vật tư được thêm vào danh mục kho (kho mặc định: Kho tạm KT) để lập Đề nghị mua và nhập/xuất kho.
-              Các trường có dấu * là bắt buộc.
-            </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư *</label>
-                <input
-                  value={newExtMatForm.code}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, code: e.target.value }))}
-                  placeholder="VD: BD22211"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Phân loại vật tư *</label>
-                <select
-                  value={newExtMatForm.category_id}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, category_id: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 bg-white"
-                >
-                  <option value="">— Chọn phân loại —</option>
-                  {inventoryCategories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
-                <input
-                  value={newExtMatForm.ten_vat_tu}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, ten_vat_tu: e.target.value }))}
-                  placeholder="Tên đầy đủ của vật tư"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính *</label>
-                <input
-                  value={newExtMatForm.dvt}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, dvt: e.target.value }))}
-                  placeholder="Cái, kg, lít..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn giá *</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={newExtMatForm.don_gia}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, don_gia: e.target.value }))}
-                  placeholder="0"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại tiền</label>
-                <select
-                  value={newExtMatForm.loai_tien}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, loai_tien: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 bg-white"
-                >
-                  <option value="USD">USD</option>
-                  <option value="VND">VND</option>
-                  <option value="KHR">KHR</option>
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy cách / Đặc tính</label>
-              <input
-                value={newExtMatForm.specification}
-                onChange={(e) => setNewExtMatForm((p) => ({ ...p, specification: e.target.value }))}
-                placeholder="Quy cách, đặc tính kỹ thuật..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Hình ảnh (link)</label>
-              <input
-                value={newExtMatForm.image_url}
-                onChange={(e) => setNewExtMatForm((p) => ({ ...p, image_url: e.target.value }))}
-                placeholder="https://..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
-              />
-            </div>
-          </div>
-        </ModalShell>
+          onCreated={handleExtMatCreated}
+          onUseExisting={handleUseExistingExtMat}
+        />
       )}
 
       {/* Modal Ký duyệt điện tử */}
