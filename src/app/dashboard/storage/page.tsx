@@ -50,14 +50,19 @@ import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
-  Warehouse, Plus, X, Search, Eye, Edit2, Minus, History,
-  Tag, Layers, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
-  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw, Trash2
+  Warehouse, Plus, X, Search, Eye, Edit2, History,
+  Tag, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
+  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw
 } from "lucide-react"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { ExpandableRow, ExpandAllToggle, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
+import { IconAction } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -227,7 +232,7 @@ export default function StoragePage() {
   const [viewLotsLoading, setViewLotsLoading] = useState(false)
   const [expandedProductKeys, setExpandedProductKeys] = useState<Set<string>>(new Set())
   const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set())
-  const [collapsedCardIds, setCollapsedCardIds] = useState<Set<string>>(new Set())
+  const [expandedNganIds, setExpandedNganIds] = useState<Set<string>>(new Set())
   const [todayMs] = useState(() => Date.now())
   const isAdmin = currentUser?.role === "admin"
   const canViewStorage = hasPermission(currentUser, "storage.view")
@@ -709,26 +714,22 @@ export default function StoragePage() {
     {
       label: `Tổng ${subTerm.toLowerCase()}`,
       value: filtered.length.toString(),
-      color: "text-slate-700",
-      icon: <Warehouse size={20} className="mx-auto mb-1 text-slate-500 opacity-70" />,
+      icon: Warehouse,
     },
     {
       label: "Đang sản xuất",
       value: filtered.filter(n => n.trang_thai === "Đang sản xuất").length.toString(),
-      color: "text-emerald-600",
-      icon: <Activity size={20} className="mx-auto mb-1 text-emerald-500 opacity-70" />,
+      icon: Activity,
     },
     {
       label: "Tổng KL tươi (kg)",
       value: filtered.reduce((s, n) => s + (n.tong_tuoi || 0), 0).toLocaleString(),
-      color: "text-blue-600",
-      icon: <Droplets size={20} className="mx-auto mb-1 text-blue-500 opacity-70" />,
+      icon: Droplets,
     },
     {
       label: "Tổng KL khô (kg)",
       value: filtered.reduce((s, n) => s + (n.tong_kho || 0), 0).toLocaleString(),
-      color: "text-purple-600",
-      icon: <Weight size={20} className="mx-auto mb-1 text-purple-500 opacity-70" />,
+      icon: Weight,
     },
   ]
 
@@ -1180,8 +1181,8 @@ export default function StoragePage() {
     })
   }
 
-  const toggleCardCollapsed = (nganId: string) => {
-    setCollapsedCardIds(prev => {
+  const toggleNganExpanded = (nganId: string) => {
+    setExpandedNganIds(prev => {
       const next = new Set(prev)
       if (next.has(nganId)) {
         next.delete(nganId)
@@ -1265,15 +1266,11 @@ export default function StoragePage() {
       {/* Scrollable content */}
       <div ref={revealRef} className="scroll-reveal">
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-3 mb-6">
+        <StatGrid cols={4} className="mb-6">
           {statsCards.map(s => (
-            <div key={s.label} className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center">
-              {s.icon}
-              <div className={`text-2xl font-extrabold ${s.color}`}>{s.value}</div>
-              <div className="text-xs text-slate-500 mt-1">{s.label}</div>
-            </div>
+            <StatCard key={s.label} icon={s.icon} label={s.label} value={s.value} />
           ))}
-        </div>
+        </StatGrid>
 
         {/* Tab nav: Đang hoạt động / Lịch sử / In QR */}
         <SegmentedTabs
@@ -1381,275 +1378,281 @@ export default function StoragePage() {
           </div>
         </FilterBar>
 
-        {/* Card grid — tab Đang hoạt động */}
+        {/* Bảng ngăn — tab Đang hoạt động (dòng xổ ExpandableRow, rule 29 mục A.4) */}
         {nganTab === "active" && (loading ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          <div className="bg-white rounded-xl border border-slate-200">
+            <ListState kind="loading" />
+          </div>
         ) : activeNgans.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
             <Warehouse size={40} className="mx-auto mb-3 opacity-30" />
             <p>Không có {subTerm.toLowerCase()} nào đang hoạt động</p>
           </div>
         ) : (
-          <div className="columns-1 gap-4 lg:columns-2 2xl:columns-3">
-            {activeNgans.map(n => {
-              const days  = curingDays(n.ngay_bd)
-              const ready = days !== null && days >= 21
-              const hs      = headerStyle(n.trang_thai)
-              const tpKg    = lotStats[n.id] || 0
-              const tpPct   = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
-              const canCloseForProduction =
-                n.trang_thai === STORAGE_STATUS_CLOSED &&
-                canManuallyMoveClosedToWaiting(n.ngay_bd, todayMs)
-              // Ngăn "Chờ sản xuất" đã có thành phẩm thật (tpPct từ loadStorageLots(), đã gồm cả lô
-              // mồ côi) nhưng RPC sync_ngan_production_status có thể chưa kích hoạt được (vd bỏ sót
-              // lô mồ côi trước bản vá 20260830) -> escape-hatch tay cho admin.
-              const canForceInProduction =
-                n.trang_thai === STORAGE_STATUS_WAITING &&
-                tpPct > 0
-              // Admin được đánh dấu "Đã sản xuất" khi ngăn đạt từ 50% trở lên (không giới hạn trên).
-              // Ngưỡng 100%-110% ở banner hậu lưu trong module Thành phẩm (product/page.tsx) không đổi.
-              const canMarkProduced =
-                n.trang_thai === STORAGE_STATUS_IN_PRODUCTION &&
-                tpPct >= 50
-              const canReturnToDraft = n.trang_thai === STORAGE_STATUS_PRODUCED
-              const nextManualStatus = canCloseForProduction
-                ? STORAGE_STATUS_WAITING
-                : canForceInProduction
-                  ? STORAGE_STATUS_IN_PRODUCTION
-                  : canMarkProduced
-                    ? STORAGE_STATUS_PRODUCED
-                    : canReturnToDraft
-                      ? STORAGE_STATUS_IN_PRODUCTION
-                      : null
-              const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
-              const isCollapsed = collapsedCardIds.has(n.id)
-              const normalizedStatus = normalizeStorageStatus(n.trang_thai)
-              const canEditThisNgan =
-                canEditStorage && (
-                  isAdmin ||
-                  normalizedStatus === STORAGE_STATUS_RECEIVING ||
-                  normalizedStatus === STORAGE_STATUS_CLOSED ||
-                  normalizedStatus === STORAGE_STATUS_WAITING
-                )
-              const canDeleteThisNgan = canDeleteStorage
-              const canViewThisNgan = canViewStorage
+          <>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-500">
+                {activeNgans.length} {subTerm.toLowerCase()} đang hoạt động
+              </span>
+              <ExpandAllToggle
+                allExpanded={activeNgans.every(n => expandedNganIds.has(n.id))}
+                onExpandAll={() => setExpandedNganIds(new Set(activeNgans.map(n => n.id)))}
+                onCollapseAll={() => setExpandedNganIds(new Set())}
+              />
+            </div>
+            <ResponsiveTableWrapper>
+              <table className="enterprise-table dense min-w-[980px]">
+                <thead>
+                  <tr>
+                    <th>{subTerm}</th>
+                    <th>Trạng thái</th>
+                    <th>Loại NL</th>
+                    <th className="text-right">KL tươi / khô (kg)</th>
+                    <th>TP / QK</th>
+                    <th>Ngày lưu ủ</th>
+                    <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeNgans.map(n => {
+                    const days  = curingDays(n.ngay_bd)
+                    const ready = days !== null && days >= 21
+                    const tpKg    = lotStats[n.id] || 0
+                    const tpPct   = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
+                    const canCloseForProduction =
+                      n.trang_thai === STORAGE_STATUS_CLOSED &&
+                      canManuallyMoveClosedToWaiting(n.ngay_bd, todayMs)
+                    // Ngăn "Chờ sản xuất" đã có thành phẩm thật (tpPct từ loadStorageLots(), đã gồm cả lô
+                    // mồ côi) nhưng RPC sync_ngan_production_status có thể chưa kích hoạt được (vd bỏ sót
+                    // lô mồ côi trước bản vá 20260830) -> escape-hatch tay cho admin.
+                    const canForceInProduction =
+                      n.trang_thai === STORAGE_STATUS_WAITING &&
+                      tpPct > 0
+                    // Admin được đánh dấu "Đã sản xuất" khi ngăn đạt từ 50% trở lên (không giới hạn trên).
+                    // Ngưỡng 100%-110% ở banner hậu lưu trong module Thành phẩm (product/page.tsx) không đổi.
+                    const canMarkProduced =
+                      n.trang_thai === STORAGE_STATUS_IN_PRODUCTION &&
+                      tpPct >= 50
+                    const canReturnToDraft = n.trang_thai === STORAGE_STATUS_PRODUCED
+                    const nextManualStatus = canCloseForProduction
+                      ? STORAGE_STATUS_WAITING
+                      : canForceInProduction
+                        ? STORAGE_STATUS_IN_PRODUCTION
+                        : canMarkProduced
+                          ? STORAGE_STATUS_PRODUCED
+                          : canReturnToDraft
+                            ? STORAGE_STATUS_IN_PRODUCTION
+                            : null
+                    const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
+                    const normalizedStatus = normalizeStorageStatus(n.trang_thai)
+                    const canEditThisNgan =
+                      canEditStorage && (
+                        isAdmin ||
+                        normalizedStatus === STORAGE_STATUS_RECEIVING ||
+                        normalizedStatus === STORAGE_STATUS_CLOSED ||
+                        normalizedStatus === STORAGE_STATUS_WAITING
+                      )
+                    const canDeleteThisNgan = canDeleteStorage
+                    const canViewThisNgan = canViewStorage
+                    const stop = (e: { stopPropagation: () => void }) => e.stopPropagation()
 
-              return (
-                <div key={n.id} className="group mb-4 break-inside-avoid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm hover-lift">
-                  {/* Card header */}
-                  <div className={`bg-gradient-to-r ${hs.grad} px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2`}>
-                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                      <Warehouse size={16} className={`${hs.icon} shrink-0`} />
-                      <span className="font-extrabold text-slate-800 text-base truncate">{n.ten_ngan}</span>
-                      <StatusBadge domain="storage" status={n.trang_thai} size="sm" />
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0 ml-2">
-                      {nextManualStatus && isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => void handleNganStatusToggle(n.id, nextManualStatus)}
-                          disabled={nganStatusSavingId === n.id}
-                          className={`rounded-lg border px-2 py-1 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                            nextManualStatus === STORAGE_STATUS_PRODUCED
-                              ? "border-blue-200 bg-white/80 text-blue-700 hover:bg-white"
-                              : nextManualStatus === STORAGE_STATUS_WAITING
-                                ? "border-amber-200 bg-white/80 text-amber-700 hover:bg-white"
-                                : "border-emerald-200 bg-white/80 text-emerald-700 hover:bg-white"
-                          }`}
-                          title={
-                            nextManualStatus === STORAGE_STATUS_PRODUCED
-                              ? `Đánh dấu đã sản xuất (${tpPct.toFixed(1)}%)`
-                              : nextManualStatus === STORAGE_STATUS_WAITING
-                                ? `Chuyển sang chờ sản xuất (${days ?? 0} ngày lưu)`
-                                : canForceInProduction
-                                  ? `Đã có thành phẩm (${tpPct.toFixed(1)}%) — chuyển sang đang sản xuất`
-                                  : `Chuyển về đang sản xuất (${tpPct.toFixed(1)}%)`
-                          }
-                        >
-                          {nganStatusSavingId === n.id
-                            ? "Đang cập nhật..."
-                            : nextManualStatus === STORAGE_STATUS_PRODUCED
-                              ? "Đã SX"
-                              : nextManualStatus === STORAGE_STATUS_WAITING
-                                ? "Chờ SX"
-                                : canForceInProduction
-                                  ? "Bắt đầu SX"
-                                  : "Về đang SX"}
-                        </button>
-                      )}
-                      <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        {canViewThisNgan && (
-                          <Link
-                            href={lookupPath}
-                            className="p-1.5 hover:bg-white/60 rounded-lg text-emerald-600 transition-colors"
-                            title="QR / Tra cứu"
-                          >
-                            <QrCode size={14} />
-                          </Link>
-                        )}
-                        {canViewThisNgan && (
-                          <button
-                            onClick={() => void handleExportDetailPdf(n.id)}
-                            disabled={exportingDetailId === n.id}
-                            className="p-1.5 hover:bg-white/60 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
-                            title="Xuất PDF"
-                          >
-                            <FileText size={14} />
-                          </button>
-                        )}
-                        {canViewThisNgan && (
-                          <button
-                            onClick={() => void handleExportGeoJson(n)}
-                            disabled={exportingGeoId === n.id}
-                            className="p-1.5 hover:bg-white/60 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
-                            title="Xuất GeoJSON"
-                          >
-                            <MapIcon size={14} />
-                          </button>
-                        )}
-                        {canViewThisNgan && (
-                          <button onClick={() => openView(n)}
-                            className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors"
-                            title="Xem chi tiết">
-                            <Eye size={14} />
-                          </button>
-                        )}
-                        {canEditThisNgan && (
-                          <button
-                            onClick={() => void handleQuickSyncNgan(n)}
-                            disabled={nganSyncingId === n.id}
-                            className="p-1.5 hover:bg-white/60 rounded-lg text-teal-600 transition-colors disabled:opacity-50"
-                            title="Đồng bộ nhanh KL tươi/khô từ Điều xe/Sản lượng"
-                          >
-                            <RefreshCw size={14} className={nganSyncingId === n.id ? "animate-spin" : undefined} />
-                          </button>
-                        )}
-                        {canEditThisNgan && (
-                          <button onClick={() => openEdit(n)}
-                            className="p-1.5 hover:bg-white/60 rounded-lg text-blue-500 transition-colors"
-                            title="Sửa">
-                            <Edit2 size={14} />
-                          </button>
-                        )}
-                        {canDeleteThisNgan && (
-                          <button onClick={() => setDelConfirm(n.id)}
-                            className="p-1.5 hover:bg-white/60 rounded-lg text-red-400 transition-colors"
-                            title="Xóa">
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => toggleCardCollapsed(n.id)}
-                        className="p-1.5 hover:bg-white/60 rounded-lg text-slate-500 transition-colors"
-                        title={isCollapsed ? "Mở rộng" : "Thu gọn"}
-                      >
-                        <Minus size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Card body */}
-                  {!isCollapsed && (
-                  <div className="p-4 space-y-0">
-                    <div className="flex items-start gap-2 py-2 border-b border-dashed border-slate-200">
-                      <Tag size={14} className="text-slate-400 shrink-0 mt-0.5" />
-                      <span className="text-xs text-slate-500 w-24 shrink-0">Mã {subTerm.toLowerCase()}</span>
-                      <span className="text-xs font-semibold text-slate-700 break-all leading-relaxed">{n.ma_ngan || "—"}</span>
-                    </div>
-                    <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
-                      <Layers size={14} className="text-slate-400 shrink-0" />
-                      <span className="text-xs text-slate-500 w-24 shrink-0">Loại NL</span>
-                      <span className="text-sm font-semibold text-slate-800">{n.loai_nl}</span>
-                    </div>
-                    <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
-                      <MapPin size={14} className="text-slate-400 shrink-0" />
-                      <span className="text-xs text-slate-500 w-24 shrink-0">Nguồn · Xử lý</span>
-                      <span className="text-sm font-semibold text-slate-800">{n.nguon_goc} · {n.xu_ly}</span>
-                    </div>
-                    <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
-                      <ShieldCheck size={14} className="text-slate-400 shrink-0" />
-                      <span className="text-xs text-slate-500 w-24 shrink-0">Chứng nhận</span>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-full">{n.chung_nhan}</span>
-                    </div>
-                    <div className="flex items-center gap-2 py-2 border-b border-dashed border-slate-200">
-                      <Weight size={14} className="text-slate-400 shrink-0" />
-                      <span className="text-xs text-slate-500 w-24 shrink-0">KL tươi / khô</span>
-                      <div className="flex-1">
-                        <span className="text-sm font-semibold text-slate-800">
-                          {(n.tong_tuoi || 0).toLocaleString()} / <span className="text-emerald-700">{(n.tong_kho || 0).toLocaleString()}</span> kg
-                        </span>
-                        {nganSyncMessage[n.id] && (
-                          <div className="text-xs font-semibold text-teal-600 mt-0.5">{nganSyncMessage[n.id]}</div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-2 py-2 border-b border-dashed border-slate-200">
-                      <BarChart2 size={14} className="text-slate-400 shrink-0 mt-1" />
-                      <span className="text-xs text-slate-500 w-24 shrink-0">TP / QK {subTerm.toLowerCase()}</span>
-                      <div className="flex-1">
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-sm font-semibold text-slate-800">
-                            {n.tong_kho > 0 ? `${tpPct.toFixed(1)}%` : "—"}
+                    return (
+                      <ExpandableRow
+                        key={n.id}
+                        expanded={expandedNganIds.has(n.id)}
+                        onToggle={() => toggleNganExpanded(n.id)}
+                        colSpan={7}
+                        label={`Xem thêm thông tin ${subTerm.toLowerCase()}`}
+                        detail={
+                          <dl className="grid grid-cols-1 gap-x-6 gap-y-2 py-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="flex items-start gap-2">
+                              <Tag size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                              <dt className="w-24 shrink-0 text-slate-500">Mã {subTerm.toLowerCase()}</dt>
+                              <dd className="break-all font-semibold text-slate-700">{n.ma_ngan || "—"}</dd>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <MapPin size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                              <dt className="w-24 shrink-0 text-slate-500">Nguồn · Xử lý</dt>
+                              <dd className="font-semibold text-slate-700">{n.nguon_goc} · {n.xu_ly}</dd>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <ShieldCheck size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                              <dt className="w-24 shrink-0 text-slate-500">Chứng nhận</dt>
+                              <dd>
+                                <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-700">{n.chung_nhan}</span>
+                              </dd>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <Activity size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                              <dt className="w-24 shrink-0 text-slate-500">Ngày xé</dt>
+                              <dd className="font-semibold text-slate-700">
+                                {fmtDate(n.xe_tu_ngay)}{n.xe_den_ngay ? ` → ${fmtDate(n.xe_den_ngay)}` : ""}
+                              </dd>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <BarChart2 size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                              <dt className="w-24 shrink-0 text-slate-500">TP / QK</dt>
+                              <dd className="font-semibold text-slate-700">
+                                {n.tong_kho > 0
+                                  ? `${tpPct.toFixed(1)}% (${tpKg.toLocaleString()} / ${(n.tong_kho || 0).toLocaleString()} kg)`
+                                  : "—"}
+                              </dd>
+                            </div>
+                            {n.ghi_chu && (
+                              <div className="flex items-start gap-2">
+                                <Tag size={13} className="mt-0.5 shrink-0 text-amber-500" />
+                                <dt className="w-24 shrink-0 text-slate-500">Ký hiệu KT</dt>
+                                <dd>
+                                  <span className="break-words rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 font-bold text-amber-700">
+                                    {n.ghi_chu}
+                                  </span>
+                                </dd>
+                              </div>
+                            )}
+                            {n.ghi_chu_tu_do && (
+                              <div className="flex items-start gap-2 sm:col-span-2 lg:col-span-3">
+                                <FileText size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                                <dt className="w-24 shrink-0 text-slate-500">Ghi chú</dt>
+                                <dd className="break-words font-medium text-slate-700">{n.ghi_chu_tu_do}</dd>
+                              </div>
+                            )}
+                          </dl>
+                        }
+                        endCell={
+                          <span onClick={stop} className="flex items-center gap-0.5">
+                            {canViewThisNgan && (
+                              <RowAction kind="view" label={`Xem chi tiết ${subTerm.toLowerCase()}`} onClick={() => openView(n)} />
+                            )}
+                            {canViewThisNgan && (
+                              <IconAction
+                                icon={FileText}
+                                tone="neutral"
+                                label="Xuất PDF"
+                                loading={exportingDetailId === n.id}
+                                onClick={() => void handleExportDetailPdf(n.id)}
+                              />
+                            )}
+                            {canViewThisNgan && (
+                              <IconAction icon={QrCode} tone="brand" label="QR / Tra cứu" href={lookupPath} />
+                            )}
+                            {canViewThisNgan && (
+                              <IconAction
+                                icon={MapIcon}
+                                tone="sky"
+                                label="Xuất GeoJSON"
+                                loading={exportingGeoId === n.id}
+                                onClick={() => void handleExportGeoJson(n)}
+                              />
+                            )}
+                            {canEditThisNgan && (
+                              <IconAction
+                                icon={RefreshCw}
+                                tone="brand"
+                                label="Đồng bộ nhanh KL tươi/khô từ Điều xe/Sản lượng"
+                                loading={nganSyncingId === n.id}
+                                onClick={() => void handleQuickSyncNgan(n)}
+                              />
+                            )}
+                            {canEditThisNgan && (
+                              <RowAction kind="edit" onClick={() => openEdit(n)} />
+                            )}
+                            {canDeleteThisNgan && (
+                              <RowAction kind="delete" onClick={() => setDelConfirm(n.id)} />
+                            )}
                           </span>
-                          {n.tong_kho > 0 && (
-                            <span className="text-xs text-slate-400">
-                              ({tpKg.toLocaleString()} / {(n.tong_kho || 0).toLocaleString()} kg)
+                        }
+                      >
+                        <td className="whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <Warehouse size={15} className="shrink-0 text-mod-600" />
+                            <div className="min-w-0">
+                              <div className="font-extrabold text-slate-800">{n.ten_ngan}</div>
+                              <div className="max-w-[220px] truncate text-xs text-slate-400" title={n.ma_ngan || ""}>
+                                {n.ma_ngan || "—"}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td onClick={nextManualStatus && isAdmin ? stop : undefined}>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <StatusBadge domain="storage" status={n.trang_thai} size="xs" />
+                            {nextManualStatus && isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => void handleNganStatusToggle(n.id, nextManualStatus)}
+                                disabled={nganStatusSavingId === n.id}
+                                className={`whitespace-nowrap rounded-lg border bg-white px-2 py-0.5 text-[11px] font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                                  nextManualStatus === STORAGE_STATUS_PRODUCED
+                                    ? "border-blue-200 text-blue-700 hover:bg-blue-50"
+                                    : nextManualStatus === STORAGE_STATUS_WAITING
+                                      ? "border-amber-200 text-amber-700 hover:bg-amber-50"
+                                      : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                                }`}
+                                title={
+                                  nextManualStatus === STORAGE_STATUS_PRODUCED
+                                    ? `Đánh dấu đã sản xuất (${tpPct.toFixed(1)}%)`
+                                    : nextManualStatus === STORAGE_STATUS_WAITING
+                                      ? `Chuyển sang chờ sản xuất (${days ?? 0} ngày lưu)`
+                                      : canForceInProduction
+                                        ? `Đã có thành phẩm (${tpPct.toFixed(1)}%) — chuyển sang đang sản xuất`
+                                        : `Chuyển về đang sản xuất (${tpPct.toFixed(1)}%)`
+                                }
+                              >
+                                {nganStatusSavingId === n.id
+                                  ? "Đang cập nhật..."
+                                  : nextManualStatus === STORAGE_STATUS_PRODUCED
+                                    ? "Đã SX"
+                                    : nextManualStatus === STORAGE_STATUS_WAITING
+                                      ? "Chờ SX"
+                                      : canForceInProduction
+                                        ? "Bắt đầu SX"
+                                        : "Về đang SX"}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap text-slate-700">{n.loai_nl}</td>
+                        <td className="whitespace-nowrap text-right tabular-nums">
+                          <span className="text-slate-700">{(n.tong_tuoi || 0).toLocaleString()}</span>
+                          <span className="text-slate-300"> / </span>
+                          <span className="font-semibold text-mod-800">{(n.tong_kho || 0).toLocaleString()}</span>
+                          {nganSyncMessage[n.id] && (
+                            <div className="mt-0.5 text-xs font-semibold text-teal-600">{nganSyncMessage[n.id]}</div>
+                          )}
+                        </td>
+                        <td className="min-w-[130px]">
+                          {n.tong_kho > 0 ? (
+                            <>
+                              <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+                                <span className="font-semibold tabular-nums text-slate-800">{tpPct.toFixed(1)}%</span>
+                                <span className="text-[11px] tabular-nums text-slate-400">
+                                  {tpKg.toLocaleString()} kg
+                                </span>
+                              </div>
+                              <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
+                                <div className="h-1 rounded-full bg-blue-400 transition-all" style={{ width: `${Math.min(tpPct, 100)}%` }} />
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap text-slate-700">
+                          {fmtDate(n.ngay_bd)}{n.ngay_kt ? ` → ${fmtDate(n.ngay_kt)}` : ""}
+                          {days !== null && (
+                            <span className={`ml-1 text-xs ${ready ? "text-emerald-600" : "text-amber-600"}`}>
+                              ({days} ngày{ready ? " ✓" : ""})
                             </span>
                           )}
-                        </div>
-                        {n.tong_kho > 0 && (
-                          <div className="mt-1.5 h-1 bg-slate-100 rounded-full overflow-hidden">
-                            <div className="h-1 bg-blue-400 rounded-full transition-all"
-                              style={{ width: `${Math.min(tpPct, 100)}%` }} />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 py-2">
-                      <Activity size={14} className="text-slate-400 shrink-0" />
-                      <span className="text-xs text-slate-500 w-24 shrink-0">Ngày lưu ủ</span>
-                      <span className="text-sm font-semibold text-slate-800">
-                        {fmtDate(n.ngay_bd)}{n.ngay_kt ? ` → ${fmtDate(n.ngay_kt)}` : ""}
-                        {days !== null && (
-                          <span className={`ml-1 text-xs ${ready ? "text-emerald-600" : "text-amber-600"}`}>
-                            ({days} ngày{ready ? " ✓" : ""})
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 py-2 border-t border-dashed border-slate-200">
-                      <Activity size={14} className="text-slate-400 shrink-0" />
-                      <span className="text-xs text-slate-500 w-24 shrink-0">Ngày xé</span>
-                      <span className="text-sm font-semibold text-slate-800">
-                        {fmtDate(n.xe_tu_ngay)}{n.xe_den_ngay ? ` → ${fmtDate(n.xe_den_ngay)}` : ""}
-                      </span>
-                    </div>
-                    {n.ghi_chu && (
-                      <div className="flex items-start gap-2 py-2 border-t border-dashed border-slate-200">
-                        <Tag size={14} className="text-amber-500 shrink-0 mt-0.5" />
-                        <span className="text-xs text-slate-500 w-24 shrink-0">Ký hiệu KT</span>
-                        <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 break-words">
-                          {n.ghi_chu}
-                        </span>
-                      </div>
-                    )}
-                    {n.ghi_chu_tu_do && (
-                      <div className="flex items-start gap-2 py-2 border-t border-dashed border-slate-200">
-                        <FileText size={14} className="text-slate-400 shrink-0 mt-0.5" />
-                        <span className="text-xs text-slate-500 w-24 shrink-0">Ghi chú</span>
-                        <span className="text-xs font-medium text-slate-700 break-words">{n.ghi_chu_tu_do}</span>
-                      </div>
-                    )}
-                  </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+                        </td>
+                      </ExpandableRow>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </ResponsiveTableWrapper>
+          </>
         ))}
-
         {/* Data table — tab Lịch sử (ngăn Đã sản xuất) */}
         {nganTab === "history" && (loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>

@@ -70,7 +70,6 @@ import {
   X,
   ChevronLeft,
   Edit2,
-  Trash2,
   Package,
   CheckCircle,
   Clock,
@@ -78,8 +77,6 @@ import {
   Weight,
   AlertTriangle,
   Lock,
-  ChevronDown,
-  ChevronRight,
   ArrowLeftRight,
   MoveRight,
   RefreshCw,
@@ -94,6 +91,12 @@ import {
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge";
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme";
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card";
+import { DateGroupHead, DateGroupRow } from "@/app/dashboard/_components/doc-ui/date-group-card";
+import { ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row";
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action";
+import { IconAction } from "@/app/dashboard/_components/doc-ui/icon-action";
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state";
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif";
 
 // Types
@@ -5092,58 +5095,18 @@ export default function ProductPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-5 gap-3 mb-6">
-        {(
-          [
-            {
-              label: "Tổng lô",
-              value: stats.total,
-              color: "text-slate-700",
-              Icon: Package,
-              ic: "text-slate-400",
-            },
-            {
-              label: "Hoàn thành",
-              value: stats.hoanThanh,
-              color: "text-emerald-600",
-              Icon: CheckCircle,
-              ic: "text-emerald-400",
-            },
-            {
-              label: "Dở dang",
-              value: stats.dorDang,
-              color: "text-amber-600",
-              Icon: Clock,
-              ic: "text-amber-400",
-            },
-            {
-              label: "Tổng bành (lọc)",
-              value: stats.tongBanh.toLocaleString("vi-VN"),
-              color: "text-blue-600",
-              Icon: Layers,
-              ic: "text-blue-400",
-            },
-            {
-              label: "Tổng tấn (lọc)",
-              value: fmtKg(stats.tongKg),
-              color: "text-purple-600",
-              Icon: Weight,
-              ic: "text-purple-400",
-            },
-          ] as const
-        ).map((s) => (
-          <div
-            key={s.label}
-            className="bg-white rounded-xl border border-slate-200 shadow-md p-4 text-center"
-          >
-            <s.Icon size={20} className={`mx-auto mb-1 ${s.ic} opacity-80`} />
-            <div className={`text-2xl font-extrabold ${s.color}`}>
-              {s.value}
-            </div>
-            <div className="text-xs text-slate-500 mt-1">{s.label}</div>
-          </div>
-        ))}
-      </div>
+      <StatGrid cols={5} className="mb-6">
+        <StatCard icon={Package} label="Tổng lô" value={stats.total} />
+        <StatCard icon={CheckCircle} label="Hoàn thành" value={stats.hoanThanh} valueTone="good" />
+        <StatCard
+          icon={Clock}
+          label="Dở dang"
+          value={stats.dorDang}
+          valueTone={stats.dorDang > 0 ? "warn" : "default"}
+        />
+        <StatCard icon={Layers} label="Tổng bành (lọc)" value={stats.tongBanh.toLocaleString("vi-VN")} />
+        <StatCard icon={Weight} label="Tổng tấn (lọc)" value={fmtKg(stats.tongKg)} />
+      </StatGrid>
 
       {(() => {
         const allDorDang = allDorDangLots;
@@ -5311,378 +5274,321 @@ export default function ProductPage() {
         )}
       </FilterBar>
 
-      <div className="space-y-4 pb-32">
-        {Object.keys(groupedByDateAndCa)
-          .sort((a, b) => b.localeCompare(a))
-          .map((date) => {
-            const isExpanded = expandedDates.includes(date);
-            const dateGroups = groupedByDateAndCa[date];
-            const dayBanh = Object.values(dateGroups)
-              .flat()
-              .reduce((sum, c) => sum + c.tong_banh_cua_ca, 0);
-            const dayKg = Object.values(dateGroups)
-              .flat()
-              .reduce((sum, c) => sum + c.tong_kg_cua_ca, 0);
-
-            // "Khóa ca sản xuất" — icon header Ngày đại diện cho tổng trạng thái khóa của cả
-            // ngày (mở modal chi tiết theo từng ca). Xem .claude/rules/06-module-production.md
-            // mục "Khóa ca sản xuất".
-            const casInDate = Object.keys(dateGroups);
-            const lockedCasInDate = casInDate.filter((ca) => lockedShiftKeys.has(`${date}|${ca}`));
-            const isAdminUser = currentUser?.role === "admin";
-            const canApproveShift = isAdminUser || hasPermission(currentUser, "product.approve_shift");
-            const dateHasAnyLockedCa = lockedCasInDate.length > 0;
-            const dateEditDisabled = dateHasAnyLockedCa && !isAdminUser;
-
+      <div className="pb-32">
+        {(() => {
+          const sortedDates = Object.keys(groupedByDateAndCa).sort((a, b) => b.localeCompare(a));
+          if (sortedDates.length === 0) {
             return (
-              <div
-                key={date}
-                className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition-all duration-200"
-              >
-                <div className="bg-slate-50 px-4 sm:px-5 py-3.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 hover:bg-slate-100 transition-colors select-none">
-                  <div
-                    onClick={() => toggleDate(date)}
-                    className="flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0"
-                  >
-                    {isExpanded ? (
-                      <ChevronDown
-                        size={18}
-                        className="text-slate-400 shrink-0"
-                      />
-                    ) : (
-                      <ChevronRight
-                        size={18}
-                        className="text-slate-400 shrink-0"
-                      />
-                    )}
-                    <span className="font-extrabold text-slate-800 text-sm sm:text-base truncate">
-                      {date !== "Chưa có ngày"
-                        ? new Date(date).toLocaleDateString("vi-VN")
-                        : date}
-                    </span>
-                    <span className="px-2 py-0.5 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-full shrink-0">
-                      {Object.values(dateGroups).flat().length} lần nhập
-                    </span>
-                  </div>
-                  <div className="flex items-center flex-wrap gap-2 sm:gap-3">
-                    <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm font-bold text-slate-600">
-                      <span>{dayBanh.toLocaleString("vi-VN")} bành</span>
-                      <span className="text-slate-300">|</span>
-                      <span className="text-emerald-700">{fmtKg(dayKg)}</span>
-                    </div>
-                    {date !== "Chưa có ngày" && canReportShift && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void openReportPdfModal(date, "shift");
-                        }}
-                        className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 shrink-0"
-                        title="Phiếu báo thành phẩm (PDF) của ngày này"
-                      >
-                        <FileDown size={16} />
-                      </button>
-                    )}
-                    {date !== "Chưa có ngày" && canReportDaily && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void openReportPdfModal(date, "daily");
-                        }}
-                        className="rounded-lg p-1.5 text-indigo-600 hover:bg-indigo-50 shrink-0"
-                        title="Báo cáo ngày: Báo cáo lô + Báo cáo sản xuất hằng ngày (PDF)"
-                      >
-                        <ClipboardList size={16} />
-                      </button>
-                    )}
-                    {date !== "Chưa có ngày" && (dateHasAnyLockedCa || canApproveShift) && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShiftLockModalDate(date);
-                        }}
-                        className={`rounded-lg p-1.5 shrink-0 ${
-                          !dateHasAnyLockedCa
-                            ? "text-emerald-600 hover:bg-emerald-50"
-                            : lockedCasInDate.length === casInDate.length
-                              ? "text-red-600 hover:bg-red-50"
-                              : "text-amber-600 hover:bg-amber-50"
-                        }`}
-                        title={
-                          !dateHasAnyLockedCa
-                            ? "Duyệt & khóa ca sản xuất ngày này"
-                            : `${lockedCasInDate.length}/${casInDate.length} ca đã khóa — bấm để xem chi tiết`
-                        }
-                      >
-                        {!dateHasAnyLockedCa ? <ShieldCheck size={16} /> : <Lock size={16} />}
-                      </button>
-                    )}
-                    {deleteMode === date ? (
-                      <>
-                        <span className="text-xs text-red-600 font-bold shrink-0">
-                          Chọn dòng cần xóa...
-                        </span>
-                        <button
-                          disabled={
-                            selectedDeleteIds.size === 0 || preCheckLoading
-                          }
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleDeletePreCheck();
-                          }}
-                          className="flex items-center gap-1 px-2.5 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white text-xs font-bold rounded-lg transition-colors shrink-0"
-                        >
-                          <Trash2 size={12} />
-                          {preCheckLoading
-                            ? "Đang kiểm tra..."
-                            : `Xóa ${selectedDeleteIds.size} dòng`}
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteMode(null);
-                            setSelectedDeleteIds(new Set());
-                            setLotsBlockedByKn([]);
-                          }}
-                          className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-lg transition-colors shrink-0"
-                        >
-                          Hủy
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openCreate(date);
-                          }}
-                          className="rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-50 shrink-0"
-                          title="Thêm ca sản xuất cho ngày này"
-                        >
-                          <Plus size={16} />
-                        </button>
-                        {/* GĐ4: giao dịch đã gửi chỉ admin sửa/xóa. */}
-                        {currentUser?.role === "admin" && (
-                        <>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (dateEditDisabled) return;
-                            openEditDate(date);
-                          }}
-                          disabled={dateEditDisabled}
-                          className={`rounded-lg p-1.5 shrink-0 ${
-                            dateEditDisabled
-                              ? "text-slate-300 cursor-not-allowed"
-                              : "text-blue-600 hover:bg-blue-50"
-                          }`}
-                          title={
-                            dateEditDisabled
-                              ? "Ngày này có ca đã được duyệt & khóa — chỉ admin sửa được"
-                              : "Sửa lô trong ngày này"
-                          }
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteMode(date);
-                            setSelectedDeleteIds(new Set());
-                          }}
-                          className="rounded-lg p-1.5 text-red-600 hover:bg-red-50 shrink-0"
-                          title="Xóa lô trong ngày này"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                        </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {isExpanded && (
-                  <div className="p-5 border-t border-slate-100 space-y-6">
-                    {Object.keys(dateGroups)
-                      .sort()
-                      .map((ca) => {
-                        const caContribs = dateGroups[ca];
-                        const caBanh = caContribs.reduce(
-                          (sum, c) => sum + c.tong_banh_cua_ca,
-                          0,
-                        );
-                        const caKg = caContribs.reduce(
-                          (sum, c) => sum + c.tong_kg_cua_ca,
-                          0,
-                        );
-                        const caLock = lockedShiftKeys.get(`${date}|${ca}`);
-                        const isCaLocked = !!caLock;
-                        const caCheckboxDisabled = isCaLocked && !isAdminUser;
-
-                        return (
-                          <div key={ca}>
-                            <div className="flex items-center gap-3 mb-3">
-                              <span className="px-2.5 py-1 bg-blue-100 text-blue-700 font-extrabold rounded-lg text-sm">
-                                Ca {ca}
-                              </span>
-                              <span className="text-xs font-bold text-slate-500">
-                                {caBanh.toLocaleString("vi-VN")} bành ·{" "}
-                                {fmtKg(caKg)}
-                              </span>
-                              {isCaLocked && (
-                                <span
-                                  className="flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-bold"
-                                  title={`Đã duyệt & khóa bởi ${caLock.lockedByName} · ${new Date(caLock.lockedAt).toLocaleString("vi-VN")}`}
-                                >
-                                  <Lock size={10} /> Đã khóa
-                                </span>
-                              )}
-                            </div>
-                            <ResponsiveTableWrapper className="rounded-xl">
-                              <table className="w-full text-sm">
-                                <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
-                                  <tr>
-                                    {deleteMode === date && (
-                                      <th className="px-3 py-2.5 w-10" />
-                                    )}
-                                    <th className="px-4 py-2.5 text-left">
-                                      Mã lô
-                                    </th>
-                                    <th className="px-4 py-2.5 text-left">
-                                      Ngăn
-                                    </th>
-                                    <th className="px-4 py-2.5 text-left">
-                                      Loại
-                                    </th>
-                                    <th className="px-4 py-2.5 text-left">
-                                      Bọc
-                                    </th>
-                                    <th className="px-4 py-2.5 text-left">
-                                      SL thực tế ca này
-                                    </th>
-                                    <th className="px-4 py-2.5 text-left">
-                                      Kiện (A/B/C/D) thời điểm
-                                    </th>
-                                    <th className="px-4 py-2.5 text-left">
-                                      Trạng thái
-                                    </th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                  {groupContributionsForDisplay(caContribs, (c) => {
-                                    const contributionNgan = c.ngan_id
-                                      ? nganMetaById.get(c.ngan_id)
-                                      : null;
-                                    const main =
-                                      contributionNgan?.ma_ngan ||
-                                      contributionNgan?.ten_ngan ||
-                                      c.ngans?.ma_ngan ||
-                                      c.ngans?.ten_ngan ||
-                                      "-";
-                                    const sub =
-                                      contributionNgan?.ma_ngan && contributionNgan?.ten_ngan
-                                        ? contributionNgan.ten_ngan
-                                        : contributionNgan?.ma_ngan
-                                          ? null
-                                          : contributionNgan?.ten_ngan || c.ngans?.ten_ngan || null;
-                                    return { main, sub };
-                                  }).map((g) => {
-                                    const allSelected =
-                                      g.uids.length > 0 && g.uids.every((id) => selectedDeleteIds.has(id));
-                                    return (
-                                    <tr
-                                      key={g.key}
-                                      className={`hover:bg-slate-50 transition-colors ${deleteMode === date && allSelected ? "bg-red-50" : ""}`}
-                                    >
-                                      {deleteMode === date && (
-                                        <td className="px-3 py-2.5">
-                                          <input
-                                            type="checkbox"
-                                            checked={allSelected}
-                                            disabled={caCheckboxDisabled}
-                                            title={
-                                              caCheckboxDisabled
-                                                ? "Ca này đã được duyệt & khóa — chỉ admin xóa được"
-                                                : undefined
-                                            }
-                                            onChange={() =>
-                                              setSelectedDeleteIds((prev) => {
-                                                const next = new Set(prev);
-                                                g.uids.forEach((id) => {
-                                                  if (allSelected) next.delete(id);
-                                                  else next.add(id);
-                                                });
-                                                return next;
-                                              })
-                                            }
-                                            className="w-4 h-4 rounded accent-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
-                                          />
-                                        </td>
-                                      )}
-                                      <td className="px-4 py-2.5 font-bold text-slate-700">
-                                        {g.maLo}
-                                      </td>
-                                      <td className="px-4 py-2.5 text-xs">
-                                        {g.nganList.map((n, idx) => (
-                                          <div key={`${n.main}-${idx}`}>
-                                            <div className="font-bold text-slate-700">{n.main}</div>
-                                            {n.sub ? (
-                                              <div className="text-slate-500">{n.sub}</div>
-                                            ) : null}
-                                          </div>
-                                        ))}
-                                      </td>
-                                      <td className="px-4 py-2.5">
-                                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[10px] font-bold">
-                                          {g.loaiCsr}
-                                        </span>
-                                      </td>
-                                      <td
-                                        className="px-4 py-2.5 text-xs text-slate-500 max-w-[140px] truncate"
-                                        title={g.boc || ""}
-                                      >
-                                        {g.boc || "-"}
-                                      </td>
-                                      <td className="px-4 py-2.5 font-extrabold text-blue-700">
-                                        +{g.tongBanhCuaCa}{" "}
-                                        <span className="text-xs font-normal text-slate-500">
-                                          ({fmtKg(g.tongKgCuaCa)})
-                                        </span>
-                                      </td>
-                                      <td className="px-4 py-2.5 text-xs text-slate-500">
-                                        <span className="flex items-center gap-0.5 flex-wrap">
-                                          <span>{g.dispA}</span>
-                                          <span>/</span>
-                                          <span>{g.dispB}</span>
-                                          <span>/</span>
-                                          <span>{g.dispC}</span>
-                                          <span>/</span>
-                                          <span>{g.dispD}</span>
-                                        </span>
-                                      </td>
-                                      <td className="px-4 py-2.5">
-                                        <StatusBadge domain="lot" status={normalizeLotStatus(g.trangThai)} size="xs" />
-                                      </td>
-                                    </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </ResponsiveTableWrapper>
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
+              <div className="bg-white rounded-2xl border border-slate-200">
+                <ListState kind="empty" />
               </div>
             );
-          })}
-        {Object.keys(groupedByDateAndCa).length === 0 && (
-          <div className="p-12 text-center text-slate-400 bg-white rounded-2xl border border-slate-200">
-            <Package size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Không có dữ liệu phù hợp</p>
-          </div>
-        )}
+          }
+          const isAdminUser = currentUser?.role === "admin";
+          const canApproveShift = isAdminUser || hasPermission(currentUser, "product.approve_shift");
+          const allExpanded = sortedDates.every((d) => expandedDates.includes(d));
+          return (
+            <>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-500">{sortedDates.length} ngày sản xuất</span>
+                <ExpandAllToggle
+                  allExpanded={allExpanded}
+                  onExpandAll={() => setExpandedDates(sortedDates)}
+                  onCollapseAll={() => setExpandedDates([])}
+                />
+              </div>
+              <ResponsiveTableWrapper>
+                <table className="enterprise-table dense min-w-[760px]">
+                  <DateGroupHead dateLabel="Ngày sản xuất" summaryLabel="Sản lượng · Ca" hideSign />
+                  <tbody>
+                    {sortedDates.map((date) => {
+                      const isExpanded = expandedDates.includes(date);
+                      const dateGroups = groupedByDateAndCa[date];
+                      const allContribs = Object.values(dateGroups).flat();
+                      const dayBanh = allContribs.reduce((sum, c) => sum + c.tong_banh_cua_ca, 0);
+                      const dayKg = allContribs.reduce((sum, c) => sum + c.tong_kg_cua_ca, 0);
+                      const hasDate = date !== "Chưa có ngày";
+
+                      // "Khóa ca sản xuất" — icon ở dòng Ngày đại diện cho tổng trạng thái khóa của cả
+                      // ngày (mở modal chi tiết theo từng ca). Xem .claude/rules/06-module-production.md
+                      // mục "Khóa ca sản xuất".
+                      const casInDate = Object.keys(dateGroups).sort();
+                      const lockedCasInDate = casInDate.filter((ca) => lockedShiftKeys.has(`${date}|${ca}`));
+                      const dateHasAnyLockedCa = lockedCasInDate.length > 0;
+                      const dateEditDisabled = dateHasAnyLockedCa && !isAdminUser;
+                      const allCaLocked = dateHasAnyLockedCa && lockedCasInDate.length === casInDate.length;
+
+                      return (
+                        <DateGroupRow
+                          key={date}
+                          hideSign
+                          open={isExpanded}
+                          onToggle={() => toggleDate(date)}
+                          title={hasDate ? new Date(date).toLocaleDateString("vi-VN") : date}
+                          subtitle={`${allContribs.length} lần nhập`}
+                          summary={
+                            <>
+                              <span className="text-sm font-bold text-slate-700 tabular-nums">
+                                {dayBanh.toLocaleString("vi-VN")} bành
+                              </span>
+                              <span className="text-slate-300">|</span>
+                              <span className="text-sm font-bold text-mod-800 tabular-nums">{fmtKg(dayKg)}</span>
+                              {casInDate.map((ca) => (
+                                <span
+                                  key={ca}
+                                  className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-600"
+                                >
+                                  Ca {ca}
+                                </span>
+                              ))}
+                              {dateHasAnyLockedCa && (
+                                <StatusBadge
+                                  tone={allCaLocked ? "danger" : "warn"}
+                                  label={allCaLocked ? "Đã khóa" : `${lockedCasInDate.length}/${casInDate.length} ca đã khóa`}
+                                  size="xs"
+                                />
+                              )}
+                            </>
+                          }
+                          actions={
+                            deleteMode === date ? (
+                              <>
+                                <span className="text-xs font-bold text-red-600">Chọn dòng cần xóa…</span>
+                                <RowAction
+                                  kind="delete"
+                                  variant="text"
+                                  label={preCheckLoading ? "Đang kiểm tra..." : `Xóa ${selectedDeleteIds.size} dòng`}
+                                  disabled={selectedDeleteIds.size === 0 || preCheckLoading}
+                                  onClick={() => void handleDeletePreCheck()}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteMode(null);
+                                    setSelectedDeleteIds(new Set());
+                                    setLotsBlockedByKn([]);
+                                  }}
+                                  className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] font-bold text-slate-600 hover:bg-slate-50"
+                                >
+                                  Hủy
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                {hasDate && canReportShift && (
+                                  <IconAction
+                                    icon={FileDown}
+                                    tone="neutral"
+                                    label="Phiếu báo thành phẩm (PDF) của ngày này"
+                                    onClick={() => void openReportPdfModal(date, "shift")}
+                                  />
+                                )}
+                                {hasDate && canReportDaily && (
+                                  <IconAction
+                                    icon={ClipboardList}
+                                    tone="sky"
+                                    label="Báo cáo ngày: Báo cáo lô + Báo cáo sản xuất hằng ngày (PDF)"
+                                    onClick={() => void openReportPdfModal(date, "daily")}
+                                  />
+                                )}
+                                {hasDate && (dateHasAnyLockedCa || canApproveShift) && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setShiftLockModalDate(date);
+                                    }}
+                                    className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                                      !dateHasAnyLockedCa
+                                        ? "text-emerald-600 hover:bg-emerald-50"
+                                        : allCaLocked
+                                          ? "text-red-600 hover:bg-red-50"
+                                          : "text-amber-600 hover:bg-amber-50"
+                                    }`}
+                                    aria-label="Khóa ca sản xuất"
+                                    title={
+                                      !dateHasAnyLockedCa
+                                        ? "Duyệt & khóa ca sản xuất ngày này"
+                                        : `${lockedCasInDate.length}/${casInDate.length} ca đã khóa — bấm để xem chi tiết`
+                                    }
+                                  >
+                                    {!dateHasAnyLockedCa ? <ShieldCheck size={16} /> : <Lock size={16} />}
+                                  </button>
+                                )}
+                                <RowAction
+                                  kind="add"
+                                  label="Thêm ca sản xuất cho ngày này"
+                                  onClick={() => openCreate(date)}
+                                />
+                                {/* GĐ4: giao dịch đã gửi chỉ admin sửa/xóa. */}
+                                {isAdminUser && (
+                                  <>
+                                    <span
+                                      title={
+                                        dateEditDisabled
+                                          ? "Ngày này có ca đã được duyệt & khóa — chỉ admin sửa được"
+                                          : undefined
+                                      }
+                                    >
+                                      <RowAction
+                                        kind="edit"
+                                        label="Sửa lô trong ngày này"
+                                        disabled={dateEditDisabled}
+                                        onClick={() => openEditDate(date)}
+                                      />
+                                    </span>
+                                    <RowAction
+                                      kind="delete"
+                                      label="Xóa lô trong ngày này"
+                                      onClick={() => {
+                                        setDeleteMode(date);
+                                        setSelectedDeleteIds(new Set());
+                                        setExpandedDates((prev) => (prev.includes(date) ? prev : [...prev, date]));
+                                      }}
+                                    />
+                                  </>
+                                )}
+                              </>
+                            )
+                          }
+                        >
+                          <div className="space-y-4 py-1">
+                            {casInDate.map((ca) => {
+                              const caContribs = dateGroups[ca];
+                              const caBanh = caContribs.reduce((sum, c) => sum + c.tong_banh_cua_ca, 0);
+                              const caKg = caContribs.reduce((sum, c) => sum + c.tong_kg_cua_ca, 0);
+                              const caLock = lockedShiftKeys.get(`${date}|${ca}`);
+                              const isCaLocked = !!caLock;
+                              const caCheckboxDisabled = isCaLocked && !isAdminUser;
+
+                              return (
+                                <div key={ca}>
+                                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                                    <span className="rounded-lg bg-mod-50 px-2.5 py-1 text-sm font-extrabold text-mod-800">
+                                      Ca {ca}
+                                    </span>
+                                    <span className="text-xs font-bold text-slate-500">
+                                      {caBanh.toLocaleString("vi-VN")} bành · {fmtKg(caKg)}
+                                    </span>
+                                    {isCaLocked && (
+                                      <span
+                                        className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700"
+                                        title={`Đã duyệt & khóa bởi ${caLock.lockedByName} · ${new Date(caLock.lockedAt).toLocaleString("vi-VN")}`}
+                                      >
+                                        <Lock size={10} /> Đã khóa
+                                      </span>
+                                    )}
+                                  </div>
+                                  <table className="enterprise-table dense min-w-[720px] rounded-lg border border-slate-200 bg-white">
+                                    <thead>
+                                      <tr>
+                                        {deleteMode === date && <th className="w-10" />}
+                                        <th>Mã lô</th>
+                                        <th>Ngăn</th>
+                                        <th>Loại</th>
+                                        <th>Bọc</th>
+                                        <th className="text-right">SL thực tế ca này</th>
+                                        <th>Kiện (A/B/C/D) thời điểm</th>
+                                        <th>Trạng thái</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {groupContributionsForDisplay(caContribs, (c) => {
+                                        const contributionNgan = c.ngan_id ? nganMetaById.get(c.ngan_id) : null;
+                                        const main =
+                                          contributionNgan?.ma_ngan ||
+                                          contributionNgan?.ten_ngan ||
+                                          c.ngans?.ma_ngan ||
+                                          c.ngans?.ten_ngan ||
+                                          "-";
+                                        const sub =
+                                          contributionNgan?.ma_ngan && contributionNgan?.ten_ngan
+                                            ? contributionNgan.ten_ngan
+                                            : contributionNgan?.ma_ngan
+                                              ? null
+                                              : contributionNgan?.ten_ngan || c.ngans?.ten_ngan || null;
+                                        return { main, sub };
+                                      }).map((g) => {
+                                        const allSelected =
+                                          g.uids.length > 0 && g.uids.every((id) => selectedDeleteIds.has(id));
+                                        return (
+                                          <tr
+                                            key={g.key}
+                                            className={deleteMode === date && allSelected ? "bg-red-50" : undefined}
+                                          >
+                                            {deleteMode === date && (
+                                              <td>
+                                                <input
+                                                  type="checkbox"
+                                                  checked={allSelected}
+                                                  disabled={caCheckboxDisabled}
+                                                  title={
+                                                    caCheckboxDisabled
+                                                      ? "Ca này đã được duyệt & khóa — chỉ admin xóa được"
+                                                      : undefined
+                                                  }
+                                                  onChange={() =>
+                                                    setSelectedDeleteIds((prev) => {
+                                                      const next = new Set(prev);
+                                                      g.uids.forEach((id) => {
+                                                        if (allSelected) next.delete(id);
+                                                        else next.add(id);
+                                                      });
+                                                      return next;
+                                                    })
+                                                  }
+                                                  className="h-4 w-4 rounded accent-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+                                                />
+                                              </td>
+                                            )}
+                                            <td className="font-bold text-slate-800">{g.maLo}</td>
+                                            <td className="text-xs">
+                                              {g.nganList.map((n, idx) => (
+                                                <div key={`${n.main}-${idx}`}>
+                                                  <div className="font-bold text-slate-700">{n.main}</div>
+                                                  {n.sub ? <div className="text-slate-500">{n.sub}</div> : null}
+                                                </div>
+                                              ))}
+                                            </td>
+                                            <td>
+                                              <span className="rounded-full bg-mod-50 px-2 py-0.5 text-[10px] font-bold text-mod-800">
+                                                {g.loaiCsr}
+                                              </span>
+                                            </td>
+                                            <td className="max-w-[160px] truncate text-xs text-slate-500" title={g.boc || ""}>
+                                              {g.boc || "-"}
+                                            </td>
+                                            <td className="text-right font-extrabold tabular-nums text-slate-800">
+                                              +{g.tongBanhCuaCa}{" "}
+                                              <span className="text-xs font-normal text-slate-500">
+                                                ({fmtKg(g.tongKgCuaCa)})
+                                              </span>
+                                            </td>
+                                            <td className="text-xs text-slate-500 tabular-nums">
+                                              {g.dispA} / {g.dispB} / {g.dispC} / {g.dispD}
+                                            </td>
+                                            <td>
+                                              <StatusBadge domain="lot" status={normalizeLotStatus(g.trangThai)} size="xs" />
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </DateGroupRow>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </ResponsiveTableWrapper>
+            </>
+          );
+        })()}
       </div>
 
       {pdfReportDate && (

@@ -777,4 +777,11 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - `product/page.tsx` bọc `moduleThemeClass("forest")`; badge trạng thái lô → `StatusBadge domain="lot"`
   (đã xoá `getLotStatusBadgeClass`). "Xuất hàng" nay tông info (xanh dương, trước tím).
 - `warehouse/page.tsx` bọc `moduleThemeClass("orange")`.
-- Chưa làm: bảng gom ngày → `DateGroupRow`/`ExpandableRow`, `StatGrid` cho KPI, trang chi tiết lô.
+- Bước 2 (2026-10-18, chờ test tay): KPI → `StatGrid cols={5}` + `StatCard`; danh sách gom ngày → MỘT
+  `enterprise-table dense` (`DateGroupHead hideSign` + `DateGroupRow` mỗi ngày, mở/thu theo
+  `expandedDates`, có `ExpandAllToggle`). Dòng ngày: ngày · số lần nhập · bành | kg · chip ca · badge khóa
+  ca; thao tác cuối dòng: Phiếu báo TP (FileDown) → Báo cáo ngày (ClipboardList) → Khóa ca (giữ màu xanh/
+  vàng/đỏ theo trạng thái) → Thêm ca → Sửa → Xóa (Sửa/Xóa vẫn chỉ admin; Sửa khoá khi ngày có ca đã khóa).
+  Bấm Xóa tự mở dòng ngày để thấy ô chọn. Chi tiết = từng ca, mỗi ca 1 bảng con `enterprise-table dense`.
+  Mọi điều kiện quyền / khóa ca / chế độ xóa / chặn lô đã KN giữ nguyên.
+- Chưa làm: trang chi tiết lô.

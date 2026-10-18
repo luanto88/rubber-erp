@@ -82,8 +82,8 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
 | Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | ✅ `/dashboard/export/[id]` (PDF nhúng loadBytes) | — | ✅ (quét QR EUDR + quét QR kiện lên xe) |
 | Kho vật tư (Nhập/Xuất/Chuyển) | ✅ | ✅ (dòng vật tư của phiếu) | ✅ `/dashboard/inventory/document/[type]/[id]` (PDF A5 nhúng loadBytes) | — | ✅ (QR phiếu mới + nhận QR cũ `?documentId=`) |
-| Thành phẩm | 🟡 theme + StatusBadge lot | ❌ (giữ bảng gom ngày cũ) | ❌ | — | — |
-| Kho nguyên liệu | 🟡 theme + StatusBadge storage + SegmentedTabs | ❌ (card ngăn) | ❌ | — | — |
+| Thành phẩm | ✅ theme + StatusBadge lot + StatGrid | ✅ (ngày → ca → lô, DateGroupRow) | ❌ | — | — |
+| Kho nguyên liệu | ✅ theme + StatusBadge storage + SegmentedTabs + StatGrid | ✅ (bảng ngăn, ExpandableRow) | ❌ | — | — |
 | Kho thành phẩm | 🟡 theme orange | — (sơ đồ kho) | — | — | — |
 
 ## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)

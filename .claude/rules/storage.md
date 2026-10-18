@@ -306,4 +306,11 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - Trang bọc `moduleThemeClass("amber")`; tab Đang hoạt động / Lịch sử / In QR → `SegmentedTabs`.
 - Badge trạng thái ngăn (thẻ, thẻ In QR, form) → `StatusBadge domain="storage"`; đã xoá `badgeClass()`.
   Lưu ý màu: "Đóng" nay tông returned (hồng), "Chờ SX" pending (amber nhấp nháy), "Đã SX" info (xanh dương).
-- Chưa làm: chuyển card ngăn sang bảng `ExpandableRow`, trang chi tiết 70/30.
+- Bước 2 (2026-10-18, chờ test tay): KPI → `StatGrid cols={4}`; tab Đang hoạt động: thẻ ngăn → bảng
+  `enterprise-table dense min-w-[980px]` + `ExpandableRow` (state `expandedNganIds`, mặc định thu gọn,
+  `ExpandAllToggle`). Cột: Ngăn (tên + mã) · Trạng thái (badge + nút admin Chờ SX / Bắt đầu SX / Đã SX /
+  Về đang SX, điều kiện giữ nguyên) · Loại NL · KL tươi / khô · TP/QK (+ thanh %) · Ngày lưu ủ · Thao tác.
+  Thao tác: Xem (Eye, mở modal chi tiết) → PDF → QR/Tra cứu → GeoJSON → Đồng bộ nhanh → Sửa → Xóa (quyền
+  giữ nguyên). Dòng xổ: Mã ngăn, Nguồn · Xử lý, Chứng nhận, Ngày xé, TP/QK chi tiết, Ký hiệu KT, Ghi chú.
+  Tab Lịch sử và In QR không đổi.
+- Chưa làm: trang chi tiết 70/30.
