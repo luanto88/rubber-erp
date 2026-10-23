@@ -3,7 +3,7 @@ import { requireAuthUser, supabaseAdmin } from "@/app/api/account/_lib/security"
 import { createSigningRequest, type SigningSignerInput } from "@/lib/signing/requests"
 import { scheduleSigningNotify } from "@/lib/signing/notify"
 import { computeRecordFingerprint } from "@/lib/signing/data-fingerprint"
-import { computeKtStatuses, KT_WAREHOUSE_CODE } from "@/lib/maintenance-kt"
+import { computeKtStatuses } from "@/lib/maintenance-kt"
 
 export const dynamic = "force-dynamic"
 
@@ -89,13 +89,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // GĐ2g: biên bản bảo trì có vật tư mua ngoài chỉ được gửi ký khi Kho tạm KT đủ hàng (kể cả admin).
+    // GĐ2g + Bước 2: biên bản có vật tư mua ngoài chỉ được gửi ký khi kho của từng vật tư đủ hàng (kể cả admin).
     if (body.modun === "maintenance" && body.banGhiId) {
       const [st] = await computeKtStatuses(body.factoryId, body.banGhiId)
       if (st && st.totalShortage > 0) {
-        const list = st.items.filter((it) => it.shortage > 0).map((it) => `${it.name} (thiếu ${it.shortage})`).join(", ")
+        const list = st.items
+          .filter((it) => it.shortage > 0)
+          .map((it) => `${it.name} (thiếu ${it.shortage}${it.warehouseCode ? ` ở kho ${it.warehouseCode}` : ""})`)
+          .join(", ")
         return NextResponse.json(
-          { error: `Kho tạm ${KT_WAREHOUSE_CODE} chưa đủ vật tư mua ngoài: ${list}. Lập đề nghị mua và nhập kho trước khi gửi ký.` },
+          { error: `Kho chưa đủ vật tư mua ngoài: ${list}. Lập đề nghị mua và nhập kho trước khi gửi ký.` },
           { status: 409 },
         )
       }

@@ -896,7 +896,7 @@ Tab `Bảo trì` trong `/dashboard/settings` có 4 sub-tab:
 - `Thiết bị`: CRUD `maintenance_assets` (filter theo bộ phận, phân loại máy móc/xe)
 - `Nhân sự bảo trì`: CRUD `maintenance_staff`
 - `Xe & Tài xế`: CRUD `dispatch_vehicles` + `dispatch_vehicle_driver_assignments` — chuyển từ tab "Cấu hình nhà máy" (2026-05), dữ liệu và logic không thay đổi
-- `Vật tư ngoài`: CRUD `maintenance_external_materials` — fields: mã (`code`), tên, ĐVT, quy cách (`specification`), nhóm vật tư (`category_id` → `inventory_item_categories`), trạng thái (`is_active`)
+- `Vật tư ngoài`: từ 2026-10-17 là `inventory_items` có `nguon_tao = 'bao_tri_mua_ngoai'` (xem mục "Vật tư mua ngoài tạo vào inventory_items" cuối file); `maintenance_external_materials` chỉ còn là dữ liệu lịch sử
 
 ---
 
@@ -1281,3 +1281,66 @@ Trước đây vật tư `nguon='ben_ngoai'` chỉ lưu tên + giá, KHÔNG đi 
   Xem trước 2026-10-06 (phuochoa_kt): 73 biên bản có mua ngoài, 23 đủ điều kiện (có mã vật tư), 13 vật tư,
   1 bỏ qua (lô). CHƯA `--apply`.
 - Chưa làm: hiện "Tồn KT" ngay trong dropdown chọn vật tư mua ngoài (khối thẻ ký đã hiện đủ số liệu).
+
+## Vật tư mua ngoài tạo vào `inventory_items` (2026-10-17)
+
+**Lỗi đã sửa**: "+ Thêm mã vật tư ngoài" (biên bản) và Cài đặt → Bảo trì → Vật tư mua ngoài từng ghi
+vào bảng cũ `maintenance_external_materials`, rồi gán id đó vào `maintenance_materials.inventory_item_id`
+(không có FK). "Lập đề nghị mua" ghi id vào `purchase_request_lines.item_id` (FK `inventory_items`) ⇒
+lỗi `purchase_request_lines_item_id_fkey`, phiếu đã tạo header nên route tự chuyển "Đã hủy"
+(vd DX-141026/001).
+
+- API chung `POST /api/maintenance/external-items` (`resolveIsoActor`; quyền `maintenance.create` |
+  `maintenance.edit` | `settings.maintenance_config` | `settings.manage_config`): bắt buộc Mã, Tên,
+  Phân loại, ĐVT, Đơn giá > 0; tuỳ chọn Quy cách, Hình ảnh (link http/https), Loại tiền (mặc định USD).
+  Chặn trùng mã và trùng tên (chuẩn hoá) — 409 kèm `existing`. Ghi `inventory_items`
+  (`nguon_tao='bao_tri_mua_ngoai'`, `default_warehouse_ids=[KT]`) + rule kho `is_primary`. Thiếu kho KT ⇒ 400.
+- Biên bản: modal gọi API, thêm vật tư vào danh sách chọn và tự điền tên/ĐVT/đơn giá/loại tiền. Đã bỏ khối
+  tự lưu tên vật tư ngoài vào bảng cũ. Lưu biên bản (chưa duyệt) bị chặn nếu dòng mua ngoài có tên nhưng
+  không có mã hợp lệ trong `inventory_items`.
+- Cài đặt: danh sách đọc `inventory_items` lọc `nguon_tao`; tạo qua API; sửa cập nhật thẳng
+  `inventory_items`; "xoá" = `is_active=false` (giữ lịch sử kho/đề nghị mua).
+- `purchase-draft`: kiểm mã vật tư mua ngoài TRƯỚC khi cấp số/tạo phiếu ⇒ thiếu mã trả 400, không còn
+  phiếu "Đã hủy" rác.
+- Chẩn đoán dữ liệu cũ: `supabase/migrations/20261017_ext_materials_to_inventory.sql` (chỉ SELECT).
+
+## Modal vật tư mua ngoài dùng chung — ảnh upload, gợi ý gần giống, lịch sử, kho mặc định (2026-10-18, Bước 1)
+
+Kế hoạch đầy đủ: `.claude/plans/vat-tu-mua-ngoai-gia-cong-2026-10-18.md`; bàn giao Bước 2–3:
+`.claude/plans/ban-giao-vat-tu-mua-ngoai-buoc-2-3.md`.
+
+- Component dùng chung `maintenance/_components/ext-material-modal.tsx` (`ExtMaterialModal`) cho biên bản
+  (`records/[id]`) và Cài đặt → Bảo trì → Vật tư mua ngoài. Đã xoá 2 modal + 2 hàm lưu cũ.
+  - Tự nạp danh mục `inventory_items` (phân trang, **kể cả vật tư ngừng dùng** vì server chặn trùng với
+    cả chúng) + kho của nhà máy. Không thêm API GET — so trùng/gần giống chạy ở client.
+  - Gõ Tên → tối đa 5 vật tư gần giống (`findSimilarNames`, ngưỡng 0,8). Mỗi dòng: ảnh, mã, ĐVT, % giống,
+    nút **Lịch sử** (`PurchaseInsightPanel` qua `GET /api/purchase/item-insight`) và **Dùng mã này** (chỉ
+    biên bản, vật tư đang dùng). Trùng tuyệt đối tên/mã ⇒ khoá nút Lưu ngay ở client; 409 của server
+    (`existing`) cũng được đưa vào danh sách gợi ý.
+  - **Ảnh = 1 ảnh upload/chụp** (`PurchaseImagePicker max={1}`, `documentType="inventory-items"`, bucket
+    `inventory-files`). Không còn ô dán link.
+  - **Kho mặc định** (chỉ khi tạo mới), mặc định KT. Chọn kho khác hiện cảnh báo: biên bản vẫn nhập/xuất
+    vật tư mua ngoài qua KT (ép KT ở `receive/route.ts` + `maintenance-kt.ts` sẽ gỡ ở Bước 2).
+  - Sửa (Cài đặt) vẫn cập nhật thẳng `inventory_items`, không đổi kho mặc định.
+- API `POST /api/maintenance/external-items`: nhận `warehouseId` (kiểm thuộc nhà máy; trống = KT);
+  `imageUrl` chỉ nhận URL public Storage của dự án (`NEXT_PUBLIC_SUPABASE_URL/storage/v1/object/public/`).
+- Cài đặt: cột Tên vật tư có ảnh thu nhỏ.
+
+## Bước 2–3 vật tư mua ngoài: chọn kho nhập + Gia công ngoài (2026-10-23, chờ test tay)
+
+- **Bước 2** (commit 75ccb46): kho tạm không còn ép KT — mỗi vật tư mua ngoài nhập/xuất theo kho mặc định của
+  chính nó (`maintenance-kt.ts` tổng quát hoá theo kho); `receive` của phiếu liên kết biên bản chỉ chặn kho
+  khác kho mặc định của dòng.
+- **Bước 3 — Gia công ngoài** (migration `20261023_maintenance_service_items.sql`, **chạy tay TRƯỚC deploy**):
+  - Dịch vụ = `inventory_items.la_dich_vu = true`, `nguon_tao = 'bao_tri_gia_cong'`, không kho; trigger
+    `trg_inventory_block_service_items` chặn đưa dịch vụ vào `inventory_document_lines`.
+  - `maintenance_materials.nguon` thêm `gia_cong`; modal vật tư mua ngoài có tuỳ chọn "Dịch vụ gia công".
+    Dịch vụ không tính vào thiếu kho, không xuất kho khi ký.
+  - Đề nghị mua: dòng dịch vụ không qua "Ghi nhận mua"; người đề nghị/admin bấm **"Xác nhận hoàn thành"**
+    (`POST /api/purchase/requests/[id]/complete-service` → RPC `purchase_complete_service`, ghi
+    `purchase_service_completions`: SL ≤ còn lại, lệch giá ≤10%, ngày, đơn vị gia công, ảnh). `purchase_effective_lines.received`
+    = nhập kho đã ghi sổ + tổng hoàn thành ⇒ phiếu tự sang Đang mua/Hoàn tất như vật tư thường.
+  - Ẩn khỏi kho: `inventory-data.ts` lọc `nguon_tao <> 'bao_tri_gia_cong'` (Nhập/Xuất/Chuyển/Tồn/Báo cáo);
+    ItemPicker Đề nghị mua hiện nhãn "Dịch vụ", thay panel tồn kho bằng dòng giải thích.
+- Chống trùng mã vật tư: UNIQUE(factory_id, code) ở DB + API `external-items` chặn trùng mã/tên chuẩn hoá (409
+  kèm `existing`) + modal khoá Lưu khi trùng tuyệt đối (kể cả vật tư ngừng dùng).

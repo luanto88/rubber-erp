@@ -5,7 +5,7 @@ import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/ap
 import { isPurchaseParticipant, loadEffectiveLines, loadPurchaseLines, loadPurchaseSigners } from "@/lib/purchase/server"
 import {
   isPurchaseBuying, isPurchaseEditable, remainingQty,
-  type PurchaseAdjustmentSummary, type PurchaseEffectiveLine, type PurchaseReceiptRow, type PurchaseRequestRow, type PurchaseStatus, type PurchaseMaintenanceSource,
+  type PurchaseAdjustmentSummary, type PurchaseEffectiveLine, type PurchaseReceiptRow, type PurchaseServiceCompletionRow, type PurchaseRequestRow, type PurchaseStatus, type PurchaseMaintenanceSource,
 } from "@/lib/purchase/types"
 
 export const dynamic = "force-dynamic"
@@ -90,17 +90,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // ── GĐ2: tình hình mua thực tế (chỉ phiếu gốc đã duyệt trở đi) ──
     let effectiveLines: PurchaseEffectiveLine[] = []
     let receipts: PurchaseReceiptRow[] = []
+    let serviceCompletions: PurchaseServiceCompletionRow[] = []
     let adjustments: PurchaseAdjustmentSummary[] = []
     let pendingAdjustmentId: string | null = null
     let parent: { id: string; so: number; nam: number } | null = null
     if (!isAdjustment && ["da_duyet", "dang_mua", "hoan_tat", "dong", "huy"].includes(status)) {
-      const [eff, recRes, adjRes] = await Promise.all([
+      const [eff, recRes, adjRes, svcRes] = await Promise.all([
         loadEffectiveLines(id).catch(() => [] as PurchaseEffectiveLine[]),
         supabaseAdmin.from("purchase_receipts").select("*").eq("request_id", id).order("created_at", { ascending: false }),
         supabaseAdmin.from("purchase_requests")
           .select("id, so, nam, trang_thai, ly_do_dieu_chinh, created_at")
           .eq("parent_request_id", id).eq("loai", "dieu_chinh").order("created_at", { ascending: false }),
+        // Bảng chưa tồn tại (migration 20261023 chưa chạy) → coi như chưa có lần xác nhận nào.
+        supabaseAdmin.from("purchase_service_completions").select("*").eq("request_id", id).order("created_at", { ascending: false }),
       ])
+      serviceCompletions = ((svcRes.error ? [] : svcRes.data) || []).map((r) => {
+        const c = r as PurchaseServiceCompletionRow
+        return { ...c, so_luong: Number(c.so_luong), don_gia: Number(c.don_gia), image_urls: c.image_urls || [] }
+      })
+      for (const c of serviceCompletions) if (c.created_by) ids.add(c.created_by)
       effectiveLines = eff
       adjustments = (adjRes.data || []) as PurchaseAdjustmentSummary[]
       pendingAdjustmentId = adjustments.find((a) => ["nhap", "cho_ky", "tra_ve"].includes(a.trang_thai))?.id || null
@@ -144,8 +152,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       }
     }
 
+    // Dịch vụ gia công ngoài (la_dich_vu): không nhập kho, chỉ "Xác nhận hoàn thành".
+    const serviceItemIds = await loadServiceItemIds([
+      ...lines.map((l) => (l as { item_id?: string | null }).item_id),
+      ...effectiveLines.map((e) => e.item_id),
+    ])
+    effectiveLines = effectiveLines.map((e) => ({ ...e, la_dich_vu: !!e.item_id && serviceItemIds.has(e.item_id) }))
+
     const buying = !isAdjustment && isPurchaseBuying(status)
-    const hasRemaining = effectiveLines.some((e) => remainingQty(e) > 0 && !e.pending_adjust)
+    const hasRemaining = effectiveLines.some((e) => !e.la_dich_vu && remainingQty(e) > 0 && !e.pending_adjust)
+    const hasServiceRemaining = effectiveLines.some((e) => e.la_dich_vu && remainingQty(e) > 0 && !e.pending_adjust)
     const hasAdjustable = effectiveLines.some((e) => remainingQty(e) > 0)
 
     let maintenanceSource: PurchaseMaintenanceSource | null = null
@@ -168,6 +184,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       traVeLyDo,
       effectiveLines,
       receipts,
+      serviceCompletions,
+      serviceItemIds: [...serviceItemIds],
       adjustments,
       pendingAdjustmentId,
       parent,
@@ -184,6 +202,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           (actor.isAdmin && status !== "huy" && status !== "hoan_tat" && status !== "da_duyet" && status !== "dang_mua" && status !== "dong"),
         // Ghi nhận mua / nhập kho: CHỈ người đề nghị + admin (GĐ2f — bỏ quyền inventory.create).
         canReceive: buying && hasRemaining && (isOwner || actor.isAdmin),
+        // "Xác nhận hoàn thành" dịch vụ gia công: cùng quy tắc với Ghi nhận mua.
+        canCompleteService: buying && hasServiceRemaining && (isOwner || actor.isAdmin),
         canAdjust: buying && hasAdjustable && isOwner && !pendingAdjustmentId,
         canClose: !isAdjustment && status === "dang_mua" && (isOwner || actor.isAdmin) && !pendingAdjustmentId,
         // Ảnh theo dòng: người đề nghị + admin, kể cả sau khi ký (ảnh không in lên PDF), trừ phiếu đã huỷ.
@@ -194,4 +214,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: isoAuthErrorStatus(err) })
   }
+}
+
+/** Tập item_id là dịch vụ gia công. Cột la_dich_vu chưa có (migration chưa chạy) → tập rỗng. */
+async function loadServiceItemIds(itemIds: (string | null | undefined)[]): Promise<Set<string>> {
+  const uniq = [...new Set(itemIds.filter(Boolean) as string[])]
+  if (!uniq.length) return new Set()
+  const { data, error } = await supabaseAdmin.from("inventory_items").select("id").in("id", uniq).eq("la_dich_vu", true)
+  if (error) return new Set()
+  return new Set(((data || []) as { id: string }[]).map((r) => r.id))
 }

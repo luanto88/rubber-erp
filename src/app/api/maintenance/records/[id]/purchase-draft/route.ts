@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
-import { computeKtStatuses } from "@/lib/maintenance-kt"
+import { computeKtStatuses, PURCHASE_ACTIVE_FOR_KT } from "@/lib/maintenance-kt"
 import { insertPurchaseLog } from "@/lib/purchase/server"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { isBoPhan } from "@/lib/bo-phan"
@@ -14,6 +14,16 @@ export const dynamic = "force-dynamic"
 // Đã có phiếu nháp/bị trả về liên kết → trả lại phiếu đó, không tạo trùng.
 
 const DEFAULT_USD_RATE: Record<string, number> = { USD: 1, KHR: 4100, VND: 25000 }
+
+type Need = {
+  itemId: string
+  itemCode: string | null
+  name: string
+  unit: string | null
+  donGia: number
+  loaiTien: string
+  qty: number
+}
 
 type MatWithLine = {
   inventory_item_id: string | null
@@ -56,12 +66,101 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .maybeSingle()
     if (existingDraft) return NextResponse.json({ id: existingDraft.id, existed: true })
 
+    // Chặn sớm — TRƯỚC khi cấp số/tạo phiếu: mọi vật tư mua ngoài phải có mã trong danh mục kho.
+    // Trước đây id vật tư nằm ở bảng cũ maintenance_external_materials ⇒ insert dòng phiếu lỗi khoá
+    // ngoại item_id và để lại 1 phiếu "Đã hủy" vô nghĩa.
+    const { data: extMats } = await supabaseAdmin
+      .from("maintenance_materials")
+      .select("inventory_item_id, ten_vat_tu, nguon, dvt, so_luong, don_gia, loai_tien")
+      .eq("record_id", id)
+      .in("nguon", ["ben_ngoai", "gia_cong"])
+    const extRows = (extMats || []) as {
+      inventory_item_id: string | null
+      ten_vat_tu: string | null
+      nguon: string
+      dvt: string | null
+      so_luong: number | null
+      don_gia: number | null
+      loai_tien: string | null
+    }[]
+    const extIds = Array.from(new Set(extRows.map((m) => m.inventory_item_id).filter((v): v is string => !!v)))
+    const knownIds = new Set<string>()
+    const knownItems = new Map<string, { code: string | null; name: string; unit: string | null; laDichVu: boolean }>()
+    if (extIds.length) {
+      const { data: known } = await supabaseAdmin
+        .from("inventory_items")
+        .select("id, code, name, unit, la_dich_vu")
+        .eq("factory_id", factoryId)
+        .in("id", extIds)
+      for (const k of (known || []) as { id: string; code: string | null; name: string; unit: string | null; la_dich_vu: boolean | null }[]) {
+        knownIds.add(k.id)
+        knownItems.set(k.id, { code: k.code, name: k.name, unit: k.unit, laDichVu: !!k.la_dich_vu })
+      }
+    }
+    const noCode = Array.from(
+      new Set(
+        extRows
+          .filter((m) => (m.ten_vat_tu || "").trim() && (!m.inventory_item_id || !knownIds.has(m.inventory_item_id)))
+          .map((m) => (m.ten_vat_tu || "").trim()),
+      ),
+    )
+    if (noCode.length) {
+      return NextResponse.json(
+        {
+          error: `Vật tư ${noCode.join(", ")} chưa có mã trong danh mục kho — sửa biên bản, chọn hoặc tạo mã vật tư ("+ Thêm mã vật tư ngoài") rồi lưu lại.`,
+        },
+        { status: 400 },
+      )
+    }
+
     const [status] = await computeKtStatuses(factoryId, id)
-    const needs = (status?.items || [])
-      .map((it) => ({ ...it, qty: Math.max(0, it.shortage - it.pendingRequested) }))
+    const needs: Need[] = (status?.items || [])
+      .map((it) => ({
+        itemId: it.itemId, itemCode: it.itemCode, name: it.name, unit: it.unit,
+        donGia: it.donGia, loaiTien: it.loaiTien, qty: Math.max(0, it.shortage - it.pendingRequested),
+      }))
       .filter((it) => it.qty > 0)
+
+    // Bước 3 — Gia công ngoài (dịch vụ, không qua kho): cần = tổng SL dòng gia_cong của biên bản
+    // − phần đã nằm trong phiếu đề nghị liên kết còn hiệu lực (phiếu đóng chỉ tính phần đã xong).
+    const serviceNeed = new Map<string, Need>()
+    for (const m of extRows) {
+      if (m.nguon !== "gia_cong" || !m.inventory_item_id) continue
+      const meta = knownItems.get(m.inventory_item_id)
+      if (!meta) continue
+      const cur = serviceNeed.get(m.inventory_item_id)
+      if (cur) cur.qty += Number(m.so_luong) || 0
+      else serviceNeed.set(m.inventory_item_id, {
+        itemId: m.inventory_item_id, itemCode: meta.code, name: meta.name, unit: meta.unit || m.dvt,
+        donGia: Number(m.don_gia) || 0, loaiTien: m.loai_tien || "USD", qty: Number(m.so_luong) || 0,
+      })
+    }
+    if (serviceNeed.size) {
+      const { data: linked } = await supabaseAdmin
+        .from("purchase_requests")
+        .select("id, trang_thai")
+        .eq("factory_id", factoryId)
+        .eq("maintenance_record_id", id)
+        .eq("loai", "goc")
+        .in("trang_thai", [...PURCHASE_ACTIVE_FOR_KT, "hoan_tat", "dong"])
+      const linkedRows = (linked || []) as { id: string; trang_thai: string }[]
+      if (linkedRows.length) {
+        const closed = new Set(linkedRows.filter((r) => r.trang_thai === "dong").map((r) => r.id))
+        const { data: lines } = await supabaseAdmin
+          .from("purchase_request_lines")
+          .select("request_id, item_id, so_luong, sl_da_mua")
+          .in("request_id", linkedRows.map((r) => r.id))
+          .in("item_id", Array.from(serviceNeed.keys()))
+        for (const l of (lines || []) as { request_id: string; item_id: string; so_luong: number | null; sl_da_mua: number | null }[]) {
+          const n = serviceNeed.get(l.item_id)
+          if (n) n.qty -= closed.has(l.request_id) ? Number(l.sl_da_mua) || 0 : Number(l.so_luong) || 0
+        }
+      }
+      for (const n of serviceNeed.values()) if (n.qty > 0) needs.push(n)
+    }
+
     if (!needs.length) {
-      return NextResponse.json({ error: "Kho tạm đã đủ (hoặc đã có đề nghị đang chờ nhập) — không cần lập thêm" }, { status: 409 })
+      return NextResponse.json({ error: "Kho đã đủ và dịch vụ gia công đã có đề nghị — không cần lập thêm" }, { status: 409 })
     }
 
     // Mục đích: tên thiết bị của dòng biên bản chứa vật tư.
@@ -69,7 +168,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .from("maintenance_materials")
       .select("inventory_item_id, maintenance_record_lines(ten_tb)")
       .eq("record_id", id)
-      .eq("nguon", "ben_ngoai")
+      .in("nguon", ["ben_ngoai", "gia_cong"])
     const tenTbByItem = new Map<string, string>()
     for (const m of (mats || []) as MatWithLine[]) {
       const l = Array.isArray(m.maintenance_record_lines) ? m.maintenance_record_lines[0] : m.maintenance_record_lines
@@ -118,7 +217,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         nguoi_de_nghi_ten: myName,
         loai_tien: loaiTien,
         tong_tien: lineRows.reduce((s, l) => s + l.thanh_tien, 0),
-        ghi_chu: `Vật tư mua ngoài cho biên bản bảo trì ${rec.ma_bb || ""} (nhập kho tạm KT)`,
+        ghi_chu: `Vật tư mua ngoài cho biên bản bảo trì ${rec.ma_bb || ""}`,
         bo_phan: isBoPhan(rec.bo_phan) ? rec.bo_phan : null,
         ngay_can_hang: today,
         trang_thai: "nhap",

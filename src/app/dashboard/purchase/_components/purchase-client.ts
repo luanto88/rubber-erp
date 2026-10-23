@@ -8,7 +8,7 @@ import {
   PURCHASE_SIGN_ORDER,
   formatSoPhieuFull,
   type PurchaseAdjustmentSummary, type PurchaseApprover, type PurchaseInsightSnapshot, type PurchaseEffectiveLine, type PurchaseLineRow,
-  type PurchaseReceiptRow, type PurchaseRequestRow, type PurchaseSigner, type PurchaseSignRole, type PurchaseMaintenanceSource,
+  type PurchaseReceiptRow, type PurchaseRequestRow, type PurchaseServiceCompletionRow, type PurchaseSigner, type PurchaseSignRole, type PurchaseMaintenanceSource,
 } from "@/lib/purchase/types"
 
 export type ApproversResponse = {
@@ -31,6 +31,10 @@ export type PurchaseDetail = {
   traVeLyDo: string | null
   effectiveLines: PurchaseEffectiveLine[]
   receipts: PurchaseReceiptRow[]
+  /** Bước 3: các lần xác nhận hoàn thành dịch vụ gia công (không qua kho). */
+  serviceCompletions?: PurchaseServiceCompletionRow[]
+  /** Id vật tư là dịch vụ (la_dich_vu) trong phiếu. */
+  serviceItemIds?: string[]
   adjustments: PurchaseAdjustmentSummary[]
   pendingAdjustmentId: string | null
   parent: { id: string; so: number; nam: number } | null
@@ -41,6 +45,7 @@ export type PurchaseDetail = {
     /** Người xem có purchase.create nhưng chưa là người đề nghị của phiếu từ biên bản: Lưu = nhận xử lý. */
     canTakeOver?: boolean
     canReceive: boolean; canAdjust: boolean; canClose: boolean; canEditImages: boolean
+    canCompleteService?: boolean
   }
 }
 
@@ -55,6 +60,22 @@ export type ReceivePayload = {
 
 export async function receivePurchase(requestId: string, payload: ReceivePayload) {
   return readJson<{ documentId: string; documentCode: string; status: string }>(await authFetch(`/api/purchase/requests/${requestId}/receive`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }))
+}
+
+export type CompleteServicePayload = {
+  ngay: string
+  nhaCungCap: string
+  ghiChu: string
+  imageUrls: string[]
+  lines: { lineId: string; soLuong: number; donGia: number; ghiChu: string | null }[]
+}
+
+export async function completeService(requestId: string, payload: CompleteServicePayload) {
+  return readJson<{ count: number; total: number; status: string }>(await authFetch(`/api/purchase/requests/${requestId}/complete-service`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

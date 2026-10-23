@@ -4,7 +4,7 @@ import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "r
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
-  AlertTriangle, Ban, BarChart3, Bell, CalendarClock, Download, FileCheck2, FilePen, History, ImagePlus, Images, Info, Loader2, Lock, PackageCheck,
+  AlertTriangle, Ban, BarChart3, Bell, CalendarClock, Download, FileCheck2, FilePen, History, ImagePlus, Images, Info, Loader2, Lock, PackageCheck, Wrench,
   Pencil, PenTool, Printer, Send, ShoppingCart, Workflow,
 } from "lucide-react"
 import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
@@ -35,7 +35,7 @@ import {
 } from "../_components/purchase-client"
 import { ImageLightbox, PurchaseImagePicker } from "../_components/purchase-image-picker"
 import { PurchaseInsightPanel } from "../_components/purchase-insight-panel"
-import { AdjustModal, ClosePurchaseModal, PurchaseFulfillmentPanel, ReceiveModal } from "../_components/purchase-fulfillment"
+import { AdjustModal, ClosePurchaseModal, CompleteServiceModal, PurchaseFulfillmentPanel, ReceiveModal } from "../_components/purchase-fulfillment"
 
 const LOG_LABEL: Record<string, string> = {
   tao: "Tạo phiếu",
@@ -45,6 +45,7 @@ const LOG_LABEL: Record<string, string> = {
   da_duyet: "Đã duyệt xong",
   huy: "Huỷ phiếu",
   nhap_kho: "Ghi nhận mua / nhập kho",
+  hoan_thanh_dich_vu: "Xác nhận hoàn thành dịch vụ",
   lap_dieu_chinh: "Lập phiếu điều chỉnh",
   tao_dieu_chinh: "Tạo phiếu điều chỉnh",
   dieu_chinh_duyet: "Phiếu điều chỉnh đã duyệt",
@@ -80,6 +81,7 @@ function PurchaseDetailInner() {
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState("")
   const [receiveOpen, setReceiveOpen] = useState(false)
+  const [serviceOpen, setServiceOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [closeOpen, setCloseOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
@@ -245,7 +247,7 @@ function PurchaseDetailInner() {
   // Bản PDF: Luôn cho phép hiển thị bản xem trước PDF qua buildPurchaseDraftPdfBytes khi chưa có file ký (Rule 29)
   const hasDraft = !hasSignedFile && detail.lines.length > 0 && !!factoryId
   const effectiveDocTab: "file" | "content" = hasSignedFile || hasDraft ? docTab : "content"
-  const anyModalOpen = receiveOpen || adjustOpen || closeOpen || cancelOpen || !!imageEdit
+  const anyModalOpen = receiveOpen || serviceOpen || adjustOpen || closeOpen || cancelOpen || !!imageEdit
   const viewerActive = (isDesktop || mobileTab === "doc") && !anyModalOpen
   const viewFileName = `${docLabel} ${soPhieu.replace("/", "-")}`
   const openSignedFile = () => {
@@ -476,6 +478,9 @@ function PurchaseDetailInner() {
   if (detail.perms.canReceive) {
     actions.push({ key: "receive", label: "Ghi nhận mua / Nhập kho", icon: <PackageCheck size={16} />, onClick: () => { setNotice(null); setReceiveOpen(true) } })
   }
+  if (detail.perms.canCompleteService) {
+    actions.push({ key: "service", label: "Xác nhận hoàn thành", icon: <Wrench size={16} />, onClick: () => { setNotice(null); setServiceOpen(true) } })
+  }
   if (!myTurn && req.trang_thai === "cho_ky" && req.yeu_cau_ky_id && !isApproved) {
     actions.push({ key: "kyscreen", label: "Mở màn ký", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
   }
@@ -646,6 +651,14 @@ function PurchaseDetailInner() {
           factoryId={factoryId}
           onClose={() => setReceiveOpen(false)}
           onDone={(msg) => { setReceiveOpen(false); setNotice(msg); void load() }}
+        />
+      )}
+      {serviceOpen && factoryId && (
+        <CompleteServiceModal
+          detail={detail}
+          factoryId={factoryId}
+          onClose={() => setServiceOpen(false)}
+          onDone={(msg) => { setServiceOpen(false); setNotice(msg); void load() }}
         />
       )}
       {adjustOpen && factoryId && (

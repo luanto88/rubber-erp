@@ -1,11 +1,13 @@
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
 
-// GĐ2g — Vật tư mua ngoài ("ben_ngoai") của biên bản Bảo trì đi qua Kho tạm KT:
-// lập Đề nghị mua → nhập KT → ký biên bản → xuất KT (issueMaintenanceStock).
-// Chỉ chạy server (service role). Khả dụng của 1 biên bản = tồn KT − phần các biên bản
-// khác CHƯA xuất kho tạo TRƯỚC nó đang giữ (giữ hàng theo thứ tự tạo, tránh 2 biên bản
-// cùng dựa vào 1 số dư).
+// GĐ2g — Vật tư mua ngoài ("ben_ngoai") của biên bản Bảo trì đi qua kho:
+// lập Đề nghị mua → nhập kho → ký biên bản → xuất kho (issueMaintenanceStock).
+// Bước 2 (2026-10-18): kho KHÔNG còn ép cứng KT. Kho của 1 vật tư trong 1 biên bản
+// (`resolveExternalWarehouses`) = kho của lần nhập kho gần nhất có vật tư đó thuộc phiếu đề nghị
+// liên kết biên bản → kho chính của vật tư (rule is_primary) → Kho tạm KT.
+// Chỉ chạy server (service role). Khả dụng của 1 biên bản = tồn kho đó − phần các biên bản
+// khác CHƯA xuất kho tạo TRƯỚC nó đang giữ cùng (kho, vật tư).
 
 export const KT_WAREHOUSE_CODE = "KT"
 
@@ -26,6 +28,9 @@ export async function findKtWarehouse(factoryId: string): Promise<{ id: string; 
 
 export type KtItemStatus = {
   itemId: string
+  /** Kho tính tồn / xuất của vật tư này (xem resolveExternalWarehouses). */
+  warehouseId: string | null
+  warehouseCode: string | null
   itemCode: string | null
   name: string
   unit: string | null
@@ -65,6 +70,102 @@ type MatRow = {
   so_luong: number | null
   don_gia: number | null
   loai_tien: string | null
+}
+
+type WarehouseInfo = { id: string; code: string; name: string }
+
+/**
+ * Kho của từng (biên bản, vật tư mua ngoài) — key `${recordId}:${itemId}`.
+ * Ưu tiên: kho phiếu nhập (đã ghi sổ) gần nhất có vật tư đó thuộc phiếu đề nghị liên kết biên bản
+ * → kho chính (is_primary) của vật tư → Kho tạm KT. Không có gì → null.
+ * Dùng chung cho trạng thái KT (computeKtStatuses) và xuất kho khi ký (issueMaintenanceStock)
+ * để 2 nơi luôn cùng 1 kho.
+ */
+export async function resolveExternalWarehouses(
+  factoryId: string,
+  pairs: { recordId: string; itemId: string }[],
+  kt?: WarehouseInfo | null,
+): Promise<{ map: Map<string, string | null>; warehouses: Map<string, WarehouseInfo> }> {
+  const sb = getSupabaseAdmin()
+  const ktWh = kt === undefined ? await findKtWarehouse(factoryId) : kt
+  const map = new Map<string, string | null>()
+  const warehouses = new Map<string, WarehouseInfo>()
+  if (ktWh) warehouses.set(ktWh.id, ktWh)
+  if (!pairs.length) return { map, warehouses }
+  const recordIds = Array.from(new Set(pairs.map((p) => p.recordId)))
+  const itemIds = Array.from(new Set(pairs.map((p) => p.itemId)))
+
+  // 1. Phiếu nhập của các đề nghị liên kết biên bản.
+  const reqToRecord = new Map<string, string>()
+  for (let i = 0; i < recordIds.length; i += 200) {
+    const { data, error } = await sb
+      .from("purchase_requests")
+      .select("id, maintenance_record_id")
+      .eq("factory_id", factoryId)
+      .in("maintenance_record_id", recordIds.slice(i, i + 200))
+    if (error) throw new Error(error.message)
+    for (const r of (data || []) as { id: string; maintenance_record_id: string }[]) reqToRecord.set(r.id, r.maintenance_record_id)
+  }
+  // latest[`rec:item`] = { warehouseId, at }
+  const latest = new Map<string, { warehouseId: string; at: string }>()
+  const reqIds = Array.from(reqToRecord.keys())
+  for (let i = 0; i < reqIds.length; i += 200) {
+    const { data: receipts, error } = await sb
+      .from("purchase_receipts")
+      .select("request_id, inventory_document_id, warehouse_id, created_at")
+      .eq("factory_id", factoryId)
+      .in("request_id", reqIds.slice(i, i + 200))
+      .not("inventory_document_id", "is", null)
+    if (error) throw new Error(error.message)
+    const rows = (receipts || []) as { request_id: string; inventory_document_id: string; warehouse_id: string | null; created_at: string }[]
+    if (!rows.length) continue
+    const docIds = rows.map((r) => r.inventory_document_id)
+    const [docsRes, linesRes] = await Promise.all([
+      sb.from("inventory_documents").select("id, status").in("id", docIds),
+      sb.from("inventory_document_lines").select("document_id, item_id").in("document_id", docIds),
+    ])
+    const posted = new Set(((docsRes.data || []) as { id: string; status: string | null }[]).filter((d) => d.status === "posted").map((d) => d.id))
+    const itemsByDoc = new Map<string, Set<string>>()
+    for (const l of (linesRes.data || []) as { document_id: string; item_id: string | null }[]) {
+      if (!l.item_id) continue
+      const set = itemsByDoc.get(l.document_id) || new Set<string>()
+      set.add(l.item_id)
+      itemsByDoc.set(l.document_id, set)
+    }
+    for (const r of rows) {
+      if (!r.warehouse_id || !posted.has(r.inventory_document_id)) continue
+      const rec = reqToRecord.get(r.request_id)!
+      for (const itemId of itemsByDoc.get(r.inventory_document_id) || []) {
+        const key = `${rec}:${itemId}`
+        const cur = latest.get(key)
+        if (!cur || r.created_at > cur.at) latest.set(key, { warehouseId: r.warehouse_id, at: r.created_at })
+      }
+    }
+  }
+
+  // 2. Kho chính của vật tư.
+  const primary = new Map<string, string>()
+  for (let i = 0; i < itemIds.length; i += 200) {
+    const { data } = await sb
+      .from("inventory_item_warehouse_rules")
+      .select("item_id, warehouse_id")
+      .eq("factory_id", factoryId)
+      .eq("is_primary", true)
+      .in("item_id", itemIds.slice(i, i + 200))
+    for (const r of (data || []) as { item_id: string; warehouse_id: string }[]) primary.set(r.item_id, r.warehouse_id)
+  }
+
+  for (const p of pairs) {
+    const key = `${p.recordId}:${p.itemId}`
+    map.set(key, latest.get(key)?.warehouseId || primary.get(p.itemId) || ktWh?.id || null)
+  }
+
+  const whIds = Array.from(new Set(Array.from(map.values()).filter((v): v is string => !!v && !warehouses.has(v))))
+  if (whIds.length) {
+    const { data } = await sb.from("inventory_warehouses").select("id, code, name").eq("factory_id", factoryId).in("id", whIds)
+    for (const w of (data || []) as WarehouseInfo[]) warehouses.set(w.id, w)
+  }
+  return { map, warehouses }
 }
 
 function recordOrder(a: RecordRow, b: RecordRow) {
@@ -108,21 +209,38 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
   const target = recordId ? records.filter((r) => r.id === recordId) : active
   if (!target.length) return []
 
+  // Kho của từng (biên bản, vật tư) — tính cho MỌI biên bản đang giữ hàng (để trừ phần giữ chỗ
+  // đúng kho) và cho biên bản đích.
+  const scopeIds = new Set([...active.map((r) => r.id), ...target.map((r) => r.id)])
+  const pairKeys = new Set<string>()
+  const pairs: { recordId: string; itemId: string }[] = []
+  for (const m of materials) {
+    if (!scopeIds.has(m.record_id)) continue
+    const key = `${m.record_id}:${m.inventory_item_id}`
+    if (pairKeys.has(key)) continue
+    pairKeys.add(key)
+    pairs.push({ recordId: m.record_id, itemId: m.inventory_item_id as string })
+  }
+  const { map: whByPair, warehouses: whInfo } = await resolveExternalWarehouses(factoryId, pairs, kt)
+
   const itemIds = Array.from(new Set(materials.map((m) => m.inventory_item_id as string)))
-  const onHand = new Map<string, number>()
+  const usedWhIds = Array.from(new Set(Array.from(whByPair.values()).filter((v): v is string => !!v)))
+  const onHand = new Map<string, number>() // key `${warehouseId}:${itemId}`
   const itemInfo = new Map<string, { code: string | null; name: string; unit: string | null }>()
   for (let i = 0; i < itemIds.length; i += 200) {
     const chunk = itemIds.slice(i, i + 200)
     const [items, bal] = await Promise.all([
       sb.from("inventory_items").select("id, code, name, unit").eq("factory_id", factoryId).in("id", chunk),
-      kt
-        ? sb.from("inventory_stock_balances").select("item_id, on_hand").eq("factory_id", factoryId).eq("warehouse_id", kt.id).in("item_id", chunk)
-        : Promise.resolve({ data: [] as { item_id: string; on_hand: number }[] }),
+      usedWhIds.length
+        ? sb.from("inventory_stock_balances").select("warehouse_id, item_id, on_hand").eq("factory_id", factoryId).in("warehouse_id", usedWhIds).in("item_id", chunk)
+        : Promise.resolve({ data: [] as { warehouse_id: string; item_id: string; on_hand: number }[] }),
     ])
     for (const it of (items.data || []) as { id: string; code: string | null; name: string; unit: string | null }[]) {
       itemInfo.set(it.id, { code: it.code, name: it.name, unit: it.unit })
     }
-    for (const b of (bal.data || []) as { item_id: string; on_hand: number | null }[]) onHand.set(b.item_id, Number(b.on_hand) || 0)
+    for (const b of (bal.data || []) as { warehouse_id: string; item_id: string; on_hand: number | null }[]) {
+      onHand.set(`${b.warehouse_id}:${b.item_id}`, Number(b.on_hand) || 0)
+    }
   }
 
   // Nhu cầu theo biên bản → vật tư.
@@ -177,14 +295,20 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
     const earlier = active.filter((r) => r.id !== rec.id && recordOrder(r, rec) < 0)
     const items: KtItemStatus[] = []
     for (const [itemId, qty] of need) {
+      const whId = whByPair.get(`${rec.id}:${itemId}`) || null
       let reserved = 0
-      for (const e of earlier) reserved += needByRecord.get(e.id)?.get(itemId) || 0
-      const stock = onHand.get(itemId) || 0
+      for (const e of earlier) {
+        if ((whByPair.get(`${e.id}:${itemId}`) || null) !== whId) continue
+        reserved += needByRecord.get(e.id)?.get(itemId) || 0
+      }
+      const stock = whId ? onHand.get(`${whId}:${itemId}`) || 0 : 0
       const available = Math.max(0, stock - reserved)
       const mat = firstMat.get(`${rec.id}:${itemId}`)
       const info = itemInfo.get(itemId)
       items.push({
         itemId,
+        warehouseId: whId,
+        warehouseCode: whId ? whInfo.get(whId)?.code || null : null,
         itemCode: info?.code || null,
         name: info?.name || mat?.ten_vat_tu || "—",
         unit: info?.unit || mat?.dvt || null,

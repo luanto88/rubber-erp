@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ExternalLink, Loader2, Lock, PackageCheck } from "lucide-react"
+import { CheckCircle2, ExternalLink, Loader2, Lock, PackageCheck, Wrench } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
@@ -17,7 +17,7 @@ import {
 } from "@/lib/purchase/types"
 import { ItemPicker, type ItemOpt } from "./purchase-form"
 import { ImageLightbox, PurchaseImagePicker } from "./purchase-image-picker"
-import { closePurchase, createAdjustment, receivePurchase, type PurchaseDetail } from "./purchase-client"
+import { closePurchase, completeService, createAdjustment, receivePurchase, type PurchaseDetail } from "./purchase-client"
 
 
 function fmtDate(iso: string | null | undefined) {
@@ -40,7 +40,9 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
   const req = detail.request
   const [lightbox, setLightbox] = useState<string | null>(null)
   if (!detail.effectiveLines.length) return null
+  const completions = detail.serviceCompletions || []
   const totalReceived = detail.receipts.filter((r) => !r.cancelled).reduce((s, r) => s + Number(r.tong_tien || 0), 0)
+    + completions.reduce((s, c) => s + Number(c.so_luong || 0) * Number(c.don_gia || 0), 0)
 
   return (
     <div className="space-y-4">
@@ -48,7 +50,7 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
         <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-extrabold text-slate-700">Tình hình mua / nhập kho</h3>
           <span className="text-xs text-slate-500">
-            Đã nhập: <b className="text-slate-800">{formatMoney(totalReceived, req.loai_tien)} {req.loai_tien}</b>
+            Đã mua / hoàn thành: <b className="text-slate-800">{formatMoney(totalReceived, req.loai_tien)} {req.loai_tien}</b>
           </span>
         </div>
         <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
@@ -57,7 +59,7 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
               <tr>
                 <th className="px-2 py-2 text-left">Vật tư (hiệu lực)</th>
                 <th className="px-2 py-2 text-right">SL duyệt</th>
-                <th className="px-2 py-2 text-right">Đã nhập</th>
+                <th className="px-2 py-2 text-right">Đã nhập / xong</th>
                 <th className="px-2 py-2 text-right">Còn lại</th>
                 <th className="px-2 py-2 text-right">Giá duyệt</th>
               </tr>
@@ -75,6 +77,7 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
                         <div className={`h-full ${rem === 0 ? "bg-emerald-500" : "bg-blue-500"}`} style={{ width: `${pct}%` }} />
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1">
+                        {e.la_dich_vu && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Dịch vụ — không qua kho</span>}
                         {e.adjusted && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700">Đã điều chỉnh</span>}
                         {e.pending_adjust && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">Đang điều chỉnh — tạm khoá nhập</span>}
                       </div>
@@ -139,6 +142,39 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
         </div>
       )}
 
+      {completions.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+          <h3 className="text-sm font-extrabold text-slate-700 mb-3">Lịch sử xác nhận hoàn thành dịch vụ ({completions.length})</h3>
+          <ul className="space-y-3">
+            {completions.map((c) => (
+              <li key={c.id} className="rounded-xl border border-violet-200 p-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Wrench size={15} className="text-violet-600" />
+                  <span className="font-semibold text-slate-800">{c.item_name}</span>
+                  <span className="text-slate-500">· {fmtDate(c.ngay)}</span>
+                  <span className="ml-auto font-semibold text-slate-800">
+                    {formatQty(c.so_luong)} {c.unit} × {formatMoney(c.don_gia, c.loai_tien || req.loai_tien)} {c.loai_tien || req.loai_tien}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {c.created_by ? `${detail.names[c.created_by] || ""} · ` : ""}{fmtDateTime(c.created_at)}
+                  {c.nha_cung_cap ? ` · Đơn vị gia công: ${c.nha_cung_cap}` : ""}
+                </p>
+                {c.ghi_chu && <p className="mt-1 text-xs text-slate-600">Ghi chú: {c.ghi_chu}</p>}
+                {c.image_urls.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {c.image_urls.map((u, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={i} src={u} alt={`Ảnh ${i + 1}`} onClick={() => setLightbox(u)} className="h-14 w-14 rounded-lg object-cover border border-slate-200 cursor-zoom-in" />
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {detail.adjustments.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
           <h3 className="text-sm font-extrabold text-slate-700 mb-2">Phiếu điều chỉnh</h3>
@@ -169,7 +205,10 @@ export function ReceiveModal({
   detail, factoryId, onClose, onDone,
 }: { detail: PurchaseDetail; factoryId: string; onClose: () => void; onDone: (msg: string) => void }) {
   const req = detail.request
-  const lines = useMemo(() => detail.effectiveLines.filter((e) => remainingQty(e) > 0 && !e.pending_adjust), [detail.effectiveLines])
+  const lines = useMemo(
+    () => detail.effectiveLines.filter((e) => remainingQty(e) > 0 && !e.pending_adjust && !e.la_dich_vu),
+    [detail.effectiveLines],
+  )
   const [warehouses, setWarehouses] = useState<{ id: string; code: string; name: string }[]>([])
   const [manageLot, setManageLot] = useState<Set<string>>(new Set())
   const [warehouseId, setWarehouseId] = useState("")
@@ -202,9 +241,9 @@ export function ReceiveModal({
       const firstItem = itemIds[0]
       const primary = ((rules || []) as { item_id: string; warehouse_id: string; is_primary: boolean | null }[])
         .find((r) => r.item_id === firstItem && r.is_primary)?.warehouse_id
-      // GĐ2g: phiếu lập từ biên bản bảo trì → nhập cứng vào kho tạm KT.
-      const forced = detail.maintenanceSource?.ktWarehouseId || null
-      setWarehouseId((cur) => forced || cur || primary || list[0]?.id || "")
+      // Phiếu lập từ biên bản bảo trì: chọn được kho (Bước 2) — mặc định kho chính của vật tư, không có thì KT.
+      const kt = detail.maintenanceSource?.ktWarehouseId || null
+      setWarehouseId((cur) => cur || primary || kt || list[0]?.id || "")
     }
     void run()
   }, [factoryId, lines, detail.maintenanceSource])
@@ -274,15 +313,14 @@ export function ReceiveModal({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className={labelCls}>Kho nhập *</label>
-            <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} disabled={!!detail.maintenanceSource} className={`${inputCls} disabled:bg-slate-100`}>
+            <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} className={inputCls}>
               <option value="">— Chọn kho —</option>
               {warehouses.map((w) => <option key={w.id} value={w.id}>{w.code} — {w.name}</option>)}
             </select>
             {detail.maintenanceSource && (
-              <p className={`mt-1 text-[11px] ${detail.maintenanceSource.ktWarehouseId ? "text-slate-500" : "text-red-600 font-semibold"}`}>
-                {detail.maintenanceSource.ktWarehouseId
-                  ? `Phiếu từ biên bản bảo trì — nhập cứng vào kho tạm ${detail.maintenanceSource.ktCode}.`
-                  : `Chưa có kho tạm mã ${detail.maintenanceSource.ktCode} — tạo kho này trong Cài đặt trước.`}
+              <p className="mt-1 text-[11px] text-slate-500">
+                Phiếu từ biên bản bảo trì — biên bản sẽ xuất vật tư từ đúng kho bạn nhập. Hàng nhập kho thường không
+                được giữ riêng: kiểm tra lại biên bản nếu kho bị xuất cho việc khác trước khi ký.
               </p>
             )}
           </div>
@@ -353,6 +391,145 @@ export function ReceiveModal({
         </div>
         <p className="text-[11px] text-slate-500">
           Hệ thống tự tạo và ghi sổ phiếu nhập kho, cộng tồn ngay. Không nhập được quá số lượng duyệt; đơn giá lệch quá ±{RECEIVE_PRICE_TOLERANCE_PCT}% so với giá duyệt hoặc đổi mã vật tư phải lập phiếu điều chỉnh trước.
+        </p>
+      </div>
+    </ModalShell>
+  )
+}
+
+// ── Modal Xác nhận hoàn thành dịch vụ gia công (Bước 3) ──────────────────────
+// Dịch vụ không có tồn kho nên không tạo phiếu nhập; chỉ ghi purchase_service_completions qua RPC
+// purchase_complete_service (chặn vượt SL còn lại, lệch giá > ±10%, dòng đang điều chỉnh).
+
+type ServiceDraftLine = { on: boolean; soLuong: string; donGia: string; ghiChu: string }
+
+export function CompleteServiceModal({
+  detail, factoryId, onClose, onDone,
+}: { detail: PurchaseDetail; factoryId: string; onClose: () => void; onDone: (msg: string) => void }) {
+  const req = detail.request
+  const lines = useMemo(
+    () => detail.effectiveLines.filter((e) => e.la_dich_vu && remainingQty(e) > 0 && !e.pending_adjust),
+    [detail.effectiveLines],
+  )
+  const [ngay, setNgay] = useState(getFactoryTodayISO())
+  const [nhaCungCap, setNhaCungCap] = useState("")
+  const [ghiChu, setGhiChu] = useState("")
+  const [images, setImages] = useState<string[]>([])
+  const [draft, setDraft] = useState<Record<string, ServiceDraftLine>>(() =>
+    Object.fromEntries(lines.map((e) => [e.root_line_id, { on: true, soLuong: String(remainingQty(e)), donGia: String(e.don_gia), ghiChu: "" }])),
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const patch = (id: string, p: Partial<ServiceDraftLine>) => setDraft((d) => ({ ...d, [id]: { ...d[id], ...p } }))
+
+  const rows = lines.map((e) => {
+    const d = draft[e.root_line_id]
+    const qty = Number(d.soLuong)
+    const price = Number(d.donGia)
+    const rem = remainingQty(e)
+    const pct = priceDeviationPct(price, e.don_gia)
+    const errs: string[] = []
+    if (d.on) {
+      if (!(qty > 0)) errs.push("Số lượng phải > 0")
+      else if (qty > rem + 1e-9) errs.push(`Vượt SL còn lại (${formatQty(rem)})`)
+      if (!(price >= 0) || d.donGia.trim() === "") errs.push("Đơn giá không hợp lệ")
+      else if (pct !== null && Math.abs(pct) > RECEIVE_PRICE_TOLERANCE_PCT) {
+        errs.push(`Giá lệch ${pct > 0 ? "+" : ""}${pct.toFixed(1)}% so với giá duyệt — cần lập phiếu điều chỉnh`)
+      }
+    }
+    return { e, d, qty, price, rem, errs }
+  })
+  const selected = rows.filter((r) => r.d.on)
+  const total = selected.reduce((s, r) => s + (r.qty > 0 && r.price >= 0 ? r.qty * r.price : 0), 0)
+  const today = getFactoryTodayISO()
+  const blocking = !ngay || ngay > today || !selected.length || selected.some((r) => r.errs.length > 0)
+
+  const handleSubmit = async () => {
+    setError(null)
+    if (blocking) return
+    setSaving(true)
+    try {
+      const res = await completeService(req.id, {
+        ngay, nhaCungCap, ghiChu, imageUrls: images,
+        lines: selected.map((r) => ({ lineId: r.e.root_line_id, soLuong: r.qty, donGia: r.price, ghiChu: r.d.ghiChu.trim() || null })),
+      })
+      onDone(`Đã xác nhận hoàn thành ${res.count} dịch vụ.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không xác nhận được")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ModalShell
+      title={`Xác nhận hoàn thành dịch vụ — ${formatSoPhieuFull(req.so, req.nam)}`}
+      onClose={onClose}
+      maxWidth="3xl"
+      closeOnBackdrop={false}
+      footer={
+        <>
+          <span className="mr-auto text-sm text-slate-600">Tổng đợt này: <b>{formatMoney(total, req.loai_tien)} {req.loai_tien}</b></span>
+          <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Đóng</button>
+          <button onClick={handleSubmit} disabled={saving || blocking} className="flex items-center gap-1.5 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl disabled:opacity-60">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={15} />} Xác nhận hoàn thành
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error && <div className="whitespace-pre-line rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">{error}</div>}
+        {!lines.length && <p className="text-sm text-slate-600">Không còn dịch vụ nào chờ xác nhận.</p>}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Ngày hoàn thành *</label>
+            <input type="date" value={ngay} max={today} onChange={(e) => setNgay(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Đơn vị gia công</label>
+            <input value={nhaCungCap} onChange={(e) => setNhaCungCap(e.target.value)} placeholder="Tên xưởng / đơn vị" className={inputCls} />
+          </div>
+        </div>
+        <div className="space-y-2">
+          {rows.map(({ e, d, rem, errs }) => (
+            <div key={e.root_line_id} className={`rounded-xl border p-3 ${d.on ? (errs.length ? "border-red-300 bg-red-50/30" : "border-violet-200") : "border-slate-200 opacity-60"}`}>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={d.on} onChange={(ev) => patch(e.root_line_id, { on: ev.target.checked })} className="mt-1" />
+                <span className="flex-1 min-w-0">
+                  <span className="font-semibold text-slate-800">{e.item_name}</span>
+                  <span className="ml-1.5 text-xs font-mono text-slate-500">{e.item_code}</span>
+                  <span className="block text-xs text-slate-500">
+                    Duyệt {formatQty(e.so_luong)} {e.unit} · đã xong {formatQty(e.received)} · còn <b>{formatQty(rem)}</b> · giá duyệt {formatMoney(e.don_gia, req.loai_tien)}
+                  </span>
+                </span>
+              </label>
+              {d.on && (
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500">SL hoàn thành ({e.unit})</label>
+                    <input type="number" inputMode="decimal" min={0} max={rem} value={d.soLuong} onChange={(ev) => patch(e.root_line_id, { soLuong: ev.target.value })} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500">Đơn giá thực tế ({req.loai_tien})</label>
+                    <input type="number" inputMode="decimal" min={0} value={d.donGia} onChange={(ev) => patch(e.root_line_id, { donGia: ev.target.value })} className={inputCls} />
+                  </div>
+                  <div className="col-span-2 md:col-span-1">
+                    <label className="text-[11px] font-bold text-slate-500">Ghi chú dòng</label>
+                    <input value={d.ghiChu} onChange={(ev) => patch(e.root_line_id, { ghiChu: ev.target.value })} className={inputCls} />
+                  </div>
+                </div>
+              )}
+              {d.on && errs.length > 0 && <p className="mt-1.5 text-xs font-semibold text-red-600">{errs.join(" · ")}</p>}
+            </div>
+          ))}
+        </div>
+        <PurchaseImagePicker factoryId={factoryId} images={images} onChange={setImages} documentType="purchase-receipts" label={`Ảnh nghiệm thu / hoá đơn — tối đa ${PURCHASE_MAX_IMAGES}`} />
+        <div>
+          <label className={labelCls}>Ghi chú</label>
+          <textarea value={ghiChu} onChange={(e) => setGhiChu(e.target.value)} rows={2} className={inputCls} />
+        </div>
+        <p className="text-[11px] text-slate-500">
+          Dịch vụ gia công không có tồn kho — hệ thống không tạo phiếu nhập kho, chỉ ghi nhận hoàn thành và cộng vào số đã mua của phiếu.
         </p>
       </div>
     </ModalShell>

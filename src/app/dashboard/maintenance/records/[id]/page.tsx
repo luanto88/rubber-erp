@@ -37,17 +37,15 @@ import {
   currencySymbol,
   generateMaBB,
   loadMaintenanceAssets,
-  loadMaintenanceExtMaterials,
   loadMaintenanceStaff,
   suggestLoaiSuaChua,
   trangThaiLabel,
   type MaintenanceAsset,
-  type MaintenanceExtMaterial,
   type MaintenanceRecord,
   type MaintenanceRecordLine,
   type MaintenanceStaff,
 } from "../../_components/maintenance-data"
-import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { ExtMaterialModal, type CreatedExtMaterial, type ExtCatalogItem, type ExtMaterialFormValues } from "../../_components/ext-material-modal"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { prepareImageForUpload, withRetry } from "@/lib/image-upload"
 import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
@@ -88,6 +86,16 @@ type InventoryItemOption = {
   // Đơn giá master data — tự điền vào Đơn giá/Loại tiền khi chọn vật tư "Trong kho"
   don_gia: number
   loai_tien: string
+  // Dịch vụ gia công ngoài — không có tồn kho, chỉ chọn được ở nguồn "Gia công ngoài"
+  la_dich_vu: boolean
+}
+
+type MaterialNguon = "trong_kho" | "ben_ngoai" | "gia_cong"
+
+const NGUON_LABEL: Record<MaterialNguon, string> = {
+  ben_ngoai: "Mua ngoài",
+  trong_kho: "Trong kho",
+  gia_cong: "Gia công ngoài",
 }
 
 type DispatchVehicle = {
@@ -101,7 +109,7 @@ type DispatchVehicle = {
 
 type DraftMaterial = {
   id: string
-  nguon: "trong_kho" | "ben_ngoai"
+  nguon: MaterialNguon
   inventory_item_id: string
   ten_vat_tu: string
   dvt: string
@@ -263,7 +271,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // Master data
   const [assets, setAssets] = useState<MaintenanceAsset[]>([])
   const [staffList, setStaffList] = useState<MaintenanceStaff[]>([])
-  const [extMaterials, setExtMaterials] = useState<MaintenanceExtMaterial[]>([])
   const [inventoryItems, setInventoryItems] = useState<InventoryItemOption[]>([])
   const [inventoryCategories, setInventoryCategories] = useState<InventoryCategory[]>([])
   const [matSearches, setMatSearches] = useState<Record<string, string>>({})
@@ -272,8 +279,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   type NewItemModalContext = { lineId: string; matId: string }
 
   const [newExtMatModal, setNewExtMatModal] = useState<NewItemModalContext | null>(null)
-  const [newExtMatForm, setNewExtMatForm] = useState({ code: "", ten_vat_tu: "", dvt: "", specification: "", category_id: "" })
-  const [savingNewExtMat, setSavingNewExtMat] = useState(false)
+  const [newExtMatInitial, setNewExtMatInitial] = useState<Partial<ExtMaterialFormValues>>({})
 
   // Header form
   const [hangMuc, setHangMuc] = useState<"Sửa chữa" | "Bảo dưỡng">("Sửa chữa")
@@ -404,7 +410,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       for (const mat of line.materials) {
         const search = (matSearches[mat.id] || "").toLowerCase()
         const catFilter = matCategoryFilters[mat.id] || ""
+        const wantService = mat.nguon === "gia_cong"
         const filtered = inventoryItems.filter((item) => {
+          if (item.la_dich_vu !== wantService) return false
           if (catFilter && item.category_id !== catFilter) return false
           if (!search) return true
           return item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search)
@@ -700,7 +708,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   const loadInventoryItems = useCallback(async (fid: string) => {
     const [{ data: items }, { data: balances }, { data: cats }, { data: primaryRules }, { data: warehouses }] = await Promise.all([
-      supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id, don_gia, loai_tien").eq("factory_id", fid).eq("is_active", true).order("code"),
+      supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id, don_gia, loai_tien, la_dich_vu").eq("factory_id", fid).eq("is_active", true).order("code"),
       supabase.from("inventory_stock_balances").select("item_id, warehouse_id, on_hand").eq("factory_id", fid),
       supabase.from("inventory_item_categories").select("id, code, name").eq("factory_id", fid).order("sort_order").order("code"),
       supabase.from("inventory_item_warehouse_rules").select("item_id, warehouse_id").eq("factory_id", fid).eq("is_primary", true),
@@ -725,7 +733,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
 
     setInventoryItems(
-      ((items || []) as { id: string; code: string; name: string; unit: string; specification: string | null; default_warehouse_ids: string[] | null; manages_lot: boolean | null; category_id: string | null; don_gia: number | null; loai_tien: string | null }[]).map((item) => {
+      ((items || []) as { id: string; code: string; name: string; unit: string; specification: string | null; default_warehouse_ids: string[] | null; manages_lot: boolean | null; category_id: string | null; don_gia: number | null; loai_tien: string | null; la_dich_vu: boolean | null }[]).map((item) => {
         const default_warehouse_ids = item.default_warehouse_ids || []
         const primaryWarehouseId = primaryRuleMap.get(item.id) || default_warehouse_ids[0] || null
         return {
@@ -737,6 +745,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           primaryWarehouseCode: primaryWarehouseId ? (warehouseCodeMap.get(primaryWarehouseId) || null) : null,
           don_gia: item.don_gia || 0,
           loai_tien: item.loai_tien || "USD",
+          la_dich_vu: item.la_dich_vu === true,
         }
       })
     )
@@ -953,16 +962,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setFactoryId(fid)
       setUser(sessionUser)
 
-      const [a, s, e, factoryRates] = await Promise.all([
+      const [a, s, factoryRates] = await Promise.all([
         loadMaintenanceAssets(fid),
         loadMaintenanceStaff(fid),
-        loadMaintenanceExtMaterials(fid),
         supabase.from("factories").select("ty_gia_usd_vnd, ty_gia_usd_khr").eq("id", fid).maybeSingle(),
       ])
       setCurrencyRates({ vnd: factoryRates.data?.ty_gia_usd_vnd, khr: factoryRates.data?.ty_gia_usd_khr })
       setAssets(a)
       setStaffList(s)
-      setExtMaterials(e)
       await Promise.all([loadInventoryItems(fid), loadDispatchVehicles(fid)])
 
       if (!isNew) {
@@ -1200,6 +1207,24 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       return
     }
 
+    // Vật tư mua ngoài phải có MÃ trong danh mục kho (inventory_items) — đi qua Đề nghị mua →
+    // nhập kho tạm KT → xuất KT. Thiếu mã là lập đề nghị mua bị lỗi khoá ngoại item_id.
+    // Biên bản đã duyệt (dữ liệu lịch sử) không chặn để admin vẫn sửa được thông tin khác.
+    if (record?.trang_thai !== "da_duyet") {
+      const knownItemIds = new Set(inventoryItems.map((i) => i.id))
+      const noCode = lines.flatMap((l) =>
+        l.materials
+          .filter((m) => (m.nguon === "ben_ngoai" || m.nguon === "gia_cong") && m.ten_vat_tu.trim() && !knownItemIds.has(m.inventory_item_id))
+          .map((m) => m.ten_vat_tu.trim()),
+      )
+      if (noCode.length > 0) {
+        setSaveError(
+          `Chọn hoặc tạo mã cho vật tư mua ngoài / dịch vụ gia công (bấm "+ Thêm mã"):\n${Array.from(new Set(noCode)).join("\n")}`,
+        )
+        return
+      }
+    }
+
     // Validate các trường bắt buộc: nội dung, nguyên nhân (Sửa chữa), cách khắc phục, hình ảnh,
     // và ĐVT/số lượng/đơn giá của vật tư đã chọn.
     const fieldViolations: string[] = []
@@ -1375,23 +1400,6 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         }
       }
 
-      // Auto-save new ben_ngoai material names to master list
-      const existingNames = new Set(extMaterials.map((m) => m.ten_vat_tu.trim().toLowerCase()))
-      const seen = new Set<string>()
-      const newExtMats = lines
-        .flatMap((l) => l.materials.filter((m) => m.nguon === "ben_ngoai" && m.ten_vat_tu.trim()))
-        .filter((m) => {
-          const key = m.ten_vat_tu.trim().toLowerCase()
-          if (existingNames.has(key) || seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
-        .map((m) => ({ factory_id: factoryId, ten_vat_tu: m.ten_vat_tu.trim(), dvt: m.dvt.trim() || null }))
-      if (newExtMats.length > 0) {
-        await supabase.from("maintenance_external_materials").insert(newExtMats)
-        void loadMaintenanceExtMaterials(factoryId!).then(setExtMaterials)
-      }
-
       const kpiLabel = maBB || record?.ma_bb || "Biên bản bảo trì"
       if (effectiveIsNew) {
         // Nạp lại bản ghi thật + đánh dấu "đã lưu xong" NGAY (độc lập với URL) để badge "Gửi ký
@@ -1416,42 +1424,48 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
-  const handleSaveNewExtMat = async () => {
-    if (!factoryId || !newExtMatModal) return
-    if (!newExtMatForm.ten_vat_tu.trim()) {
-      setSaveError("Vui lòng nhập tên vật tư")
-      return
+  // Modal "Thêm vật tư mua ngoài": tạo mã mới (API) hoặc "Dùng mã này" với vật tư gần giống đã có.
+  const applyExtMatToLine = (item: { id: string; name: string; unit: string | null; don_gia: number | null; loai_tien: string | null }) => {
+    if (!newExtMatModal) return
+    updateMaterial(newExtMatModal.lineId, newExtMatModal.matId, {
+      inventory_item_id: item.id,
+      ten_vat_tu: item.name,
+      dvt: item.unit || "",
+      don_gia: item.don_gia ? String(item.don_gia) : "",
+      loai_tien: item.loai_tien || "USD",
+    })
+    setNewExtMatModal(null)
+  }
+
+  const handleExtMatCreated = ({ item: it, warehouse }: CreatedExtMaterial) => {
+    const option: InventoryItemOption = {
+      id: it.id,
+      code: it.code,
+      name: it.name,
+      unit: it.unit,
+      specification: it.specification,
+      default_warehouse_ids: it.default_warehouse_ids || [],
+      manages_lot: false,
+      category_id: it.category_id,
+      currentStock: 0,
+      primaryWarehouseId: warehouse?.id || null,
+      primaryWarehouseCode: warehouse?.code || null,
+      don_gia: Number(it.don_gia) || 0,
+      loai_tien: it.loai_tien || "USD",
+      la_dich_vu: it.la_dich_vu === true,
     }
-    setSavingNewExtMat(true)
-    try {
-      const { data: inserted, error } = await supabase
-        .from("maintenance_external_materials")
-        .insert({
-          factory_id: factoryId,
-          code: newExtMatForm.code.trim() || null,
-          ten_vat_tu: newExtMatForm.ten_vat_tu.trim(),
-          dvt: newExtMatForm.dvt.trim() || null,
-          specification: newExtMatForm.specification.trim() || null,
-          category_id: newExtMatForm.category_id || null,
-          is_active: true,
-        })
-        .select("id, factory_id, ten_vat_tu, dvt, code, specification, category_id, is_active")
-        .single()
-      if (error) { setSaveError(error.message); return }
-      const newExtMat: MaintenanceExtMaterial = inserted as MaintenanceExtMaterial
-      setExtMaterials((prev) => [...prev, newExtMat])
-      updateMaterial(newExtMatModal.lineId, newExtMatModal.matId, {
-        inventory_item_id: inserted.id,
-        ten_vat_tu: inserted.ten_vat_tu as string,
-        dvt: (inserted.dvt as string | null) || "",
-      })
-      setNewExtMatModal(null)
-      setNewExtMatForm({ code: "", ten_vat_tu: "", dvt: "", specification: "", category_id: "" })
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Lỗi tạo vật tư ngoài")
-    } finally {
-      setSavingNewExtMat(false)
-    }
+    setInventoryItems((prev) => [...prev, option].sort((a, b) => a.code.localeCompare(b.code)))
+    applyExtMatToLine({ id: it.id, name: it.name, unit: it.unit, don_gia: option.don_gia, loai_tien: option.loai_tien })
+  }
+
+  const handleUseExistingExtMat = (it: ExtCatalogItem) => {
+    // Ưu tiên số liệu đã nạp (đơn giá/kho chính); vật tư chưa có trong danh sách đang hoạt động
+    // của trang (mới tạo ở nơi khác) thì dùng số liệu từ danh mục của modal.
+    const opt = inventoryItems.find((o) => o.id === it.id)
+    applyExtMatToLine(opt
+      ? { id: opt.id, name: opt.name, unit: opt.unit, don_gia: opt.don_gia, loai_tien: opt.loai_tien }
+      : { id: it.id, name: it.name, unit: it.unit, don_gia: it.don_gia, loai_tien: it.loai_tien })
+    if (!opt && factoryId) void loadInventoryItems(factoryId)
   }
 
   // U1b — chế độ xem: tab mobile (Tài liệu/Ký duyệt) + tab cột tài liệu (File đã ký/Nội dung).
@@ -1471,7 +1485,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // ── Ký duyệt điện tử: dữ liệu dùng chung cho thẻ ký (chế độ sửa) và hộp hành động (chế độ xem) ──
   const canCreateSign = !!user && hasPermission(user, "maintenance.create") && (isAdmin || isCreator)
   const ktBlockedReason = ktStatus && ktStatus.totalShortage > 0
-    ? `Kho tạm ${ktStatus.ktWarehouse?.code || "KT"} chưa đủ vật tư mua ngoài — lập đề nghị mua và nhập kho trước khi gửi ký`
+    ? `Kho chưa đủ vật tư mua ngoài (${ktStatus.items.filter((it) => it.shortage > 0).map((it) => `${it.name}${it.warehouseCode ? ` — kho ${it.warehouseCode}` : ""}`).join("; ")}) — lập đề nghị mua và nhập kho trước khi gửi ký`
     : null
   const reloadSigningStatus = () => {
     setSigningStatus(undefined)
@@ -1770,10 +1784,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                   className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                     isKho
                                       ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                      : "bg-blue-50 text-blue-700 border border-blue-200"
+                                      : mat.nguon === "gia_cong"
+                                        ? "bg-violet-50 text-violet-700 border border-violet-200"
+                                        : "bg-blue-50 text-blue-700 border border-blue-200"
                                   }`}
                                 >
-                                  {isKho ? "Trong kho" : "Bên ngoài"}
+                                  {NGUON_LABEL[mat.nguon] || "Mua ngoài"}
                                 </span>
                               </td>
                               <td className="py-2.5 px-3 font-semibold text-slate-800">
@@ -2490,7 +2506,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   return (
                     <div key={mat.id} className="mb-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                       <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-[10px] font-bold text-slate-500">{isKho ? "Vật tư kho" : "Vật tư bên ngoài"}</label>
+                        <label className="text-[10px] font-bold text-slate-500">{isKho ? "Vật tư kho" : mat.nguon === "gia_cong" ? "Dịch vụ gia công ngoài" : "Vật tư mua ngoài"}</label>
                         {!isReadOnly && (
                           isKho ? (
                             <Link
@@ -2506,26 +2522,27 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               type="button"
                               onClick={() => {
                                 setNewExtMatModal({ lineId: line.id, matId: mat.id })
-                                setNewExtMatForm({ code: "", ten_vat_tu: "", dvt: mat.dvt || "", specification: "", category_id: "" })
+                                setNewExtMatInitial({ ten_vat_tu: mat.ten_vat_tu || "", dvt: mat.dvt || "", loai_tien: mat.loai_tien || "USD", la_dich_vu: mat.nguon === "gia_cong" })
                               }}
                               className="flex items-center gap-0.5 text-[10px] font-bold text-brand-700 hover:text-brand-800"
                             >
-                              <Plus size={10} /> Thêm mã vật tư ngoài
+                              <Plus size={10} /> {mat.nguon === "gia_cong" ? "Thêm mã dịch vụ gia công" : "Thêm mã vật tư ngoài"}
                             </button>
                           )
                         )}
                       </div>
                       <div className="flex flex-wrap gap-1.5 items-end">
-                        <div className="w-[88px]">
+                        <div className="w-[112px]">
                           <label className="text-xs font-bold text-slate-500 block mb-1">Nguồn</label>
                           <select
                             value={mat.nguon}
-                            onChange={(e) => updateMaterial(line.id, mat.id, { nguon: e.target.value as "trong_kho" | "ben_ngoai", inventory_item_id: "", ten_vat_tu: "" })}
+                            onChange={(e) => updateMaterial(line.id, mat.id, { nguon: e.target.value as MaterialNguon, inventory_item_id: "", ten_vat_tu: "" })}
                             disabled={isReadOnly}
                             className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white"
                           >
-                            <option value="ben_ngoai">Bên ngoài</option>
+                            <option value="ben_ngoai">Mua ngoài</option>
                             <option value="trong_kho">Trong kho</option>
+                            <option value="gia_cong">Gia công ngoài</option>
                           </select>
                         </div>
                         <div className="w-[180px]">
@@ -2586,7 +2603,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                     key={item.id}
                                     type="button"
                                     onClick={() => {
-                                      const priceFields = mat.nguon === "trong_kho"
+                                      const priceFields = mat.nguon === "trong_kho" || mat.nguon === "gia_cong"
                                         ? { don_gia: item.don_gia > 0 ? String(item.don_gia) : mat.don_gia, loai_tien: item.loai_tien }
                                         : {}
                                       updateMaterial(line.id, mat.id, { inventory_item_id: item.id, ten_vat_tu: item.name, dvt: item.unit || "", ...priceFields })
@@ -2751,22 +2768,30 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   )
 
   const renderKtPanel = (st: KtRecordStatus) => {
-    const code = st.ktWarehouse?.code || "KT"
+    // Bước 2: mỗi vật tư mua ngoài có kho riêng (kho nhập gần nhất → kho chính → KT).
+    const codes = Array.from(new Set(st.items.map((it) => it.warehouseCode).filter((c): c is string => !!c)))
+    const code = codes.length ? codes.join(", ") : st.ktWarehouse?.code || "KT"
+    const noWarehouse = st.items.some((it) => !it.warehouseId)
     const done = st.trangThai === "da_duyet" || st.trangThai === "huy"
     const short = st.totalShortage > 0
     const canDraft = !done && st.needsRequest && (isAdmin || (isCreator && hasPermission(user, "maintenance.create")))
     return (
       <div className={`p-3 rounded-xl border ${short ? "bg-amber-50 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
         <label className="text-[11px] font-bold text-slate-600 block mb-2 uppercase tracking-wider">
-          Vật tư mua ngoài — kho tạm {code}
+          Vật tư mua ngoài — kho {code}
         </label>
-        {!st.ktWarehouse && (
-          <p className="text-xs font-semibold text-red-600 mb-2">Chưa có kho mã {code} — tạo kho này trong Cài đặt trước.</p>
+        {noWarehouse && (
+          <p className="text-xs font-semibold text-red-600 mb-2">
+            Có vật tư chưa xác định được kho (chưa nhập kho, chưa có kho chính, không có kho tạm KT) — gán kho chính trong Cài đặt.
+          </p>
         )}
         <div className="space-y-1">
           {st.items.map((it) => (
             <div key={it.itemId} className="flex flex-wrap items-center justify-between gap-x-2 text-xs">
-              <span className="font-semibold text-slate-700 truncate">{it.name}</span>
+              <span className="font-semibold text-slate-700 truncate">
+                {it.name}
+                {it.warehouseCode && <span className="ml-1 font-mono text-[10px] text-slate-400">Kho {it.warehouseCode}</span>}
+              </span>
               <span className="text-slate-500">
                 cần {it.need} · khả dụng {it.available}{it.unit ? ` ${it.unit}` : ""}
                 {it.pendingRequested > 0 && <> · đang đề nghị {it.pendingRequested}</>}
@@ -2778,7 +2803,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         {done ? (
           <p className="mt-2 text-[11px] text-slate-500">Biên bản đã xuất kho — vật tư mua ngoài xuất từ kho {code}.</p>
         ) : short ? (
-          <p className="mt-2 text-[11px] text-amber-800">Chưa đủ hàng ở kho {code} — chưa gửi ký duyệt được. Lưu biên bản vẫn bình thường.</p>
+          <p className="mt-2 text-[11px] text-amber-800">
+            Chưa đủ hàng ở kho {code} — chưa gửi ký duyệt được. Lưu biên bản vẫn bình thường. Hàng nhập kho thường không
+            được giữ riêng cho biên bản: nếu đã nhập mà vẫn thiếu, có thể kho đã bị xuất cho việc khác.
+          </p>
         ) : (
           <p className="mt-2 text-[11px] text-emerald-700">Kho {code} đủ hàng — có thể gửi ký duyệt; ký xong tự xuất kho {code}.</p>
         )}
@@ -2794,7 +2822,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         {canDraft && (
           <button
             onClick={handleCreatePurchaseDraft}
-            disabled={ktDrafting || !st.ktWarehouse}
+            disabled={ktDrafting}
             className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg disabled:opacity-60"
           >
             {ktDrafting ? <Loader2 size={12} className="animate-spin" /> : <ShoppingCart size={12} />} Lập đề nghị mua
@@ -3628,88 +3656,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       )}
 
-      {/* Modal tạo vật tư bên ngoài */}
-      {newExtMatModal && (
-        <ModalShell
-          title="Thêm vật tư bên ngoài"
+      {/* Modal tạo vật tư mua ngoài (dùng chung với Cài đặt → Bảo trì) */}
+      {newExtMatModal && factoryId && (
+        <ExtMaterialModal
+          factoryId={factoryId}
+          categories={inventoryCategories}
+          initial={newExtMatInitial}
           onClose={() => setNewExtMatModal(null)}
-          maxWidth="lg"
-          footer={
-            <>
-              <button
-                type="button"
-                onClick={() => setNewExtMatModal(null)}
-                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSaveNewExtMat()}
-                disabled={savingNewExtMat}
-                className="px-5 py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-bold rounded-xl shadow-md disabled:opacity-50"
-              >
-                {savingNewExtMat ? "Đang lưu..." : "Lưu vật tư"}
-              </button>
-            </>
-          }
-        >
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư</label>
-                <input
-                  value={newExtMatForm.code}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, code: e.target.value }))}
-                  placeholder="VD: BD22211"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm vật tư</label>
-                <select
-                  value={newExtMatForm.category_id}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, category_id: e.target.value }))}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 bg-white"
-                >
-                  <option value="">— Không phân nhóm —</option>
-                  {inventoryCategories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Tên vật tư *</label>
-                <input
-                  value={newExtMatForm.ten_vat_tu}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, ten_vat_tu: e.target.value }))}
-                  placeholder="Tên đầy đủ của vật tư"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Đơn vị tính</label>
-                <input
-                  value={newExtMatForm.dvt}
-                  onChange={(e) => setNewExtMatForm((p) => ({ ...p, dvt: e.target.value }))}
-                  placeholder="Cái, kg, lít..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1.5">Quy cách / Đặc tính</label>
-              <input
-                value={newExtMatForm.specification}
-                onChange={(e) => setNewExtMatForm((p) => ({ ...p, specification: e.target.value }))}
-                placeholder="Quy cách, đặc tính kỹ thuật..."
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600"
-              />
-            </div>
-          </div>
-        </ModalShell>
+          onCreated={handleExtMatCreated}
+          onUseExisting={handleUseExistingExtMat}
+        />
       )}
 
       {/* Modal Ký duyệt điện tử */}

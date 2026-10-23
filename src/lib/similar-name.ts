@@ -110,3 +110,39 @@ export function findSimilarNames<T>(
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
 }
+
+/**
+ * Tìm theo TỪ KHOÁ (khác `findSimilarNames` — chống trùng): mọi từ của truy vấn phải nằm trong
+ * tên hoặc mã (sau chuẩn hoá), vd "UCP" hoặc "203" khớp "Bạc đạn UCP 203". Từ 1 ký tự chữ bị bỏ
+ * qua (quá nhiễu), số thì giữ. Sắp: khớp đầu từ trước, tên ngắn trước.
+ */
+export function findKeywordMatches<T>(
+  query: string,
+  items: T[],
+  getName: (item: T) => string,
+  getCode: (item: T) => string = () => "",
+  options: { limit?: number } = {},
+): T[] {
+  const limit = options.limit ?? 5
+  const tokens = normalizeName(query).split(" ").filter((t) => t.length >= 2 || /\d/.test(t))
+  if (!tokens.length) return []
+  const scored: { item: T; rank: number; len: number }[] = []
+  for (const item of items) {
+    const hay = normalizeName(`${getName(item)} ${getCode(item)}`)
+    if (!hay) continue
+    const words = hay.split(" ")
+    let rank = 0
+    let ok = true
+    for (const t of tokens) {
+      if (words.includes(t)) rank += 2
+      else if (words.some((w) => w.startsWith(t))) rank += 1
+      else if (hay.includes(t)) rank += 0
+      else { ok = false; break }
+    }
+    if (ok) scored.push({ item, rank, len: hay.length })
+  }
+  return scored
+    .sort((a, b) => b.rank - a.rank || a.len - b.len)
+    .slice(0, limit)
+    .map((s) => s.item)
+}
