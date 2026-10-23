@@ -96,7 +96,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .map((it) => ({ ...it, qty: Math.max(0, it.shortage - it.pendingRequested) }))
       .filter((it) => it.qty > 0)
     if (!needs.length) {
-      return NextResponse.json({ error: "Kho tạm đã đủ (hoặc đã có đề nghị đang chờ nhập) — không cần lập thêm" }, { status: 409 })
+      return NextResponse.json({ error: "Kho đã đủ (hoặc đã có đề nghị đang chờ nhập) — không cần lập thêm" }, { status: 409 })
     }
 
     // Mục đích: tên thiết bị của dòng biên bản chứa vật tư.
@@ -153,7 +153,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         nguoi_de_nghi_ten: myName,
         loai_tien: loaiTien,
         tong_tien: lineRows.reduce((s, l) => s + l.thanh_tien, 0),
-        ghi_chu: `Vật tư mua ngoài cho biên bản bảo trì ${rec.ma_bb || ""} (nhập kho tạm KT)`,
+        ghi_chu: `Vật tư mua ngoài cho biên bản bảo trì ${rec.ma_bb || ""}`,
         bo_phan: isBoPhan(rec.bo_phan) ? rec.bo_phan : null,
         ngay_can_hang: today,
         trang_thai: "nhap",

@@ -6,14 +6,15 @@
 //   Đề nghị mua), kèm "Lịch sử" (tồn theo kho, lần mua/nhập/xuất gần nhất) và "Dùng mã này".
 // - Trùng tuyệt đối tên (sau chuẩn hoá) hoặc trùng mã → chặn ngay ở client (server vẫn chặn 409).
 // - Ảnh đại diện = 1 ảnh upload/chụp (inventory_items.image_url), không còn ô dán link.
-// - Kho mặc định chọn được, mặc định Kho tạm KT (chỉ khi tạo mới).
+// - Kho mặc định chọn được, mặc định Kho tạm KT (chỉ khi tạo mới). Biên bản nhập/xuất theo kho thật
+//   của lần nhập (Bước 2), kho mặc định là gợi ý khi chưa nhập.
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import { AlertTriangle, History, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { authFetch } from "@/lib/auth-fetch"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
-import { findSimilarNames, normalizeName } from "@/lib/similar-name"
+import { findKeywordMatches, findSimilarNames, normalizeName } from "@/lib/similar-name"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ImageLightbox, PurchaseImagePicker } from "@/app/dashboard/purchase/_components/purchase-image-picker"
 import { PurchaseInsightPanel } from "@/app/dashboard/purchase/_components/purchase-insight-panel"
@@ -141,10 +142,17 @@ export function ExtMaterialModal({
 
   const deferredName = useDeferredValue(form.ten_vat_tu)
   const others = useMemo(() => catalog.filter((it) => it.id !== editItemId), [catalog, editItemId])
-  const similar = useMemo(
-    () => findSimilarNames(deferredName, others, (it) => it.name, { limit: 5 }),
-    [deferredName, others],
-  )
+  // Gợi ý = khớp từ khoá (gõ "UCP" hay "203" ra "Bạc đạn UCP 203") + tên gần giống (chống trùng).
+  const similar = useMemo(() => {
+    const fuzzy = findSimilarNames(deferredName, others, (it) => it.name, { limit: 5 })
+    const keyword = findKeywordMatches(deferredName, others, (it) => it.name, (it) => it.code, { limit: 5 })
+    const out: { item: ExtCatalogItem; score: number | null }[] = fuzzy.map((c) => ({ item: c.item, score: c.score }))
+    for (const it of keyword) {
+      if (out.length >= 8) break
+      if (!out.some((o) => o.item.id === it.id)) out.push({ item: it, score: null })
+    }
+    return out
+  }, [deferredName, others])
   const exactDup = useMemo(() => {
     const target = normalizeName(form.ten_vat_tu)
     return target ? others.find((it) => normalizeName(it.name) === target) || null : null
@@ -236,7 +244,6 @@ export function ExtMaterialModal({
     }
   }
 
-  const selectedWh = warehouses.find((w) => w.id === form.warehouse_id)
   const blocked = !!exactDup || !!codeDup
 
   const renderSuggestion = (it: ExtCatalogItem, score: number | null) => {
@@ -291,7 +298,7 @@ export function ExtMaterialModal({
 
   // Gộp: vật tư gần giống + vật tư trùng mà server báo về (khi danh mục client chưa kịp có).
   const suggestionList: { item: ExtCatalogItem; score: number | null }[] = [
-    ...similar.map((c) => ({ item: c.item, score: c.score })),
+    ...similar,
   ]
   if (exactDup && !suggestionList.some((s) => s.item.id === exactDup.id)) suggestionList.unshift({ item: exactDup, score: 1 })
   if (codeDup && !suggestionList.some((s) => s.item.id === codeDup.id)) suggestionList.unshift({ item: codeDup, score: null })
@@ -351,7 +358,7 @@ export function ExtMaterialModal({
                   <AlertTriangle size={13} />
                   {blocked
                     ? "Vật tư này đã có trong danh mục — hãy dùng mã đang có."
-                    : "Có vật tư tên gần giống — kiểm tra trước khi tạo mã mới."}
+                    : "Vật tư đã có khớp tên đang gõ — kiểm tra trước khi tạo mã mới."}
                 </p>
                 <ul className="space-y-1.5">{suggestionList.map((s) => renderSuggestion(s.item, s.score))}</ul>
               </div>
@@ -413,12 +420,6 @@ export function ExtMaterialModal({
                   <option key={w.id} value={w.id}>{w.code} - {w.name}</option>
                 ))}
               </select>
-              {selectedWh && selectedWh.code !== KT_CODE && (
-                <p className="mt-1 text-xs text-amber-700">
-                  Lưu ý: biên bản bảo trì hiện vẫn nhập và xuất vật tư mua ngoài qua Kho tạm {KT_CODE}. Kho mặc định
-                  dùng cho Đề nghị mua trực tiếp và các màn kho.
-                </p>
-              )}
             </div>
           )}
 

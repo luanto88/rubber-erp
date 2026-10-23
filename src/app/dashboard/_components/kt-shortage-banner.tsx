@@ -5,7 +5,7 @@ import Link from "next/link"
 import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react"
 import { authFetch } from "@/lib/auth-fetch"
 
-// GĐ2g — Banner cảnh báo biên bản bảo trì còn thiếu vật tư mua ngoài ở kho tạm KT (chưa lập đề nghị
+// GĐ2g — Banner cảnh báo biên bản bảo trì còn thiếu vật tư mua ngoài trong kho (chưa lập đề nghị
 // mua hoặc đề nghị chưa nhập đủ). Dùng chung ở module Bảo trì và Đề nghị mua. Lỗi tải → ẩn im lặng.
 
 type ShortageRecord = {
@@ -43,7 +43,7 @@ export function KtShortageBanner() {
       <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 text-left">
         <AlertTriangle size={16} className="shrink-0 text-amber-600" />
         <span className="flex-1">
-          <b>{records.length} biên bản bảo trì</b> thiếu vật tư mua ngoài ở kho tạm KT
+          <b>{records.length} biên bản bảo trì</b> thiếu vật tư mua ngoài trong kho
           {noRequest > 0 ? <> — <b>{noRequest}</b> biên bản chưa lập đề nghị mua</> : " — đang chờ đề nghị mua nhập kho"}.
         </span>
         {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

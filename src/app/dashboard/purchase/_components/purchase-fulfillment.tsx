@@ -202,9 +202,9 @@ export function ReceiveModal({
       const firstItem = itemIds[0]
       const primary = ((rules || []) as { item_id: string; warehouse_id: string; is_primary: boolean | null }[])
         .find((r) => r.item_id === firstItem && r.is_primary)?.warehouse_id
-      // GĐ2g: phiếu lập từ biên bản bảo trì → nhập cứng vào kho tạm KT.
-      const forced = detail.maintenanceSource?.ktWarehouseId || null
-      setWarehouseId((cur) => forced || cur || primary || list[0]?.id || "")
+      // Phiếu lập từ biên bản bảo trì: chọn được kho (Bước 2) — mặc định kho chính của vật tư, không có thì KT.
+      const kt = detail.maintenanceSource?.ktWarehouseId || null
+      setWarehouseId((cur) => cur || primary || kt || list[0]?.id || "")
     }
     void run()
   }, [factoryId, lines, detail.maintenanceSource])
@@ -274,15 +274,14 @@ export function ReceiveModal({
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className={labelCls}>Kho nhập *</label>
-            <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} disabled={!!detail.maintenanceSource} className={`${inputCls} disabled:bg-slate-100`}>
+            <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} className={inputCls}>
               <option value="">— Chọn kho —</option>
               {warehouses.map((w) => <option key={w.id} value={w.id}>{w.code} — {w.name}</option>)}
             </select>
             {detail.maintenanceSource && (
-              <p className={`mt-1 text-[11px] ${detail.maintenanceSource.ktWarehouseId ? "text-slate-500" : "text-red-600 font-semibold"}`}>
-                {detail.maintenanceSource.ktWarehouseId
-                  ? `Phiếu từ biên bản bảo trì — nhập cứng vào kho tạm ${detail.maintenanceSource.ktCode}.`
-                  : `Chưa có kho tạm mã ${detail.maintenanceSource.ktCode} — tạo kho này trong Cài đặt trước.`}
+              <p className="mt-1 text-[11px] text-slate-500">
+                Phiếu từ biên bản bảo trì — biên bản sẽ xuất vật tư từ đúng kho bạn nhập. Hàng nhập kho thường không
+                được giữ riêng: kiểm tra lại biên bản nếu kho bị xuất cho việc khác trước khi ký.
               </p>
             )}
           </div>

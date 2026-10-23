@@ -1471,7 +1471,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // ── Ký duyệt điện tử: dữ liệu dùng chung cho thẻ ký (chế độ sửa) và hộp hành động (chế độ xem) ──
   const canCreateSign = !!user && hasPermission(user, "maintenance.create") && (isAdmin || isCreator)
   const ktBlockedReason = ktStatus && ktStatus.totalShortage > 0
-    ? `Kho tạm ${ktStatus.ktWarehouse?.code || "KT"} chưa đủ vật tư mua ngoài — lập đề nghị mua và nhập kho trước khi gửi ký`
+    ? `Kho chưa đủ vật tư mua ngoài (${ktStatus.items.filter((it) => it.shortage > 0).map((it) => `${it.name}${it.warehouseCode ? ` — kho ${it.warehouseCode}` : ""}`).join("; ")}) — lập đề nghị mua và nhập kho trước khi gửi ký`
     : null
   const reloadSigningStatus = () => {
     setSigningStatus(undefined)
@@ -2751,22 +2751,30 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   )
 
   const renderKtPanel = (st: KtRecordStatus) => {
-    const code = st.ktWarehouse?.code || "KT"
+    // Bước 2: mỗi vật tư mua ngoài có kho riêng (kho nhập gần nhất → kho chính → KT).
+    const codes = Array.from(new Set(st.items.map((it) => it.warehouseCode).filter((c): c is string => !!c)))
+    const code = codes.length ? codes.join(", ") : st.ktWarehouse?.code || "KT"
+    const noWarehouse = st.items.some((it) => !it.warehouseId)
     const done = st.trangThai === "da_duyet" || st.trangThai === "huy"
     const short = st.totalShortage > 0
     const canDraft = !done && st.needsRequest && (isAdmin || (isCreator && hasPermission(user, "maintenance.create")))
     return (
       <div className={`p-3 rounded-xl border ${short ? "bg-amber-50 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
         <label className="text-[11px] font-bold text-slate-600 block mb-2 uppercase tracking-wider">
-          Vật tư mua ngoài — kho tạm {code}
+          Vật tư mua ngoài — kho {code}
         </label>
-        {!st.ktWarehouse && (
-          <p className="text-xs font-semibold text-red-600 mb-2">Chưa có kho mã {code} — tạo kho này trong Cài đặt trước.</p>
+        {noWarehouse && (
+          <p className="text-xs font-semibold text-red-600 mb-2">
+            Có vật tư chưa xác định được kho (chưa nhập kho, chưa có kho chính, không có kho tạm KT) — gán kho chính trong Cài đặt.
+          </p>
         )}
         <div className="space-y-1">
           {st.items.map((it) => (
             <div key={it.itemId} className="flex flex-wrap items-center justify-between gap-x-2 text-xs">
-              <span className="font-semibold text-slate-700 truncate">{it.name}</span>
+              <span className="font-semibold text-slate-700 truncate">
+                {it.name}
+                {it.warehouseCode && <span className="ml-1 font-mono text-[10px] text-slate-400">Kho {it.warehouseCode}</span>}
+              </span>
               <span className="text-slate-500">
                 cần {it.need} · khả dụng {it.available}{it.unit ? ` ${it.unit}` : ""}
                 {it.pendingRequested > 0 && <> · đang đề nghị {it.pendingRequested}</>}
@@ -2778,7 +2786,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         {done ? (
           <p className="mt-2 text-[11px] text-slate-500">Biên bản đã xuất kho — vật tư mua ngoài xuất từ kho {code}.</p>
         ) : short ? (
-          <p className="mt-2 text-[11px] text-amber-800">Chưa đủ hàng ở kho {code} — chưa gửi ký duyệt được. Lưu biên bản vẫn bình thường.</p>
+          <p className="mt-2 text-[11px] text-amber-800">
+            Chưa đủ hàng ở kho {code} — chưa gửi ký duyệt được. Lưu biên bản vẫn bình thường. Hàng nhập kho thường không
+            được giữ riêng cho biên bản: nếu đã nhập mà vẫn thiếu, có thể kho đã bị xuất cho việc khác.
+          </p>
         ) : (
           <p className="mt-2 text-[11px] text-emerald-700">Kho {code} đủ hàng — có thể gửi ký duyệt; ký xong tự xuất kho {code}.</p>
         )}
@@ -2794,7 +2805,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         {canDraft && (
           <button
             onClick={handleCreatePurchaseDraft}
-            disabled={ktDrafting || !st.ktWarehouse}
+            disabled={ktDrafting}
             className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg disabled:opacity-60"
           >
             {ktDrafting ? <Loader2 size={12} className="animate-spin" /> : <ShoppingCart size={12} />} Lập đề nghị mua
