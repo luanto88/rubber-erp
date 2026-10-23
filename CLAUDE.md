@@ -7921,3 +7921,8 @@ Modal dùng chung `maintenance/_components/ext-material-modal.tsx` (biên bản 
 giống + lịch sử + "Dùng mã này", ảnh upload/chụp 1 ảnh, kho mặc định (mặc định KT). Không migration.
 Chi tiết: rule 14 mục cuối. Bước 2 (chọn kho nhập, gỡ ép KT) và Bước 3 (Gia công ngoài):
 `.claude/plans/ban-giao-vat-tu-mua-ngoai-buoc-2-3.md`.
+
+## Vật tư mua ngoài Bước 2–3 (2026-10-23, chờ test tay)
+Bước 2 chọn kho nhập (75ccb46) + Bước 3 Gia công ngoài (dịch vụ không qua kho, nút "Xác nhận hoàn thành" ở Đề
+nghị mua, ẩn dịch vụ khỏi kho). Migration `20261023_maintenance_service_items.sql` **chạy tay TRƯỚC deploy**.
+Chi tiết: rule 14 mục "Bước 2–3".

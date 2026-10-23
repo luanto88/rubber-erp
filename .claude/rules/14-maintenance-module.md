@@ -1325,3 +1325,22 @@ Kế hoạch đầy đủ: `.claude/plans/vat-tu-mua-ngoai-gia-cong-2026-10-18.m
 - API `POST /api/maintenance/external-items`: nhận `warehouseId` (kiểm thuộc nhà máy; trống = KT);
   `imageUrl` chỉ nhận URL public Storage của dự án (`NEXT_PUBLIC_SUPABASE_URL/storage/v1/object/public/`).
 - Cài đặt: cột Tên vật tư có ảnh thu nhỏ.
+
+## Bước 2–3 vật tư mua ngoài: chọn kho nhập + Gia công ngoài (2026-10-23, chờ test tay)
+
+- **Bước 2** (commit 75ccb46): kho tạm không còn ép KT — mỗi vật tư mua ngoài nhập/xuất theo kho mặc định của
+  chính nó (`maintenance-kt.ts` tổng quát hoá theo kho); `receive` của phiếu liên kết biên bản chỉ chặn kho
+  khác kho mặc định của dòng.
+- **Bước 3 — Gia công ngoài** (migration `20261023_maintenance_service_items.sql`, **chạy tay TRƯỚC deploy**):
+  - Dịch vụ = `inventory_items.la_dich_vu = true`, `nguon_tao = 'bao_tri_gia_cong'`, không kho; trigger
+    `trg_inventory_block_service_items` chặn đưa dịch vụ vào `inventory_document_lines`.
+  - `maintenance_materials.nguon` thêm `gia_cong`; modal vật tư mua ngoài có tuỳ chọn "Dịch vụ gia công".
+    Dịch vụ không tính vào thiếu kho, không xuất kho khi ký.
+  - Đề nghị mua: dòng dịch vụ không qua "Ghi nhận mua"; người đề nghị/admin bấm **"Xác nhận hoàn thành"**
+    (`POST /api/purchase/requests/[id]/complete-service` → RPC `purchase_complete_service`, ghi
+    `purchase_service_completions`: SL ≤ còn lại, lệch giá ≤10%, ngày, đơn vị gia công, ảnh). `purchase_effective_lines.received`
+    = nhập kho đã ghi sổ + tổng hoàn thành ⇒ phiếu tự sang Đang mua/Hoàn tất như vật tư thường.
+  - Ẩn khỏi kho: `inventory-data.ts` lọc `nguon_tao <> 'bao_tri_gia_cong'` (Nhập/Xuất/Chuyển/Tồn/Báo cáo);
+    ItemPicker Đề nghị mua hiện nhãn "Dịch vụ", thay panel tồn kho bằng dòng giải thích.
+- Chống trùng mã vật tư: UNIQUE(factory_id, code) ở DB + API `external-items` chặn trùng mã/tên chuẩn hoá (409
+  kèm `existing`) + modal khoá Lưu khi trùng tuyệt đối (kể cả vật tư ngừng dùng).

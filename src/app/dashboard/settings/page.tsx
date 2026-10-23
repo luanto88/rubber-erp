@@ -295,7 +295,8 @@ type PersonnelGroupForm = {
   is_active: boolean
 }
 
-// Vật tư mua ngoài của Bảo trì = inventory_items có nguon_tao = 'bao_tri_mua_ngoai' (kho mặc định
+// Vật tư mua ngoài của Bảo trì = inventory_items có nguon_tao = 'bao_tri_mua_ngoai' (+ dịch vụ gia
+// công 'bao_tri_gia_cong', la_dich_vu = true, không kho) (kho mặc định
 // Kho tạm KT). Bảng cũ maintenance_external_materials chỉ còn là dữ liệu lịch sử, không ghi thêm.
 type MaintenanceExtMaterialRow = {
   id: string
@@ -309,6 +310,7 @@ type MaintenanceExtMaterialRow = {
   don_gia: number
   loai_tien: string
   is_active: boolean
+  la_dich_vu: boolean
 }
 
 
@@ -1191,7 +1193,7 @@ export default function SettingsPage() {
         supabase.from("maintenance_staff").select("*").eq("factory_id", fid).order("ten"),
         supabase.from("personnel_groups").select("id, factory_id, code, name, description, is_system, is_active, sort_order").eq("factory_id", fid).order("sort_order").order("name"),
         supabase.from("personnel_group_members").select("staff_id, group_id, is_primary, personnel_groups(id, name, code)").eq("factory_id", fid),
-        supabase.from("inventory_items").select("id, factory_id, code, name, unit, specification, category_id, image_url, don_gia, loai_tien, is_active").eq("factory_id", fid).eq("nguon_tao", "bao_tri_mua_ngoai").order("name"),
+        supabase.from("inventory_items").select("id, factory_id, code, name, unit, specification, category_id, image_url, don_gia, loai_tien, is_active, la_dich_vu").eq("factory_id", fid).in("nguon_tao", ["bao_tri_mua_ngoai", "bao_tri_gia_cong"]).order("name"),
         supabase.from("dispatch_drivers").select("*").eq("factory_id", fid).order("name"),
         supabase.from("dispatch_vehicles").select("id, factory_id, code, name, vehicle_type, plate_number, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
         supabase.from("dispatch_vehicle_driver_assignments").select("id, factory_id, vehicle_id, driver_id, effective_from, effective_to, is_current, note").eq("factory_id", fid).order("is_current", { ascending: false }).order("effective_from", { ascending: false }),
@@ -1271,7 +1273,7 @@ export default function SettingsPage() {
       })
       setMaintStaff(nextStaff)
       setMaintExtMats(
-        ((mRes.data || []) as { id: string; factory_id: string; code: string | null; name: string; unit: string | null; specification: string | null; category_id: string | null; image_url: string | null; don_gia: number | null; loai_tien: string | null; is_active: boolean | null }[]).map((r) => ({
+        ((mRes.data || []) as { id: string; factory_id: string; code: string | null; name: string; unit: string | null; specification: string | null; category_id: string | null; image_url: string | null; don_gia: number | null; loai_tien: string | null; is_active: boolean | null; la_dich_vu: boolean | null }[]).map((r) => ({
           id: r.id,
           factory_id: r.factory_id,
           ten_vat_tu: r.name,
@@ -1283,6 +1285,7 @@ export default function SettingsPage() {
           don_gia: Number(r.don_gia) || 0,
           loai_tien: r.loai_tien || "USD",
           is_active: r.is_active !== false,
+          la_dich_vu: r.la_dich_vu === true,
         })),
       )
 
@@ -4972,14 +4975,14 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      {["Mã", "Tên vật tư", "Đơn vị tính", "Đơn giá", "Quy cách", "Trạng thái", ""].map((h) => (
+                      {["Mã", "Tên vật tư", "Loại", "Đơn vị tính", "Đơn giá", "Quy cách", "Trạng thái", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {maintExtMats.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
                     ) : maintExtMats.map((m) => (
                       <tr key={m.id} className="row-hover">
                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.code || "—"}</td>
@@ -4992,6 +4995,9 @@ export default function SettingsPage() {
                             <span>{m.ten_vat_tu}</span>
                           </div>
                         </td>
+                        <td className="px-4 py-3">
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-bold whitespace-nowrap " + (m.la_dich_vu ? "bg-violet-100 text-violet-700" : "bg-sky-100 text-sky-700")}>{m.la_dich_vu ? "Gia công" : "Mua ngoài"}</span>
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{m.dvt || "—"}</td>
                         <td className="px-4 py-3 text-right text-slate-600 tabular-nums">{m.don_gia > 0 ? `${m.don_gia.toLocaleString("vi-VN")} ${m.loai_tien}` : "—"}</td>
                         <td className="px-4 py-3 text-slate-500 text-xs">{m.specification || "—"}</td>
@@ -5001,7 +5007,7 @@ export default function SettingsPage() {
                         <td className="px-4 py-3">
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => { setMaintEditId(m.id); setMaintError(""); setExtMatForm({ ...emptyExtMaterialForm(), ten_vat_tu: m.ten_vat_tu, dvt: m.dvt || "", code: m.code || "", specification: m.specification || "", category_id: m.category_id || "", don_gia: m.don_gia > 0 ? String(m.don_gia) : "", loai_tien: m.loai_tien || "USD", image_url: m.image_url || "", is_active: m.is_active !== false }); setMaintModal("ext-mat") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => { setMaintEditId(m.id); setMaintError(""); setExtMatForm({ ...emptyExtMaterialForm(), ten_vat_tu: m.ten_vat_tu, dvt: m.dvt || "", code: m.code || "", specification: m.specification || "", category_id: m.category_id || "", don_gia: m.don_gia > 0 ? String(m.don_gia) : "", loai_tien: m.loai_tien || "USD", image_url: m.image_url || "", is_active: m.is_active !== false, la_dich_vu: m.la_dich_vu }); setMaintModal("ext-mat") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setMaintDelConfirm({ type: "ext-mat", id: m.id, label: m.ten_vat_tu })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
                             </div>
                           )}

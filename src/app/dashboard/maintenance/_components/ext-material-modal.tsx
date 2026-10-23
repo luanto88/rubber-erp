@@ -8,6 +8,8 @@
 // - Ảnh đại diện = 1 ảnh upload/chụp (inventory_items.image_url), không còn ô dán link.
 // - Kho mặc định chọn được, mặc định Kho tạm KT (chỉ khi tạo mới). Biên bản nhập/xuất theo kho thật
 //   của lần nhập (Bước 2), kho mặc định là gợi ý khi chưa nhập.
+// - Loại "Gia công ngoài" (dịch vụ: tiện trục, quấn motor...): KHÔNG có kho, không tồn kho
+//   (inventory_items.la_dich_vu = true); trên đề nghị mua dùng "Xác nhận hoàn thành" thay nhập kho.
 
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import { AlertTriangle, History, Loader2 } from "lucide-react"
@@ -34,10 +36,11 @@ export type ExtMaterialFormValues = {
   image_url: string
   warehouse_id: string
   is_active: boolean
+  la_dich_vu: boolean
 }
 
 export function emptyExtMaterialForm(): ExtMaterialFormValues {
-  return { code: "", ten_vat_tu: "", dvt: "", specification: "", category_id: "", don_gia: "", loai_tien: "USD", image_url: "", warehouse_id: "", is_active: true }
+  return { code: "", ten_vat_tu: "", dvt: "", specification: "", category_id: "", don_gia: "", loai_tien: "USD", image_url: "", warehouse_id: "", is_active: true, la_dich_vu: false }
 }
 
 export type ExtCatalogItem = {
@@ -51,6 +54,7 @@ export type ExtCatalogItem = {
   don_gia: number | null
   loai_tien: string | null
   is_active: boolean | null
+  la_dich_vu?: boolean | null
 }
 
 export type CreatedExtMaterial = {
@@ -64,6 +68,7 @@ export type CreatedExtMaterial = {
     don_gia: number | null
     loai_tien: string | null
     default_warehouse_ids: string[] | null
+    la_dich_vu?: boolean | null
   }
   warehouse: { id: string; code: string } | null
 }
@@ -112,7 +117,7 @@ export function ExtMaterialModal({
           fetchAllPaginated<ExtCatalogItem>((from, to) =>
             supabase
               .from("inventory_items")
-              .select("id, code, name, unit, category_id, image_url, specification, don_gia, loai_tien, is_active")
+              .select("id, code, name, unit, category_id, image_url, specification, don_gia, loai_tien, is_active, la_dich_vu")
               .eq("factory_id", factoryId)
               .order("id")
               .range(from, to),
@@ -183,7 +188,7 @@ export function ExtMaterialModal({
     if (!form.category_id) missing.push("Phân loại vật tư")
     if (!form.dvt.trim()) missing.push("Đơn vị tính")
     if (!(parseFloat(form.don_gia) > 0)) missing.push("Đơn giá (> 0)")
-    if (!isEdit && !form.warehouse_id) missing.push("Kho mặc định")
+    if (!isEdit && !form.la_dich_vu && !form.warehouse_id) missing.push("Kho mặc định")
     if (missing.length) { setError(`Vui lòng nhập: ${missing.join(", ")}`); return }
     if (codeDup) { setError(`Mã vật tư ${form.code.trim().toUpperCase()} đã có (${codeDup.name}).`); return }
     if (exactDup) { setError(`Vật tư "${exactDup.name}" (${exactDup.code}) đã có trong danh mục.`); return }
@@ -224,7 +229,8 @@ export function ExtMaterialModal({
           loaiTien: form.loai_tien,
           specification: form.specification.trim() || null,
           imageUrl: form.image_url.trim() || null,
-          warehouseId: form.warehouse_id || null,
+          warehouseId: form.la_dich_vu ? null : form.warehouse_id || null,
+          laDichVu: form.la_dich_vu,
         }),
       })
       const json = (await res.json().catch(() => ({}))) as {
@@ -266,6 +272,7 @@ export function ExtMaterialModal({
             </p>
           </div>
           {exact && <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">Trùng tên</span>}
+          {it.la_dich_vu && <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">Dịch vụ</span>}
           {inactive && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">Ngừng dùng</span>}
           <button
             type="button"
@@ -313,7 +320,9 @@ export function ExtMaterialModal({
   return (
     <>
       <ModalShell
-        title={isEdit ? "Sửa vật tư mua ngoài" : "Thêm vật tư mua ngoài"}
+        title={isEdit
+          ? (form.la_dich_vu ? "Sửa dịch vụ gia công ngoài" : "Sửa vật tư mua ngoài")
+          : (form.la_dich_vu ? "Thêm dịch vụ gia công ngoài" : "Thêm vật tư mua ngoài")}
         onClose={onClose}
         maxWidth="2xl"
         footer={
@@ -337,8 +346,33 @@ export function ExtMaterialModal({
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}
             </div>
           )}
+          {!isEdit ? (
+            <div>
+              <label className={labelCls}>Loại *</label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { v: false, title: "Mua ngoài (nhập kho)", hint: "Vật tư thật: nhập kho → xuất cho biên bản" },
+                  { v: true, title: "Gia công ngoài (dịch vụ)", hint: "Tiện, hàn, quấn motor... — không tồn kho" },
+                ] as const).map((o) => (
+                  <button
+                    key={String(o.v)}
+                    type="button"
+                    onClick={() => patch({ la_dich_vu: o.v })}
+                    className={`rounded-xl border px-3 py-2 text-left transition-colors ${form.la_dich_vu === o.v ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500" : "border-slate-200 hover:bg-slate-50"}`}
+                  >
+                    <span className="block text-sm font-bold text-slate-800">{o.title}</span>
+                    <span className="block text-[11px] text-slate-500">{o.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : form.la_dich_vu ? (
+            <p className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-800">Dịch vụ gia công ngoài — không tồn kho.</p>
+          ) : null}
           <p className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-            Vật tư được thêm vào danh mục kho để lập Đề nghị mua và nhập/xuất kho. Các trường có dấu * là bắt buộc.
+            {form.la_dich_vu
+              ? "Dịch vụ gia công lập Đề nghị mua như vật tư nhưng KHÔNG nhập/xuất kho — khi xong bấm \"Xác nhận hoàn thành\" trên phiếu đề nghị. Các trường có dấu * là bắt buộc."
+              : "Vật tư được thêm vào danh mục kho để lập Đề nghị mua và nhập/xuất kho. Các trường có dấu * là bắt buộc."}
           </p>
 
           <div>
@@ -411,7 +445,7 @@ export function ExtMaterialModal({
             <input value={form.specification} onChange={(e) => patch({ specification: e.target.value })} placeholder="Quy cách, đặc tính kỹ thuật..." className={inputCls} />
           </div>
 
-          {!isEdit && (
+          {!isEdit && !form.la_dich_vu && (
             <div>
               <label className={labelCls}>Kho mặc định *</label>
               <select value={form.warehouse_id} onChange={(e) => patch({ warehouse_id: e.target.value })} className={`${inputCls} bg-white`}>

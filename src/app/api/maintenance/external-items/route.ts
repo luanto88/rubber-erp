@@ -23,6 +23,8 @@ type Body = {
   specification?: string | null
   imageUrl?: string | null
   warehouseId?: string | null
+  /** true = dịch vụ GIA CÔNG NGOÀI (tiện trục, quấn motor...): không có kho, không tồn kho. */
+  laDichVu?: boolean
 }
 
 // Ảnh đại diện chỉ nhận URL public của Storage dự án (ảnh upload/chụp qua app), không nhận link ngoài.
@@ -54,6 +56,7 @@ export async function POST(req: NextRequest) {
     const donGia = Number(body.donGia)
     const loaiTien = CURRENCIES.has(String(body.loaiTien || "")) ? String(body.loaiTien) : "USD"
     const imageUrl = String(body.imageUrl || "").trim()
+    const laDichVu = body.laDichVu === true
 
     const missing: string[] = []
     if (!code) missing.push("Mã vật tư")
@@ -74,9 +77,12 @@ export async function POST(req: NextRequest) {
     if (!category) return NextResponse.json({ error: "Phân loại vật tư không hợp lệ" }, { status: 400 })
 
     // Kho mặc định: kho người dùng chọn (phải thuộc nhà máy), để trống = Kho tạm KT.
-    const warehouseId = String(body.warehouseId || "").trim()
+    // Dịch vụ gia công không có kho (không nhập/xuất kho — xác nhận hoàn thành trên đề nghị mua).
+    const warehouseId = laDichVu ? "" : String(body.warehouseId || "").trim()
     let warehouse: { id: string; code: string } | null = null
-    if (warehouseId) {
+    if (laDichVu) {
+      warehouse = null
+    } else if (warehouseId) {
       const { data: wh } = await supabaseAdmin
         .from("inventory_warehouses").select("id, code").eq("id", warehouseId).eq("factory_id", factoryId).maybeSingle()
       if (!wh) return NextResponse.json({ error: "Kho mặc định không hợp lệ" }, { status: 400 })
@@ -130,7 +136,7 @@ export async function POST(req: NextRequest) {
         unit,
         specification: body.specification?.trim() || null,
         image_url: imageUrl || null,
-        default_warehouse_ids: [warehouse.id],
+        default_warehouse_ids: warehouse ? [warehouse.id] : [],
         manages_lot: false,
         manages_expiry: false,
         min_stock: 0,
@@ -140,11 +146,14 @@ export async function POST(req: NextRequest) {
         is_active: true,
         don_gia: donGia,
         loai_tien: loaiTien,
-        nguon_tao: "bao_tri_mua_ngoai",
+        nguon_tao: laDichVu ? "bao_tri_gia_cong" : "bao_tri_mua_ngoai",
+        la_dich_vu: laDichVu,
       })
-      .select("id, code, name, unit, specification, category_id, image_url, don_gia, loai_tien, default_warehouse_ids, is_active")
+      .select("id, code, name, unit, specification, category_id, image_url, don_gia, loai_tien, default_warehouse_ids, is_active, la_dich_vu")
       .single()
     if (error || !item) return NextResponse.json({ error: error?.message || "Không tạo được vật tư" }, { status: 400 })
+
+    if (!warehouse) return NextResponse.json({ item, warehouse: null })
 
     const { error: ruleErr } = await supabaseAdmin.from("inventory_item_warehouse_rules").insert({
       factory_id: factoryId,

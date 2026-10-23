@@ -86,6 +86,16 @@ type InventoryItemOption = {
   // Đơn giá master data — tự điền vào Đơn giá/Loại tiền khi chọn vật tư "Trong kho"
   don_gia: number
   loai_tien: string
+  // Dịch vụ gia công ngoài — không có tồn kho, chỉ chọn được ở nguồn "Gia công ngoài"
+  la_dich_vu: boolean
+}
+
+type MaterialNguon = "trong_kho" | "ben_ngoai" | "gia_cong"
+
+const NGUON_LABEL: Record<MaterialNguon, string> = {
+  ben_ngoai: "Mua ngoài",
+  trong_kho: "Trong kho",
+  gia_cong: "Gia công ngoài",
 }
 
 type DispatchVehicle = {
@@ -99,7 +109,7 @@ type DispatchVehicle = {
 
 type DraftMaterial = {
   id: string
-  nguon: "trong_kho" | "ben_ngoai"
+  nguon: MaterialNguon
   inventory_item_id: string
   ten_vat_tu: string
   dvt: string
@@ -400,7 +410,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       for (const mat of line.materials) {
         const search = (matSearches[mat.id] || "").toLowerCase()
         const catFilter = matCategoryFilters[mat.id] || ""
+        const wantService = mat.nguon === "gia_cong"
         const filtered = inventoryItems.filter((item) => {
+          if (item.la_dich_vu !== wantService) return false
           if (catFilter && item.category_id !== catFilter) return false
           if (!search) return true
           return item.code.toLowerCase().includes(search) || item.name.toLowerCase().includes(search)
@@ -696,7 +708,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   const loadInventoryItems = useCallback(async (fid: string) => {
     const [{ data: items }, { data: balances }, { data: cats }, { data: primaryRules }, { data: warehouses }] = await Promise.all([
-      supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id, don_gia, loai_tien").eq("factory_id", fid).eq("is_active", true).order("code"),
+      supabase.from("inventory_items").select("id, code, name, unit, specification, default_warehouse_ids, manages_lot, category_id, don_gia, loai_tien, la_dich_vu").eq("factory_id", fid).eq("is_active", true).order("code"),
       supabase.from("inventory_stock_balances").select("item_id, warehouse_id, on_hand").eq("factory_id", fid),
       supabase.from("inventory_item_categories").select("id, code, name").eq("factory_id", fid).order("sort_order").order("code"),
       supabase.from("inventory_item_warehouse_rules").select("item_id, warehouse_id").eq("factory_id", fid).eq("is_primary", true),
@@ -721,7 +733,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
 
     setInventoryItems(
-      ((items || []) as { id: string; code: string; name: string; unit: string; specification: string | null; default_warehouse_ids: string[] | null; manages_lot: boolean | null; category_id: string | null; don_gia: number | null; loai_tien: string | null }[]).map((item) => {
+      ((items || []) as { id: string; code: string; name: string; unit: string; specification: string | null; default_warehouse_ids: string[] | null; manages_lot: boolean | null; category_id: string | null; don_gia: number | null; loai_tien: string | null; la_dich_vu: boolean | null }[]).map((item) => {
         const default_warehouse_ids = item.default_warehouse_ids || []
         const primaryWarehouseId = primaryRuleMap.get(item.id) || default_warehouse_ids[0] || null
         return {
@@ -733,6 +745,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           primaryWarehouseCode: primaryWarehouseId ? (warehouseCodeMap.get(primaryWarehouseId) || null) : null,
           don_gia: item.don_gia || 0,
           loai_tien: item.loai_tien || "USD",
+          la_dich_vu: item.la_dich_vu === true,
         }
       })
     )
@@ -1201,12 +1214,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       const knownItemIds = new Set(inventoryItems.map((i) => i.id))
       const noCode = lines.flatMap((l) =>
         l.materials
-          .filter((m) => m.nguon === "ben_ngoai" && m.ten_vat_tu.trim() && !knownItemIds.has(m.inventory_item_id))
+          .filter((m) => (m.nguon === "ben_ngoai" || m.nguon === "gia_cong") && m.ten_vat_tu.trim() && !knownItemIds.has(m.inventory_item_id))
           .map((m) => m.ten_vat_tu.trim()),
       )
       if (noCode.length > 0) {
         setSaveError(
-          `Chọn hoặc tạo mã vật tư cho vật tư mua ngoài (bấm "+ Thêm mã vật tư ngoài"):\n${Array.from(new Set(noCode)).join("\n")}`,
+          `Chọn hoặc tạo mã cho vật tư mua ngoài / dịch vụ gia công (bấm "+ Thêm mã"):\n${Array.from(new Set(noCode)).join("\n")}`,
         )
         return
       }
@@ -1439,6 +1452,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       primaryWarehouseCode: warehouse?.code || null,
       don_gia: Number(it.don_gia) || 0,
       loai_tien: it.loai_tien || "USD",
+      la_dich_vu: it.la_dich_vu === true,
     }
     setInventoryItems((prev) => [...prev, option].sort((a, b) => a.code.localeCompare(b.code)))
     applyExtMatToLine({ id: it.id, name: it.name, unit: it.unit, don_gia: option.don_gia, loai_tien: option.loai_tien })
@@ -1770,10 +1784,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                   className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                     isKho
                                       ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                      : "bg-blue-50 text-blue-700 border border-blue-200"
+                                      : mat.nguon === "gia_cong"
+                                        ? "bg-violet-50 text-violet-700 border border-violet-200"
+                                        : "bg-blue-50 text-blue-700 border border-blue-200"
                                   }`}
                                 >
-                                  {isKho ? "Trong kho" : "Bên ngoài"}
+                                  {NGUON_LABEL[mat.nguon] || "Mua ngoài"}
                                 </span>
                               </td>
                               <td className="py-2.5 px-3 font-semibold text-slate-800">
@@ -2490,7 +2506,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   return (
                     <div key={mat.id} className="mb-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                       <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-[10px] font-bold text-slate-500">{isKho ? "Vật tư kho" : "Vật tư bên ngoài"}</label>
+                        <label className="text-[10px] font-bold text-slate-500">{isKho ? "Vật tư kho" : mat.nguon === "gia_cong" ? "Dịch vụ gia công ngoài" : "Vật tư mua ngoài"}</label>
                         {!isReadOnly && (
                           isKho ? (
                             <Link
@@ -2506,26 +2522,27 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               type="button"
                               onClick={() => {
                                 setNewExtMatModal({ lineId: line.id, matId: mat.id })
-                                setNewExtMatInitial({ ten_vat_tu: mat.ten_vat_tu || "", dvt: mat.dvt || "", loai_tien: mat.loai_tien || "USD" })
+                                setNewExtMatInitial({ ten_vat_tu: mat.ten_vat_tu || "", dvt: mat.dvt || "", loai_tien: mat.loai_tien || "USD", la_dich_vu: mat.nguon === "gia_cong" })
                               }}
                               className="flex items-center gap-0.5 text-[10px] font-bold text-brand-700 hover:text-brand-800"
                             >
-                              <Plus size={10} /> Thêm mã vật tư ngoài
+                              <Plus size={10} /> {mat.nguon === "gia_cong" ? "Thêm mã dịch vụ gia công" : "Thêm mã vật tư ngoài"}
                             </button>
                           )
                         )}
                       </div>
                       <div className="flex flex-wrap gap-1.5 items-end">
-                        <div className="w-[88px]">
+                        <div className="w-[112px]">
                           <label className="text-xs font-bold text-slate-500 block mb-1">Nguồn</label>
                           <select
                             value={mat.nguon}
-                            onChange={(e) => updateMaterial(line.id, mat.id, { nguon: e.target.value as "trong_kho" | "ben_ngoai", inventory_item_id: "", ten_vat_tu: "" })}
+                            onChange={(e) => updateMaterial(line.id, mat.id, { nguon: e.target.value as MaterialNguon, inventory_item_id: "", ten_vat_tu: "" })}
                             disabled={isReadOnly}
                             className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white"
                           >
-                            <option value="ben_ngoai">Bên ngoài</option>
+                            <option value="ben_ngoai">Mua ngoài</option>
                             <option value="trong_kho">Trong kho</option>
+                            <option value="gia_cong">Gia công ngoài</option>
                           </select>
                         </div>
                         <div className="w-[180px]">
@@ -2586,7 +2603,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                                     key={item.id}
                                     type="button"
                                     onClick={() => {
-                                      const priceFields = mat.nguon === "trong_kho"
+                                      const priceFields = mat.nguon === "trong_kho" || mat.nguon === "gia_cong"
                                         ? { don_gia: item.don_gia > 0 ? String(item.don_gia) : mat.don_gia, loai_tien: item.loai_tien }
                                         : {}
                                       updateMaterial(line.id, mat.id, { inventory_item_id: item.id, ten_vat_tu: item.name, dvt: item.unit || "", ...priceFields })

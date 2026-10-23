@@ -224,3 +224,8 @@ Nay `Suggestion.binding`: chỉ giá của CHÍNH vật tư (lần mua gần nh�
 ## Lập đề nghị từ biên bản — vật tư mua ngoài phải có mã kho (2026-10-17)
 `purchase-draft` chặn 400 khi vật tư mua ngoài của biên bản chưa có mã trong `inventory_items` (trước
 đây lỗi FK `purchase_request_lines_item_id_fkey` + phiếu tự "Đã hủy"). Chi tiết: rule 14 mục cuối.
+
+## Dịch vụ gia công ngoài (2026-10-23, chờ test tay)
+Dòng có vật tư `la_dich_vu` (`nguon_tao='bao_tri_gia_cong'`) không nhập kho: modal Ghi nhận mua bỏ qua, người đề
+nghị/admin dùng nút "Xác nhận hoàn thành" (`perms.canCompleteService`, bảng `purchase_service_completions`,
+log `hoan_thanh_dich_vu`). Xem rule 14 mục "Bước 2–3".
