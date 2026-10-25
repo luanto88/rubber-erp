@@ -184,7 +184,7 @@ function ratioLabel(ratio: number | null) {
   return `${ratio.toFixed(1)}%`
 }
 
-export async function downloadStorageDetailPdf(detail: StorageDetailData) {
+async function buildStorageDetailDoc(detail: StorageDetailData) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
 
@@ -283,7 +283,22 @@ export async function downloadStorageDetailPdf(detail: StorageDetailData) {
   })
 
   renderFooter(doc, DETAIL_DOC_CODE)
-  doc.save(`chi-tiet-ngan-${safeName(detail.ngan.ten_ngan || detail.ngan.ma_ngan || detail.ngan.id)}.pdf`)
+  return doc
+}
+
+export function storageDetailPdfFileName(detail: StorageDetailData) {
+  return `chi-tiet-ngan-${safeName(detail.ngan.ten_ngan || detail.ngan.ma_ngan || detail.ngan.id)}.pdf`
+}
+
+/** Bytes PDF chi tiết ngăn — cho `DocViewer loadBytes` ở trang chi tiết 70/30 (cùng nội dung nút Xuất PDF). */
+export async function buildStorageDetailPdfBytes(detail: StorageDetailData): Promise<Uint8Array> {
+  const doc = await buildStorageDetailDoc(detail)
+  return new Uint8Array(doc.output("arraybuffer"))
+}
+
+export async function downloadStorageDetailPdf(detail: StorageDetailData) {
+  const doc = await buildStorageDetailDoc(detail)
+  doc.save(storageDetailPdfFileName(detail))
 }
 
 export async function downloadStoragePeriodReportPdf(params: {

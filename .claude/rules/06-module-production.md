@@ -784,4 +784,17 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
   vàng/đỏ theo trạng thái) → Thêm ca → Sửa → Xóa (Sửa/Xóa vẫn chỉ admin; Sửa khoá khi ngày có ca đã khóa).
   Bấm Xóa tự mở dòng ngày để thấy ô chọn. Chi tiết = từng ca, mỗi ca 1 bảng con `enterprise-table dense`.
   Mọi điều kiện quyền / khóa ca / chế độ xóa / chặn lô đã KN giữ nguyên.
-- Chưa làm: trang chi tiết lô.
+- Bước 3 (2026-10-25, chờ test tay):
+  - Bộ lọc → `FilterBar layout="grid"` (tìm span 2, mọi ô `h-10`, `FilterMultiSelect fullWidth`, "Xóa lọc"
+    luôn hiện nhưng mờ khi không lọc). Thứ tự + logic lọc giữ nguyên (mục 4.10).
+  - Bảng con từng ca thêm cột "Thao tác" — con mắt mở **trang chi tiết lô** `/dashboard/product/lot/[id]`
+    (`ContribDisplayGroup.lotId` = `lots.id` của nhóm).
+  - Trang chi tiết lô (CHỈ XEM — sửa/xoá/khoá ca/Sang kiện vẫn ở danh sách): `DetailPageHeader` (mã lô,
+    chip ngày mở/tròn lô, bành·kg, Tải PDF, `HeaderQr`) + `DetailSplitLayout`; trái tab "Bản PDF"
+    (`DocViewer loadBytes` = `buildProductLotPdfBytes`, `src/lib/product-lot-pdf.ts`, A4 dọc, QR góc phải
+    trên trỏ trang chi tiết) / "Giao dịch nhập" / "Xuất hàng" (đơn có `assignments` chứa `lot_id`, link
+    `/dashboard/export/[id]`); phải `StatusSummaryBar domain="lot"` (bành/lô tròn + còn chưa xuất) →
+    Hành động (Tải PDF, Danh sách, Ngăn nguồn) → "Số bành theo kiện" (mỗi kiện link tra cứu nhãn
+    `/product-label`) → Thông tin lô → Kiểm nghiệm (KN mới nhất theo `lan`). Guard `product.view`.
+  - PDF lô là bản tham khảo, KHÔNG phải biểu mẫu có mã ISO.
+  - Đơn xuất cũ chỉ gán theo `ma_lo` (không `lot_id`) KHÔNG hiện ở tab Xuất hàng của trang lô.

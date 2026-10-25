@@ -313,4 +313,21 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
   Thao tác: Xem (Eye, mở modal chi tiết) → PDF → QR/Tra cứu → GeoJSON → Đồng bộ nhanh → Sửa → Xóa (quyền
   giữ nguyên). Dòng xổ: Mã ngăn, Nguồn · Xử lý, Chứng nhận, Ngày xé, TP/QK chi tiết, Ký hiệu KT, Ghi chú.
   Tab Lịch sử và In QR không đổi.
-- Chưa làm: trang chi tiết 70/30.
+- Bước 3 (2026-10-25, chờ test tay):
+  - Bộ lọc → `FilterBar layout="grid"`: Tìm (span 2) · Trạng thái · Ký hiệu KT · Loại NL · Từ ngày ·
+    Đến ngày; hàng cuối (col-span-full) = chú thích kỳ báo cáo + "Xóa lọc" + "Xuất báo cáo theo kỳ".
+  - Tab Lịch sử → `enterprise-table dense min-w-[900px]` (Ngăn · Trạng thái + "Về đang SX" admin ·
+    Loại NL · KL tươi/khô · TP/QK · Ngày lưu ủ · Thao tác: view → PDF → QR → GeoJSON → Sửa admin).
+  - **Con mắt (cả 2 tab) mở trang chi tiết `/dashboard/storage/[id]`** — đã XOÁ modal "Xem chi tiết" cũ
+    (`openView`/`viewNgan`/`groupedViewLots`…); lô thành phẩm gom theo chủng loại nay nằm ở tab "Lô
+    thành phẩm" của trang chi tiết (mục 7 cũ chỉ còn ý nghĩa lịch sử).
+  - Trang chi tiết dashboard = component MỚI `_components/storage-detail-dashboard.tsx`
+    (`StorageDetailClient` vẫn chỉ phục vụ trang công khai `/storage`, không đổi). Trái: tab "Bản PDF"
+    (`DocViewer loadBytes` = `buildStorageDetailPdfBytes`, cùng nội dung nút Xuất PDF) / "Chuyến xe" /
+    "Lô thành phẩm" (gom chủng loại, con mắt → chi tiết lô) / "Bản đồ" (tải GeoJSON lười khi mở tab).
+    Phải: `StatusSummaryBar domain="storage"` (headline TP/QK) → Hành động (Tải PDF, Tải GeoJSON, Trang
+    tra cứu, Chỉnh sửa) → Khối lượng → Thông tin ngăn. Guard `storage.view`.
+  - "Chỉnh sửa" (cùng điều kiện `canEditThisNgan`) mở `/dashboard/storage?edit=<id>` — danh sách đọc
+    tham số 1 lần sau khi tải xong, tự chuyển dây chuyền Mủ nước nếu cần, rồi gọi `openEdit` (tự kiểm quyền).
+  - `storage-pdf.ts`: tách `buildStorageDetailDoc` (nội bộ) → `buildStorageDetailPdfBytes` +
+    `downloadStorageDetailPdf` (tên file không đổi).

@@ -6,7 +6,6 @@ import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUs
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, matchesNoteFilterMulti } from "@/lib/note-filter"
-import { InventoryQrCard } from "@/app/dashboard/inventory/_components/inventory-qr-card"
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
@@ -22,7 +21,6 @@ import {
   loadDispatchTripsByUids,
   loadStorageDetail,
   loadStorageGeoJson,
-  loadStorageLots,
   loadStorageLotsByNgans,
   resolveStorageNgansActualTotals,
   summarizeStorageLots,
@@ -50,9 +48,9 @@ import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { isDateInRange, normalizeDateInput } from "@/lib/date-utils"
 import {
-  Warehouse, Plus, X, Search, Eye, Edit2, History,
+  Warehouse, Plus, X, Search, History,
   Tag, MapPin, ShieldCheck, Weight, BarChart2, Activity, Droplets, Truck, FileText, QrCode,
-  ChevronDown, ChevronRight, Map as MapIcon, Check, Printer, RefreshCw
+  Map as MapIcon, Check, Printer, RefreshCw
 } from "lucide-react"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
@@ -111,15 +109,6 @@ const emptyForm = (loaiNL = "Mủ đông chén") => ({
 
 type StorageForm = ReturnType<typeof emptyForm>
 
-const headerStyle = (tt: string) => {
-  if (tt === STORAGE_STATUS_IN_PRODUCTION) return { grad: "from-emerald-50 to-teal-50", icon: "text-emerald-600" }
-  if (tt === STORAGE_STATUS_PRODUCED) return { grad: "from-blue-50 to-cyan-50", icon: "text-blue-600" }
-  if (tt === STORAGE_STATUS_WAITING) return { grad: "from-amber-50 to-yellow-50", icon: "text-amber-500" }
-  if (tt === STORAGE_STATUS_CLOSED) return { grad: "from-rose-50 to-orange-50", icon: "text-rose-500" }
-  if (tt === STORAGE_STATUS_RECEIVING) return { grad: "from-slate-50 to-gray-100", icon: "text-slate-400" }
-  return { grad: "from-slate-50 to-gray-100", icon: "text-slate-400" }
-}
-
 const genMaNgan = (f: ReturnType<typeof emptyForm>) => {
   const xlAbbr = f.xu_ly === "Xé" ? "X" : f.xu_ly === "Không xé" ? "KX" : "HH"
   const fmt = (d: string) =>
@@ -129,7 +118,6 @@ const genMaNgan = (f: ReturnType<typeof emptyForm>) => {
 }
 
 const fmtDate = formatStorageDate
-const fmtKg = (kg: number) => `${Math.round(kg || 0).toLocaleString("vi-VN")} kg`
 const safeDownloadName = (value: string) => value
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")
@@ -217,7 +205,7 @@ export default function StoragePage() {
   const [selectedSuffixCode, setSelectedSuffixCode] = useState<string>("")
 
   // modal / form
-  const [modal, setModal]         = useState<"add" | "edit" | "view" | null>(null)
+  const [modal, setModal]         = useState<"add" | "edit" | null>(null)
   const [form, setForm]           = useState<StorageForm>(emptyForm())
   const [editId, setEditId]       = useState<string | null>(null)
   const [saving, setSaving]       = useState(false)
@@ -227,11 +215,6 @@ export default function StoragePage() {
   const [selectedPrintIds, setSelectedPrintIds] = useState<Set<string>>(new Set())
   const [printingQr, setPrintingQr] = useState(false)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
-  const [viewNgan, setViewNgan]   = useState<Ngan | null>(null)
-  const [viewLots, setViewLots]   = useState<ProducedLot[]>([])
-  const [viewLotsLoading, setViewLotsLoading] = useState(false)
-  const [expandedProductKeys, setExpandedProductKeys] = useState<Set<string>>(new Set())
-  const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set())
   const [expandedNganIds, setExpandedNganIds] = useState<Set<string>>(new Set())
   const [todayMs] = useState(() => Date.now())
   const isAdmin = currentUser?.role === "admin"
@@ -268,53 +251,6 @@ export default function StoragePage() {
     () => dispatchTrips.filter((trip) => matchesNoteFilterMulti(trip.ghi_chu, tripNoteFilter)),
     [dispatchTrips, tripNoteFilter],
   )
-  const groupedViewLots = useMemo(() => {
-    const grouped = viewLots.reduce<Record<string, {
-      key: string
-      loai_csr: string
-      loai_banh: number
-      boc: string
-      totalKg: number
-      totalLots: number
-      dates: Record<string, { totalKg: number; lots: ProducedLot[] }>
-    }>>((acc, lot) => {
-      const key = [lot.loai_csr, lot.loai_banh, lot.boc || ""].join("|")
-      const dateKey = lot.ngay_sx?.slice(0, 10) || ""
-      if (!acc[key]) {
-        acc[key] = {
-          key,
-          loai_csr: lot.loai_csr,
-          loai_banh: lot.loai_banh,
-          boc: lot.boc || "—",
-          totalKg: 0,
-          totalLots: 0,
-          dates: {},
-        }
-      }
-      if (!acc[key].dates[dateKey]) {
-        acc[key].dates[dateKey] = { totalKg: 0, lots: [] }
-      }
-      acc[key].totalKg += lot.tong_kg || 0
-      acc[key].totalLots += 1
-      acc[key].dates[dateKey].totalKg += lot.tong_kg || 0
-      acc[key].dates[dateKey].lots.push(lot)
-      return acc
-    }, {})
-
-    return Object.values(grouped)
-      .map(group => ({
-        ...group,
-        dates: Object.entries(group.dates)
-          .sort((a, b) => b[0].localeCompare(a[0]))
-          .map(([date, value]) => ({
-            date,
-            totalKg: value.totalKg,
-            lots: value.lots.sort((a, b) => a.ma_lo.localeCompare(b.ma_lo)),
-          })),
-      }))
-      .sort((a, b) => b.totalKg - a.totalKg)
-  }, [viewLots])
-
   // ── Load ──────────────────────────────────────────────────────────────────
   const loadUnassigned = useCallback(async (fid: string, allNgans: Ngan[]) => {
     const assignedUIDs = new Set(allNgans.flatMap(n => n.trips || []))
@@ -919,22 +855,22 @@ export default function StoragePage() {
     })()
   }
 
-  const openView = async (n: Ngan) => {
-    if (!factoryId) return
-    setViewNgan(n)
-    setViewLots([])
-    setViewLotsLoading(true)
-    setExpandedProductKeys(new Set())
-    setExpandedDateKeys(new Set())
-    setModal("view")
-    try {
-      const data = await loadStorageLots(factoryId, n.id)
-      setViewLots(data)
-    } catch {
-      setViewLots([])
-    }
-    setViewLotsLoading(false)
-  }
+  // Nút "Chỉnh sửa" ở trang chi tiết ngăn mở `/dashboard/storage?edit=<id>` — mở form sửa đúng
+  // ngăn đó 1 lần khi danh sách đã tải xong (openEdit tự kiểm quyền như nút Sửa trên dòng).
+  const editParamHandledRef = useRef(false)
+  useEffect(() => {
+    if (loading || editParamHandledRef.current || ngans.length === 0) return
+    editParamHandledRef.current = true
+    const editId = new URLSearchParams(window.location.search).get("edit")
+    if (!editId) return
+    window.history.replaceState(null, "", window.location.pathname)
+    const target = ngans.find(n => n.id === editId)
+    if (!target) return
+    if (target.loai_nl === "Mủ nước") setDayChuyen("Mủ nước")
+    openEdit(target)
+    // openEdit đổi identity mỗi render; ref đảm bảo chỉ chạy 1 lần.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, ngans])
 
   const handleExportDetailPdf = async (nganId: string) => {
     if (!factoryId) return
@@ -1157,30 +1093,6 @@ export default function StoragePage() {
     }
   }
 
-  const toggleProductKey = (key: string) => {
-    setExpandedProductKeys(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
-  }
-
-  const toggleDateKey = (key: string) => {
-    setExpandedDateKeys(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
-  }
-
   const toggleNganExpanded = (nganId: string) => {
     setExpandedNganIds(prev => {
       const next = new Set(prev)
@@ -1285,96 +1197,96 @@ export default function StoragePage() {
           ]}
         />
 
-        {/* Filters */}
+        {/* Filters — FilterBar layout="grid" (rule 29 mục A.1) */}
         <FilterBar
           className="mb-5"
+          layout="grid"
           activeCount={
             [search, filterTT, reportFrom, reportTo, reportLoaiNL].filter(Boolean).length +
             (filterGhiChu.length > 0 ? 1 : 0)
           }
         >
-          <div className="flex flex-wrap gap-3 items-center w-full">
-            <div className="flex items-center gap-2 flex-1 min-w-48">
-              <Search size={15} className="text-slate-400" />
-              <input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder={`Tìm tên ${subTerm.toLowerCase()}, mã...`}
-                className="flex-1 text-sm outline-none" />
-            </div>
-            <select value={filterTT} onChange={e => setFilterTT(e.target.value)}
-              disabled={nganTab === "history"}
-              title={nganTab === "history" ? "Tab Lịch sử chỉ gồm ngăn Đã sản xuất" : undefined}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed">
-              <option value="">Tất cả trạng thái</option>
-              {TRANG_THAI_OPTS.filter(t => t !== STORAGE_STATUS_PRODUCED).map(t => <option key={t}>{t}</option>)}
-            </select>
-            <FilterMultiSelect
-              options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
-              selected={filterGhiChu}
-              onChange={setFilterGhiChu}
-              labels={{ [EMPTY_NOTE_FILTER]: "Không có ký hiệu KT" }}
-              placeholder="Tất cả ký hiệu KT"
-              searchPlaceholder="Tìm ký hiệu KT..."
-              className="min-w-64"
-            />
-            {(search || filterTT || filterGhiChu.length > 0 || reportFrom || reportTo || reportLoaiNL) && (
-              <button onClick={() => {
-                setSearch("")
-                setFilterTT("")
-                setFilterGhiChu([])
-                setReportFrom("")
-                setReportTo("")
-                setReportLoaiNL("")
-              }}
-                className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500">
-                <X size={14} /> Xóa lọc
+          <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-mod-600 sm:col-span-2">
+            <Search size={15} className="shrink-0 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder={`Tìm tên ${subTerm.toLowerCase()}, mã...`}
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+            {search && (
+              <button type="button" onClick={() => setSearch("")} aria-label="Xóa ô tìm"
+                className="shrink-0 text-slate-400 hover:text-slate-600">
+                <X size={14} />
               </button>
             )}
           </div>
-
-          <div className="border-t border-slate-100 pt-4 w-full">
-            <div className="flex flex-wrap items-end gap-2.5">
-              <div className="min-w-[150px]">
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
-                <DateTextInput
-                  value={reportFrom}
-                  onChange={setReportFrom}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="min-w-[150px]">
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Đến ngày</label>
-                <DateTextInput
-                  value={reportTo}
-                  onChange={setReportTo}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div className="min-w-[220px] flex-1 max-w-[280px]">
-                <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại nguyên liệu</label>
-                <select
-                  value={reportLoaiNL}
-                  onChange={e => setReportLoaiNL(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
-                >
-                  <option value="">Tất cả loại nguyên liệu</option>
-                  {dcLoaiNL.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </div>
+          <select value={filterTT} onChange={e => setFilterTT(e.target.value)}
+            disabled={nganTab === "history"}
+            title={nganTab === "history" ? "Tab Lịch sử chỉ gồm ngăn Đã sản xuất" : undefined}
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600 disabled:cursor-not-allowed disabled:opacity-50">
+            <option value="">Tất cả trạng thái</option>
+            {TRANG_THAI_OPTS.filter(t => t !== STORAGE_STATUS_PRODUCED).map(t => <option key={t}>{t}</option>)}
+          </select>
+          <FilterMultiSelect
+            options={[EMPTY_NOTE_FILTER, ...requiredNotes]}
+            selected={filterGhiChu}
+            onChange={setFilterGhiChu}
+            labels={{ [EMPTY_NOTE_FILTER]: "Không có ký hiệu KT" }}
+            placeholder="Tất cả ký hiệu KT"
+            searchPlaceholder="Tìm ký hiệu KT..."
+            fullWidth
+          />
+          <select
+            value={reportLoaiNL}
+            onChange={e => setReportLoaiNL(e.target.value)}
+            title="Loại nguyên liệu"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
+          >
+            <option value="">Tất cả loại nguyên liệu</option>
+            {dcLoaiNL.map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+          <DateTextInput
+            value={reportFrom}
+            onChange={setReportFrom}
+            title="Từ ngày"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
+          />
+          <DateTextInput
+            value={reportTo}
+            onChange={setReportTo}
+            title="Đến ngày"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
+          />
+          <div className="col-span-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-slate-400">
+              Báo cáo theo kỳ chỉ lấy các {subTerm.toLowerCase()} có toàn bộ thời gian nguyên liệu nằm trọn trong kỳ lọc.
+            </p>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
+              <button
+                type="button"
+                disabled={!(search || filterTT || filterGhiChu.length > 0 || reportFrom || reportTo || reportLoaiNL)}
+                onClick={() => {
+                  setSearch("")
+                  setFilterTT("")
+                  setFilterGhiChu([])
+                  setReportFrom("")
+                  setReportTo("")
+                  setReportLoaiNL("")
+                }}
+                className="flex h-10 items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-600"
+              >
+                <X size={14} /> Xóa lọc
+              </button>
               <button
                 type="button"
                 onClick={() => void handleExportPeriodReport()}
                 disabled={exportingPeriod}
-                className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold rounded-xl shadow-sm whitespace-nowrap disabled:opacity-50"
+                className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-brand-600 px-3.5 text-sm font-bold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
               >
                 <FileText size={14} />
-                {exportingPeriod ? "Đang xuất báo cáo..." : "Xuất báo cáo theo kỳ"}
+                {exportingPeriod ? "Đang xuất..." : "Xuất báo cáo theo kỳ"}
               </button>
             </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Chỉ lấy các {subTerm.toLowerCase()} có toàn bộ thời gian nguyên liệu nằm trọn trong kỳ lọc.
-            </p>
           </div>
         </FilterBar>
 
@@ -1521,7 +1433,7 @@ export default function StoragePage() {
                         endCell={
                           <span onClick={stop} className="flex items-center gap-0.5">
                             {canViewThisNgan && (
-                              <RowAction kind="view" label={`Xem chi tiết ${subTerm.toLowerCase()}`} onClick={() => openView(n)} />
+                              <RowAction kind="view" label={`Xem chi tiết ${subTerm.toLowerCase()}`} href={`/dashboard/storage/${n.id}`} />
                             )}
                             {canViewThisNgan && (
                               <IconAction
@@ -1653,111 +1565,139 @@ export default function StoragePage() {
             </ResponsiveTableWrapper>
           </>
         ))}
-        {/* Data table — tab Lịch sử (ngăn Đã sản xuất) */}
+        {/* Bảng tab Lịch sử (ngăn Đã sản xuất) — enterprise-table dense (rule 29 mục A.3) */}
         {nganTab === "history" && (loading ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          <div className="bg-white rounded-xl border border-slate-200">
+            <ListState kind="loading" />
+          </div>
         ) : historyNgans.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-12 text-center text-slate-400">
             <History size={40} className="mx-auto mb-3 opacity-30" />
             <p>Chưa có {subTerm.toLowerCase()} nào trong lịch sử</p>
           </div>
         ) : (
-          <ResponsiveTableWrapper>
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  {["Mã " + subTerm.toLowerCase(), "Loại NL", "KL tươi/khô", "TP/QK ngăn", "Ngày lưu ủ", ""].map(h => (
-                    <th key={h} className="px-3 py-2 text-left text-xs font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {historyNgans.map(n => {
-                  const days  = curingDays(n.ngay_bd)
-                  const ready = days !== null && days >= 21
-                  const tpKg    = lotStats[n.id] || 0
-                  const tpPct   = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
-                  const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
-                  const canReturnToDraft = n.trang_thai === STORAGE_STATUS_PRODUCED
-                  return (
-                    <tr key={n.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <div className="font-bold text-slate-800">{n.ten_ngan}</div>
-                        <div className="text-xs text-slate-400">{n.ma_ngan || "—"}</div>
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">{n.loai_nl}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">
-                        {(n.tong_tuoi || 0).toLocaleString()} / <span className="text-emerald-700 font-semibold">{(n.tong_kho || 0).toLocaleString()}</span> kg
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">
-                        {n.tong_kho > 0 ? `${tpPct.toFixed(1)}%` : "—"}
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap text-slate-700">
-                        {fmtDate(n.ngay_bd)}{n.ngay_kt ? ` → ${fmtDate(n.ngay_kt)}` : ""}
-                        {days !== null && (
-                          <span className={`ml-1 text-xs ${ready ? "text-emerald-600" : "text-amber-600"}`}>
-                            ({days} ngày{ready ? " ✓" : ""})
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1">
-                          {canViewStorage && (
-                            <Link href={lookupPath}
-                              className="p-1.5 hover:bg-slate-100 rounded-lg text-emerald-600 transition-colors"
-                              title="QR / Tra cứu">
-                              <QrCode size={14} />
-                            </Link>
+          <>
+            <div className="mb-2 text-xs font-bold text-slate-500">
+              {historyNgans.length} {subTerm.toLowerCase()} đã sản xuất
+            </div>
+            <ResponsiveTableWrapper>
+              <table className="enterprise-table dense min-w-[900px]">
+                <thead>
+                  <tr>
+                    <th>{subTerm}</th>
+                    <th>Trạng thái</th>
+                    <th>Loại NL</th>
+                    <th className="text-right">KL tươi / khô (kg)</th>
+                    <th className="text-right">TP / QK</th>
+                    <th>Ngày lưu ủ</th>
+                    <th className="text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyNgans.map(n => {
+                    const days  = curingDays(n.ngay_bd)
+                    const ready = days !== null && days >= 21
+                    const tpKg    = lotStats[n.id] || 0
+                    const tpPct   = n.tong_kho > 0 ? (tpKg / n.tong_kho) * 100 : 0
+                    const lookupPath = buildStorageLookupPath(n.id, n.ma_ngan)
+                    const canReturnToDraft = n.trang_thai === STORAGE_STATUS_PRODUCED
+                    return (
+                      <tr key={n.id}>
+                        <td className="whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <Warehouse size={15} className="shrink-0 text-mod-600" />
+                            <div className="min-w-0">
+                              {canViewStorage ? (
+                                <Link href={`/dashboard/storage/${n.id}`} className="font-extrabold text-slate-800 hover:text-brand-700 hover:underline">
+                                  {n.ten_ngan}
+                                </Link>
+                              ) : (
+                                <div className="font-extrabold text-slate-800">{n.ten_ngan}</div>
+                              )}
+                              <div className="max-w-[220px] truncate text-xs text-slate-400" title={n.ma_ngan || ""}>
+                                {n.ma_ngan || "—"}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <StatusBadge domain="storage" status={n.trang_thai} size="xs" />
+                            {canReturnToDraft && isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => void handleNganStatusToggle(n.id, STORAGE_STATUS_IN_PRODUCTION)}
+                                disabled={nganStatusSavingId === n.id}
+                                className="whitespace-nowrap rounded-lg border border-emerald-200 bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                title={`Chuyển về đang sản xuất (${tpPct.toFixed(1)}%)`}
+                              >
+                                {nganStatusSavingId === n.id ? "Đang cập nhật..." : "Về đang SX"}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap text-slate-700">{n.loai_nl}</td>
+                        <td className="whitespace-nowrap text-right tabular-nums">
+                          <span className="text-slate-700">{(n.tong_tuoi || 0).toLocaleString()}</span>
+                          <span className="text-slate-300"> / </span>
+                          <span className="font-semibold text-mod-800">{(n.tong_kho || 0).toLocaleString()}</span>
+                        </td>
+                        <td className="whitespace-nowrap text-right tabular-nums">
+                          {n.tong_kho > 0 ? (
+                            <>
+                              <span className="font-semibold text-slate-800">{tpPct.toFixed(1)}%</span>
+                              <div className="text-[11px] text-slate-400">{tpKg.toLocaleString()} kg</div>
+                            </>
+                          ) : (
+                            <span className="text-slate-400">—</span>
                           )}
-                          {canViewStorage && (
-                            <button onClick={() => void handleExportDetailPdf(n.id)}
-                              disabled={exportingDetailId === n.id}
-                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-700 transition-colors disabled:opacity-50"
-                              title="Xuất PDF">
-                              <FileText size={14} />
-                            </button>
+                        </td>
+                        <td className="whitespace-nowrap text-slate-700">
+                          {fmtDate(n.ngay_bd)}{n.ngay_kt ? ` → ${fmtDate(n.ngay_kt)}` : ""}
+                          {days !== null && (
+                            <span className={`ml-1 text-xs ${ready ? "text-emerald-600" : "text-amber-600"}`}>
+                              ({days} ngày{ready ? " ✓" : ""})
+                            </span>
                           )}
-                          {canViewStorage && (
-                            <button onClick={() => void handleExportGeoJson(n)}
-                              disabled={exportingGeoId === n.id}
-                              className="p-1.5 hover:bg-slate-100 rounded-lg text-sky-700 transition-colors disabled:opacity-50"
-                              title="Xuất GeoJSON">
-                              <MapIcon size={14} />
-                            </button>
-                          )}
-                          {canViewStorage && (
-                            <button onClick={() => openView(n)}
-                              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
-                              title="Xem chi tiết">
-                              <Eye size={14} />
-                            </button>
-                          )}
-                          {canEditStorage && isAdmin && (
-                            <button onClick={() => openEdit(n)}
-                              className="p-1.5 hover:bg-slate-100 rounded-lg text-blue-500 transition-colors"
-                              title="Sửa">
-                              <Edit2 size={14} />
-                            </button>
-                          )}
-                          {canReturnToDraft && isAdmin && (
-                            <button
-                              type="button"
-                              onClick={() => void handleNganStatusToggle(n.id, STORAGE_STATUS_IN_PRODUCTION)}
-                              disabled={nganStatusSavingId === n.id}
-                              className="rounded-lg border border-emerald-200 bg-white px-2 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-50 transition disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap"
-                              title={`Chuyển về đang sản xuất (${tpPct.toFixed(1)}%)`}
-                            >
-                              {nganStatusSavingId === n.id ? "Đang cập nhật..." : "Về đang SX"}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </ResponsiveTableWrapper>
+                        </td>
+                        <td>
+                          <div className="flex items-center justify-end gap-0.5">
+                            {canViewStorage && (
+                              <RowAction kind="view" label={`Xem chi tiết ${subTerm.toLowerCase()}`} href={`/dashboard/storage/${n.id}`} />
+                            )}
+                            {canViewStorage && (
+                              <IconAction
+                                icon={FileText}
+                                tone="neutral"
+                                label="Xuất PDF"
+                                loading={exportingDetailId === n.id}
+                                onClick={() => void handleExportDetailPdf(n.id)}
+                              />
+                            )}
+                            {canViewStorage && (
+                              <IconAction icon={QrCode} tone="brand" label="QR / Tra cứu" href={lookupPath} />
+                            )}
+                            {canViewStorage && (
+                              <IconAction
+                                icon={MapIcon}
+                                tone="sky"
+                                label="Xuất GeoJSON"
+                                loading={exportingGeoId === n.id}
+                                onClick={() => void handleExportGeoJson(n)}
+                              />
+                            )}
+                            {canEditStorage && isAdmin && (
+                              <RowAction kind="edit" onClick={() => openEdit(n)} />
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </ResponsiveTableWrapper>
+          </>
         ))}
 
         {/* Card grid — tab In QR hàng loạt */}
@@ -2184,180 +2124,6 @@ export default function StoragePage() {
               </div>
             )}
         </ModalShell>
-      )}
-
-      {/* ── View detail modal ──────────────────────────────────────────────── */}
-      {modal === "view" && viewNgan && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className={`bg-gradient-to-r ${headerStyle(viewNgan.trang_thai).grad} border-b border-slate-200 px-6 py-4 flex items-center justify-between`}>
-              <div className="flex items-center gap-2">
-                <Warehouse size={18} className={headerStyle(viewNgan.trang_thai).icon} />
-                <h2 className="text-lg font-extrabold text-slate-800">{viewNgan.ten_ngan}</h2>
-              </div>
-              <button onClick={() => {
-                setModal(null)
-                setViewLots([])
-                setExpandedProductKeys(new Set())
-                setExpandedDateKeys(new Set())
-              }} className="p-2 hover:bg-white/60 rounded-xl">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6 space-y-0 text-sm">
-              {([
-                [`Mã ${subTerm.toLowerCase()}`, viewNgan.ma_ngan],
-                ["Loại NL",    viewNgan.loai_nl],
-                ["Nguồn gốc",  viewNgan.nguon_goc],
-                ["Xử lý",      viewNgan.xu_ly],
-                ["Chứng nhận", viewNgan.chung_nhan],
-                ["Ngày BD",    fmtDate(viewNgan.ngay_bd)],
-                ["Ngày KT",    fmtDate(viewNgan.ngay_kt)],
-                ["Xé từ ngày", fmtDate(viewNgan.xe_tu_ngay)],
-                ["Xé đến ngày", fmtDate(viewNgan.xe_den_ngay)],
-                ["KL tươi",    (viewNgan.tong_tuoi || 0).toLocaleString() + " kg"],
-                ["KL khô",     (viewNgan.tong_kho  || 0).toLocaleString() + " kg"],
-                ["TP / QK",    viewNgan.tong_kho > 0
-                  ? `${((lotStats[viewNgan.id] || 0) / viewNgan.tong_kho * 100).toFixed(1)}% (${(lotStats[viewNgan.id] || 0).toLocaleString()} kg)`
-                  : "—"],
-                ["Số chuyến",  (viewNgan.trips || []).length + " chuyến"],
-                ["Trạng thái", viewNgan.trang_thai],
-                ...(viewNgan.ghi_chu ? [["Ký hiệu KT", viewNgan.ghi_chu]] : []),
-                ...(viewNgan.ghi_chu_tu_do ? [["Ghi chú", viewNgan.ghi_chu_tu_do]] : []),
-              ] as [string, string][]).map(([k, v]) => (
-                <div key={k} className="flex justify-between py-2 border-b border-dashed border-slate-200 last:border-0">
-                  <span className="text-slate-500">{k}</span>
-                  <span className="font-semibold text-slate-700 text-right max-w-[60%]">{v}</span>
-                </div>
-              ))}
-
-              <div className="pt-4">
-                <InventoryQrCard
-                  compact
-                  title="QR ngăn"
-                  caption="Quét để mở trang chi tiết ngăn lưu trên web."
-                  hrefPath={buildStorageLookupPath(viewNgan.id, viewNgan.ma_ngan)}
-                  valueText={viewNgan.ma_ngan || viewNgan.ten_ngan}
-                  downloadFileName={`QR-${viewNgan.ma_ngan || viewNgan.ten_ngan}`}
-                />
-              </div>
-
-              <div className="pt-5 mt-3 border-t border-slate-200">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div>
-                    <h3 className="text-sm font-extrabold text-slate-800">Thành phẩm đã dùng nguyên liệu</h3>
-                    <p className="text-xs text-slate-400">Bấm từng nhóm để mở ngày sản xuất, rồi mở tiếp để xem chi tiết từng lô</p>
-                  </div>
-                  <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-full">
-                    {viewLots.length} lô
-                  </span>
-                </div>
-
-                {viewLotsLoading ? (
-                  <div className="py-6 text-center text-slate-400 text-sm">Đang tải danh sách thành phẩm...</div>
-                ) : groupedViewLots.length === 0 ? (
-                  <div className="py-6 text-center text-slate-400 text-sm">
-                    Chưa có lô thành phẩm nào sử dụng nguyên liệu từ {viewNgan.ten_ngan}
-                  </div>
-                ) : (
-                  <div className="max-h-[42vh] overflow-y-auto pr-1 space-y-4 overscroll-contain">
-                    {groupedViewLots.map(group => {
-                      const productExpanded = expandedProductKeys.has(group.key)
-                      return (
-                        <div key={group.key} className="border border-slate-200 rounded-xl overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => toggleProductKey(group.key)}
-                            className="w-full px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 text-left hover:bg-slate-100 transition-colors"
-                          >
-                            <div className="flex items-start gap-2 min-w-0">
-                              {productExpanded ? (
-                                <ChevronDown size={16} className="text-slate-400 shrink-0 mt-0.5" />
-                              ) : (
-                                <ChevronRight size={16} className="text-slate-400 shrink-0 mt-0.5" />
-                              )}
-                              <div className="min-w-0">
-                                <div className="text-sm font-bold text-slate-800 break-words">
-                                  {group.loai_csr} / Bành {group.loai_banh} / {group.boc}
-                                </div>
-                                <div className="text-xs text-slate-500 mt-1">
-                                  {group.dates.length} ngày sản xuất · {group.totalLots} lô
-                                </div>
-                              </div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <div className="text-sm font-extrabold text-blue-700">{fmtKg(group.totalKg)}</div>
-                            </div>
-                          </button>
-
-                          {productExpanded && (
-                            <div className="bg-white divide-y divide-slate-100">
-                              {group.dates.map(dateGroup => {
-                                const dateKey = `${group.key}|${dateGroup.date}`
-                                const dateExpanded = expandedDateKeys.has(dateKey)
-                                return (
-                                  <div key={dateKey}>
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleDateKey(dateKey)}
-                                      className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-slate-50 transition-colors"
-                                    >
-                                      <div className="flex items-start gap-2 min-w-0">
-                                        {dateExpanded ? (
-                                          <ChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />
-                                        ) : (
-                                          <ChevronRight size={15} className="text-slate-400 shrink-0 mt-0.5" />
-                                        )}
-                                        <div className="min-w-0">
-                                          <div className="text-sm font-semibold text-slate-700">
-                                            {fmtDate(dateGroup.date)}
-                                          </div>
-                                          <div className="text-xs text-slate-500 mt-1 break-words">
-                                            {group.loai_csr} / Bành {group.loai_banh} / {group.boc}
-                                          </div>
-                                        </div>
-                                      </div>
-                                      <div className="text-right shrink-0">
-                                        <div className="text-sm font-bold text-slate-700">{fmtKg(dateGroup.totalKg)}</div>
-                                        <div className="text-xs text-slate-500">{dateGroup.lots.length} lô</div>
-                                      </div>
-                                    </button>
-
-                                    {dateExpanded && (
-                                      <div className="px-4 pb-3">
-                                        <div className="rounded-xl border border-slate-200 overflow-hidden">
-                                          <div className="divide-y divide-slate-100 bg-white">
-                                            {dateGroup.lots.map(lot => (
-                                              <div key={lot.id} className="px-4 py-3 flex items-center justify-between gap-4">
-                                                <div className="min-w-0">
-                                                  <div className="font-bold text-slate-800">{lot.ma_lo}</div>
-                                                  <div className="text-xs text-slate-500">
-                                                    Ca {lot.ca || "—"} · {lot.tong_banh || 0} bành · {lot.trang_thai}
-                                                  </div>
-                                                </div>
-                                                <div className="text-right shrink-0">
-                                                  <div className="text-sm font-semibold text-slate-700">{fmtKg(lot.tong_kg || 0)}</div>
-                                                </div>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* ── Delete confirm ─────────────────────────────────────────────────── */}

@@ -70,7 +70,7 @@ print `Printer` → riêng module → edit `Pencil` → copy `Copy` → delete `
 lại / lệch chuẩn đã thấy. 4. Prompt bàn giao cho phiên sau (đọc rule 29 + phần còn lại).
 Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 
-## F. Tình trạng áp dụng (cập nhật 2026-10-18)
+## F. Tình trạng áp dụng (cập nhật 2026-10-25)
 | Module | Danh sách | Dòng xổ | Chi tiết 70/30 + PDF | Xem file token | QR phiếu + Quét QR |
 |---|---|---|---|---|---|
 | Bảo trì | ✅ | Lý lịch ✅ · Biên bản ✅ · Tổng quan ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ (quét ở Lý lịch) |
@@ -82,8 +82,8 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
 | Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | ✅ `/dashboard/export/[id]` (PDF nhúng loadBytes) | — | ✅ (quét QR EUDR + quét QR kiện lên xe) |
 | Kho vật tư (Nhập/Xuất/Chuyển) | ✅ | ✅ (dòng vật tư của phiếu) | ✅ `/dashboard/inventory/document/[type]/[id]` (PDF A5 nhúng loadBytes) | — | ✅ (QR phiếu mới + nhận QR cũ `?documentId=`) |
-| Thành phẩm | ✅ theme + StatusBadge lot + StatGrid | ✅ (ngày → ca → lô, DateGroupRow) | ❌ | — | — |
-| Kho nguyên liệu | ✅ theme + StatusBadge storage + SegmentedTabs + StatGrid | ✅ (bảng ngăn, ExpandableRow) | ❌ | — | — |
+| Thành phẩm | ✅ theme + StatusBadge lot + StatGrid + FilterBar grid | ✅ (ngày → ca → lô, DateGroupRow) | ✅ chi tiết lô `/dashboard/product/lot/[id]` (PDF nhúng loadBytes, chỉ xem) | — | QR góc phải trên PDF lô (chưa Quét QR ở ô tìm) |
+| Kho nguyên liệu | ✅ theme + StatusBadge storage + SegmentedTabs + StatGrid + FilterBar grid; tab Lịch sử `enterprise-table dense` | ✅ (bảng ngăn, ExpandableRow) | ✅ `/dashboard/storage/[id]` (PDF F03 nhúng loadBytes) | — | QR có sẵn trên PDF (trỏ trang công khai `/storage`); chưa Quét QR ở ô tìm |
 | Kho thành phẩm | 🟡 theme orange | — (sơ đồ kho) | — | — | — |
 
 ## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)

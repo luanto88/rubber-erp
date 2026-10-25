@@ -364,6 +364,7 @@ type ContribDisplayGroupNgan = { main: string; sub: string | null };
 type ContribDisplayGroup = {
   key: string;
   uids: string[];
+  lotId: string;
   maLo: string;
   loaiCsr: string;
   boc: string;
@@ -391,6 +392,7 @@ function groupContributionsForDisplay(
     string,
     {
       uids: string[];
+      lotId: string;
       maLo: string;
       loaiCsr: string;
       boc: string;
@@ -431,6 +433,7 @@ function groupContributionsForDisplay(
     } else {
       map.set(key, {
         uids: [c.uid],
+        lotId: c.id,
         maLo: c.ma_lo,
         loaiCsr: c.loai_csr,
         boc: c.boc || "",
@@ -449,6 +452,7 @@ function groupContributionsForDisplay(
   return [...map.entries()].map(([key, g]) => ({
     key,
     uids: g.uids,
+    lotId: g.lotId,
     maLo: g.maLo,
     loaiCsr: g.loaiCsr,
     boc: g.boc,
@@ -5136,49 +5140,47 @@ export default function ProductPage() {
         ) : null;
       })()}
 
+      {/* Bộ lọc — FilterBar layout="grid" (rule 29 mục A.1) */}
       <FilterBar
+        layout="grid"
         activeCount={
           [search, filterDC, filterLoai, filterBoc, filterTT, filterCa].filter(Boolean).length +
           (filterGhiChu.length > 0 ? 1 : 0) +
           (isDateFilterCustom ? 1 : 0)
         }
       >
-        <div className="flex items-center gap-2 flex-1 min-w-48">
-          <Search size={15} className="text-slate-400" />
+        <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-mod-600 sm:col-span-2">
+          <Search size={15} className="shrink-0 text-slate-400" />
           <input
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-            }}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Tìm mã lô, ngăn..."
-            className="flex-1 text-sm outline-none"
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none"
           />
+          {search && (
+            <button type="button" onClick={() => setSearch("")} aria-label="Xóa ô tìm" className="shrink-0 text-slate-400 hover:text-slate-600">
+              <X size={14} />
+            </button>
+          )}
         </div>
         <input
           type="date"
           value={filterFrom}
-          onChange={(e) => {
-            setFilterFrom(e.target.value);
-          }}
+          onChange={(e) => setFilterFrom(e.target.value)}
           title="Từ ngày"
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
         />
-        <span className="text-slate-400 text-sm">→</span>
         <input
           type="date"
           value={filterTo}
-          onChange={(e) => {
-            setFilterTo(e.target.value);
-          }}
+          onChange={(e) => setFilterTo(e.target.value)}
           title="Đến ngày"
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
         />
         <select
           value={filterDC}
-          onChange={(e) => {
-            setFilterDC(e.target.value);
-          }}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+          onChange={(e) => setFilterDC(e.target.value)}
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
         >
           <option value="">Tất cả dây chuyền</option>
           <option value={DAY_CHUYEN_TAP}>{DAY_CHUYEN_TAP}</option>
@@ -5186,10 +5188,8 @@ export default function ProductPage() {
         </select>
         <select
           value={filterLoai}
-          onChange={(e) => {
-            setFilterLoai(e.target.value);
-          }}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+          onChange={(e) => setFilterLoai(e.target.value)}
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
         >
           <option value="">Tất cả loại CSR</option>
           {filterLoaiOptions.map((l) => (
@@ -5200,10 +5200,8 @@ export default function ProductPage() {
         </select>
         <select
           value={filterBoc}
-          onChange={(e) => {
-            setFilterBoc(e.target.value);
-          }}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+          onChange={(e) => setFilterBoc(e.target.value)}
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
         >
           <option value="">Tất cả loại bọc</option>
           {filterBocOptions.map((b) => (
@@ -5214,10 +5212,8 @@ export default function ProductPage() {
         </select>
         <select
           value={filterTT}
-          onChange={(e) => {
-            setFilterTT(e.target.value);
-          }}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+          onChange={(e) => setFilterTT(e.target.value)}
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
         >
           <option value="">Tất cả trạng thái</option>
           {TRANG_THAI_OPTS.map((t) => (
@@ -5226,10 +5222,8 @@ export default function ProductPage() {
         </select>
         <select
           value={filterCa}
-          onChange={(e) => {
-            setFilterCa(e.target.value);
-          }}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+          onChange={(e) => setFilterCa(e.target.value)}
+          className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-mod-600"
         >
           <option value="">Tất cả ca</option>
           {CA_OPTS.map((c) => (
@@ -5245,33 +5239,28 @@ export default function ProductPage() {
           labels={{ [EMPTY_NOTE_FILTER]: "Không có ghi chú" }}
           placeholder="Tất cả ghi chú"
           searchPlaceholder="Tìm ghi chú..."
-          className="min-w-64"
+          fullWidth
         />
-        {(filterLoai ||
-          filterBoc ||
-          filterTT ||
-          filterCa ||
-          filterGhiChu.length > 0 ||
-          isDateFilterCustom ||
-          search ||
-          filterDC) && (
-          <button
-            onClick={() => {
-              setFilterLoai("");
-              setFilterBoc("");
-              setFilterTT("");
-              setFilterCa("");
-              setFilterGhiChu([]);
-              setFilterFrom(defaultDateRange.from);
-              setFilterTo(defaultDateRange.to);
-              setSearch("");
-              setFilterDC("");
-            }}
-            className="flex items-center gap-1 text-sm text-slate-500 hover:text-red-500"
-          >
-            <X size={14} /> Xóa lọc
-          </button>
-        )}
+        <button
+          type="button"
+          disabled={
+            !(filterLoai || filterBoc || filterTT || filterCa || filterGhiChu.length > 0 || isDateFilterCustom || search || filterDC)
+          }
+          onClick={() => {
+            setFilterLoai("");
+            setFilterBoc("");
+            setFilterTT("");
+            setFilterCa("");
+            setFilterGhiChu([]);
+            setFilterFrom(defaultDateRange.from);
+            setFilterTo(defaultDateRange.to);
+            setSearch("");
+            setFilterDC("");
+          }}
+          className="flex h-10 w-full items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 hover:border-red-300 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-600"
+        >
+          <X size={14} /> Xóa lọc
+        </button>
       </FilterBar>
 
       <div className="pb-32">
@@ -5480,7 +5469,7 @@ export default function ProductPage() {
                                       </span>
                                     )}
                                   </div>
-                                  <table className="enterprise-table dense min-w-[720px] rounded-lg border border-slate-200 bg-white">
+                                  <table className="enterprise-table dense min-w-[800px] rounded-lg border border-slate-200 bg-white">
                                     <thead>
                                       <tr>
                                         {deleteMode === date && <th className="w-10" />}
@@ -5491,6 +5480,7 @@ export default function ProductPage() {
                                         <th className="text-right">SL thực tế ca này</th>
                                         <th>Kiện (A/B/C/D) thời điểm</th>
                                         <th>Trạng thái</th>
+                                        <th className="text-right">Thao tác</th>
                                       </tr>
                                     </thead>
                                     <tbody>
@@ -5570,6 +5560,13 @@ export default function ProductPage() {
                                             </td>
                                             <td>
                                               <StatusBadge domain="lot" status={normalizeLotStatus(g.trangThai)} size="xs" />
+                                            </td>
+                                            <td className="text-right">
+                                              <RowAction
+                                                kind="view"
+                                                label={`Xem chi tiết lô ${g.maLo}`}
+                                                href={`/dashboard/product/lot/${g.lotId}`}
+                                              />
                                             </td>
                                           </tr>
                                         );
