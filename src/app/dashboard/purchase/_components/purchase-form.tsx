@@ -193,6 +193,7 @@ export function ItemPicker({
           <span className="flex-1 min-w-0 truncate">
             <span className="font-mono text-xs text-slate-500 mr-1.5">{value.code}</span>
             <span className="font-semibold text-slate-800">{value.name}</span>
+            {value.nguon_tao === "bao_tri_gia_cong" && <span className="ml-1.5 text-[10px] font-bold text-violet-700 bg-violet-50 rounded px-1.5">Dịch vụ</span>}
           </span>
         ) : (
           <span className="flex-1 text-slate-400">— Chọn vật tư trong kho —</span>
@@ -240,6 +241,7 @@ export function ItemPicker({
                 >
                   <span className="font-mono text-xs text-slate-500 w-20 shrink-0 truncate">{it.code}</span>
                   <span className="flex-1 min-w-0 truncate text-slate-800">{it.name}</span>
+                  {it.nguon_tao === "bao_tri_gia_cong" && <span className="text-[10px] font-bold text-violet-700 bg-violet-50 rounded px-1.5 shrink-0">Dịch vụ</span>}
                   <span className="text-xs text-slate-400 shrink-0">{it.unit}</span>
                   {dup && <span className="text-[10px] text-amber-600 shrink-0">đã có dòng</span>}
                 </button>
@@ -737,7 +739,12 @@ export function PurchaseForm({
                 )
               })()}
 
-              {l.item_id && (
+              {l.item_id && items.find((i) => i.id === l.item_id)?.nguon_tao === "bao_tri_gia_cong" && (
+                <p className="mt-3 px-3 py-2 rounded-lg bg-violet-50 text-xs text-violet-800">
+                  Dịch vụ gia công ngoài — không qua kho, không có tồn kho. Sau khi duyệt, người đề nghị bấm “Xác nhận hoàn thành” thay cho nhập kho.
+                </p>
+              )}
+              {l.item_id && items.find((i) => i.id === l.item_id)?.nguon_tao !== "bao_tri_gia_cong" && (
                 <div className="mt-3">
                   {/* Thanh tiêu đề panel THAM KHẢO — cố ý khác hẳn ô nhập liệu để không bị nhầm. */}
                   <button

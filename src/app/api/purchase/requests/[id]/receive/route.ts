@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { findKtWarehouse, KT_WAREHOUSE_CODE } from "@/lib/maintenance-kt"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { scheduleModuleBroadcast } from "@/lib/signing/notify"
@@ -33,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { data: request } = await supabaseAdmin
       .from("purchase_requests")
-      .select("id, so, nam, nguoi_de_nghi_id, giam_doc_user_id, ke_toan_user_id, loai_tien, maintenance_record_id")
+      .select("id, so, nam, nguoi_de_nghi_id, giam_doc_user_id, ke_toan_user_id, loai_tien")
       .eq("id", id)
       .eq("factory_id", actor.factoryId)
       .maybeSingle()
@@ -44,14 +43,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: "Chỉ người đề nghị hoặc admin được ghi nhận mua" }, { status: 403 })
     }
 
-    // GĐ2g: phiếu lập từ biên bản bảo trì nhập cứng vào Kho tạm KT.
-    if (request.maintenance_record_id) {
-      const kt = await findKtWarehouse(actor.factoryId)
-      if (!kt) return NextResponse.json({ error: `Chưa có kho tạm mã ${KT_WAREHOUSE_CODE}` }, { status: 400 })
-      if (body.warehouseId !== kt.id) {
-        return NextResponse.json({ error: `Phiếu lập từ biên bản bảo trì phải nhập vào kho tạm ${KT_WAREHOUSE_CODE}` }, { status: 400 })
-      }
-    }
+    // Bước 2 (2026-10-18): phiếu lập từ biên bản bảo trì KHÔNG còn ép Kho tạm KT — chọn kho nào cũng
+    // được, biên bản tự tính tồn/xuất theo kho của lần nhập gần nhất (maintenance-kt.ts).
+    // Chỉ kiểm kho thuộc đúng nhà máy.
+    const { data: wh } = await supabaseAdmin
+      .from("inventory_warehouses").select("id").eq("id", String(body.warehouseId || "")).eq("factory_id", actor.factoryId).maybeSingle()
+    if (!wh) return NextResponse.json({ error: "Kho nhập không hợp lệ" }, { status: 400 })
 
     const ngay = /^\d{4}-\d{2}-\d{2}$/.test(String(body.ngay || "")) ? String(body.ngay) : getFactoryTodayISO()
     if (ngay > getFactoryTodayISO()) return NextResponse.json({ error: "Ngày nhập không được sau hôm nay" }, { status: 400 })

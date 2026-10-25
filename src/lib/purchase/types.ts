@@ -160,6 +160,25 @@ export type PurchaseEffectiveLine = {
   received: number
   adjusted: boolean
   pending_adjust: boolean
+  /** Dịch vụ gia công ngoài (inventory_items.la_dich_vu) — không nhập kho, chỉ "Xác nhận hoàn thành". */
+  la_dich_vu?: boolean
+}
+
+/** 1 lần "Xác nhận hoàn thành" dịch vụ gia công (bảng purchase_service_completions). */
+export type PurchaseServiceCompletionRow = {
+  id: string
+  line_id: string
+  item_name: string | null
+  unit: string | null
+  so_luong: number
+  don_gia: number
+  loai_tien: string | null
+  ngay: string
+  nha_cung_cap: string | null
+  ghi_chu: string | null
+  image_urls: string[]
+  created_by: string | null
+  created_at: string
 }
 
 export type PurchaseReceiptRow = {

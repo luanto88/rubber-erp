@@ -7914,3 +7914,15 @@ Trang chi tiết biên bản chế độ xem 70/30 + route `api/maintenance/reco
 ### U3 Kiểm nghiệm + dòng xổ Văn bản/ISO/Tổng quan Bảo trì (2026-10-14, chờ test tay)
 Bản chưa ký nhúng ở chi tiết Bảo trì/Điều xe (`DocViewer loadBytes`); trang mới
 `/dashboard/quality/[date]`. Chi tiết + bảng tình trạng: rule 29 mục F, G.
+
+## Cập nhật (2026-10-18) — Vật tư mua ngoài Bảo trì: Bước 1 xong (chờ test tay)
+
+Modal dùng chung `maintenance/_components/ext-material-modal.tsx` (biên bản + Cài đặt): gợi ý vật tư gần
+giống + lịch sử + "Dùng mã này", ảnh upload/chụp 1 ảnh, kho mặc định (mặc định KT). Không migration.
+Chi tiết: rule 14 mục cuối. Bước 2 (chọn kho nhập, gỡ ép KT) và Bước 3 (Gia công ngoài):
+`.claude/plans/ban-giao-vat-tu-mua-ngoai-buoc-2-3.md`.
+
+## Vật tư mua ngoài Bước 2–3 (2026-10-23, chờ test tay)
+Bước 2 chọn kho nhập (75ccb46) + Bước 3 Gia công ngoài (dịch vụ không qua kho, nút "Xác nhận hoàn thành" ở Đề
+nghị mua, ẩn dịch vụ khỏi kho). Migration `20261023_maintenance_service_items.sql` **chạy tay TRƯỚC deploy**.
+Chi tiết: rule 14 mục "Bước 2–3".

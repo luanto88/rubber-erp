@@ -7,7 +7,7 @@ import { fetchImageForPdf, isPdfImageFailure, type PdfImage, type PdfImageResult
 // ─── Types (mirror DB shape dùng bởi maintenance/print/page.tsx) ────────────
 
 export type MaterialRow = {
-  nguon: "trong_kho" | "ben_ngoai"
+  nguon: "trong_kho" | "ben_ngoai" | "gia_cong"
   ten_vat_tu: string
   dvt: string | null
   so_luong: number
@@ -1378,7 +1378,7 @@ function buildF06Rows(line: LineData): { rows: F06Row[]; grandTotal: number } {
       dvt: mat.dvt || "",
       so_luong: mat.so_luong,
       thanh_tien: mat.thanh_tien ? pdfMoney(mat.thanh_tien, mat.loai_tien || "USD") : "",
-      ghi_chu: mat.nguon === "ben_ngoai" ? "Mua ngoài" : "Kho",
+      ghi_chu: mat.nguon === "ben_ngoai" ? "Mua ngoài" : mat.nguon === "gia_cong" ? "Gia công ngoài" : "Kho",
     })
   }
   rows.push({

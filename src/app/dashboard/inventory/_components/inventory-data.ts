@@ -269,6 +269,8 @@ export async function loadInventoryAdminData() {
       .select("id, code, name, unit, specification, manages_lot, manages_expiry, min_stock, max_stock, opening_stock, category_id, default_warehouse_ids, uses_shared_oil_stock, is_active")
       .eq("factory_id", factoryId)
       .eq("is_active", true)
+      // Dịch vụ gia công ngoài không qua kho — không hiện ở Nhập/Xuất/Chuyển/Tồn.
+      .or("nguon_tao.is.null,nguon_tao.neq.bao_tri_gia_cong")
       .order("code"),
     supabase
       .from("inventory_item_warehouse_rules")

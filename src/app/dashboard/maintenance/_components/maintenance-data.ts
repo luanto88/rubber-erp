@@ -54,7 +54,7 @@ export type MaintenanceMaterial = {
   line_id: string
   record_id: string
   factory_id: string
-  nguon: "trong_kho" | "ben_ngoai"
+  nguon: "trong_kho" | "ben_ngoai" | "gia_cong"
   inventory_item_id: string | null
   ten_vat_tu: string
   dvt: string | null
