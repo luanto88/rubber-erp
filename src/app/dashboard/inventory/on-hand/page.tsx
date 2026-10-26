@@ -289,6 +289,18 @@ export default function InventoryOnHandPage() {
     })
   }, [categoryFilterSet, items, selectedCategoryIds.length, selectedWarehouseIds.length, stockBalances, warehouseFilterSet])
 
+  // Chế độ pallet: chỉ bật khi người dùng chọn phân loại có vật tư pallet hoặc chọn mã pallet cụ thể.
+  // Khi bật, dòng pallet không tách theo kho mà gộp 1 dòng/nhóm (pallet dùng theo TỔNG mọi kho).
+  const palletMode = useMemo(() => {
+    if (selectedCategoryIds.length === 0 && selectedItemIds.length === 0) return false
+    return items.some(
+      (item) =>
+        palletGroupOfItemCode(item.code) &&
+        (selectedCategoryIds.length === 0 || categoryFilterSet.has(item.category_id || "")) &&
+        (selectedItemIds.length === 0 || itemFilterSet.has(item.id)),
+    )
+  }, [categoryFilterSet, itemFilterSet, items, selectedCategoryIds.length, selectedItemIds.length])
+
   const onHandRows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
 
@@ -300,6 +312,7 @@ export default function InventoryOnHandPage() {
         if (!item || !warehouse) return null
         if (selectedCategoryIds.length > 0 && !categoryFilterSet.has(item.category_id || "")) return null
         if (selectedItemIds.length > 0 && !itemFilterSet.has(item.id)) return null
+        if (palletMode && palletGroupOfItemCode(item.code)) return null
 
         const rule = getRule(item.id, balance.warehouse_id, warehouseRules)
         const minStock = Number(rule?.min_stock ?? item.min_stock ?? 0)
@@ -363,6 +376,7 @@ export default function InventoryOnHandPage() {
     itemFilterSet,
     itemMap,
     lotBalances,
+    palletMode,
     periodKey,
     periodReady,
     periodTotals,
@@ -432,17 +446,13 @@ export default function InventoryOnHandPage() {
   ])
 
   // ── Pallet: tồn sổ sách + đang lưu dưới kiện TP + luồng trong kỳ (chỉ tính, không ghi phiếu) ──
-  const showPalletSection = useMemo(
-    () => items.some((item) => palletGroupOfItemCode(item.code)),
-    [items],
-  )
   const [palletFlow, setPalletFlow] = useState<PalletFlowResult | null>(null)
   const [palletLoading, setPalletLoading] = useState(false)
   const palletPeriodFrom = periodReady ? fromDate : ""
   const palletPeriodTo = periodReady ? toDate || getFactoryTodayISO() : ""
 
   useEffect(() => {
-    if (!factoryId || !showPalletSection) return
+    if (!factoryId || !palletMode) return
     let alive = true
     const run = async () => {
       try {
@@ -460,29 +470,78 @@ export default function InventoryOnHandPage() {
     return () => {
       alive = false
     }
-  }, [factoryId, palletPeriodFrom, palletPeriodTo, showPalletSection])
+  }, [factoryId, palletPeriodFrom, palletPeriodTo, palletMode])
 
-  // Pallet dùng theo TỔNG (mọi kho), không theo bộ lọc: Tổng sở hữu = sổ sách − mất XK từ mốc;
-  // Trống = Tổng sở hữu − Đang lưu dưới kiện TP.
-  const palletRows = useMemo(() => {
-    const hasItem = new Set<string>()
-    for (const item of items) {
-      const g = palletGroupOfItemCode(item.code)
-      if (g) hasItem.add(g.groupCode)
-    }
-    const flow = palletFlow?.success ? palletFlow.byGroup : {}
+  const palletReady = palletMode && !palletLoading && Boolean(palletFlow?.success)
+  const palletError = palletMode && !palletLoading && palletFlow && !palletFlow.success ? palletFlow.error : null
+
+  // 1 dòng / nhóm pallet, gộp MỌI kho (không theo bộ lọc Kho): Tổng sở hữu = sổ sách − mất XK từ mốc;
+  // Tồn trống = Tổng sở hữu − Đang lưu dưới kiện TP.
+  const palletTableRows = useMemo(() => {
+    if (!palletMode) return []
+    const normalizedSearch = search.trim().toLowerCase()
+    const flow = palletFlow?.success ? palletFlow.byGroup : null
+    const categorySelected = selectedCategoryIds.length > 0
+    const itemSelected = selectedItemIds.length > 0
+
     return PALLET_COMPONENT_ORDER.map((c) => {
       const { groupCode, itemCodes } = PALLET_COMPONENT_ITEMS[c]
-      const f = flow[groupCode]
-      const soSach = f?.soSach || 0
+      const label = PALLET_COMPONENT_LABEL[c]
+      const codeSet = new Set(itemCodes.map((x) => x.toUpperCase()))
+      const groupItems = items.filter((item) => codeSet.has(item.code.trim().toUpperCase()))
+      const matched = groupItems.filter(
+        (item) =>
+          (!categorySelected || categoryFilterSet.has(item.category_id || "")) &&
+          (!itemSelected || itemFilterSet.has(item.id)),
+      )
+      const f = flow?.[groupCode]
+      if (matched.length === 0) {
+        // Nhóm chưa có mã trong kho (vd PMB4): chỉ hiện khi lọc theo phân loại và có luồng pallet.
+        if (groupItems.length > 0 || !categorySelected || itemSelected) return null
+        if (!f || !(f.dangLuu || f.xuatLuu || f.traVe || f.matXuatKhau)) return null
+      }
+      if (normalizedSearch) {
+        const hay = [groupCode, label, ...itemCodes, ...groupItems.map((item) => item.name)].map((s) => s.toLowerCase())
+        if (!hay.some((s) => s.includes(normalizedSearch))) return null
+      }
+
+      const itemIdSet = new Set(groupItems.map((item) => item.id))
+      const byWarehouse = new Map<string, number>()
+      let localBook = 0
+      let closing = 0
+      let inQty = 0
+      let outQty = 0
+      for (const balance of stockBalances) {
+        if (!itemIdSet.has(balance.item_id)) continue
+        const qty = Number(balance.on_hand || 0)
+        localBook += qty
+        byWarehouse.set(balance.warehouse_id, (byWarehouse.get(balance.warehouse_id) || 0) + qty)
+        const totals = periodTotals.get(periodKey(balance.warehouse_id, balance.item_id))
+        closing += qty - (totals?.netAfter || 0)
+        inQty += totals?.inQty || 0
+        outQty += totals?.outQty || 0
+      }
+      const warehouseNote = [...byWarehouse]
+        .filter(([, qty]) => qty !== 0)
+        .map(([id, qty]) => `${warehouseMap.get(id)?.code || "?"} ${qty.toLocaleString("vi-VN")}`)
+        .join(" · ")
+
+      const soSach = f ? f.soSach : localBook
       const matTuMoc = f?.matTuMoc || 0
       const dangLuu = f?.dangLuu || 0
       const tongSoHuu = soSach - matTuMoc
       return {
+        id: `pallet-${groupCode}`,
         groupCode,
-        label: PALLET_COMPONENT_LABEL[c],
+        label,
         note: itemCodes.length > 1 ? `Gồm ${itemCodes.join(", ")}` : "",
-        hasBook: hasItem.has(groupCode),
+        hasBook: groupItems.length > 0,
+        itemIds: groupItems.map((item) => item.id),
+        linkCode: groupItems[0]?.code || null,
+        unit: groupItems[0]?.unit || "",
+        categoryName: groupItems[0]?.category_name || "Pallet",
+        warehouseNote,
+        period: periodReady ? { opening: closing - inQty + outQty, inQty, outQty, closing } : null,
         soSach,
         mocNgay: f?.mocNgay || null,
         matTuMoc,
@@ -493,8 +552,22 @@ export default function InventoryOnHandPage() {
         traVe: f?.traVe || 0,
         matXuatKhau: f?.matXuatKhau || 0,
       }
-    }).filter((r) => r.hasBook || r.soSach || r.dangLuu || r.xuatLuu || r.traVe || r.matXuatKhau)
-  }, [items, palletFlow])
+    }).filter((row): row is NonNullable<typeof row> => Boolean(row))
+  }, [
+    categoryFilterSet,
+    itemFilterSet,
+    items,
+    palletFlow,
+    palletMode,
+    periodKey,
+    periodReady,
+    periodTotals,
+    search,
+    selectedCategoryIds.length,
+    selectedItemIds.length,
+    stockBalances,
+    warehouseMap,
+  ])
 
   const searchSuggestions = useMemo(() => {
     const values = new Set<string>()
@@ -517,13 +590,13 @@ export default function InventoryOnHandPage() {
     const lotManagedCount = onHandRows.filter((row) => row.item.manages_lot || row.item.manages_expiry).length
 
     return {
-      trackedCount: onHandRows.length,
+      trackedCount: onHandRows.length + palletTableRows.length,
       lowCount,
       highCount,
       lotManagedCount,
       lotCount: lotRows.length,
     }
-  }, [lotRows.length, onHandRows])
+  }, [lotRows.length, onHandRows, palletTableRows.length])
 
   // ── Quét QR mã vật tư: quét liên tục, mỗi mã hợp lệ thêm vào bộ lọc "Mã vật tư" ──
   const handleScanDecoded = (text: string) => {
@@ -576,9 +649,15 @@ export default function InventoryOnHandPage() {
     const periodText = periodReady
       ? `Kỳ: ${fromDate ? fmt(fromDate) : "đầu kỳ"} – ${fmt(toDate || today)}`
       : `Tồn tại ngày ${fmt(today)}`
+    const withPallet = palletMode && palletTableRows.length > 0
     const head = ["STT", "Kho", "Phân loại", "Mã vật tư", "Tên vật tư", "ĐVT"]
     if (periodReady) head.push("Tồn đầu kỳ", "Nhập trong kỳ", "Xuất trong kỳ")
-    head.push("Tồn sổ sách", "Tồn thực tế", "Chênh lệch", "Ghi chú")
+    head.push("Tồn sổ sách")
+    if (withPallet) {
+      head.push("Đang lưu dưới kiện TP", "Mất XK từ mốc", "Tổng sở hữu", "Tồn trống")
+      if (periodReady) head.push("Xuất lưu trong kỳ", "Trả về (xuất rời)", "Mất do xuất khẩu")
+    }
+    head.push("Tồn thực tế", "Chênh lệch", "Ghi chú")
 
     const aoa: (string | number)[][] = [
       ["PHIẾU KIỂM TỒN KHO VẬT TƯ"],
@@ -587,10 +666,32 @@ export default function InventoryOnHandPage() {
       head,
     ]
     const bookCol = head.indexOf("Tồn sổ sách")
+    const emptyCol = head.indexOf("Tồn trống")
+    const actualCol = head.indexOf("Tồn thực tế")
     const colLetter = (index: number) => XLSX.utils.encode_col(index)
-    onHandRows.forEach((row, index) => {
+    // Cột đối chiếu của từng dòng: pallet so với Tồn trống (đếm pallet trống thực tế), còn lại so sổ sách.
+    const compareCols: number[] = []
+    let stt = 0
+    for (const row of palletTableRows) {
       const line: (string | number)[] = [
-        index + 1,
+        ++stt,
+        `Tổng mọi kho${row.warehouseNote ? ` (${row.warehouseNote})` : ""}`,
+        row.categoryName,
+        row.groupCode,
+        `${row.label}${row.note ? ` — ${row.note}` : ""}`,
+        row.unit,
+      ]
+      if (row.period) line.push(row.period.opening, row.period.inQty, row.period.outQty)
+      else if (periodReady) line.push("", "", "")
+      line.push(row.period ? row.period.closing : row.soSach, row.dangLuu, row.matTuMoc, row.tongSoHuu, row.trong)
+      if (periodReady) line.push(row.xuatLuu, row.traVe, row.matXuatKhau)
+      line.push("", "", "Đối chiếu với Tồn trống")
+      aoa.push(line)
+      compareCols.push(emptyCol)
+    }
+    for (const row of onHandRows) {
+      const line: (string | number)[] = [
+        ++stt,
         `${row.warehouse.code} - ${row.warehouse.name}`,
         row.categoryName,
         row.item.code,
@@ -598,56 +699,26 @@ export default function InventoryOnHandPage() {
         row.item.unit,
       ]
       if (row.period) line.push(row.period.opening, row.period.inQty, row.period.outQty)
-      line.push(row.period ? row.period.closing : row.onHand, "", "", "")
+      line.push(row.period ? row.period.closing : row.onHand)
+      if (withPallet) line.push(...Array(periodReady ? 7 : 4).fill(""))
+      line.push("", "", "")
       aoa.push(line)
-    })
+      compareCols.push(bookCol)
+    }
 
     const sheet = XLSX.utils.aoa_to_sheet(aoa)
-    // Chênh lệch = Thực tế − Sổ sách (chỉ tính khi đã nhập số thực tế)
-    onHandRows.forEach((_, index) => {
+    // Chênh lệch = Thực tế − cột đối chiếu (chỉ tính khi đã nhập số thực tế)
+    compareCols.forEach((col, index) => {
       const r = index + 5 // dòng Excel (1-based): 4 dòng đầu là tiêu đề
-      const book = `${colLetter(bookCol)}${r}`
-      const actual = `${colLetter(bookCol + 1)}${r}`
-      sheet[`${colLetter(bookCol + 2)}${r}`] = { t: "n", f: `IF(${actual}="","",${actual}-${book})` }
+      const ref = `${colLetter(col)}${r}`
+      const actual = `${colLetter(actualCol)}${r}`
+      sheet[`${colLetter(actualCol + 1)}${r}`] = { t: "n", f: `IF(${actual}="","",${actual}-${ref})` }
     })
     sheet["!cols"] = head.map((h) =>
-      ({ wch: h === "Tên vật tư" ? 36 : h === "Kho" ? 22 : h === "Phân loại" ? 20 : h === "Ghi chú" ? 24 : 12 }),
+      ({ wch: h === "Tên vật tư" ? 36 : h === "Kho" ? 28 : h === "Phân loại" ? 20 : h === "Ghi chú" ? 24 : 12 }),
     )
     const book = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(book, sheet, "Kiem ton")
-    if (showPalletSection && palletFlow?.success && palletRows.length > 0) {
-      const pHead = [
-        "Mã",
-        "Pallet",
-        "Ghi chú",
-        "Sổ sách (mọi kho)",
-        "Mốc kiểm kê",
-        "Mất XK từ mốc",
-        "Tổng sở hữu",
-        "Đang lưu dưới kiện TP",
-        "Trống trong kho",
-      ]
-      if (periodReady) pHead.push("Xuất lưu trong kỳ", "Trả về (xuất rời)", "Mất do xuất khẩu")
-      const pAoa: (string | number)[][] = [["TỒN PALLET"], [periodText], [], pHead]
-      for (const r of palletRows) {
-        const line: (string | number)[] = [
-          r.groupCode,
-          r.label,
-          r.note,
-          r.soSach,
-          r.mocNgay ? fmt(r.mocNgay) : "",
-          r.matTuMoc,
-          r.tongSoHuu,
-          r.dangLuu,
-          r.trong,
-        ]
-        if (periodReady) line.push(r.xuatLuu, r.traVe, r.matXuatKhau)
-        pAoa.push(line)
-      }
-      const pSheet = XLSX.utils.aoa_to_sheet(pAoa)
-      pSheet["!cols"] = pHead.map((h) => ({ wch: h === "Pallet" ? 22 : h === "Ghi chú" ? 18 : 16 }))
-      XLSX.utils.book_append_sheet(book, pSheet, "Pallet")
-    }
     XLSX.writeFile(book, `kiem-ton-kho-${today}.xlsx`)
   }
 
@@ -666,7 +737,12 @@ export default function InventoryOnHandPage() {
             label="Xuất file kiểm tồn"
             tone="emerald"
             title="Xuất Excel kiểm tồn theo bộ lọc hiện tại (có cột Tồn thực tế + Chênh lệch)"
-            disabled={loading || onHandRows.length === 0 || (periodActive && !periodReady)}
+            disabled={
+              loading ||
+              (onHandRows.length === 0 && palletTableRows.length === 0) ||
+              (periodActive && !periodReady) ||
+              (palletMode && !palletReady)
+            }
             onClick={exportStockCount}
           />
           {hasSelection ? (
@@ -897,99 +973,6 @@ export default function InventoryOnHandPage() {
         }
       />
 
-      {showPalletSection ? (
-        <ScrollRevealSection className="relative z-0">
-          <ResponsiveTableWrapper>
-            <div className="border-b border-slate-200 px-4 py-3">
-              <h2 className="text-base font-bold text-slate-800">Tồn pallet (tính theo tổng mọi kho)</h2>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Pallet dùng theo tổng, không theo kho — không phụ thuộc bộ lọc Kho/Phân loại/Mã vật tư. Tổng sở hữu = sổ
-                sách mọi kho − pallet mất do xuất khẩu kể từ mốc (phiếu nhập đầu tiên). Trống trong kho = Tổng sở hữu −
-                đang lưu dưới kiện thành phẩm; pallet xuất rời / PE trả về tự quay lại phần trống. Hình thức xuất cấu
-                hình ở Cài đặt → Cấu hình nhà máy → Loại pallet xuất. Số liệu chỉ tính, không tự tạo phiếu kho.
-              </p>
-            </div>
-            {palletLoading && !palletFlow ? (
-              <div className="p-8 text-center text-sm text-slate-400">Đang tính pallet...</div>
-            ) : palletFlow && !palletFlow.success ? (
-              <div className="p-4 text-sm font-semibold text-rose-600">Không tính được pallet: {palletFlow.error}</div>
-            ) : (
-              <>
-                <table className="enterprise-table dense min-w-[900px]">
-                  <thead>
-                    <tr>
-                      <th>Mã</th>
-                      <th>Pallet</th>
-                      <th className="text-right">Sổ sách (mọi kho)</th>
-                      <th className="text-right">Mất XK từ mốc</th>
-                      <th className="text-right">Tổng sở hữu</th>
-                      <th className="text-right">Đang lưu dưới kiện TP</th>
-                      <th className="text-right">Trống trong kho</th>
-                      {periodReady ? (
-                        <>
-                          <th className="text-right">Xuất lưu trong kỳ</th>
-                          <th className="text-right">Trả về (xuất rời)</th>
-                          <th className="text-right">Mất do xuất khẩu</th>
-                        </>
-                      ) : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {palletRows.map((r) => (
-                      <tr key={r.groupCode}>
-                        <td className="font-bold text-slate-700">{r.groupCode}</td>
-                        <td>
-                          <div className="text-slate-700">{r.label}</div>
-                          {r.note ? <div className="text-xs text-slate-400">{r.note}</div> : null}
-                          {!r.hasBook ? <div className="text-xs text-amber-600">Chưa có mã trong kho vật tư</div> : null}
-                        </td>
-                        <td className="text-right">{r.soSach.toLocaleString("vi-VN")}</td>
-                        <td className="text-right text-rose-700">
-                          {r.matTuMoc.toLocaleString("vi-VN")}
-                          <div className="text-[11px] text-slate-400">
-                            {r.mocNgay ? `từ ${r.mocNgay.split("-").reverse().join("/")}` : "chưa có phiếu nhập"}
-                          </div>
-                        </td>
-                        <td className="text-right font-semibold text-slate-800">{r.tongSoHuu.toLocaleString("vi-VN")}</td>
-                        <td className="text-right text-violet-700">{r.dangLuu.toLocaleString("vi-VN")}</td>
-                        <td className={`text-right font-bold ${r.trong < 0 ? "text-rose-600" : "text-emerald-700"}`}>
-                          {r.trong.toLocaleString("vi-VN")}
-                          {r.trong < 0 ? (
-                            <div className="text-[11px] font-semibold text-rose-500">Sổ sách thiếu — cần kiểm kê</div>
-                          ) : null}
-                        </td>
-                        {periodReady ? (
-                          <>
-                            <td className="text-right text-amber-700">{r.xuatLuu.toLocaleString("vi-VN")}</td>
-                            <td className="text-right text-emerald-700">{r.traVe.toLocaleString("vi-VN")}</td>
-                            <td className="text-right text-rose-700">{r.matXuatKhau.toLocaleString("vi-VN")}</td>
-                          </>
-                        ) : null}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {palletFlow?.success && (palletFlow.unknownKien > 0 || palletFlow.unknownExportTypes.length > 0) ? (
-                  <div className="space-y-1 border-t border-slate-100 px-4 py-2 text-xs text-amber-700">
-                    {palletFlow.unknownKien > 0 ? (
-                      <div>
-                        {palletFlow.unknownKien} kiện còn tồn chưa quy đổi được pallet ({palletFlow.unknownLabels.join(", ")}).
-                      </div>
-                    ) : null}
-                    {palletFlow.unknownExportTypes.length > 0 ? (
-                      <div>
-                        Loại pallet xuất chưa khai báo (tạm tính như xuất khẩu dạng kiện):{" "}
-                        {palletFlow.unknownExportTypes.join(", ")}.
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </>
-            )}
-          </ResponsiveTableWrapper>
-        </ScrollRevealSection>
-      ) : null}
-
       <ScrollRevealSection className="relative z-0">
         <ResponsiveTableWrapper>
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
@@ -1001,9 +984,33 @@ export default function InventoryOnHandPage() {
           </div>
         </div>
 
+        {palletMode ? (
+          <div className="space-y-1 border-b border-slate-100 bg-violet-50/50 px-4 py-2 text-xs text-slate-600">
+            <div>
+              <span className="font-bold text-violet-700">Pallet dùng theo tổng mọi kho</span> (không theo bộ lọc
+              Kho) — mỗi loại 1 dòng. Tổng sở hữu = sổ sách mọi kho − pallet mất do xuất khẩu kể từ mốc (phiếu nhập
+              đầu tiên). Tồn trống = Tổng sở hữu − đang lưu dưới kiện thành phẩm; pallet xuất rời / PE trả về tự quay
+              lại phần trống. Hình thức xuất cấu hình ở Cài đặt → Cấu hình nhà máy → Loại pallet xuất. Chỉ tính, không
+              tự tạo phiếu kho.
+            </div>
+            {palletLoading ? <div className="text-slate-500">Đang tính pallet...</div> : null}
+            {palletError ? <div className="font-semibold text-rose-600">Không tính được pallet: {palletError}</div> : null}
+            {palletReady && palletFlow?.success && palletFlow.unknownKien > 0 ? (
+              <div className="text-amber-700">
+                {palletFlow.unknownKien} kiện còn tồn chưa quy đổi được pallet ({palletFlow.unknownLabels.join(", ")}).
+              </div>
+            ) : null}
+            {palletReady && palletFlow?.success && palletFlow.unknownExportTypes.length > 0 ? (
+              <div className="text-amber-700">
+                Loại pallet xuất chưa khai báo (tạm tính như xuất khẩu dạng kiện): {palletFlow.unknownExportTypes.join(", ")}.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {loading ? (
           <div className="p-12 text-center text-slate-400">Đang tải...</div>
-        ) : onHandRows.length === 0 ? (
+        ) : onHandRows.length === 0 && palletTableRows.length === 0 ? (
           <div className="p-12 text-center text-slate-400">
             <Warehouse size={40} className="mx-auto mb-3 opacity-30" />
             <p>Không có dữ liệu tồn kho phù hợp</p>
@@ -1021,6 +1028,15 @@ export default function InventoryOnHandPage() {
                     "Đơn vị",
                     ...(periodReady ? ["Tồn đầu kỳ", "Nhập trong kỳ", "Xuất trong kỳ", "Tồn cuối kỳ"] : []),
                     "Tồn hiện tại",
+                    ...(palletMode
+                      ? [
+                          "Đang lưu dưới kiện TP",
+                          "Mất XK từ mốc",
+                          "Tổng sở hữu",
+                          "Tồn trống",
+                          ...(periodReady ? ["Xuất lưu trong kỳ", "Trả về (xuất rời)", "Mất do xuất khẩu"] : []),
+                        ]
+                      : []),
                     "Min",
                     "Max",
                     "Số lô",
@@ -1036,6 +1052,105 @@ export default function InventoryOnHandPage() {
                 </tr>
               </thead>
               <tbody>
+                {palletTableRows.map((row) => {
+                  const selected = row.itemIds.length > 0 && row.itemIds.every((id) => selectedItemIds.includes(id))
+                  const num = (n: number) => (palletReady ? n.toLocaleString("vi-VN") : "Đang tính…")
+                  return (
+                    <tr
+                      key={row.id}
+                      className={`border-t border-slate-100 transition-colors duration-150 ${
+                        row.itemIds.length > 0 ? "cursor-pointer" : ""
+                      } ${selected ? "bg-emerald-50 hover:bg-emerald-100" : "bg-violet-50/30 hover:bg-violet-50"}`}
+                      onClick={() => {
+                        if (row.itemIds.length === 0) return
+                        setSelectedItemIds((prev) =>
+                          selected ? prev.filter((id) => !row.itemIds.includes(id)) : [...new Set([...prev, ...row.itemIds])],
+                        )
+                      }}
+                      title={selected ? "Bấm để bỏ lọc nhóm pallet" : "Bấm để thêm nhóm pallet vào bộ lọc"}
+                    >
+                      <td className="px-4 py-3 text-slate-600">
+                        <div className="font-semibold text-slate-700">Tổng mọi kho</div>
+                        <div className="text-xs text-slate-500">{row.warehouseNote || "Chưa có tồn sổ sách"}</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{row.categoryName}</td>
+                      <td className="px-4 py-3">
+                        {row.linkCode && row.itemIds.length === 1 ? (
+                          <Link
+                            href={`/dashboard/inventory/item?code=${encodeURIComponent(row.linkCode)}`}
+                            onClick={(event) => event.stopPropagation()}
+                            className="font-bold text-slate-700 transition hover:text-emerald-700"
+                          >
+                            {row.groupCode}
+                          </Link>
+                        ) : (
+                          <span className="font-bold text-slate-700">{row.groupCode}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {row.label}
+                        {row.note ? <div className="text-[11px] text-slate-400">{row.note}</div> : null}
+                        {!row.hasBook ? <div className="text-[11px] text-amber-600">Chưa có mã trong kho vật tư</div> : null}
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{row.unit || "—"}</td>
+                      {periodReady ? (
+                        row.period ? (
+                          <>
+                            <td className="px-4 py-3 text-right text-slate-600">{row.period.opening.toLocaleString("vi-VN")}</td>
+                            <td className="px-4 py-3 text-right text-emerald-700">{row.period.inQty.toLocaleString("vi-VN")}</td>
+                            <td className="px-4 py-3 text-right text-amber-700">{row.period.outQty.toLocaleString("vi-VN")}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-slate-800">{row.period.closing.toLocaleString("vi-VN")}</td>
+                          </>
+                        ) : (
+                          <td colSpan={4} />
+                        )
+                      ) : null}
+                      <td className="px-4 py-3 font-semibold text-slate-800">
+                        {row.soSach.toLocaleString("vi-VN")}
+                        <div className="text-[11px] font-normal text-slate-400">sổ sách</div>
+                      </td>
+                      <td className="px-4 py-3 text-right text-violet-700">{num(row.dangLuu)}</td>
+                      <td className="px-4 py-3 text-right text-rose-700">
+                        {num(row.matTuMoc)}
+                        <div className="text-[11px] text-slate-400">
+                          {row.mocNgay ? `từ ${row.mocNgay.split("-").reverse().join("/")}` : "chưa có phiếu nhập"}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-800">{num(row.tongSoHuu)}</td>
+                      <td
+                        className={`px-4 py-3 text-right font-bold ${
+                          palletReady && row.trong < 0 ? "text-rose-600" : "text-emerald-700"
+                        }`}
+                      >
+                        {num(row.trong)}
+                      </td>
+                      {periodReady ? (
+                        <>
+                          <td className="px-4 py-3 text-right text-amber-700">{num(row.xuatLuu)}</td>
+                          <td className="px-4 py-3 text-right text-emerald-700">{num(row.traVe)}</td>
+                          <td className="px-4 py-3 text-right text-rose-700">{num(row.matXuatKhau)}</td>
+                        </>
+                      ) : null}
+                      <td className="px-4 py-3 text-slate-400">—</td>
+                      <td className="px-4 py-3 text-slate-400">—</td>
+                      <td className="px-4 py-3 text-slate-400">—</td>
+                      <td className="px-4 py-3 text-slate-400">—</td>
+                      <td className="px-4 py-3">
+                        {palletReady ? (
+                          <span
+                            className={`rounded-full px-2 py-1 text-xs font-bold ${
+                              row.trong < 0 ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-700"
+                            }`}
+                          >
+                            {row.trong < 0 ? "Cần kiểm kê" : "An toàn"}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
                 {onHandRows.map((row) => (
                   <tr
                     key={row.id}
@@ -1066,7 +1181,7 @@ export default function InventoryOnHandPage() {
                       {row.item.name}
                       {palletGroupOfItemCode(row.item.code) ? (
                         <div className="text-[11px] text-slate-400">
-                          Sổ sách theo kho — tồn trống thật xem khối Tồn pallet
+                          Sổ sách theo kho — chọn phân loại Pallet các loại để xem tồn trống
                         </div>
                       ) : null}
                     </td>
@@ -1080,6 +1195,13 @@ export default function InventoryOnHandPage() {
                       </>
                     ) : null}
                     <td className="px-4 py-3 font-semibold text-slate-800">{row.onHand.toLocaleString("vi-VN")}</td>
+                    {palletMode
+                      ? Array.from({ length: periodReady ? 7 : 4 }, (_, i) => (
+                          <td key={`pl-${i}`} className="px-4 py-3 text-right text-slate-300">
+                            —
+                          </td>
+                        ))
+                      : null}
                     <td className="px-4 py-3 text-slate-500">{row.minStock.toLocaleString("vi-VN")}</td>
                     <td className="px-4 py-3 text-slate-500">{row.maxStock.toLocaleString("vi-VN")}</td>
                     <td className="px-4 py-3 text-slate-500">{row.lotCount.toLocaleString("vi-VN")}</td>
