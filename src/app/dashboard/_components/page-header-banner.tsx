@@ -150,6 +150,8 @@ export function PageHeaderBanner({
     if (!collapsible) return
     try {
       const saved = localStorage.getItem(actualKey)
+      // Đọc localStorage SAU khi mount là có chủ đích: đọc lúc render sẽ lệch HTML server ↔ client (hydration).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (saved === "true") setCollapsed(true)
     } catch {
       // Ignore localStorage errors

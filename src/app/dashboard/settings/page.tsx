@@ -29,6 +29,7 @@ import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import { ShiftNamesTab } from "./_components/shift-names-tab"
 import { OpeningStockTab } from "./_components/opening-stock-tab"
+import { ExportPalletTypesTab } from "./_components/export-pallet-types-tab"
 import { Kpi5sLocationsTab } from "./_components/kpi-5s-locations-tab"
 import { Kpi5sZonesTab } from "./_components/kpi-5s-zones-tab"
 import { KpiCriteriaTab } from "./_components/kpi-criteria-tab"
@@ -220,7 +221,7 @@ type VanBanDocumentTypeRow = {
   is_active: boolean
 }
 
-type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments" | "opening-stock"
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments" | "opening-stock" | "export-pallet-types"
 
 type MaintenanceTab = "assets" | "staff" | "vehicles" | "ext-materials"
 
@@ -824,6 +825,11 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
       filename: "ton_dau_ky_thanh_pham.csv",
       rows: [],
     },
+    "export-pallet-types": {
+      // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
+      filename: "loai_pallet_xuat.csv",
+      rows: [],
+    },
   }
   const cfg = cfgs[tab]
   const blob = new Blob(["﻿" + cfg.rows.join("\r\n")], { type: "text/csv;charset=utf-8" })
@@ -1248,7 +1254,7 @@ export default function SettingsPage() {
       }
 
       // Tra cứu phòng ban từ profiles liên kết để dự phòng khi bảng maintenance_staff chưa có cột
-      const linkedProfileIds = (sRes.data || []).map((s: any) => s.profile_id).filter(Boolean) as string[]
+      const linkedProfileIds = ((sRes.data || []) as { profile_id: string | null }[]).map((s) => s.profile_id).filter(Boolean) as string[]
       const profileDeptMap = new Map<string, { department: string | null; department_id: string | null }>()
       if (linkedProfileIds.length > 0) {
         const { data: linkedProfs } = await supabase.from("profiles").select("id, department, department_id").in("id", linkedProfileIds)
@@ -1264,8 +1270,8 @@ export default function SettingsPage() {
         const linkedDept = staff.profile_id ? profileDeptMap.get(staff.profile_id) : null
         return {
           ...staff,
-          phong_ban: (staff as any).phong_ban || linkedDept?.department || null,
-          department_id: (staff as any).department_id || linkedDept?.department_id || null,
+          phong_ban: (staff as { phong_ban?: string | null }).phong_ban || linkedDept?.department || null,
+          department_id: (staff as { department_id?: string | null }).department_id || linkedDept?.department_id || null,
           group_ids: groups?.group_ids || [],
           group_names: groups?.group_names || [],
           primary_group_id: groups?.primary_group_id || null,
@@ -1399,7 +1405,7 @@ export default function SettingsPage() {
           if (!profileAvailability.ok) { setMaintError(profileAvailability.error); return }
         }
 
-        const payload: Record<string, any> = {
+        const payload: Record<string, unknown> = {
           factory_id: factoryId,
           profile_id: nextProfileId,
           ten: staffForm.ten.trim(),
@@ -3803,7 +3809,7 @@ export default function SettingsPage() {
                 <SlidersHorizontal size={16} className="text-amber-600" />
                 <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
               </div>
-              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && configTab !== "opening-stock" && (
+              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && configTab !== "opening-stock" && configTab !== "export-pallet-types" && (
                 <div className="flex flex-wrap items-center gap-2">
                   {configTab !== "forest-plots" && (
                     <>
@@ -3889,6 +3895,7 @@ export default function SettingsPage() {
                   { key: "quality-targets" as const, label: "Mục tiêu chất lượng" },
                   { key: "shift-assignments" as const, label: "Phân công trực ca" },
                   { key: "opening-stock" as const, label: "Tồn đầu kỳ thành phẩm" },
+                  { key: "export-pallet-types" as const, label: "Loại pallet xuất" },
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -4207,6 +4214,8 @@ export default function SettingsPage() {
                 <QualityTargetsTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "opening-stock" ? (
                 <OpeningStockTab factoryId={factoryId} canManage={canManageSettings} />
+              ) : configTab === "export-pallet-types" ? (
+                <ExportPalletTypesTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "shift-assignments" ? (
                 <ShiftAssignmentsTab
                   factoryId={factoryId}

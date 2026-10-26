@@ -53,6 +53,7 @@ import {
   Map as MapIcon, Check, Printer, RefreshCw
 } from "lucide-react"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { QrScanButton, QrScanPortal } from "@/app/dashboard/_components/qr-scan-portal"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
@@ -193,6 +194,31 @@ export default function StoragePage() {
 
   // filters
   const [search, setSearch]     = useState("")
+  // Quét QR ở ô tìm (rule 29 mục D2): QR ngăn = /storage?id=&code= hoặc /dashboard/storage/{id}.
+  const [scanning, setScanning] = useState(false)
+  const handleStorageScan = (text: string) => {
+    setScanning(false)
+    const raw = text.trim()
+    const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+    let id: string | null = null
+    let code: string | null = null
+    try {
+      const u = new URL(raw, window.location.origin)
+      if (u.pathname === "/storage") {
+        id = u.searchParams.get("id")
+        code = u.searchParams.get("code")
+      } else if (u.pathname.startsWith("/dashboard/storage/")) {
+        id = u.pathname.match(uuid)?.[0] || null
+      }
+    } catch {
+      // không phải URL — dùng nguyên chuỗi làm từ khoá tìm
+    }
+    if (id && uuid.test(id)) {
+      window.location.assign(`/dashboard/storage/${id}`)
+      return
+    }
+    setSearch((code || raw).trim())
+  }
   const [filterTT, setFilterTT] = useState("")
   const [nganTab, setNganTab]   = useState<"active" | "history" | "print">("active")
   const [filterGhiChu, setFilterGhiChu] = useState<string[]>([])
@@ -721,7 +747,7 @@ export default function StoragePage() {
         },
         { tuoi: 0, kho: 0 },
       )
-      const payload: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         ...form,
         ten_ngan: normalizedPosition,
         trang_thai: trangThai,
@@ -1217,7 +1243,14 @@ export default function StoragePage() {
                 <X size={14} />
               </button>
             )}
+            <QrScanButton onClick={() => setScanning(true)} title={`Quét QR ${subTerm.toLowerCase()}`} />
           </div>
+          <QrScanPortal
+            open={scanning}
+            onClose={() => setScanning(false)}
+            onDecoded={handleStorageScan}
+            hintText={`Đưa camera vào mã QR dán tại ${subTerm.toLowerCase()}`}
+          />
           <select value={filterTT} onChange={e => setFilterTT(e.target.value)}
             disabled={nganTab === "history"}
             title={nganTab === "history" ? "Tab Lịch sử chỉ gồm ngăn Đã sản xuất" : undefined}

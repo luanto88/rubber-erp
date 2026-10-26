@@ -202,25 +202,23 @@ function DoiNguoiKyModal({
 
   const [selectedStepIdx, setSelectedStepIdx] = useState<number>(editableSteps[0]?.idx ?? currentStepIndex)
   const [selectedDept, setSelectedDept] = useState<string>("")
-  const [deptProfiles, setDeptProfiles] = useState<ProfileOption[]>([])
+  const [fetchedDeptProfiles, setFetchedDeptProfiles] = useState<ProfileOption[]>([])
   const [loadingDept, setLoadingDept] = useState(false)
+  // Chưa chọn phòng ban ⇒ toàn bộ nhân sự; có phòng ban ⇒ danh sách vừa tải theo phòng ban.
+  const deptProfiles = selectedDept ? fetchedDeptProfiles : allProfiles
   const [selectedUserId, setSelectedUserId] = useState<string>("")
   const [reason, setReason] = useState<string>("")
   const [err, setErr] = useState<string>("")
 
-  // Khi selectedDept đổi, fetch nhân sự phòng ban đó
+  // Khi selectedDept đổi, fetch nhân sự phòng ban đó (loadingDept bật sẵn ở onChange của ô chọn)
   useEffect(() => {
-    if (!selectedDept) {
-      setDeptProfiles(allProfiles)
-      return
-    }
+    if (!selectedDept) return
     let alive = true
-    setLoadingDept(true)
     fetch(`/api/documents/dept-users?factoryId=${factoryId}&dept=${encodeURIComponent(selectedDept)}&leadership=false`)
       .then((res) => res.json())
       .then((data: ProfileOption[]) => {
         if (alive && Array.isArray(data)) {
-          setDeptProfiles(data)
+          setFetchedDeptProfiles(data)
         }
       })
       .catch((e) => console.error("Lỗi tải danh sách theo phòng ban:", e))
@@ -228,7 +226,7 @@ function DoiNguoiKyModal({
         if (alive) setLoadingDept(false)
       })
     return () => { alive = false }
-  }, [factoryId, selectedDept, allProfiles])
+  }, [factoryId, selectedDept])
 
   const targetStep = steps[selectedStepIdx]
   const currentSignerName = targetStep?.ten || (targetStep?.user_id ? (allProfiles.find((p) => p.id === targetStep.user_id)?.full_name || targetStep.user_id) : "Chưa chỉ định")
@@ -307,6 +305,7 @@ function DoiNguoiKyModal({
             onChange={(e) => {
               setSelectedDept(e.target.value)
               setSelectedUserId("")
+              setLoadingDept(!!e.target.value)
             }}
             className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:border-emerald-500"
           >
@@ -2498,7 +2497,8 @@ export default function IsoFormInstancePage() {
           .in("loai_tai_lieu", keys)
           .limit(1)
         if (alive) {
-          const hasValidKhung = (data?.length ?? 0) > 0 && Array.isArray((data as any)[0]?.khung) && (data as any)[0].khung.length > 0
+          const khung = ((data || []) as { khung: unknown }[])[0]?.khung
+          const hasValidKhung = Array.isArray(khung) && khung.length > 0
           setTemplateExists(hasValidKhung)
         }
       } catch {

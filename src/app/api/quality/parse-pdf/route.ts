@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       let hasPerm = false
       if (userPerms && userPerms.length > 0) {
         hasPerm = userPerms.some(
-          (p: any) =>
+          (p: { permission_code: string; granted: boolean | null }) =>
             (p.permission_code === "quality.tech_support" || p.permission_code === "quality.import") &&
             p.granted === true,
         )
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
           .eq("role", profile.role)
 
         hasPerm = (rolePerms || []).some(
-          (p: any) => p.permission_code === "quality.tech_support" || p.permission_code === "quality.import",
+          (p: { permission_code: string }) => p.permission_code === "quality.tech_support" || p.permission_code === "quality.import",
         )
       }
 
@@ -97,10 +97,10 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json(result)
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[API parse-pdf error]:", err)
     return NextResponse.json(
-      { success: false, error: err.message || "Lỗi máy chủ khi xử lý biểu KQKN" },
+      { success: false, error: (err instanceof Error && err.message) || "Lỗi máy chủ khi xử lý biểu KQKN" },
       { status: 500 }
     )
   }

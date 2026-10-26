@@ -146,11 +146,11 @@ type Props = {
   factoryCode: string
   factoryLots?: FactoryLot[]
   existingQcRows?: ExistingQc[]
-  signingStatusByDate: Map<string, any>
+  signingStatusByDate: Map<string, unknown>
   onBack: () => void
   onSuccess: (count: number, batchPKN: number, ngayKN: string) => void
   showToast: (msg: string, ok?: boolean) => void
-  calcGrade: (samples: SampleMap, loaiCsr: string, tieuChuan: string) => { grade: any; dat_hang: string; trang_thai: string }
+  calcGrade: (samples: SampleMap, loaiCsr: string, tieuChuan: string) => { grade: Record<string, { dat: boolean; tb?: number; detail?: string }>; dat_hang: string; trang_thai: string }
   getNextPKN: (fid: string, year: number) => Promise<number>
   getNextLoKN: (fid: string) => Promise<number>
   normalizeLotCode: (maLo: string) => string
@@ -402,9 +402,9 @@ export function QualityConverterView({
 
       setParseResult(data)
       showToast(`Đã bóc tách thành công ${data.total_lots} lô từ biểu KQKN!`)
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
-      showToast("Lỗi phân tích: " + (e.message || String(e)), false)
+      showToast("Lỗi phân tích: " + ((e instanceof Error && e.message) || String(e)), false)
     } finally {
       setAnalyzing(false)
     }
@@ -433,8 +433,8 @@ export function QualityConverterView({
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
       showToast("Đã tải file Excel đối chiếu thành công!")
-    } catch (e: any) {
-      showToast("Lỗi tải file Excel: " + e.message, false)
+    } catch (e: unknown) {
+      showToast("Lỗi tải file Excel: " + (e instanceof Error ? e.message : String(e)), false)
     }
   }
 
@@ -547,9 +547,9 @@ export function QualityConverterView({
       } else {
         showToast("Không nhập được lô nào: " + errors.join("; "), false)
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e)
-      showToast("Lỗi ghi dữ liệu: " + (e.message || String(e)), false)
+      showToast("Lỗi ghi dữ liệu: " + ((e instanceof Error && e.message) || String(e)), false)
     } finally {
       setSavingToDb(false)
     }

@@ -151,7 +151,7 @@ export default function MaintenancePrintPage() {
               if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
               if (filterTo) recQ = recQ.lte("ngay", filterTo)
               const { data: chunkRecs } = await recQ
-              if (chunkRecs) recList.push(...(chunkRecs as any[]))
+              if (chunkRecs) recList.push(...(chunkRecs as typeof recList))
             }
 
             if (recList.length === 0) return []
@@ -274,7 +274,7 @@ export default function MaintenancePrintPage() {
                 if (filterFrom) recQ = recQ.gte("ngay", filterFrom)
                 if (filterTo) recQ = recQ.lte("ngay", filterTo)
                 const { data: chunkRecs } = await recQ
-                if (chunkRecs) recList.push(...(chunkRecs as any[]))
+                if (chunkRecs) recList.push(...(chunkRecs as typeof recList))
               }
 
               if (recList.length === 0) return []

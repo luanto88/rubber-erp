@@ -48,7 +48,7 @@ export async function assertShiftNotLocked(params: {
   if (isAdmin) return;
 
   throw new Error(
-    `Ca sản xuất ${params.ngaySx} - Ca ${params.ca} đã được duyệt & khóa. Liên hệ quản trị viên (module Thành phẩm) để mở khóa trước khi thao tác.`,
+    `Ca sản xuất ${params.ngaySx} - Ca ${params.ca} đã được phê duyệt. Liên hệ quản trị viên (module Thành phẩm) để hủy phê duyệt trước khi thao tác.`,
   );
 }
 

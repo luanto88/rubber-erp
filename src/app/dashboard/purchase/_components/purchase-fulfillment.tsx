@@ -202,8 +202,8 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
 type ReceiveDraftLine = { on: boolean; soLuong: string; donGia: string; lotNo: string; expiry: string; ghiChu: string }
 
 export function ReceiveModal({
-  detail, factoryId, onClose, onDone,
-}: { detail: PurchaseDetail; factoryId: string; onClose: () => void; onDone: (msg: string) => void }) {
+  detail, factoryId, onClose, onDone, stepLabel,
+}: { detail: PurchaseDetail; factoryId: string; onClose: () => void; onDone: (msg: string) => void; stepLabel?: string }) {
   const req = detail.request
   const lines = useMemo(
     () => detail.effectiveLines.filter((e) => remainingQty(e) > 0 && !e.pending_adjust && !e.la_dich_vu),
@@ -294,7 +294,7 @@ export function ReceiveModal({
 
   return (
     <ModalShell
-      title={`Ghi nhận mua / Nhập kho — ${formatSoPhieuFull(req.so, req.nam)}`}
+      title={`${stepLabel ? `${stepLabel} — Xác nhận nhập kho vật tư` : "Ghi nhận mua / Nhập kho"} — ${formatSoPhieuFull(req.so, req.nam)}`}
       onClose={onClose}
       maxWidth="4xl"
       closeOnBackdrop={false}
@@ -404,8 +404,8 @@ export function ReceiveModal({
 type ServiceDraftLine = { on: boolean; soLuong: string; donGia: string; ghiChu: string }
 
 export function CompleteServiceModal({
-  detail, factoryId, onClose, onDone,
-}: { detail: PurchaseDetail; factoryId: string; onClose: () => void; onDone: (msg: string) => void }) {
+  detail, factoryId, onClose, onDone, stepLabel,
+}: { detail: PurchaseDetail; factoryId: string; onClose: () => void; onDone: (msg: string) => void; stepLabel?: string }) {
   const req = detail.request
   const lines = useMemo(
     () => detail.effectiveLines.filter((e) => e.la_dich_vu && remainingQty(e) > 0 && !e.pending_adjust),
@@ -463,7 +463,7 @@ export function CompleteServiceModal({
 
   return (
     <ModalShell
-      title={`Xác nhận hoàn thành dịch vụ — ${formatSoPhieuFull(req.so, req.nam)}`}
+      title={`${stepLabel ? `${stepLabel} — Xác nhận hoàn thành gia công` : "Xác nhận hoàn thành dịch vụ"} — ${formatSoPhieuFull(req.so, req.nam)}`}
       onClose={onClose}
       maxWidth="3xl"
       closeOnBackdrop={false}

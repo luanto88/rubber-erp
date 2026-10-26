@@ -3,7 +3,7 @@
  * Prevents PostgREST default 1000-row silent truncation.
  */
 export async function fetchAllPaginated<T>(
-  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
   pageSize = 1000
 ): Promise<T[]> {
   const all: T[] = []

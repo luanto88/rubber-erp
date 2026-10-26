@@ -145,16 +145,25 @@ export async function buildShiftReport(shift: ShiftReportData): Promise<ShiftRep
 }
 
 /**
- * Mở Phiếu thành phẩm của 1 ngày: ngày đã khóa đủ ca + có bản cứng → mở bản cứng; đã khóa + chưa
- * có → dựng rồi lưu bản cứng; chưa khóa → dựng sống. `null` = ngày không có dữ liệu.
+ * Mở Phiếu thành phẩm của 1 ngày ở tab mới (xem `resolveShiftReport`). `null` = ngày không có dữ liệu.
  */
 export async function openShiftReport(factoryId: string, ngay: string): Promise<ShiftReportBundle | null> {
+  const bundle = await resolveShiftReport(factoryId, ngay);
+  if (bundle) openShiftReportPdfInNewTab(bundle.doc);
+  return bundle;
+}
+
+/**
+ * Lấy Phiếu thành phẩm của 1 ngày KHÔNG mở tab (dùng cho khung xem nhúng ở trang chi tiết ngày):
+ * ngày đã khóa đủ ca + có bản cứng → bản cứng; đã khóa + chưa có → dựng rồi lưu bản cứng; chưa khóa
+ * → dựng sống. `null` = ngày không có dữ liệu.
+ */
+export async function resolveShiftReport(factoryId: string, ngay: string): Promise<ShiftReportBundle | null> {
   const lockState = await loadReportLockState(factoryId, ngay);
   const saved = lockState?.fullyLocked ? lockState.current.F09 : undefined;
   if (saved) {
     try {
       const blob = await fetchSnapshotBlob(factoryId, saved.id);
-      openShiftReportPdfInNewTab(blob);
       return {
         doc: blob,
         fileName: saved.fileName,
@@ -181,10 +190,16 @@ export async function openShiftReport(factoryId: string, ngay: string): Promise<
   }
 }
 
+/** Bytes PDF của 1 bundle (cho `DocViewer loadBytes`). */
+export async function shiftBundleBytes(bundle: ShiftReportBundle): Promise<Uint8Array> {
+  return new Uint8Array(await pdfSourceToBlob(bundle.doc).arrayBuffer());
+}
+
 async function buildLiveShift(factoryId: string, ngay: string): Promise<ShiftReportBundle | null> {
   const shift = await loadShiftReport(factoryId, ngay);
   if (shift.sections.length === 0) return null;
-  return buildShiftReport(shift);
+  const doc = await buildShiftReportPdf(shift);
+  return { doc, fileName: buildShiftReportFileName(shift) };
 }
 
 // ── B. Báo cáo ngày F11 + F12 ────────────────────────────────────────────────────────────────────

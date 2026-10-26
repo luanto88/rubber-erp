@@ -447,6 +447,19 @@ export async function getPurchaseTasks(factoryId: string, user: SessionUser): Pr
     .eq("nguoi_de_nghi_id", user.id)
     .eq("trang_thai", "tra_ve")
   items.push({ label: "Phiếu của bạn bị trả về", count: count || 0, link: "/dashboard/purchase?tab=todo" })
+  // Phiếu của tôi đã duyệt còn dòng chưa nhập kho / chưa xác nhận gia công (sl_da_mua < so_luong).
+  // Đếm gần đúng theo bản chụp sl_da_mua — tab "Chờ tôi xử lý" tính chính xác ở server.
+  const { data: buying } = await supabase
+    .from("purchase_requests")
+    .select("id, purchase_request_lines(so_luong, sl_da_mua)")
+    .eq("factory_id", factoryId)
+    .eq("nguoi_de_nghi_id", user.id)
+    .eq("loai", "goc")
+    .in("trang_thai", ["da_duyet", "dang_mua"])
+  const fulfill = ((buying || []) as { purchase_request_lines: { so_luong: number | null; sl_da_mua: number | null }[] | null }[])
+    .filter((r) => (r.purchase_request_lines || []).some((l) => (Number(l.so_luong) || 0) > (Number(l.sl_da_mua) || 0)))
+    .length
+  items.push({ label: "Phiếu chờ bạn ghi nhận mua / xác nhận gia công", count: fulfill, link: "/dashboard/purchase?tab=todo" })
   return { moduleLabel: "Đề nghị mua vật tư", items }
 }
 

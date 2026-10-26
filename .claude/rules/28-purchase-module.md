@@ -229,3 +229,27 @@ Nay `Suggestion.binding`: chỉ giá của CHÍNH vật tư (lần mua gần nh�
 Dòng có vật tư `la_dich_vu` (`nguon_tao='bao_tri_gia_cong'`) không nhập kho: modal Ghi nhận mua bỏ qua, người đề
 nghị/admin dùng nút "Xác nhận hoàn thành" (`perms.canCompleteService`, bảng `purchase_service_completions`,
 log `hoan_thanh_dich_vu`). Xem rule 14 mục "Bước 2–3".
+
+## Panel chọn người ký khi gửi (2026-10-26, chờ test tay)
+- "Gửi ký duyệt" mà phiếu thiếu Giám đốc/Kế toán (luôn đúng với phiếu lập từ biên bản) hoặc người xem đang
+  nhận xử lý phiếu từ biên bản ⇒ mở `PurchaseApproverModal` (điền sẵn người đã lưu, trống thì
+  `defaultGiamDocId`/`defaultKeToanId` của `/api/purchase/approvers` — hiện là Tô Thành Luân / Neang Ry Ta).
+- Lưu qua route mới `PATCH /api/purchase/requests/[id]/approvers` (chỉ đổi 2 cột, KHÔNG xoá/chèn lại dòng
+  ⇒ giữ ảnh + bản chụp). Người gọi = người đề nghị, hoặc nhận xử lý (phiếu từ biên bản + `purchase.create`,
+  set người đề nghị + log `nhan_xu_ly`). Log `chon_nguoi_ky`. Rồi `submitPurchaseForSigning` như cũ.
+- Nút "Gửi ký duyệt" hiện khi `canSubmit || canTakeOver`. Form sửa phiếu cũng điền gợi ý khi approver NULL.
+
+## Sau duyệt: nhắc bước tiếp + wizard + tab Gia công ngoài (2026-10-26, chờ test tay)
+- `da_duyet` hiển thị "Đã duyệt · Chờ ghi nhận mua" tông pending (registry + `PURCHASE_STATUS_LABEL/CLASS`).
+- GET danh sách trả `nextStep` (`nhap_kho|gia_cong|ca_hai`, theo `sl_da_mua` + `la_dich_vu`) và `myFulfillTurn`
+  (người đề nghị/admin). Badge danh sách ghi "Đã duyệt · Chờ nhập kho / Chờ xác nhận gia công…", chip
+  "Tới lượt BẠN"; tab "Chờ tôi xử lý" gồm cả phiếu này; chuông thêm "Phiếu chờ bạn ghi nhận mua / xác nhận gia
+  công"; trang chi tiết có banner amber nhắc.
+- 2 nút cũ gộp 1: "Ghi nhận mua & hoàn thành" (wizard `FulfillStep`): Bước 1 nhập kho (`ReceiveModal`) →
+  Bước 2 gia công (`CompleteServiceModal`), tiêu đề "Bước i/n — Xác nhận nhập kho vật tư / hoàn thành gia
+  công"; xong bước 1 nạp lại phiếu rồi mở bước 2 nếu vẫn còn quyền. Kết thúc, phiếu từ biên bản không còn
+  phần chờ ⇒ thông báo "Bây giờ bạn có thể quay lại biên bản số … để gửi phê duyệt" (có link). Route
+  `receive`/`complete-service` không đổi.
+- Tab **"Gia công ngoài"** (`_components/service-completions-view.tsx`, API `GET /api/purchase/service-completions`):
+  lọc ngày/bộ phận/đơn vị gia công/tìm, tổng quy USD (tỷ giá nhà máy), link phiếu + biên bản, ảnh, xuất Excel.
+  Phạm vi: `purchase.view_all`/admin toàn nhà máy, còn lại phiếu mình liên quan.

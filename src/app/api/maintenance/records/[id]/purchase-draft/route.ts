@@ -115,6 +115,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const [status] = await computeKtStatuses(factoryId, id)
     const needs: Need[] = (status?.items || [])
+      // Dịch vụ gia công tính riêng ở khối bên dưới (cũng có trong status.items từ 2026-10-26).
+      .filter((it) => it.kind === "vat_tu")
       .map((it) => ({
         itemId: it.itemId, itemCode: it.itemCode, name: it.name, unit: it.unit,
         donGia: it.donGia, loaiTien: it.loaiTien, qty: Math.max(0, it.shortage - it.pendingRequested),

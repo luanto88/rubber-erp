@@ -1056,7 +1056,7 @@ export async function loadNganCumulativeBaselines(
   // 1 lần ở baselineKg và 1 lần ở vòng lặp cộng dồn từng kiện khi in nhãn.
   // Hiện tượng lỗi: Kiện đầu tiên vừa in đã bị cộng dồn lên 99% (ngang tỷ lệ ngăn hiện tại),
   // và đến kiện cuối cùng thì % vọt lên >200% làm bật cảnh báo vượt 110%.
-  let excludeRealLotIds: string[] = [];
+  const excludeRealLotIds: string[] = [];
   if (excludePredictionLotIds.length > 0) {
     for (let i = 0; i < excludePredictionLotIds.length; i += 200) {
       const chunk = excludePredictionLotIds.slice(i, i + 200);

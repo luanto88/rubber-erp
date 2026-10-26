@@ -60,9 +60,12 @@ export function ImageLightbox({
     setRotation(0)
   }, [])
 
-  useEffect(() => {
+  // Đổi ảnh ⇒ reset ngay trong lúc render (không dùng effect để tránh render dây chuyền)
+  const [lastIndex, setLastIndex] = useState(currentIndex)
+  if (lastIndex !== currentIndex) {
+    setLastIndex(currentIndex)
     resetTransform()
-  }, [currentIndex, resetTransform])
+  }
 
   // Prevent background scroll when lightbox is open
   useEffect(() => {

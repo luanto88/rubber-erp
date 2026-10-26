@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { X, Eye, ExternalLink, Trash2 } from "lucide-react"
 import {
   type WarehouseSlot,
@@ -247,12 +248,12 @@ export default function WarehouseSlotCell({
                           <X size={10} /> Dọn
                         </button>
                         {item.export_order_id && (
-                          <a
+                          <Link
                             href="/dashboard/export"
                             className="flex items-center gap-1 px-2 py-1 bg-blue-50 hover:bg-blue-100 rounded-lg text-blue-700 font-bold text-[10px] transition-colors"
                           >
                             <ExternalLink size={10} /> Đơn
-                          </a>
+                          </Link>
                         )}
                       </>
                     )}

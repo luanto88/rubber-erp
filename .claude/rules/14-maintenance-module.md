@@ -1344,3 +1344,17 @@ Kế hoạch đầy đủ: `.claude/plans/vat-tu-mua-ngoai-gia-cong-2026-10-18.m
     ItemPicker Đề nghị mua hiện nhãn "Dịch vụ", thay panel tồn kho bằng dòng giải thích.
 - Chống trùng mã vật tư: UNIQUE(factory_id, code) ở DB + API `external-items` chặn trùng mã/tên chuẩn hoá (409
   kèm `existing`) + modal khoá Lưu khi trùng tuyệt đối (kể cả vật tư ngừng dùng).
+
+## Chặn gửi ký khi gia công ngoài chưa hoàn thành (2026-10-26, chờ test tay)
+- `computeKtStatuses` nay đọc cả `nguon = 'gia_cong'`: mỗi dịch vụ thành 1 `KtItemStatus` `kind: "dich_vu"`
+  (need = SL biên bản; available = tổng `purchase_service_completions.so_luong` trên phiếu GỐC liên kết biên
+  bản, mọi trạng thái; không kho, không giữ chỗ). Vật tư qua kho là `kind: "vat_tu"`.
+- `totalShortage` cộng cả phần gia công chưa xong ⇒ `create-request` (409) + `ktBlockedReason` + banner
+  `KtShortageBanner` ("Chờ xác nhận gia công") tự chặn. Thông báo dùng `describeKtShortage`
+  (`src/lib/maintenance-kt-message.ts`, thuần). `purchase-draft` chỉ lấy `kind === "vat_tu"` từ status (dịch vụ
+  vẫn tính ở khối riêng — tránh trùng). Khối KT trang biên bản hiện dòng "Gia công · đã hoàn thành N".
+  Ví dụ dữ liệu thật: `DX-261026/001` có gia công chưa hoàn thành → từ nay không gửi ký được.
+
+## Sửa: mã tạo mới là Dịch vụ gia công ⇒ dòng tự thành "Gia công ngoài" (2026-10-27)
+`applyExtMatToLine` (`records/[id]/page.tsx`) đặt `nguon` theo `la_dich_vu` của mã vừa tạo/chọn ("Dùng mã này")
+— trước đây dòng giữ nguyên "Mua ngoài".

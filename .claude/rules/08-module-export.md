@@ -330,3 +330,12 @@ bản gốc ra `../rubber-erp-backups/export-orders-backup-*.json` trước khi 
   (xe, lô gán A-D, chỉ tiêu); phải `StatusSummaryBar domain="export"` → `SignActionBox` (Tải PDF, "Mở trong danh
   sách" `?search=<ma_don>`, Truy xuất EUDR) → Thông tin đơn. Duyệt/Sửa/Cấp quyền vẫn ở danh sách (duyệt có
   reconcile lô — không chép). Danh sách có `RowAction kind="view"` trỏ trang này.
+
+## Loại pallet xuất cấu hình theo nhà máy (2026-10-27, chờ test tay)
+- Bảng `export_pallet_types` (migration `20261027_export_pallet_types.sql`, **chạy tay**): `ten`, `hinh_thuc`
+  (`roi` = pallet trả về kho · `kien` = xuất khẩu, mất pallet của kiện · `boc_mang` = PE, pallet trả về, chỉ mất
+  `mat_thanh_phan` mỗi kiện 1 cái), `sort_order`, `is_active`. Seed: Rời, Pallet sắt đế gỗ, PE đế gỗ (mất đế gỗ),
+  PE đế nhựa (mất đế nhựa), Gỗ, MB4, MB5 + mọi loại đã dùng trên đơn cũ.
+- Quản trị: Cài đặt → Cấu hình nhà máy → **Loại pallet xuất** (`settings/_components/export-pallet-types-tab.tsx`).
+- Màn Xuất hàng đọc bảng này (bảng chưa có ⇒ danh sách mặc định cũ); nút "+" ghi thẳng vào bảng (hình thức mặc
+  định `kien`). Đã bỏ `PALLET_XUAT_BASE` cứng.

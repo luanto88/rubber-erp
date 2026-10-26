@@ -274,7 +274,19 @@ export default function MaintenanceHistoryPage() {
           }
 
           const recIds = recList.map((r) => r.id)
-          const lines: any[] = []
+          const lines: {
+            id: string
+            record_id: string
+            asset_id: string | null
+            dispatch_vehicle_id: string | null
+            ten_tb: string
+            ma_tb: string
+            noi_dung: string | null
+            cac_khac_phuc: string | null
+            chi_phi_dk: number | null
+            loai_tien: string | null
+            cong_tho: number | null
+          }[] = []
           for (let i = 0; i < recIds.length; i += 100) {
             const chunk = recIds.slice(i, i + 100)
             const { data: chunkLines } = await supabase
@@ -284,7 +296,7 @@ export default function MaintenanceHistoryPage() {
               )
               .in("record_id", chunk)
               .eq("factory_id", fid)
-            if (chunkLines) lines.push(...chunkLines)
+            if (chunkLines) lines.push(...(chunkLines as typeof lines))
           }
 
           const recMap = new Map(recList.map((r) => [r.id, r]))

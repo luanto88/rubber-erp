@@ -214,32 +214,37 @@ export function getKLFromTrip(trip: StorageTripItem, loaiNl: string) {
   }
 }
 
+/** Một dòng chuyến trong `dispatch_entries.rows` (JSONB — kiểu không cố định, đọc an toàn). */
+type TripSourceRow = Record<string, unknown>
+
+// Giữ đúng ngữ nghĩa cũ `String(x || "")` (vd ô ghi chú số 0 từ Excel → "").
+const strOf = (v: unknown) => String(v || "")
+const strList = (v: unknown) => (Array.isArray(v) ? v.map((item) => String(item || "").trim()).filter(Boolean) : [])
+
 function mapTripRow(
-  row: Record<string, any>,
+  row: TripSourceRow,
   ngay: string,
   dispatchEntryId?: string,
   chungNhan?: string,
 ): StorageTripItem {
-  const date =
-    row._date && /^\d{4}-\d{2}-\d{2}/.test(row._date)
-      ? row._date.slice(0, 10)
-      : toISODate(ngay)
-  const uid = row.uid || ""
-  const rowId = row.row_id || uid || ""
+  const rawDate = strOf(row._date)
+  const date = rawDate && /^\d{4}-\d{2}-\d{2}/.test(rawDate) ? rawDate.slice(0, 10) : toISODate(ngay)
+  const uid = strOf(row.uid)
+  const rowId = strOf(row.row_id) || uid || ""
   return {
     ref: buildDispatchTripRef({ dispatchEntryId, rowId, uid }),
     uid,
     row_id: rowId || undefined,
-    dispatch_entry_id: dispatchEntryId || row.dispatch_entry_id || undefined,
+    dispatch_entry_id: dispatchEntryId || strOf(row.dispatch_entry_id) || undefined,
     _date: date,
-    so_xe: row.so_xe || "",
+    so_xe: strOf(row.so_xe),
     chuyen: Number(row.chuyen) || 1,
-    tai_xe: row.tai_xe || "",
-    diem_gn: Array.isArray(row.diem_gn) ? row.diem_gn.map((item) => String(item || "").trim()).filter(Boolean) : [],
-    phien: Array.isArray(row.phien) ? row.phien.map((item) => String(item || "").trim()).filter(Boolean) : [],
-    lo_thu_hoach: Array.isArray(row.lo_thu_hoach) ? row.lo_thu_hoach.map((item) => String(item || "").trim()).filter(Boolean) : [],
+    tai_xe: strOf(row.tai_xe),
+    diem_gn: strList(row.diem_gn),
+    phien: strList(row.phien),
+    lo_thu_hoach: strList(row.lo_thu_hoach),
     doi: Array.isArray(row.doi) ? row.doi.map(Number).filter((n: number) => !isNaN(n)) : [],
-    chung_nhan: String(chungNhan || row.chung_nhan || "").trim(),
+    chung_nhan: String(chungNhan || strOf(row.chung_nhan)).trim(),
     kl_ct: Number(row.kl_ct) || 0,
     kl_ck: Number(row.kl_ck) || 0,
     kl_dct: Number(row.kl_dct) || 0,
@@ -250,8 +255,8 @@ function mapTripRow(
     kl_dk: Number(row.kl_dk) || 0,
     kl_mn: Number(row.kl_mn) || 0,
     kl_mnk: Number(row.kl_mnk) || 0,
-    ghi_chu: String(row.ghi_chu || "").trim(),
-    ghi_chu_tu_do: String(row.ghi_chu_tu_do || "").trim(),
+    ghi_chu: strOf(row.ghi_chu).trim(),
+    ghi_chu_tu_do: strOf(row.ghi_chu_tu_do).trim(),
   }
 }
 

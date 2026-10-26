@@ -345,10 +345,10 @@ export function PurchaseForm({
         setCategories((cats || []) as CategoryOpt[])
         setWarehouses((whs || []) as WarehouseOpt[])
         setApprovers(appr)
-        if (!existing) {
-          setGiamDocId((v) => v || appr.defaultGiamDocId || "")
-          setKeToanId((v) => v || appr.defaultKeToanId || "")
-        }
+        // Tạo mới hoặc phiếu đang sửa chưa có người ký (vd lập từ biên bản bảo trì): điền gợi ý mặc định,
+        // bỏ qua nếu trùng chính người đề nghị.
+        setGiamDocId((v) => v || (appr.defaultGiamDocId && appr.defaultGiamDocId !== userId ? appr.defaultGiamDocId : ""))
+        setKeToanId((v) => v || (appr.defaultKeToanId && appr.defaultKeToanId !== userId ? appr.defaultKeToanId : ""))
       } catch (err) {
         if (alive) setLoadError(err instanceof Error ? err.message : "Không tải được danh mục")
       } finally {
@@ -357,7 +357,7 @@ export function PurchaseForm({
     }
     void run()
     return () => { alive = false }
-  }, [factoryId, existing])
+  }, [factoryId, existing, userId])
 
   const patchLine = useCallback((key: string, patch: Partial<DraftLine>) => {
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)))

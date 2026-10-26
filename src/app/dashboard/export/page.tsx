@@ -13,6 +13,7 @@ import {
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
 import { fetchAllPaginated } from "@/lib/supabase-helpers";
+import { DEFAULT_EXPORT_PALLET_TYPES } from "@/lib/pallet-usage";
 import {
   applyTxToKienPallet,
   buildLotKienBocMap,
@@ -242,7 +243,9 @@ const LOAI_XE_OPTS = [
 ];
 const CSR_OPTS = ["CSR10", "CSR20", "CSR3L", "CSRL", "CSRCV50", "CSRCV60"];
 const SVR_OPTS = ["SVR10", "SVR20", "SVR3L", "SVRL", "SVRCV50", "SVRCV60"];
-const PALLET_XUAT_BASE = ["Rời", "PE đế gỗ", "PE đế nhựa", "Gỗ", "MB4", "MB5"];
+// Danh sách mặc định khi bảng export_pallet_types chưa có (migration 20261027 chưa chạy). Nguồn thật:
+// Cài đặt → Cấu hình nhà máy → Loại pallet xuất.
+const PALLET_XUAT_DEFAULT = DEFAULT_EXPORT_PALLET_TYPES.filter((t) => t.ten !== "Pallet sắt đế gỗ").map((t) => t.ten);
 const CHI_TIEU_LIST = [
   "Tạp chất",
   "Tro",
@@ -456,11 +459,13 @@ export default function ExportPage() {
   const csrOpts = useMemo(() => (isNMCP ? SVR_OPTS : CSR_OPTS), [isNMCP]);
 
   // Pallet xuất: base list + custom options added at runtime
+  const [palletTypes, setPalletTypes] = useState<string[]>(PALLET_XUAT_DEFAULT);
+  const [palletTypesFromDb, setPalletTypesFromDb] = useState(false);
   const [palletExtra, setPalletExtra] = useState<string[]>([]);
   const [newPalletInput, setNewPalletInput] = useState("");
   const palletOpts = useMemo(
-    () => [...PALLET_XUAT_BASE, ...palletExtra],
-    [palletExtra],
+    () => [...palletTypes, ...palletExtra.filter((p) => !palletTypes.includes(p))],
+    [palletTypes, palletExtra],
   );
 
   // Filters (list view)
@@ -622,6 +627,40 @@ export default function ExportPage() {
     setQcResults(data || []);
   }, []);
 
+  const loadPalletTypes = useCallback(async (fid: string) => {
+    const { data, error } = await supabase
+      .from("export_pallet_types")
+      .select("ten")
+      .eq("factory_id", fid)
+      .eq("is_active", true)
+      .order("sort_order")
+      .order("ten");
+    if (error) return; // bảng chưa có ⇒ giữ danh sách mặc định
+    setPalletTypesFromDb(true);
+    setPalletTypes((data || []).map((r) => r.ten as string));
+  }, []);
+
+  // Nút "+" thêm loại pallet xuất ⇒ ghi về Cài đặt (mặc định "xuất khẩu dạng kiện", sửa lại ở Cài đặt).
+  const addPalletType = async (raw: string) => {
+    const v = raw.trim();
+    if (!v) return;
+    setForm((p) => ({ ...p, loai_pallet: v }));
+    setNewPalletInput("");
+    if (palletOpts.includes(v)) return;
+    if (palletTypesFromDb && factoryId) {
+      const { error } = await supabase
+        .from("export_pallet_types")
+        .insert({ factory_id: factoryId, ten: v, hinh_thuc: "kien", sort_order: 100 });
+      if (!error) {
+        void loadPalletTypes(factoryId);
+        showToast(`Đã thêm "${v}" vào Cài đặt → Loại pallet xuất (hình thức mặc định: xuất khẩu dạng kiện).`, "success");
+        return;
+      }
+      showToast(`Không lưu được loại pallet mới: ${error.message}`, "error");
+    }
+    setPalletExtra((p) => [...p, v]);
+  };
+
   const loadCustomers = useCallback(async (fid: string) => {
     const { data } = await supabase
       .from("customers")
@@ -759,10 +798,8 @@ export default function ExportPage() {
       setEditId(snapshot.editId);
       setView("add");
       setKienScanEntries([]);
-      if (
-        snapshot.form.loai_pallet &&
-        !PALLET_XUAT_BASE.includes(snapshot.form.loai_pallet)
-      ) {
+      // palletOpts tự bỏ trùng với danh sách Cài đặt ⇒ thêm thẳng vào extra
+      if (snapshot.form.loai_pallet) {
         setPalletExtra((prev) =>
           prev.includes(snapshot.form.loai_pallet)
             ? prev
@@ -796,7 +833,8 @@ export default function ExportPage() {
     void loadQcResults(factoryId);
     void loadCustomers(factoryId);
     void loadGrants(factoryId);
-  }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers, loadGrants]);
+    void loadPalletTypes(factoryId);
+  }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers, loadGrants, loadPalletTypes]);
 
   // -- Compute remaining per lot --------------------------------------------
   const lotById = useMemo(
@@ -1085,7 +1123,7 @@ export default function ExportPage() {
       yeu_cau_chi_tieu: order.yeu_cau_chi_tieu || [],
     });
     // Nếu loai_pallet của đơn cũ không có trong base list thì thêm vào palletExtra
-    if (order.loai_pallet && !PALLET_XUAT_BASE.includes(order.loai_pallet)) {
+    if (order.loai_pallet && !palletTypes.includes(order.loai_pallet)) {
       setPalletExtra((prev) =>
         prev.includes(order.loai_pallet) ? prev : [...prev, order.loai_pallet],
       );
@@ -3361,11 +3399,7 @@ export default function ExportPage() {
                       onChange={(e) => setNewPalletInput(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && newPalletInput.trim()) {
-                          const v = newPalletInput.trim();
-                          if (!palletOpts.includes(v))
-                            setPalletExtra((p) => [...p, v]);
-                          setForm((p) => ({ ...p, loai_pallet: v }));
-                          setNewPalletInput("");
+                          void addPalletType(newPalletInput);
                         }
                       }}
                       placeholder="Thêm loại khác..."
@@ -3373,14 +3407,7 @@ export default function ExportPage() {
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        const v = newPalletInput.trim();
-                        if (!v) return;
-                        if (!palletOpts.includes(v))
-                          setPalletExtra((p) => [...p, v]);
-                        setForm((p) => ({ ...p, loai_pallet: v }));
-                        setNewPalletInput("");
-                      }}
+                      onClick={() => void addPalletType(newPalletInput)}
                       className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition-colors"
                     >
                       <Plus size={12} />

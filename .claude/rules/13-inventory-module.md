@@ -387,3 +387,23 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
 - Danh sách: con mắt + mã phiếu mở trang chi tiết (`inventoryDocumentDetailHref`); ô tìm có **Quét QR** — nhận
   URL trang chi tiết mới và cả QR cũ `?documentId=` / `?code=` (đã in trên giấy) rồi chuyển sang trang chi tiết.
 - Form `?documentId=` / `?mode=new` không đổi.
+
+## Tab Tồn: ô tìm + Quét QR + Từ–Đến ngày + file kiểm tồn + Tồn pallet (2026-10-27, chờ test tay)
+- Bộ lọc lưới 12 cột: Tìm vật tư/số lô (đứng đầu, có nút **Quét QR**) · Từ ngày · Đến ngày / Kho · Phân loại · Mã vật tư.
+- Quét QR thẻ kho (`/dashboard/inventory/item?code=…&warehouseId=…`, QR bồn dầu chỉ `warehouseId`, hoặc mã trần):
+  quét liên tục, mỗi mã hợp lệ cộng vào bộ lọc "Mã vật tư" (gỡ lọc Phân loại/Kho nếu đang loại vật tư đó),
+  thanh trên máy quét liệt kê kết quả + nút Xong. `QrScanPortal` có thêm prop `scanKey`/`header`.
+- Từ–Đến ngày ⇒ thêm cột Tồn đầu kỳ / Nhập / Xuất / Tồn cuối kỳ: tồn cuối = tồn hiện tại − ròng phát sinh sau
+  ngày cuối; đầu kỳ = cuối − nhập + xuất. Nhập = import + transfer_in, xuất = export + transfer_out. Phát sinh tải
+  phân trang từ ngày đầu kỳ. Dầu dùng chung bồn gộp theo bồn của kho.
+- "Xuất file kiểm tồn" (Excel, xlsx): STT, Kho, Phân loại, Mã, Tên, ĐVT, [cột kỳ], Tồn sổ sách, Tồn thực tế (trống),
+  Chênh lệch (công thức), Ghi chú; có sheet "Pallet" nếu đang hiện khối pallet.
+- "In nhãn QR" / "In tồn kho" chỉ bấm được khi đã chọn ≥1 mã vật tư.
+- **Khối Tồn pallet** (hiện khi nhà máy có mã pallet) — pallet dùng theo TỔNG, không theo kho, không phụ thuộc bộ lọc
+  (sửa 2026-10-27, bản đầu cộng sai sổ sách + đang lưu): Sổ sách = on_hand mọi kho; Mốc = phiếu nhập đầu tiên của nhóm;
+  Tổng sở hữu = Sổ sách − Mất do xuất khẩu từ mốc; **Trống = Tổng sở hữu − Đang lưu dưới kiện TP** (âm ⇒ đỏ "cần kiểm
+  kê"). Có kỳ thì thêm Xuất lưu / Trả về (xuất rời) / Mất do xuất khẩu. Chỉ tính, không ghi phiếu kho. Server action
+  `inventory/pallet-flow-actions.ts` (`inventory.view`). Quy đổi + mã vật tư ở `src/lib/pallet-usage.ts`:
+  DPH, PM (= MUBEZ + MCH gộp sắt mỏng), ĐG, ĐN (người dùng tự tạo), PMB5, PMB4, PG. Hình thức xuất theo
+  `export_pallet_types` (rule 08). Kiện rời kho khi tổng bành gán đơn ≥ bành SX; đơn hoàn tất kiện quyết định hình thức.
+  Trang cũ `/dashboard/product/pallet` đã XOÁ, banner Thành phẩm có link "Tồn pallet" sang đây.

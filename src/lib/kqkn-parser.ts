@@ -129,7 +129,7 @@ export function solveTcTro(targetMean: number, target3sd: number, n: number, max
     for (let i = 0; i < n; i++) {
       vals.push(Math.max(0, tm + Math.floor(Math.random() * (2 * spread + 1)) - spread))
     }
-    let curSum = vals.reduce((a, b) => a + b, 0)
+    const curSum = vals.reduce((a, b) => a + b, 0)
     let diff = targetSum - curSum
     while (diff !== 0) {
       const idx = Math.floor(Math.random() * n)
@@ -341,7 +341,6 @@ export async function processKqknPdf(
   const page = await doc.getPage(1)
   const textContent = await page.getTextContent()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allItems = textContent.items
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .filter((i: any) => i.str && i.str.trim())

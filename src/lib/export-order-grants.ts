@@ -31,6 +31,14 @@ export type FactoryGrantItem = {
   createdAt: string
 }
 
+/** Body JSON của các route /api/export/customer-grant* (chỉ các trường client đọc). */
+type GrantsApiJson = {
+  code?: string
+  error?: string
+  users?: unknown[]
+  grants?: unknown[]
+}
+
 async function callGrantsApi(path: string, options: RequestInit = {}) {
   const session = await getFreshAuthSession()
   let token = session?.access_token || ""
@@ -41,7 +49,7 @@ async function callGrantsApi(path: string, options: RequestInit = {}) {
       Authorization: `Bearer ${token}`,
     },
   })
-  let json = (await res.json().catch(() => null)) as any
+  let json = (await res.json().catch(() => null)) as GrantsApiJson | null
 
   if (!res.ok && json?.code === "session_expired") {
     const freshSession = await forceRefreshAuthSession()
@@ -53,7 +61,7 @@ async function callGrantsApi(path: string, options: RequestInit = {}) {
         Authorization: `Bearer ${token}`,
       },
     })
-    json = (await res.json().catch(() => null)) as any
+    json = (await res.json().catch(() => null)) as GrantsApiJson | null
   }
 
   return { res, json }

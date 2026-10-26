@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
     if (grantsErr) throw grantsErr
 
     const userIds = [...new Set((grantsData || []).map((g) => g.granted_to_user_id))]
-    let userMap = new Map<string, string>()
+    const userMap = new Map<string, string>()
 
     if (userIds.length > 0) {
       const { data: profilesData } = await supabaseAdmin

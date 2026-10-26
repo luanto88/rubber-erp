@@ -7926,3 +7926,12 @@ Chi tiết: rule 14 mục cuối. Bước 2 (chọn kho nhập, gỡ ép KT) và
 Bước 2 chọn kho nhập (75ccb46) + Bước 3 Gia công ngoài (dịch vụ không qua kho, nút "Xác nhận hoàn thành" ở Đề
 nghị mua, ẩn dịch vụ khỏi kho). Migration `20261023_maintenance_service_items.sql` **chạy tay TRƯỚC deploy**.
 Chi tiết: rule 14 mục "Bước 2–3".
+
+## Sự cố dev 2026-10-26 — load vô hạn / "unexpected Turbopack error"
+Không phải lỗi code: cache Turbopack hỏng (`%TEMP%\next-panic-*.log` báo `Failed to restore task data
+(corrupted database)` / thiếu `.next/dev/cache/turbopack/*.sst`) ⇒ HMR lỗi, trang tự tải lại liên tục.
+Cách sửa: tắt `npm run dev`, xoá `.next/dev/cache/turbopack`, chạy lại + hard refresh. Cùng phiên: eslint
+bỏ qua `src/scratch/**` + `src/app/test-sodo/**` (không xoá file), sửa 8 lỗi react-hooks/Link ⇒ `eslint src` 0 lỗi.
+
+## Tồn kho: Quét QR + kỳ + file kiểm tồn + Tồn pallet; Loại pallet xuất ở Cài đặt (2026-10-27, chờ test tay)
+Migration `20261027_export_pallet_types.sql` **chạy tay trước deploy**. Chi tiết: rule 13 mục cuối, rule 08 mục cuối. Đã xoá `src/scratch`, `src/app/test-sodo`, `dashboard/product/pallet` (người dùng chốt); `eslint src` 0 lỗi.

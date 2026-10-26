@@ -89,6 +89,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
+import { QrScanButton, QrScanPortal } from "@/app/dashboard/_components/qr-scan-portal";
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge";
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme";
 import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card";
@@ -1417,6 +1418,8 @@ export default function ProductPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Quét QR ở ô tìm (rule 29 mục D2): nhãn kiện /product-label?f=&lo=&kien= hoặc trang chi tiết lô.
+  const [scanning, setScanning] = useState(false);
   const [postSaveReadyNgans, setPostSaveReadyNgans] = useState<PostSaveReadyNgan[]>([]);
   const [selectedReadyNganIds, setSelectedReadyNganIds] = useState<Set<string>>(
     new Set(),
@@ -1760,6 +1763,40 @@ export default function ProductPage() {
   } else if (filterBoc && !filterBocOptions.includes(filterBoc)) {
     setFilterBoc("");
   }
+
+  const handleProductScan = (text: string) => {
+    setScanning(false);
+    const raw = text.trim();
+    const lotMatch = raw.match(/\/dashboard\/product\/lot\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (lotMatch) {
+      window.location.assign(`/dashboard/product/lot/${lotMatch[1]}`);
+      return;
+    }
+    let lo: string | null = null;
+    let f: string | null = null;
+    try {
+      const u = new URL(raw, window.location.origin);
+      if (u.pathname.endsWith("/product-label")) {
+        lo = u.searchParams.get("lo");
+        f = u.searchParams.get("f");
+      }
+    } catch {
+      // không phải URL — dùng nguyên chuỗi làm từ khoá tìm
+    }
+    if (f && factoryId && f !== factoryId) {
+      setSaveError("Mã QR này thuộc nhà máy khác — không tra cứu được ở đây.");
+      return;
+    }
+    const value = (lo || raw).trim();
+    setSearch(value);
+    // Bỏ lọc ngày để lô cũ (ngoài tháng hiện tại) vẫn hiện.
+    setFilterFrom("");
+    setFilterTo("");
+    const key = value.toLowerCase();
+    const dates = [...new Set(contributions.filter((c) => c.ma_lo.toLowerCase() === key).map((c) => c.ngay_sx || "Chưa có ngày"))];
+    if (dates.length) setExpandedDates(dates);
+    else if (lo) setSaveError(`Không tìm thấy lô ${lo} trong danh sách thành phẩm.`);
+  };
 
   const groupedByDateAndCa = useMemo(() => {
     const groups: Record<string, Record<string, LotContribution[]>> = {};
@@ -4969,6 +5006,15 @@ export default function ProductPage() {
                 <Wand2 size={15} /> Dự đoán số lô
               </Link>
             )}
+            {hasPermission(currentUser, "inventory.view") && (
+              <Link
+                href="/dashboard/inventory/on-hand"
+                title="Tồn pallet nằm ở Kho vật tư → Tồn (lọc Phân loại: Pallet các loại)"
+                className="flex items-center gap-1.5 px-3 py-2 border border-white/40 bg-white/15 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/25"
+              >
+                <Layers size={15} /> Tồn pallet
+              </Link>
+            )}
             {hasPermission(currentUser, "product.confirm_scan") && (
               <Link
                 href="/dashboard/product/confirm"
@@ -5141,6 +5187,12 @@ export default function ProductPage() {
       })()}
 
       {/* Bộ lọc — FilterBar layout="grid" (rule 29 mục A.1) */}
+      <QrScanPortal
+        open={scanning}
+        onClose={() => setScanning(false)}
+        onDecoded={handleProductScan}
+        hintText="Đưa camera vào mã QR trên nhãn kiện thành phẩm"
+      />
       <FilterBar
         layout="grid"
         activeCount={
@@ -5157,6 +5209,7 @@ export default function ProductPage() {
             placeholder="Tìm mã lô, ngăn..."
             className="min-w-0 flex-1 bg-transparent text-sm outline-none"
           />
+          <QrScanButton onClick={() => setScanning(true)} title="Quét QR nhãn kiện / chi tiết lô" />
           {search && (
             <button type="button" onClick={() => setSearch("")} aria-label="Xóa ô tìm" className="shrink-0 text-slate-400 hover:text-slate-600">
               <X size={14} />
@@ -5332,8 +5385,8 @@ export default function ProductPage() {
                               ))}
                               {dateHasAnyLockedCa && (
                                 <StatusBadge
-                                  tone={allCaLocked ? "danger" : "warn"}
-                                  label={allCaLocked ? "Đã khóa" : `${lockedCasInDate.length}/${casInDate.length} ca đã khóa`}
+                                  tone={allCaLocked ? "valid" : "warn"}
+                                  label={allCaLocked ? "Đã phê duyệt" : `${lockedCasInDate.length}/${casInDate.length} ca đã phê duyệt`}
                                   size="xs"
                                 />
                               )}
@@ -5365,6 +5418,13 @@ export default function ProductPage() {
                               </>
                             ) : (
                               <>
+                                {hasDate && (
+                                  <RowAction
+                                    kind="view"
+                                    label="Xem Phiếu thành phẩm của ngày (tất cả lô)"
+                                    href={`/dashboard/product/day/${date}`}
+                                  />
+                                )}
                                 {hasDate && canReportShift && (
                                   <IconAction
                                     icon={FileDown}
@@ -5390,19 +5450,19 @@ export default function ProductPage() {
                                     }}
                                     className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
                                       !dateHasAnyLockedCa
-                                        ? "text-emerald-600 hover:bg-emerald-50"
+                                        ? "text-slate-500 hover:bg-slate-100"
                                         : allCaLocked
-                                          ? "text-red-600 hover:bg-red-50"
+                                          ? "text-emerald-600 hover:bg-emerald-50"
                                           : "text-amber-600 hover:bg-amber-50"
                                     }`}
-                                    aria-label="Khóa ca sản xuất"
+                                    aria-label="Phê duyệt ca sản xuất"
                                     title={
                                       !dateHasAnyLockedCa
-                                        ? "Duyệt & khóa ca sản xuất ngày này"
-                                        : `${lockedCasInDate.length}/${casInDate.length} ca đã khóa — bấm để xem chi tiết`
+                                        ? "Phê duyệt ca sản xuất ngày này"
+                                        : `${lockedCasInDate.length}/${casInDate.length} ca đã phê duyệt — bấm để xem chi tiết`
                                     }
                                   >
-                                    {!dateHasAnyLockedCa ? <ShieldCheck size={16} /> : <Lock size={16} />}
+                                    {allCaLocked ? <ShieldCheck size={16} /> : !dateHasAnyLockedCa ? <ShieldCheck size={16} /> : <Lock size={16} />}
                                   </button>
                                 )}
                                 <RowAction
@@ -5416,7 +5476,7 @@ export default function ProductPage() {
                                     <span
                                       title={
                                         dateEditDisabled
-                                          ? "Ngày này có ca đã được duyệt & khóa — chỉ admin sửa được"
+                                          ? "Ngày này có ca đã được phê duyệt — chỉ admin sửa được"
                                           : undefined
                                       }
                                     >
@@ -5462,10 +5522,10 @@ export default function ProductPage() {
                                     </span>
                                     {isCaLocked && (
                                       <span
-                                        className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700"
-                                        title={`Đã duyệt & khóa bởi ${caLock.lockedByName} · ${new Date(caLock.lockedAt).toLocaleString("vi-VN")}`}
+                                        className="flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+                                        title={`Đã phê duyệt bởi ${caLock.lockedByName} · ${new Date(caLock.lockedAt).toLocaleString("vi-VN")}`}
                                       >
-                                        <Lock size={10} /> Đã khóa
+                                        <ShieldCheck size={10} /> Đã phê duyệt
                                       </span>
                                     )}
                                   </div>
@@ -5480,7 +5540,6 @@ export default function ProductPage() {
                                         <th className="text-right">SL thực tế ca này</th>
                                         <th>Kiện (A/B/C/D) thời điểm</th>
                                         <th>Trạng thái</th>
-                                        <th className="text-right">Thao tác</th>
                                       </tr>
                                     </thead>
                                     <tbody>
@@ -5515,7 +5574,7 @@ export default function ProductPage() {
                                                   disabled={caCheckboxDisabled}
                                                   title={
                                                     caCheckboxDisabled
-                                                      ? "Ca này đã được duyệt & khóa — chỉ admin xóa được"
+                                                      ? "Ca này đã được phê duyệt — chỉ admin xóa được"
                                                       : undefined
                                                   }
                                                   onChange={() =>
@@ -5532,7 +5591,16 @@ export default function ProductPage() {
                                                 />
                                               </td>
                                             )}
-                                            <td className="font-bold text-slate-800">{g.maLo}</td>
+                                            <td className="font-bold text-slate-800">
+                                              <Link
+                                                href={`/dashboard/product/lot/${g.lotId}`}
+                                                onClick={(e) => e.stopPropagation()}
+                                                className="text-mod-800 hover:underline"
+                                                title={`Xem chi tiết lô ${g.maLo}`}
+                                              >
+                                                {g.maLo}
+                                              </Link>
+                                            </td>
                                             <td className="text-xs">
                                               {g.nganList.map((n, idx) => (
                                                 <div key={`${n.main}-${idx}`}>
@@ -5560,13 +5628,6 @@ export default function ProductPage() {
                                             </td>
                                             <td>
                                               <StatusBadge domain="lot" status={normalizeLotStatus(g.trangThai)} size="xs" />
-                                            </td>
-                                            <td className="text-right">
-                                              <RowAction
-                                                kind="view"
-                                                label={`Xem chi tiết lô ${g.maLo}`}
-                                                href={`/dashboard/product/lot/${g.lotId}`}
-                                              />
                                             </td>
                                           </tr>
                                         );
@@ -7050,7 +7111,7 @@ function ShiftLockModal({
       if (rpcError) throw rpcError;
       onChanged();
     } catch (err) {
-      setError(getErrorMessage(err, "Không khóa được ca sản xuất này."));
+      setError(getErrorMessage(err, "Không phê duyệt được ca sản xuất này."));
     } finally {
       setBusyCa(null);
     }
@@ -7058,7 +7119,7 @@ function ShiftLockModal({
 
   const handleUnlock = async (ca: string) => {
     if (!unlockReason.trim()) {
-      setError("Vui lòng nhập lý do mở khóa.");
+      setError("Vui lòng nhập lý do hủy phê duyệt.");
       return;
     }
     setBusyCa(ca);
@@ -7075,7 +7136,7 @@ function ShiftLockModal({
       setUnlockReason("");
       onChanged();
     } catch (err) {
-      setError(getErrorMessage(err, "Không mở khóa được ca sản xuất này."));
+      setError(getErrorMessage(err, "Không hủy phê duyệt được ca sản xuất này."));
     } finally {
       setBusyCa(null);
     }
@@ -7083,7 +7144,7 @@ function ShiftLockModal({
 
   return (
     <ModalShell
-      title={`Khóa ca sản xuất — ${new Date(date).toLocaleDateString("vi-VN")}`}
+      title={`Phê duyệt ca sản xuất — ${new Date(date).toLocaleDateString("vi-VN")}`}
       onClose={onClose}
       maxWidth="md"
     >
@@ -7105,13 +7166,13 @@ function ShiftLockModal({
                   </span>
                   {lock ? (
                     <span className="text-xs text-slate-600">
-                      <span className="inline-flex items-center gap-1 font-bold text-red-600">
-                        <Lock size={12} /> Đã khóa
+                      <span className="inline-flex items-center gap-1 font-bold text-emerald-700">
+                        <ShieldCheck size={12} /> Đã phê duyệt
                       </span>{" "}
                       bởi {lock.lockedByName} · {new Date(lock.lockedAt).toLocaleString("vi-VN")}
                     </span>
                   ) : (
-                    <span className="text-xs text-slate-400 font-bold">Chưa khóa</span>
+                    <span className="text-xs text-slate-400 font-bold">Chưa phê duyệt</span>
                   )}
                 </div>
                 {!lock && canApproveShift && (
@@ -7120,7 +7181,7 @@ function ShiftLockModal({
                     disabled={isBusy}
                     className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors shrink-0"
                   >
-                    <ShieldCheck size={13} /> {isBusy ? "Đang khóa..." : "Khóa"}
+                    <ShieldCheck size={13} /> {isBusy ? "Đang phê duyệt..." : "Phê duyệt"}
                   </button>
                 )}
                 {lock && isAdmin && unlockCa !== ca && (
@@ -7132,7 +7193,7 @@ function ShiftLockModal({
                     }}
                     className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition-colors shrink-0"
                   >
-                    Mở khóa
+                    Hủy phê duyệt
                   </button>
                 )}
               </div>
@@ -7141,7 +7202,7 @@ function ShiftLockModal({
                   <textarea
                     value={unlockReason}
                     onChange={(e) => setUnlockReason(e.target.value)}
-                    placeholder="Lý do mở khóa (bắt buộc)..."
+                    placeholder="Lý do hủy phê duyệt (bắt buộc)..."
                     rows={2}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs outline-none focus:border-amber-500"
                   />
@@ -7160,7 +7221,7 @@ function ShiftLockModal({
                       disabled={isBusy || !unlockReason.trim()}
                       className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg"
                     >
-                      {isBusy ? "Đang mở khóa..." : "Xác nhận mở khóa"}
+                      {isBusy ? "Đang hủy..." : "Xác nhận hủy phê duyệt"}
                     </button>
                   </div>
                 </div>
@@ -7171,7 +7232,7 @@ function ShiftLockModal({
         {dayState?.fullyLocked && (
           <div className="p-3 border border-emerald-200 bg-emerald-50 rounded-xl space-y-2">
             <p className="text-xs font-bold text-emerald-800">
-              Ngày đã khóa đủ tất cả các ca — bản cứng PDF
+              Ngày đã phê duyệt đủ tất cả các ca — bản cứng PDF
             </p>
             {dayState.unavailable ? (
               <p className="text-xs text-amber-700 font-semibold">
@@ -7205,7 +7266,7 @@ function ShiftLockModal({
               })
             )}
             <p className="text-[11px] text-slate-500">
-              Muốn sửa: admin mở khóa ca, sửa dữ liệu rồi khóa lại — lần mở phiếu kế tiếp sẽ tạo bản cứng mới.
+              Muốn sửa: admin hủy phê duyệt ca, sửa dữ liệu rồi phê duyệt lại — lần mở phiếu kế tiếp sẽ tạo bản cứng mới.
             </p>
           </div>
         )}

@@ -798,3 +798,31 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
     `/product-label`) → Thông tin lô → Kiểm nghiệm (KN mới nhất theo `lan`). Guard `product.view`.
   - PDF lô là bản tham khảo, KHÔNG phải biểu mẫu có mã ISO.
   - Đơn xuất cũ chỉ gán theo `ma_lo` (không `lot_id`) KHÔNG hiện ở tab Xuất hàng của trang lô.
+
+## 4.17. Con mắt dòng NGÀY → trang Phiếu thành phẩm của ngày (2026-10-26, chờ test tay)
+- Danh sách: `RowAction view` đứng đầu cụm thao tác dòng ngày → `/dashboard/product/day/[date]`. Đã BỎ
+  con mắt từng lô trong bảng con (cột Thao tác bảng con bỏ luôn); mã lô là link sang chi tiết lô.
+- Trang ngày (`product/day/[date]/page.tsx`, chỉ XEM, guard `product.view`): trái tab "Phiếu thành phẩm"
+  (`DocViewer loadBytes` = `resolveShiftReport` — cùng nội dung + quy tắc bản cứng của nút FileDown; cần
+  quyền `REPORT_SHIFT_PERMISSIONS`, thiếu quyền chỉ hiện thông báo) / "Danh sách lô" (theo ca, từ
+  `lot_transactions` của ngày, phân trang). Phải: trạng thái khoá ca, hint/cảnh báo bản cứng, Tải PDF /
+  Chia sẻ ảnh / Về danh sách, Tổng hợp.
+- `report-bundle.ts`: `resolveShiftReport` (không mở tab) + `shiftBundleBytes`; `openShiftReport` =
+  resolve + mở tab (hành vi cũ). Mở trang ngày của ngày đã khoá đủ ca chưa có bản cứng ⇒ tự lưu bản cứng.
+
+## 4.18. "Khóa ca" → "Phê duyệt" + Quét QR ô tìm + Báo cáo pallet tồn (2026-10-26, chờ test tay)
+- Chỉ đổi CHỮ hiển thị (không đổi DB/RPC/tên hàm `product_lock_shift`…): Khóa → Phê duyệt, Đã khóa →
+  Đã phê duyệt (badge tông valid xanh, trước là danger đỏ), Mở khóa → Hủy phê duyệt (lý do bắt buộc),
+  "N/M ca đã phê duyệt". Áp ở `product/page.tsx` (dòng ngày, bảng con từng ca, `ShiftLockModal`),
+  `product/day/[date]`, Hub quét QR, thông báo lỗi `shift-lock.ts`. RAISE trong RPC vẫn chữ "khóa" (không sửa DB).
+- Ô tìm Thành phẩm có **Quét QR** (`_components/qr-scan-portal.tsx` dùng chung): nhãn kiện
+  `/product-label?f=&lo=&kien=` → ô tìm = mã lô, bỏ lọc ngày, tự mở các ngày có lô (sai `f` → báo lỗi);
+  `/dashboard/product/lot/{id}` → mở trang lô.
+- **Báo cáo pallet tồn** `/dashboard/product/pallet` (link "Báo cáo pallet" trên banner, guard `product.view`):
+  server action `loadPalletStockReport` — kiện còn tồn = bành SX > bành đã gán đơn xuất (kể cả xuất một phần),
+  pallet theo giao dịch cuối chứa kiện (fallback `lots.pallet`). Lõi tính tách thành `computeKienAvailability`
+  (dùng chung với `loadSkKienAvailability`). Quy đổi vật tư `src/lib/pallet-usage.ts`: Sắt đế gỗ = sắt dày + đế
+  gỗ; Sắt đế nhựa = sắt dày + đế nhựa; Sắt mỏng; MB5; Gỗ = pallet gỗ; loại lạ / không ghi → "Chưa xác định".
+  Số đo DB 2026-10-26: 1.484 kiện tồn (MB5 875, Sắt mỏng 227, Sắt đế gỗ 382).
+
+- 2026-10-27: trang Báo cáo pallet tồn `/dashboard/product/pallet` và `loadPalletStockReport` đã XOÁ — tồn pallet chuyển sang Kho vật tư → Tồn (rule 13 mục cuối). Banner Thành phẩm: link "Tồn pallet" (gate `inventory.view`).

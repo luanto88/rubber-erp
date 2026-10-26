@@ -46,6 +46,43 @@ type KhoItem = {
   new_doc_ma?: string | null // Lần ban hành bản mới
 }
 
+/** Dòng iso_documents đọc ở Kho (các cột được select). */
+type KhoDocRow = {
+  id: string
+  ma_tai_lieu: string | null
+  ten_tai_lieu: string
+  loai_tai_lieu: string | null
+  trang_thai: string
+  ngay_hieu_luc: string | null
+  lan_ban_hanh: string | null
+  file_signed_pdf_url: string | null
+  file_signed_office_url: string | null
+  file_goc_url: string | null
+  created_by: string | null
+  soan_thao_user_id: string | null
+  xem_xet_user_id: string | null
+  phe_duyet_user_id: string | null
+  created_at?: string
+}
+
+/** Dòng iso_form_instances đọc ở Kho (các cột được select). */
+type KhoFormInstanceRow = {
+  id: string
+  tieu_de: string | null
+  trang_thai: string
+  template_doc_id: string | null
+  ky_phe_duyet_at: string | null
+  final_pdf_url: string | null
+  final_office_url: string | null
+  soan_thao_signed_url: string | null
+  draft_file_url: string | null
+  nguoi_tao: string | null
+  xem_xet_user_id: string | null
+  phe_duyet_user_id: string | null
+  thu_tu_ky_json?: Parameters<typeof isFormInstanceRelated>[0]["thu_tu_ky_json"]
+  created_at?: string
+}
+
 /** Hiện nguyên văn loại tài liệu ("Quy trình") thay vì mã (QT); giá trị lọc vẫn là mã. */
 function loaiLabel(code: string): string {
   return LOAI_TAI_LIEU_LABEL[code] || code
@@ -211,14 +248,14 @@ export default function KhoPage() {
 
         // Bản đồ tài liệu đang có hiệu lực theo mã (chuẩn hóa chữ thường)
         const activeDocByCode = new Map<string, { id: string; lan_ban_hanh: string | null }>()
-        for (const ad of ((activeDocsRes.data || []) as any[])) {
+        for (const ad of ((activeDocsRes.data || []) as { id: string; ma_tai_lieu: string | null; lan_ban_hanh: string | null }[])) {
           if (ad.ma_tai_lieu) {
             activeDocByCode.set(ad.ma_tai_lieu.trim().toLowerCase(), { id: ad.id, lan_ban_hanh: ad.lan_ban_hanh })
           }
         }
 
         // Gộp 2 truy vấn hồ sơ của mình theo id, lọc lại bằng isFormInstanceRelated.
-        type KhoFormRow = Parameters<typeof isFormInstanceRelated>[0] & { id: string }
+        type KhoFormRow = Parameters<typeof isFormInstanceRelated>[0] & KhoFormInstanceRow
         if (userFormsByColsRes.error) console.error("[iso/kho] hồ sơ theo cột lỗi:", userFormsByColsRes.error.message)
         if (userFormsByStepsRes.error) console.error("[iso/kho] hồ sơ theo bước ký lỗi:", userFormsByStepsRes.error.message)
         const userFormsMap = new Map<string, KhoFormRow>()
@@ -227,19 +264,19 @@ export default function KhoPage() {
         }
         const userFormsRes = { data: [...userFormsMap.values()] }
 
-        const docsMap = new Map(((docsRes.data || []) as any[]).map((d) => [d.id, d]))
-        const rawForms = (formsRes.data || []) as any[]
+        const docsMap = new Map(((docsRes.data || []) as KhoDocRow[]).map((d) => [d.id, d]))
+        const rawForms = (formsRes.data || []) as KhoFormInstanceRow[]
 
         // Lấy mã template cho form instances
         const allFormTmplIds = [
           ...rawForms.map((f) => f.template_doc_id),
-          ...((userFormsRes.data || []) as any[]).map((f) => f.template_doc_id),
+          ...(userFormsRes.data as KhoFormInstanceRow[]).map((f) => f.template_doc_id),
         ].filter(Boolean) as string[]
 
         const tmplRes = allFormTmplIds.length > 0
           ? await supabase.from("iso_documents").select("id, ma_tai_lieu, ten_tai_lieu").in("id", allFormTmplIds)
           : { data: [] }
-        const tmplMap = new Map(((tmplRes.data || []) as any[]).map((t) => [t.id, t]))
+        const tmplMap = new Map(((tmplRes.data || []) as { id: string; ma_tai_lieu: string | null; ten_tai_lieu: string | null }[]).map((t) => [t.id, t]))
 
         const formsMap = new Map(rawForms.map((f) => [f.id, f]))
 
@@ -310,7 +347,7 @@ export default function KhoPage() {
         }
 
         // 2. Bổ sung các tài liệu do user tạo/soạn thảo/soát xét nếu chưa có trong danh sách phân phối
-        for (const doc of ((userDocsRes.data || []) as any[])) {
+        for (const doc of ((userDocsRes.data || []) as KhoDocRow[])) {
           const itemId = doc.id
           const normCode = doc.ma_tai_lieu ? doc.ma_tai_lieu.trim().toLowerCase() : ""
           const activeMatch = doc.trang_thai === "het_hieu_luc" && normCode ? activeDocByCode.get(normCode) : null
@@ -339,7 +376,7 @@ export default function KhoPage() {
               trang_thai: doc.trang_thai,
               ngay_hieu_luc: doc.ngay_hieu_luc,
               lan_ban_hanh: doc.lan_ban_hanh,
-              ngay_nhan: doc.created_at,
+              ngay_nhan: doc.created_at as string,
               first_viewed_at: null,
               first_downloaded_at: null,
               file_url: getFileUrl(doc),
@@ -355,7 +392,7 @@ export default function KhoPage() {
         }
 
         // 3. Bổ sung hồ sơ do user lập nếu chưa có
-        for (const form of ((userFormsRes.data || []) as any[])) {
+        for (const form of (userFormsRes.data as KhoFormInstanceRow[])) {
           const itemId = form.id
           if (seen.has(itemId)) {
             const exist = seen.get(itemId)!
@@ -375,7 +412,7 @@ export default function KhoPage() {
               trang_thai: form.trang_thai === "da_phe_duyet" ? "co_hieu_luc" : form.trang_thai,
               ngay_hieu_luc: form.ky_phe_duyet_at || null,
               lan_ban_hanh: "—",
-              ngay_nhan: form.created_at,
+              ngay_nhan: form.created_at as string,
               first_viewed_at: null,
               first_downloaded_at: null,
               file_url: form.final_pdf_url || form.soan_thao_signed_url || form.draft_file_url || null,

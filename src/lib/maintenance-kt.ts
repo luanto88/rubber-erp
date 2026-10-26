@@ -28,6 +28,9 @@ export async function findKtWarehouse(factoryId: string): Promise<{ id: string; 
 
 export type KtItemStatus = {
   itemId: string
+  /** "vat_tu" = vật tư mua ngoài qua kho; "dich_vu" = gia công ngoài (không kho) — onHand/available =
+   *  SL đã "Xác nhận hoàn thành" trên phiếu đề nghị liên kết biên bản. */
+  kind: "vat_tu" | "dich_vu"
   /** Kho tính tồn / xuất của vật tư này (xem resolveExternalWarehouses). */
   warehouseId: string | null
   warehouseCode: string | null
@@ -63,6 +66,7 @@ export type KtRecordStatus = {
 type RecordRow = { id: string; ma_bb: string | null; bo_phan: string | null; trang_thai: string | null; created_at: string }
 type MatRow = {
   record_id: string
+  nguon: string
   line_id: string | null
   inventory_item_id: string | null
   ten_vat_tu: string | null
@@ -184,9 +188,9 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
   const materials = await fetchAllPaginated<MatRow>((from, to) =>
     sb
       .from("maintenance_materials")
-      .select("record_id, line_id, inventory_item_id, ten_vat_tu, dvt, so_luong, don_gia, loai_tien")
+      .select("record_id, nguon, line_id, inventory_item_id, ten_vat_tu, dvt, so_luong, don_gia, loai_tien")
       .eq("factory_id", factoryId)
-      .eq("nguon", "ben_ngoai")
+      .in("nguon", ["ben_ngoai", "gia_cong"])
       .not("inventory_item_id", "is", null)
       .order("id")
       .range(from, to),
@@ -215,7 +219,7 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
   const pairKeys = new Set<string>()
   const pairs: { recordId: string; itemId: string }[] = []
   for (const m of materials) {
-    if (!scopeIds.has(m.record_id)) continue
+    if (m.nguon !== "ben_ngoai" || !scopeIds.has(m.record_id)) continue
     const key = `${m.record_id}:${m.inventory_item_id}`
     if (pairKeys.has(key)) continue
     pairKeys.add(key)
@@ -243,7 +247,9 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
     }
   }
 
-  // Nhu cầu theo biên bản → vật tư.
+  // Nhu cầu theo biên bản → vật tư (vật tư qua kho và dịch vụ gia công tách riêng).
+  const serviceKeys = new Set<string>() // `${recordId}:${itemId}` là dịch vụ gia công
+  for (const m of materials) if (m.nguon === "gia_cong") serviceKeys.add(`${m.record_id}:${m.inventory_item_id}`)
   const needByRecord = new Map<string, Map<string, number>>()
   const firstMat = new Map<string, MatRow>()
   for (const m of materials) {
@@ -260,6 +266,7 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
   const targetIds = target.map((r) => r.id)
   const linkedByRecord = new Map<string, KtLinkedRequest[]>()
   const pendingByRecord = new Map<string, Map<string, number>>()
+  const completedByRecord = new Map<string, Map<string, number>>()
   for (let i = 0; i < targetIds.length; i += 200) {
     const { data: reqs } = await sb
       .from("purchase_requests")
@@ -271,6 +278,23 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
       const list = linkedByRecord.get(r.maintenance_record_id) || []
       list.push({ id: r.id, so: r.so, nam: r.nam, trangThai: r.trang_thai, loai: r.loai })
       linkedByRecord.set(r.maintenance_record_id, list)
+    }
+    // Dịch vụ gia công: đã "Xác nhận hoàn thành" trên phiếu gốc liên kết (mọi trạng thái — phiếu đã
+    // hoàn tất/đóng vẫn giữ phần đã xong).
+    const gocReqs = reqRows.filter((r) => r.loai === "goc")
+    if (gocReqs.length) {
+      const gocToRecord = new Map(gocReqs.map((r) => [r.id, r.maintenance_record_id]))
+      const { data: comps } = await sb
+        .from("purchase_service_completions")
+        .select("request_id, item_id, so_luong")
+        .in("request_id", gocReqs.map((r) => r.id))
+      for (const c of (comps || []) as { request_id: string; item_id: string | null; so_luong: number | null }[]) {
+        if (!c.item_id) continue
+        const rec = gocToRecord.get(c.request_id)!
+        const map = completedByRecord.get(rec) || new Map<string, number>()
+        map.set(c.item_id, (map.get(c.item_id) || 0) + (Number(c.so_luong) || 0))
+        completedByRecord.set(rec, map)
+      }
     }
     const activeReqs = reqRows.filter((r) => r.loai === "goc" && PURCHASE_ACTIVE_FOR_KT.includes(r.trang_thai))
     if (!activeReqs.length) continue
@@ -295,6 +319,30 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
     const earlier = active.filter((r) => r.id !== rec.id && recordOrder(r, rec) < 0)
     const items: KtItemStatus[] = []
     for (const [itemId, qty] of need) {
+      const mat0 = firstMat.get(`${rec.id}:${itemId}`)
+      if (serviceKeys.has(`${rec.id}:${itemId}`)) {
+        // Dịch vụ gia công: không kho, không giữ chỗ giữa các biên bản.
+        const completed = completedByRecord.get(rec.id)?.get(itemId) || 0
+        const info = itemInfo.get(itemId)
+        items.push({
+          itemId,
+          kind: "dich_vu",
+          warehouseId: null,
+          warehouseCode: null,
+          itemCode: info?.code || null,
+          name: info?.name || mat0?.ten_vat_tu || "—",
+          unit: info?.unit || mat0?.dvt || null,
+          need: qty,
+          onHand: completed,
+          reservedByOthers: 0,
+          available: completed,
+          shortage: Math.max(0, qty - completed),
+          pendingRequested: pendingByRecord.get(rec.id)?.get(itemId) || 0,
+          donGia: Number(mat0?.don_gia) || 0,
+          loaiTien: mat0?.loai_tien || "USD",
+        })
+        continue
+      }
       const whId = whByPair.get(`${rec.id}:${itemId}`) || null
       let reserved = 0
       for (const e of earlier) {
@@ -307,6 +355,7 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
       const info = itemInfo.get(itemId)
       items.push({
         itemId,
+        kind: "vat_tu",
         warehouseId: whId,
         warehouseCode: whId ? whInfo.get(whId)?.code || null : null,
         itemCode: info?.code || null,

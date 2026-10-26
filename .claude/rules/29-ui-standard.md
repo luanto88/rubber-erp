@@ -82,8 +82,8 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
 | Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | ✅ `/dashboard/export/[id]` (PDF nhúng loadBytes) | — | ✅ (quét QR EUDR + quét QR kiện lên xe) |
 | Kho vật tư (Nhập/Xuất/Chuyển) | ✅ | ✅ (dòng vật tư của phiếu) | ✅ `/dashboard/inventory/document/[type]/[id]` (PDF A5 nhúng loadBytes) | — | ✅ (QR phiếu mới + nhận QR cũ `?documentId=`) |
-| Thành phẩm | ✅ theme + StatusBadge lot + StatGrid + FilterBar grid | ✅ (ngày → ca → lô, DateGroupRow) | ✅ chi tiết lô `/dashboard/product/lot/[id]` (PDF nhúng loadBytes, chỉ xem) | — | QR góc phải trên PDF lô (chưa Quét QR ở ô tìm) |
-| Kho nguyên liệu | ✅ theme + StatusBadge storage + SegmentedTabs + StatGrid + FilterBar grid; tab Lịch sử `enterprise-table dense` | ✅ (bảng ngăn, ExpandableRow) | ✅ `/dashboard/storage/[id]` (PDF F03 nhúng loadBytes) | — | QR có sẵn trên PDF (trỏ trang công khai `/storage`); chưa Quét QR ở ô tìm |
+| Thành phẩm | ✅ theme + StatusBadge lot + StatGrid + FilterBar grid | ✅ (ngày → ca → lô, DateGroupRow) | ✅ chi tiết NGÀY `/dashboard/product/day/[date]` (F09 nhúng, con mắt dòng ngày) + chi tiết lô `/dashboard/product/lot/[id]` (link mã lô) | — | QR góc phải trên PDF lô + ✅ Quét QR ở ô tìm (nhãn kiện / trang lô) |
+| Kho nguyên liệu | ✅ theme + StatusBadge storage + SegmentedTabs + StatGrid + FilterBar grid; tab Lịch sử `enterprise-table dense` | ✅ (bảng ngăn, ExpandableRow) | ✅ `/dashboard/storage/[id]` (PDF F03 nhúng loadBytes) | — | QR có sẵn trên PDF (trỏ trang công khai `/storage`) + ✅ Quét QR ở ô tìm (mở chi tiết ngăn) |
 | Kho thành phẩm | 🟡 theme orange | — (sơ đồ kho) | — | — | — |
 
 ## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)

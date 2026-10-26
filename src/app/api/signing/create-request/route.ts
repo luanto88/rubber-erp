@@ -4,6 +4,7 @@ import { createSigningRequest, type SigningSignerInput } from "@/lib/signing/req
 import { scheduleSigningNotify } from "@/lib/signing/notify"
 import { computeRecordFingerprint } from "@/lib/signing/data-fingerprint"
 import { computeKtStatuses } from "@/lib/maintenance-kt"
+import { describeKtShortage } from "@/lib/maintenance-kt-message"
 
 export const dynamic = "force-dynamic"
 
@@ -89,16 +90,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // GĐ2g + Bước 2: biên bản có vật tư mua ngoài chỉ được gửi ký khi kho của từng vật tư đủ hàng (kể cả admin).
+    // GĐ2g + Bước 2: biên bản có vật tư mua ngoài chỉ được gửi ký khi kho của từng vật tư đủ hàng VÀ dịch vụ gia công đã xác nhận hoàn thành (kể cả admin).
     if (body.modun === "maintenance" && body.banGhiId) {
       const [st] = await computeKtStatuses(body.factoryId, body.banGhiId)
       if (st && st.totalShortage > 0) {
-        const list = st.items
-          .filter((it) => it.shortage > 0)
-          .map((it) => `${it.name} (thiếu ${it.shortage}${it.warehouseCode ? ` ở kho ${it.warehouseCode}` : ""})`)
-          .join(", ")
         return NextResponse.json(
-          { error: `Kho chưa đủ vật tư mua ngoài: ${list}. Lập đề nghị mua và nhập kho trước khi gửi ký.` },
+          { error: describeKtShortage(st.items) || "Chưa đủ vật tư / dịch vụ gia công để gửi ký." },
           { status: 409 },
         )
       }

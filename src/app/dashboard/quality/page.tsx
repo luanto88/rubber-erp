@@ -1021,7 +1021,7 @@ export default function QualityPage() {
     setEligibleLots([fakeLot])
     setSelectedLotIds(new Set([fakeLot.id]))
     setTabData({ [fakeLot.id]: {
-      samples: Object.fromEntries(ALL_FIELDS.map(f=>[f.key,padSamples((r.samples as any)?.[f.key],r.so_mau)])),
+      samples: Object.fromEntries(ALL_FIELDS.map(f=>[f.key,padSamples(r.samples?.[f.key],r.so_mau)])),
       preview: null
     }})
     setActiveTabLotId(fakeLot.id)
@@ -1039,7 +1039,7 @@ export default function QualityPage() {
     } else {
       next.add(lot.id)
       const initSamples: Samples = lot.prev_qc
-        ? Object.fromEntries(ALL_FIELDS.map(f=>[f.key,padSamples((lot.prev_qc!.samples as any)?.[f.key],createForm.so_mau)]))
+        ? Object.fromEntries(ALL_FIELDS.map(f=>[f.key,padSamples(lot.prev_qc!.samples?.[f.key],createForm.so_mau)]))
         : emptyTabSamples(createForm.so_mau)
       setTabData(prev => ({ ...prev, [lot.id]: { samples:initSamples, preview:null } }))
       setActiveTabLotId(lot.id)
@@ -1194,7 +1194,7 @@ export default function QualityPage() {
         const notes: NoteEntry[] = []
         if (parentId && lot.prev_qc) {
           ALL_FIELDS.forEach(f => {
-            const origVals = ((lot.prev_qc!.samples as any)?.[f.key]||[]).map(Number)
+            const origVals = (lot.prev_qc!.samples?.[f.key]||[]).map(Number)
             ;(samples[f.key]||[]).forEach((v, i)=>{
               const numV = v !== "" ? Number(v) : 0
               if (numV!==(origVals[i]||0)) notes.push({
@@ -2220,7 +2220,7 @@ export default function QualityPage() {
                             {lot?.prev_qc && (
                               <div className="mt-3 pt-2 border-t border-slate-200/60 flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-bold text-slate-500">KQ cũ:</span>
-                                {((lot.prev_qc.samples as any)?.[f.key]||[]).map((v:number,i:number)=>{
+                                {(lot.prev_qc.samples?.[f.key]||[]).map((v,i)=>{
                                   const isPrevFail = evalSampleFail(f.key, v, lim)
                                   return (
                                     <span key={i} className={`text-xs font-mono px-2 py-0.5 rounded ${
@@ -2697,8 +2697,8 @@ export default function QualityPage() {
                                             </div>
                                           )}
                                           <div className="flex flex-wrap gap-3 text-xs">
-                                            {ALL_FIELDS.filter(f=>effectiveR.grade?.[f.key]||(effectiveR.samples as any)?.[f.key]?.some((v:any)=>v>0)).map(f=>{
-                                              const vals=((effectiveR.samples as any)?.[f.key]||[]) as number[]
+                                            {ALL_FIELDS.filter(f=>effectiveR.grade?.[f.key]||effectiveR.samples?.[f.key]?.some((v)=>Number(v)>0)).map(f=>{
+                                              const vals=(effectiveR.samples?.[f.key]||[]) as number[]
                                               const g=effectiveR.grade?.[f.key]
                                               return (
                                                 <div key={f.key} className={`rounded-xl p-3 border min-w-[110px] ${g?.dat===false?"border-red-200 bg-red-50":"border-slate-200 bg-white"}`}>
@@ -2723,8 +2723,8 @@ export default function QualityPage() {
                                             <div className="pt-2 border-t border-slate-200">
                                               <div className="text-xs font-semibold text-slate-500 mb-2">Kết quả ban đầu (Lần 1 rớt hạng):</div>
                                               <div className="flex flex-wrap gap-2 text-xs">
-                                                {ALL_FIELDS.filter(f=>r.grade?.[f.key]||(r.samples as any)?.[f.key]?.some((v:any)=>v>0)).map(f=>{
-                                                  const oldVals=((r.samples as any)?.[f.key]||[]) as number[]
+                                                {ALL_FIELDS.filter(f=>r.grade?.[f.key]||r.samples?.[f.key]?.some((v)=>Number(v)>0)).map(f=>{
+                                                  const oldVals=(r.samples?.[f.key]||[]) as number[]
                                                   const og=r.grade?.[f.key]
                                                   return (
                                                     <div key={f.key} className={`rounded-lg px-2.5 py-1.5 border text-[11px] ${og?.dat===false?"bg-red-50 border-red-200 text-red-700":"bg-slate-100 border-slate-200 text-slate-600"}`}>

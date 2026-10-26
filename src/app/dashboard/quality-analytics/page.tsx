@@ -377,8 +377,8 @@ export default function QualityAnalyticsPage({
   const [selectedMetrics, setSelectedMetrics] = useState<MetricKey[]>(["pri", "po", "mooney"])
   const [focusMetricSelection, setFocusMetric] = useState<MetricKey>("pri")
   const [granularity, setGranularity] = useState<"day" | "week" | "month">("day")
-  const [compareMonthA, setCompareMonthA] = useState("")
-  const [compareMonthB, setCompareMonthB] = useState("")
+  const [pickedCompareMonthA, setCompareMonthA] = useState("")
+  const [pickedCompareMonthB, setCompareMonthB] = useState("")
   const [driversDimension, setDriversDimension] = useState<DriverDimension>("ca")
   const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(new Set())
   const [expandedDateKeys, setExpandedDateKeys] = useState<Set<string>>(new Set())
@@ -729,21 +729,16 @@ export default function QualityAnalyticsPage({
     return { cp, cpk, lsl, usl }
   }, [customStdMap, filteredRecords, focusMetric])
 
-  useEffect(() => {
-    if (!compareMonthOptions.length) {
-      if (compareMonthA) setCompareMonthA("")
-      if (compareMonthB) setCompareMonthB("")
-      return
-    }
-
-    if (!compareMonthA || !compareMonthOptions.includes(compareMonthA)) {
-      setCompareMonthA(compareMonthOptions[0] || "")
-    }
-
-    if (!compareMonthB || !compareMonthOptions.includes(compareMonthB) || compareMonthB === compareMonthA) {
-      setCompareMonthB(compareMonthOptions[1] || compareMonthOptions[0] || "")
-    }
-  }, [compareMonthA, compareMonthB, compareMonthOptions])
+  // Tháng so sánh hiệu lực: giá trị đã chọn nếu còn trong danh sách, ngược lại tháng mặc định
+  // (suy ra khi render — không dùng effect setState để tránh render dây chuyền).
+  const compareMonthA =
+    pickedCompareMonthA && compareMonthOptions.includes(pickedCompareMonthA)
+      ? pickedCompareMonthA
+      : compareMonthOptions[0] || ""
+  const compareMonthB =
+    pickedCompareMonthB && compareMonthOptions.includes(pickedCompareMonthB) && pickedCompareMonthB !== compareMonthA
+      ? pickedCompareMonthB
+      : compareMonthOptions[1] || compareMonthOptions[0] || ""
 
   const compareMonthRecordsA = useMemo(
     () => compareBaseRecords.filter((record) => getMonthBucket(record.ngay_kn) === compareMonthA),

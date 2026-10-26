@@ -52,6 +52,7 @@ import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
 import { MaintenanceSignModal, loadRecordForSigning } from "../_components/maintenance-sign-modal"
 import { authFetch } from "@/lib/auth-fetch"
 import type { KtRecordStatus } from "@/lib/maintenance-kt"
+import { describeKtShortage } from "@/lib/maintenance-kt-message"
 import { PURCHASE_STATUS_LABEL, type PurchaseStatus } from "@/lib/purchase/types"
 import type { MaintenanceSigningStatus } from "../_components/maintenance-sign-types"
 import { SignStatusBadge } from "@/app/dashboard/_components/sign-status-badge"
@@ -1425,9 +1426,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   }
 
   // Modal "Thêm vật tư mua ngoài": tạo mã mới (API) hoặc "Dùng mã này" với vật tư gần giống đã có.
-  const applyExtMatToLine = (item: { id: string; name: string; unit: string | null; don_gia: number | null; loai_tien: string | null }) => {
+  const applyExtMatToLine = (item: { id: string; name: string; unit: string | null; don_gia: number | null; loai_tien: string | null; la_dich_vu?: boolean | null }) => {
     if (!newExtMatModal) return
     updateMaterial(newExtMatModal.lineId, newExtMatModal.matId, {
+      // Nguồn dòng theo đúng loại mã vừa tạo/chọn: dịch vụ ⇒ Gia công ngoài, vật tư ⇒ Mua ngoài.
+      nguon: item.la_dich_vu === true ? "gia_cong" : "ben_ngoai",
       inventory_item_id: item.id,
       ten_vat_tu: item.name,
       dvt: item.unit || "",
@@ -1455,7 +1458,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       la_dich_vu: it.la_dich_vu === true,
     }
     setInventoryItems((prev) => [...prev, option].sort((a, b) => a.code.localeCompare(b.code)))
-    applyExtMatToLine({ id: it.id, name: it.name, unit: it.unit, don_gia: option.don_gia, loai_tien: option.loai_tien })
+    applyExtMatToLine({ id: it.id, name: it.name, unit: it.unit, don_gia: option.don_gia, loai_tien: option.loai_tien, la_dich_vu: option.la_dich_vu })
   }
 
   const handleUseExistingExtMat = (it: ExtCatalogItem) => {
@@ -1463,8 +1466,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     // của trang (mới tạo ở nơi khác) thì dùng số liệu từ danh mục của modal.
     const opt = inventoryItems.find((o) => o.id === it.id)
     applyExtMatToLine(opt
-      ? { id: opt.id, name: opt.name, unit: opt.unit, don_gia: opt.don_gia, loai_tien: opt.loai_tien }
-      : { id: it.id, name: it.name, unit: it.unit, don_gia: it.don_gia, loai_tien: it.loai_tien })
+      ? { id: opt.id, name: opt.name, unit: opt.unit, don_gia: opt.don_gia, loai_tien: opt.loai_tien, la_dich_vu: opt.la_dich_vu }
+      : { id: it.id, name: it.name, unit: it.unit, don_gia: it.don_gia, loai_tien: it.loai_tien, la_dich_vu: it.la_dich_vu })
     if (!opt && factoryId) void loadInventoryItems(factoryId)
   }
 
@@ -1485,7 +1488,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // ── Ký duyệt điện tử: dữ liệu dùng chung cho thẻ ký (chế độ sửa) và hộp hành động (chế độ xem) ──
   const canCreateSign = !!user && hasPermission(user, "maintenance.create") && (isAdmin || isCreator)
   const ktBlockedReason = ktStatus && ktStatus.totalShortage > 0
-    ? `Kho chưa đủ vật tư mua ngoài (${ktStatus.items.filter((it) => it.shortage > 0).map((it) => `${it.name}${it.warehouseCode ? ` — kho ${it.warehouseCode}` : ""}`).join("; ")}) — lập đề nghị mua và nhập kho trước khi gửi ký`
+    ? describeKtShortage(ktStatus.items)
     : null
   const reloadSigningStatus = () => {
     setSigningStatus(undefined)
@@ -2769,16 +2772,22 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   const renderKtPanel = (st: KtRecordStatus) => {
     // Bước 2: mỗi vật tư mua ngoài có kho riêng (kho nhập gần nhất → kho chính → KT).
-    const codes = Array.from(new Set(st.items.map((it) => it.warehouseCode).filter((c): c is string => !!c)))
+    const goods = st.items.filter((it) => it.kind !== "dich_vu")
+    const services = st.items.filter((it) => it.kind === "dich_vu")
+    const goodsShort = goods.some((it) => it.shortage > 0)
+    const servicesShort = services.some((it) => it.shortage > 0)
+    const codes = Array.from(new Set(goods.map((it) => it.warehouseCode).filter((c): c is string => !!c)))
     const code = codes.length ? codes.join(", ") : st.ktWarehouse?.code || "KT"
-    const noWarehouse = st.items.some((it) => !it.warehouseId)
+    const noWarehouse = goods.some((it) => !it.warehouseId)
     const done = st.trangThai === "da_duyet" || st.trangThai === "huy"
     const short = st.totalShortage > 0
     const canDraft = !done && st.needsRequest && (isAdmin || (isCreator && hasPermission(user, "maintenance.create")))
     return (
       <div className={`p-3 rounded-xl border ${short ? "bg-amber-50 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
         <label className="text-[11px] font-bold text-slate-600 block mb-2 uppercase tracking-wider">
-          Vật tư mua ngoài — kho {code}
+          {goods.length ? <>Vật tư mua ngoài — kho {code}</> : null}
+          {goods.length && services.length ? " · " : null}
+          {services.length ? "Gia công ngoài" : null}
         </label>
         {noWarehouse && (
           <p className="text-xs font-semibold text-red-600 mb-2">
@@ -2786,7 +2795,19 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           </p>
         )}
         <div className="space-y-1">
-          {st.items.map((it) => (
+          {st.items.map((it) => it.kind === "dich_vu" ? (
+            <div key={it.itemId} className="flex flex-wrap items-center justify-between gap-x-2 text-xs">
+              <span className="font-semibold text-slate-700 truncate">
+                {it.name}
+                <span className="ml-1 rounded bg-violet-100 px-1 text-[10px] font-bold text-violet-700">Gia công</span>
+              </span>
+              <span className="text-slate-500">
+                cần {it.need} · đã hoàn thành {it.available}{it.unit ? ` ${it.unit}` : ""}
+                {it.pendingRequested > 0 && <> · đang đề nghị {it.pendingRequested}</>}
+                {!done && it.shortage > 0 && <b className="text-red-600"> · chưa xong {it.shortage}</b>}
+              </span>
+            </div>
+          ) : (
             <div key={it.itemId} className="flex flex-wrap items-center justify-between gap-x-2 text-xs">
               <span className="font-semibold text-slate-700 truncate">
                 {it.name}
@@ -2801,14 +2822,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           ))}
         </div>
         {done ? (
-          <p className="mt-2 text-[11px] text-slate-500">Biên bản đã xuất kho — vật tư mua ngoài xuất từ kho {code}.</p>
+          <p className="mt-2 text-[11px] text-slate-500">{goods.length ? <>Biên bản đã xuất kho — vật tư mua ngoài xuất từ kho {code}.</> : "Biên bản đã duyệt."}</p>
         ) : short ? (
           <p className="mt-2 text-[11px] text-amber-800">
-            Chưa đủ hàng ở kho {code} — chưa gửi ký duyệt được. Lưu biên bản vẫn bình thường. Hàng nhập kho thường không
-            được giữ riêng cho biên bản: nếu đã nhập mà vẫn thiếu, có thể kho đã bị xuất cho việc khác.
+            {goodsShort && <>Chưa đủ hàng ở kho {code} — chưa gửi ký duyệt được. Hàng nhập kho thường không được giữ riêng cho biên bản: nếu đã nhập mà vẫn thiếu, có thể kho đã bị xuất cho việc khác. </>}
+            {servicesShort && <>Dịch vụ gia công chưa xác nhận hoàn thành — người đề nghị bấm “Ghi nhận mua &amp; hoàn thành” trên phiếu đề nghị mua. </>}
+            Lưu biên bản vẫn bình thường.
           </p>
         ) : (
-          <p className="mt-2 text-[11px] text-emerald-700">Kho {code} đủ hàng — có thể gửi ký duyệt; ký xong tự xuất kho {code}.</p>
+          <p className="mt-2 text-[11px] text-emerald-700">{goods.length ? <>Kho {code} đủ hàng{services.length ? ", gia công đã hoàn thành" : ""} — có thể gửi ký duyệt; ký xong tự xuất kho {code}.</> : "Gia công đã hoàn thành — có thể gửi ký duyệt."}</p>
         )}
         {st.linkedRequests.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">

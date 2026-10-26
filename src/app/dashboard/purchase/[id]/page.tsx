@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
@@ -31,11 +31,14 @@ import {
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { PurchaseForm } from "../_components/purchase-form"
 import {
-  buildPurchaseDraftPdfBytes, fetchPurchaseDetail, readJson, submitPurchaseForSigning, updateLineImages, type PurchaseDetail,
+  buildPurchaseDraftPdfBytes, fetchPurchaseDetail, readJson, savePurchaseApprovers, submitPurchaseForSigning, updateLineImages, type PurchaseDetail,
 } from "../_components/purchase-client"
+import { PurchaseApproverModal } from "../_components/purchase-approver-modal"
 import { ImageLightbox, PurchaseImagePicker } from "../_components/purchase-image-picker"
 import { PurchaseInsightPanel } from "../_components/purchase-insight-panel"
 import { AdjustModal, ClosePurchaseModal, CompleteServiceModal, PurchaseFulfillmentPanel, ReceiveModal } from "../_components/purchase-fulfillment"
+
+type FulfillStep = "receive" | "service"
 
 const LOG_LABEL: Record<string, string> = {
   tao: "Tạo phiếu",
@@ -53,6 +56,7 @@ const LOG_LABEL: Record<string, string> = {
   cap_nhat_anh: "Cập nhật ảnh dòng vật tư",
   tao_tu_bao_tri: "Lập từ biên bản bảo trì",
   nhan_xu_ly: "Nhận xử lý phiếu từ biên bản bảo trì",
+  chon_nguoi_ky: "Chọn người ký (Giám đốc, Kế toán)",
 }
 
 function fmtDateTime(iso: string | null | undefined) {
@@ -79,12 +83,17 @@ function PurchaseDetailInner() {
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(searchParams.get("submitError"))
   const [cancelOpen, setCancelOpen] = useState(false)
+  // Panel chọn Giám đốc / Kế toán khi gửi ký (phiếu thiếu người ký hoặc đang nhận xử lý).
+  const [approverOpen, setApproverOpen] = useState(false)
+  const [approverError, setApproverError] = useState<string | null>(null)
   const [cancelReason, setCancelReason] = useState("")
-  const [receiveOpen, setReceiveOpen] = useState(false)
-  const [serviceOpen, setServiceOpen] = useState(false)
+  // Ghi nhận mua & hoàn thành: 1 hành động duy nhất, chạy tuần tự Bước nhập kho → Bước hoàn thành gia công.
+  const [wizard, setWizard] = useState<{ steps: FulfillStep[]; idx: number; msgs: string[] } | null>(null)
+  const receiveOpen = wizard?.steps[wizard.idx] === "receive"
+  const serviceOpen = wizard?.steps[wizard.idx] === "service"
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [closeOpen, setCloseOpen] = useState(false)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<ReactNode>(null)
   const [lightbox, setLightbox] = useState<string | null>(null)
   // Sửa ảnh 1 dòng: id dòng + danh sách ảnh đang chỉnh.
   const [imageEdit, setImageEdit] = useState<{ lineId: string; label: string; urls: string[]; readOnly: boolean } | null>(null)
@@ -130,10 +139,69 @@ function PurchaseDetailInner() {
     if (user) void load()
   }, [user, load])
 
+  const startFulfill = () => {
+    if (!detail) return
+    const steps: FulfillStep[] = []
+    if (detail.perms.canReceive) steps.push("receive")
+    if (detail.perms.canCompleteService) steps.push("service")
+    if (!steps.length) return
+    setNotice(null)
+    setWizard({ steps, idx: 0, msgs: [] })
+  }
+
+  /** Xong 1 bước: nạp lại phiếu, mở bước kế (nếu vẫn còn việc), hết bước thì báo kết quả. */
+  const handleStepDone = async (msg: string) => {
+    if (!wizard) return
+    const msgs = [...wizard.msgs, msg]
+    let fresh: PurchaseDetail | null = null
+    try {
+      fresh = await fetchPurchaseDetail(id)
+      setDetail(fresh)
+    } catch {
+      void load()
+    }
+    let next = wizard.idx + 1
+    while (next < wizard.steps.length && fresh) {
+      const st = wizard.steps[next]
+      if ((st === "receive" && fresh.perms.canReceive) || (st === "service" && fresh.perms.canCompleteService)) break
+      next++
+    }
+    if (fresh && next < wizard.steps.length) {
+      setWizard({ steps: wizard.steps, idx: next, msgs })
+      return
+    }
+    setWizard(null)
+    const stillOpen = !!fresh && (fresh.perms.canReceive || fresh.perms.canCompleteService)
+    const src = fresh?.maintenanceSource
+    setNotice(
+      <>
+        {msgs.join(" ")}
+        {stillOpen && " Phiếu vẫn còn phần chưa nhập kho / chưa hoàn thành — bấm lại “Ghi nhận mua & hoàn thành” khi có hàng."}
+        {!stillOpen && src && (
+          <>
+            {" "}Bây giờ bạn có thể quay lại biên bản số{" "}
+            <Link href={`/dashboard/maintenance/records/${src.id}`} className="font-bold underline">{src.maBb || "(chưa có mã)"}</Link>
+            {" "}để gửi phê duyệt.
+          </>
+        )}
+      </>,
+    )
+  }
+
   const existing = useMemo(() => (detail ? { request: detail.request, lines: detail.lines } : null), [detail])
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (opts?: { skipPanel?: boolean }) => {
     if (!factoryId) return
+    // Thiếu Giám đốc/Kế toán (luôn đúng với phiếu lập từ biên bản bảo trì) hoặc người xem đang nhận xử lý
+    // phiếu từ biên bản → mở panel chọn người ký thay vì báo lỗi rồi bắt vào "Sửa phiếu".
+    const r = detail?.request
+    const needPanel = !!r && (!r.giam_doc_user_id || !r.ke_toan_user_id || !!detail?.perms.canTakeOver)
+    if (needPanel && !opts?.skipPanel) {
+      setApproverError(null)
+      setActionError(null)
+      setApproverOpen(true)
+      return
+    }
     setBusy(true)
     setActionError(null)
     try {
@@ -141,6 +209,30 @@ function PurchaseDetailInner() {
       router.push(`/dashboard/ky/${yeuCauId}`)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Không gửi ký được")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleApproverConfirm = async (giamDocId: string, keToanId: string) => {
+    if (!factoryId) return
+    setBusy(true)
+    setApproverError(null)
+    try {
+      await savePurchaseApprovers(id, giamDocId, keToanId)
+    } catch (err) {
+      setApproverError(err instanceof Error ? err.message : "Không lưu được người ký")
+      setBusy(false)
+      return
+    }
+    try {
+      const yeuCauId = await submitPurchaseForSigning(id, factoryId)
+      router.push(`/dashboard/ky/${yeuCauId}`)
+    } catch (err) {
+      // Người ký đã lưu — đóng panel, tải lại phiếu, báo lỗi gửi ký ở trang chi tiết.
+      setApproverOpen(false)
+      setActionError(err instanceof Error ? err.message : "Không gửi ký được")
+      void load()
     } finally {
       setBusy(false)
     }
@@ -232,7 +324,8 @@ function PurchaseDetailInner() {
             onCancel={() => setEditing(false)}
             onSaved={async (_id, submitAfter) => {
               setEditing(false)
-              if (submitAfter) await handleSubmit()
+              // Form đã bắt buộc chọn Giám đốc/Kế toán và đã lưu (kể cả nhận xử lý) → gửi thẳng.
+              if (submitAfter) await handleSubmit({ skipPanel: true })
               else void load()
             }}
           />
@@ -247,7 +340,7 @@ function PurchaseDetailInner() {
   // Bản PDF: Luôn cho phép hiển thị bản xem trước PDF qua buildPurchaseDraftPdfBytes khi chưa có file ký (Rule 29)
   const hasDraft = !hasSignedFile && detail.lines.length > 0 && !!factoryId
   const effectiveDocTab: "file" | "content" = hasSignedFile || hasDraft ? docTab : "content"
-  const anyModalOpen = receiveOpen || serviceOpen || adjustOpen || closeOpen || cancelOpen || !!imageEdit
+  const anyModalOpen = receiveOpen || serviceOpen || adjustOpen || closeOpen || cancelOpen || approverOpen || !!imageEdit
   const viewerActive = (isDesktop || mobileTab === "doc") && !anyModalOpen
   const viewFileName = `${docLabel} ${soPhieu.replace("/", "-")}`
   const openSignedFile = () => {
@@ -275,7 +368,7 @@ function PurchaseDetailInner() {
           <b>Lập từ biên bản bảo trì</b>{" "}
           <Link href={`/dashboard/maintenance/records/${detail.maintenanceSource.id}`} className="font-bold underline">{detail.maintenanceSource.maBb || "(chưa có mã)"}</Link>
           {" "}— vật tư mua ngoài, nhập kho vào kho tạm {detail.maintenanceSource.ktCode}; biên bản chỉ gửi ký được khi kho tạm đủ hàng.
-          {detail.perms.canTakeOver && " Bạn có thể thêm/bớt vật tư, tăng số lượng: bấm “Nhận xử lý” rồi Lưu — bạn sẽ là người đề nghị (ký bước 1 và ghi nhận mua)."}
+          {detail.perms.canTakeOver && " Bấm “Gửi ký duyệt” để chọn Giám đốc, Kế toán và gửi luôn — bạn sẽ là người đề nghị (ký bước 1 và ghi nhận mua). Cần thêm/bớt vật tư, đổi số lượng thì bấm “Nhận xử lý”."}
         </div>
       )}
       {isAdjustment && (
@@ -465,7 +558,7 @@ function PurchaseDetailInner() {
   if (myTurn && req.yeu_cau_ky_id && !isApproved) {
     actions.push({ key: "sign", label: "Ký ngay", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
   }
-  if (detail.perms.canSubmit && !isApproved) {
+  if ((detail.perms.canSubmit || detail.perms.canTakeOver) && !isApproved) {
     actions.push({
       key: "submit",
       label: req.trang_thai === "tra_ve" ? "Gửi ký lại" : "Gửi ký duyệt",
@@ -475,11 +568,14 @@ function PurchaseDetailInner() {
       disabled: busy,
     })
   }
-  if (detail.perms.canReceive) {
-    actions.push({ key: "receive", label: "Ghi nhận mua / Nhập kho", icon: <PackageCheck size={16} />, onClick: () => { setNotice(null); setReceiveOpen(true) } })
-  }
-  if (detail.perms.canCompleteService) {
-    actions.push({ key: "service", label: "Xác nhận hoàn thành", icon: <Wrench size={16} />, onClick: () => { setNotice(null); setServiceOpen(true) } })
+  if (detail.perms.canReceive || detail.perms.canCompleteService) {
+    const both = detail.perms.canReceive && detail.perms.canCompleteService
+    actions.push({
+      key: "fulfill",
+      label: both ? "Ghi nhận mua & hoàn thành" : detail.perms.canReceive ? "Ghi nhận mua / Nhập kho" : "Xác nhận hoàn thành gia công",
+      icon: detail.perms.canReceive ? <PackageCheck size={16} /> : <Wrench size={16} />,
+      onClick: startFulfill,
+    })
   }
   if (!myTurn && req.trang_thai === "cho_ky" && req.yeu_cau_ky_id && !isApproved) {
     actions.push({ key: "kyscreen", label: "Mở màn ký", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
@@ -510,6 +606,20 @@ function PurchaseDetailInner() {
       {myTurn && (
         <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
           <Bell size={15} /> Đến lượt bạn ký phiếu này
+        </div>
+      )}
+      {(detail.perms.canReceive || detail.perms.canCompleteService) && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+          <Bell size={15} className="mt-0.5 shrink-0" />
+          <span>
+            Phiếu đã duyệt — tới lượt bạn{" "}
+            {detail.perms.canReceive && detail.perms.canCompleteService
+              ? "ghi nhận mua (nhập kho) rồi xác nhận hoàn thành gia công"
+              : detail.perms.canReceive
+                ? "ghi nhận mua và nhập kho"
+                : "xác nhận hoàn thành gia công"}
+            . Phiếu chỉ hoàn tất sau bước này.
+          </span>
         </div>
       )}
       {(primary || secondary.length > 0 || danger.length > 0) && (
@@ -649,16 +759,18 @@ function PurchaseDetailInner() {
         <ReceiveModal
           detail={detail}
           factoryId={factoryId}
-          onClose={() => setReceiveOpen(false)}
-          onDone={(msg) => { setReceiveOpen(false); setNotice(msg); void load() }}
+          stepLabel={wizard ? `Bước ${wizard.idx + 1}/${wizard.steps.length}` : undefined}
+          onClose={() => setWizard(null)}
+          onDone={(msg) => void handleStepDone(msg)}
         />
       )}
       {serviceOpen && factoryId && (
         <CompleteServiceModal
           detail={detail}
           factoryId={factoryId}
-          onClose={() => setServiceOpen(false)}
-          onDone={(msg) => { setServiceOpen(false); setNotice(msg); void load() }}
+          stepLabel={wizard ? `Bước ${wizard.idx + 1}/${wizard.steps.length}` : undefined}
+          onClose={() => setWizard(null)}
+          onDone={(msg) => void handleStepDone(msg)}
         />
       )}
       {adjustOpen && factoryId && (
@@ -705,6 +817,19 @@ function PurchaseDetailInner() {
             </div>
           )}
         </ModalShell>
+      )}
+      {approverOpen && user && (
+        <PurchaseApproverModal
+          soPhieu={soPhieu}
+          userId={user.id}
+          initialGiamDocId={req.giam_doc_user_id}
+          initialKeToanId={req.ke_toan_user_id}
+          takeOver={!!detail.perms.canTakeOver}
+          busy={busy}
+          error={approverError}
+          onClose={() => setApproverOpen(false)}
+          onConfirm={(g, k) => void handleApproverConfirm(g, k)}
+        />
       )}
       {cancelOpen && (
         <ModalShell

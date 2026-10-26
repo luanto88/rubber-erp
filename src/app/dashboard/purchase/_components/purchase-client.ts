@@ -104,6 +104,15 @@ export async function closePurchase(requestId: string, lyDo: string) {
   }))
 }
 
+/** Chỉ đổi Giám đốc / Kế toán (panel "Gửi ký duyệt"); phiếu từ biên bản: đồng thời nhận xử lý. */
+export async function savePurchaseApprovers(requestId: string, giamDocUserId: string, keToanUserId: string) {
+  return readJson<{ ok: boolean; takeOver: boolean }>(await authFetch(`/api/purchase/requests/${requestId}/approvers`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ giamDocUserId, keToanUserId }),
+  }))
+}
+
 export async function readJson<T>(res: Response): Promise<T> {
   const json = (await res.json().catch(() => ({}))) as T & { error?: string }
   if (!res.ok) throw new Error(json.error || `Lỗi ${res.status}`)

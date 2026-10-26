@@ -1,5 +1,5 @@
 "use client"
-import { useState, useEffect, useRef, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { MapContainer, TileLayer, GeoJSON, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -119,8 +119,8 @@ export default function MapClient() {
   // Selected lot details
   const [selectedLot, setSelectedLot] = useState<LotProperties | null>(null)
 
-  // GeoJSON key for forcing re-render
-  const geoJsonKey = useRef(0)
+  // Phiên bản dữ liệu GeoJSON — tăng mỗi lần tải xong file, dùng làm key buộc <GeoJSON> vẽ lại
+  const [geoVersion, setGeoVersion] = useState(0)
 
   // ── Load GeoJSON ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -132,7 +132,7 @@ export default function MapClient() {
         const res = await fetch(`/geojson/${fileInfo.file}`)
         const data = await res.json()
         setGeoData(data)
-        geoJsonKey.current++
+        setGeoVersion((v) => v + 1)
       } catch (e) {
         console.error("Failed to load GeoJSON:", e)
       }
@@ -175,7 +175,6 @@ export default function MapClient() {
         return true
       }),
     }
-    geoJsonKey.current++
     return filtered
   }, [geoData, filterTeam, filterVariety, filterYear, searchLot])
 
@@ -436,7 +435,7 @@ export default function MapClient() {
           {filteredData && (
             <>
               <GeoJSON
-                key={geoJsonKey.current}
+                key={`${geoVersion}|${filterTeam}|${filterVariety}|${filterYear}|${searchLot}`}
                 data={filteredData}
                 style={styleFeature as L.StyleFunction}
                 onEachFeature={onEachFeature as L.GeoJSONOptions["onEachFeature"]}

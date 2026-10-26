@@ -629,6 +629,19 @@ export async function loadSkKienAvailability(
   lotIds: string[],
 ): Promise<Record<string, SkKienAvailability>> {
   await assertProductAccess(accessToken, factoryId, SK_PERMISSIONS, "sang kiện / thay bọc");
+  return computeKienAvailability(factoryId, lotIds);
+}
+
+/**
+ * Lõi tính theo kiện (KHÔNG kiểm quyền — chỉ gọi sau khi đã assert ở hàm export): produced theo
+ * lot_transactions, bọc/pallet theo giao dịch cuối chứa kiện (fallback bản chụp lô), assigned theo mọi
+ * export_orders khớp lot_id hoặc ma_lo. Dùng cho Sang kiện / Thay bọc (tồn pallet
+ * theo kiện nay tính riêng ở src/app/dashboard/inventory/pallet-flow-actions.ts).
+ */
+async function computeKienAvailability(
+  factoryId: string,
+  lotIds: string[],
+): Promise<Record<string, SkKienAvailability>> {
   const ids = [...new Set(lotIds)].filter(Boolean);
   const out: Record<string, SkKienAvailability> = {};
   if (ids.length === 0) return out;

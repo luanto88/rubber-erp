@@ -40,6 +40,7 @@ const QrScanner = dynamic(
 const PURCHASE_ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 import { readJson } from "./_components/purchase-client"
 import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
+import { ServiceCompletionsView } from "./_components/service-completions-view"
 
 /** Dòng vật tư rút gọn do GET /api/purchase/requests trả kèm (cho dòng xổ). */
 type ListLine = {
@@ -61,11 +62,20 @@ type ListRow = PurchaseRequestRow & {
   signedCount: number
   signerCount: number
   myTurn: boolean
+  /** Phiếu đã duyệt còn phải ghi nhận mua / xác nhận gia công (API tính). */
+  nextStep?: "nhap_kho" | "gia_cong" | "ca_hai" | null
+  myFulfillTurn?: boolean
   file_hien_tai: string | null
   lines?: ListLine[]
 }
 
-type Tab = "todo" | "mine" | "all"
+type Tab = "todo" | "mine" | "all" | "gia_cong"
+
+const NEXT_STEP_LABEL: Record<"nhap_kho" | "gia_cong" | "ca_hai", string> = {
+  nhap_kho: "Chờ nhập kho",
+  gia_cong: "Chờ xác nhận gia công",
+  ca_hai: "Chờ nhập kho + gia công",
+}
 
 const COLS = 9
 
@@ -117,6 +127,7 @@ function PurchaseListInner() {
   }, [])
 
   const load = useCallback(async () => {
+    if (tab === "gia_cong") return // tab thống kê gia công tự tải dữ liệu
     setLoading(true)
     setError(null)
     try {
@@ -161,6 +172,7 @@ function PurchaseListInner() {
     { key: "todo", label: "Chờ tôi xử lý", ...(tab === "todo" ? { count: rows.length, alertCount: true } : {}) },
     { key: "mine", label: "Của tôi" },
     ...(canAll ? [{ key: "all" as Tab, label: "Tất cả" }] : []),
+    { key: "gia_cong" as Tab, label: "Gia công ngoài" },
   ]
 
   const stats = useMemo(() => {
@@ -168,14 +180,16 @@ function PurchaseListInner() {
     let myTurn = 0
     let dangMua = 0
     let gap = 0
+    let fulfill = 0
     for (const r of rows) {
       if (r.trang_thai === "cho_ky") dangKy++
       if (r.myTurn) myTurn++
+      if (r.myFulfillTurn) fulfill++
       if (r.trang_thai === "dang_mua" || r.trang_thai === "da_duyet") dangMua++
       const urg = r.ngay_can_hang && isPurchaseActive(r.trang_thai) ? purchaseUrgency(r.ngay_can_hang, today) : null
       if (urg && (urg.level === "qua_han" || urg.level === "gap")) gap++
     }
-    return { total: rows.length, dangKy, myTurn, dangMua, gap }
+    return { total: rows.length, dangKy, myTurn, dangMua, gap, fulfill }
   }, [rows, today])
 
   const expandableIds = filtered.filter((r) => (r.lines || []).length > 0).map((r) => r.id)
@@ -238,10 +252,13 @@ function PurchaseListInner() {
         ariaLabel="Phạm vi phiếu đề nghị mua"
       />
 
+      {tab === "gia_cong" ? (
+        <ServiceCompletionsView defaultFrom={from} defaultTo={to} />
+      ) : (<>
       <StatGrid cols={4}>
         <StatCard icon={ClipboardList} label="Số phiếu" value={stats.total} sub={`${stats.dangMua} phiếu đã duyệt / đang mua`} />
         <StatCard icon={Clock} label="Đang ký duyệt" value={stats.dangKy} />
-        <StatCard icon={Bell} label="Chờ bạn ký" value={stats.myTurn} valueTone={stats.myTurn > 0 ? "warn" : "default"} />
+        <StatCard icon={Bell} label="Chờ bạn ký" value={stats.myTurn} valueTone={stats.myTurn > 0 || stats.fulfill > 0 ? "warn" : "default"} sub={stats.fulfill > 0 ? `${stats.fulfill} phiếu chờ bạn ghi nhận mua / gia công` : undefined} />
         <StatCard icon={AlertTriangle} label="Cần hàng gấp / quá hạn" value={stats.gap} valueTone={stats.gap > 0 ? "danger" : "default"} />
       </StatGrid>
 
@@ -455,9 +472,10 @@ function PurchaseListInner() {
                           <StatusBadge
                             domain="purchase"
                             status={r.trang_thai}
-                            label={r.trang_thai === "cho_ky" && r.signerCount > 0 ? `Đang ký duyệt (${r.signedCount}/${r.signerCount})` : undefined}
+                            label={r.trang_thai === "cho_ky" && r.signerCount > 0 ? `Đang ký duyệt (${r.signedCount}/${r.signerCount})` : r.nextStep ? `${r.trang_thai === "dang_mua" ? "Đang mua" : "Đã duyệt"} · ${NEXT_STEP_LABEL[r.nextStep]}` : undefined}
                           />
                           {r.myTurn && <StatusBadge tone="pending" label="Chờ BẠN ký" size="xs" />}
+                          {r.myFulfillTurn && <StatusBadge tone="pending" label="Tới lượt BẠN" size="xs" />}
                         </div>
                       </td>
                     </ExpandableRow>
@@ -468,6 +486,7 @@ function PurchaseListInner() {
           </>
         )}
       </ResponsiveTableWrapper>
+      </>)}
     </div>
   )
 }

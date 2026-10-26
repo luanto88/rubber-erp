@@ -1789,8 +1789,8 @@ function HubView({
           <div className="mb-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5">
             <Lock size={14} className="mt-0.5 shrink-0 text-red-500" />
             <p className="text-xs font-semibold text-red-700">
-              Ca này đã được duyệt & khóa bởi {shiftLock.lockedByName} · {formatDMYHMS(new Date(shiftLock.lockedAt))}.
-              Liên hệ quản trị viên (module Thành phẩm) để mở khóa.
+              Ca này đã được phê duyệt bởi {shiftLock.lockedByName} · {formatDMYHMS(new Date(shiftLock.lockedAt))}.
+              Liên hệ quản trị viên (module Thành phẩm) để hủy phê duyệt.
             </p>
           </div>
         )}

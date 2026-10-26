@@ -308,7 +308,6 @@ export async function parseOutputPdf(buffer: Buffer): Promise<ParsedOutputReport
     const page = await doc.getPage(pageIdx + 1)
     const textContent = await page.getTextContent()
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const items = textContent.items
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .filter((i: any) => i.str && i.str.trim())

@@ -17,7 +17,8 @@ const REQUEST_COLS =
 // ── GET: danh sách ──────────────────────────────────────────
 // ?scope=mine|todo|all&from=&to=&status=
 //  mine — phiếu tôi đề nghị hoặc tôi là người ký; all — toàn nhà máy (purchase.view_all/admin);
-//  todo — phiếu đang chờ CHÍNH TÔI ký (đã tới lượt) + phiếu bị trả về của tôi.
+//  todo — phiếu đang chờ CHÍNH TÔI ký (đã tới lượt) + phiếu bị trả về của tôi + phiếu đã duyệt của tôi
+//         còn phải ghi nhận mua / xác nhận gia công.
 export async function GET(req: NextRequest) {
   try {
     const actor = await resolveIsoActor(req)
@@ -116,7 +117,7 @@ export async function GET(req: NextRequest) {
 
     // Dòng vật tư rút gọn — cho dòng xổ ở danh sách (rule 29 mục A.3).
     type ListLine = {
-      id: string; request_id: string; sort_order: number; item_code: string | null; item_name: string
+      id: string; request_id: string; sort_order: number; item_id: string | null; item_code: string | null; item_name: string
       unit: string | null; so_luong: number; don_gia: number; thanh_tien: number; sl_da_mua: number
       muc_dich: string | null; ngay_can_hang: string | null
     }
@@ -125,7 +126,7 @@ export async function GET(req: NextRequest) {
     for (let i = 0; i < reqIds.length; i += 100) {
       const { data } = await supabaseAdmin
         .from("purchase_request_lines")
-        .select("id, request_id, sort_order, item_code, item_name, unit, so_luong, don_gia, thanh_tien, sl_da_mua, muc_dich, ngay_can_hang")
+        .select("id, request_id, sort_order, item_id, item_code, item_name, unit, so_luong, don_gia, thanh_tien, sl_da_mua, muc_dich, ngay_can_hang")
         .in("request_id", reqIds.slice(i, i + 100))
         .order("sort_order", { ascending: true })
         .range(0, 9999)
@@ -134,6 +135,15 @@ export async function GET(req: NextRequest) {
         arr.push(l)
         linesByReq.set(l.request_id, arr)
       }
+    }
+
+    // Dịch vụ gia công (không nhập kho) — để biết bước tiếp theo của phiếu đã duyệt.
+    const serviceIds = new Set<string>()
+    const allItemIds = [...new Set([...linesByReq.values()].flat().map((l) => l.item_id).filter((v): v is string => !!v))]
+    for (let i = 0; i < allItemIds.length; i += 200) {
+      const { data, error } = await supabaseAdmin.from("inventory_items").select("id").in("id", allItemIds.slice(i, i + 200)).eq("la_dich_vu", true)
+      if (error) break
+      for (const it of (data || []) as { id: string }[]) serviceIds.add(it.id)
     }
 
     const userIds = new Set<string>()
@@ -153,6 +163,13 @@ export async function GET(req: NextRequest) {
       const signers = r.yeu_cau_ky_id ? signersByYc.get(r.yeu_cau_ky_id) || [] : []
       const pending = signers.filter((s) => s.trang_thai !== "da_ky").sort((a, b) => a.thu_tu - b.thu_tu)
       const minThuTu = pending[0]?.thu_tu
+      // Bước tiếp theo của phiếu ĐÃ DUYỆT (theo bản chụp sl_da_mua): nhập kho / xác nhận gia công.
+      const reqLines = linesByReq.get(r.id) || []
+      const left = (l: ListLine) => (Number(l.so_luong) || 0) - (Number(l.sl_da_mua) || 0) > 0
+      const buying = r.loai !== "dieu_chinh" && (r.trang_thai === "da_duyet" || r.trang_thai === "dang_mua")
+      const needGoods = buying && reqLines.some((l) => left(l) && !(l.item_id && serviceIds.has(l.item_id)))
+      const needService = buying && reqLines.some((l) => left(l) && !!l.item_id && serviceIds.has(l.item_id))
+      const nextStep: "nhap_kho" | "gia_cong" | "ca_hai" | null = needGoods && needService ? "ca_hai" : needGoods ? "nhap_kho" : needService ? "gia_cong" : null
       const turnUserIds = r.trang_thai === "cho_ky" ? pending.filter((s) => s.thu_tu === minThuTu).map((s) => s.user_id) : []
       return {
         ...r,
@@ -163,6 +180,9 @@ export async function GET(req: NextRequest) {
         signerCount: signers.length,
         turnUserIds,
         myTurn: turnUserIds.includes(actor.userId),
+        nextStep,
+        // Người đề nghị (hoặc admin) là người phải ghi nhận mua / xác nhận hoàn thành.
+        myFulfillTurn: !!nextStep && (r.nguoi_de_nghi_id === actor.userId || actor.isAdmin),
         file_hien_tai: r.yeu_cau_ky_id ? fileByYc.get(r.yeu_cau_ky_id) || null : null,
         lines: (linesByReq.get(r.id) || []).sort((a, b) => a.sort_order - b.sort_order),
       }
@@ -171,7 +191,7 @@ export async function GET(req: NextRequest) {
     // "Chờ tôi xử lý": phiếu cần hàng sớm nhất lên trước (phiếu cũ không có ngày cần → cuối).
     const filtered = scope === "todo"
       ? result
-          .filter((r) => r.myTurn || (r.trang_thai === "tra_ve" && r.nguoi_de_nghi_id === actor.userId))
+          .filter((r) => r.myTurn || (r.trang_thai === "tra_ve" && r.nguoi_de_nghi_id === actor.userId) || (!!r.nextStep && r.nguoi_de_nghi_id === actor.userId))
           .sort((a, b) => (a.ngay_can_hang || "9999-12-31").localeCompare(b.ngay_can_hang || "9999-12-31"))
       : result
     return NextResponse.json({ rows: filtered, canAll })

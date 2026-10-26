@@ -93,7 +93,7 @@ export const PURCHASE_STATUS: Record<string, StatusEntry> = {
   nhap: { label: "Nháp", tone: "draft" },
   cho_ky: { label: "Đang ký duyệt", tone: "pending" },
   tra_ve: { label: "Bị trả về", tone: "returned" },
-  da_duyet: { label: "Đã duyệt", tone: "valid" },
+  da_duyet: { label: "Đã duyệt · Chờ ghi nhận mua", tone: "pending" },
   dang_mua: { label: "Đang mua", tone: "info" },
   hoan_tat: { label: "Hoàn tất", tone: "valid" },
   dong: { label: "Đã đóng", tone: "draft" },
