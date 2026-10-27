@@ -1,5 +1,6 @@
 import { buildDispatchTripRef, getKLFromTrip, loadDispatchTripsByUids } from "@/lib/storage-detail"
-import { formatDateDisplay, getTodayISODate, normalizeDateInput } from "@/lib/date-utils"
+import { formatDateDisplay, getFactoryTodayISO, normalizeDateInput } from "@/lib/date-utils"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
 
 export type WarnCode =
   | "NO_DISPATCH_DATE"
@@ -93,7 +94,7 @@ export type OutputFormState = OutputFormData
 
 export function emptyOutputForm(): OutputFormData {
   return {
-    ngay: getTodayISODate(),
+    ngay: getFactoryTodayISO(),
     doi: "",
     ma_nguon: "cs",
     so_xe: "",
@@ -107,6 +108,23 @@ export function emptyOutputForm(): OutputFormData {
     ghi_chu: "",
     ghi_chu_tu_do: "",
   }
+}
+
+/**
+ * 5 loại mủ của Sản lượng — nguồn DUY NHẤT cho nhãn + cột KL (trang danh sách, form, import, PDF).
+ * Trước đây lặp lại 4 nơi.
+ */
+export const OUTPUT_MATERIALS = [
+  { key: "mn", label: "Mủ nước", shortLabel: "Nước", tuoiKey: "mn_tuoi", khoKey: "mn_kho" },
+  { key: "ct", label: "Mủ chén", shortLabel: "Chén", tuoiKey: "ct_tuoi", khoKey: "ct_kho" },
+  { key: "dct", label: "Mủ đông chén", shortLabel: "ĐChén", tuoiKey: "dct_tuoi", khoKey: "dct_kho" },
+  { key: "dkt", label: "Mủ đông khối", shortLabel: "ĐKhối", tuoiKey: "dkt_tuoi", khoKey: "dkt_kho" },
+  { key: "dt", label: "Mủ dây", shortLabel: "Dây", tuoiKey: "dt_tuoi", khoKey: "dt_kho" },
+] as const
+
+/** So sánh số xe theo thứ tự tự nhiên ("2A" trước "10A"). */
+export function compareSoXe(a: string, b: string) {
+  return a.localeCompare(b, "vi", { numeric: true, sensitivity: "base" })
 }
 
 export function parseVehicleCode(raw: string): { base_xe: string; chuyen: number } {
@@ -201,12 +219,14 @@ async function syncStorageTotalsFromTripUids(
   const uniqueUids = [...new Set(tripRefs.filter(Boolean))]
   if (uniqueUids.length === 0) return
 
-  const { data: ngans, error: ngansError } = await supabase
-    .from("ngans")
-    .select("id, loai_nl, trips")
-    .eq("factory_id", factoryId)
-
-  if (ngansError) throw new Error(ngansError.message)
+  const ngans = await fetchAllPaginated<{ id: string; loai_nl: string; trips?: string[] }>((from, to) =>
+    supabase
+      .from("ngans")
+      .select("id, loai_nl, trips")
+      .eq("factory_id", factoryId)
+      .order("id")
+      .range(from, to),
+  ).catch((err: { message?: string }) => { throw new Error(err?.message || "Không tải được ngăn lưu") })
 
   const affected = (ngans ?? []).filter((ngan: { trips?: string[] }) =>
     (ngan.trips ?? []).some((uid) => uniqueUids.includes(uid)),
@@ -270,13 +290,16 @@ export async function writeBackToDispatch(
     groups.set(key, g)
   }
 
-  const { data: entries, error: entriesError } = await supabase
-    .from("dispatch_entries")
-    .select("id,ngay,rows")
-    .eq("factory_id", factoryId)
-
-  if (entriesError) throw new Error(entriesError.message)
-  if (!entries?.length) return
+  const entries = await fetchAllPaginated<{ id: string; ngay: string; rows?: Array<Record<string, unknown>> }>((from, to) =>
+    supabase
+      .from("dispatch_entries")
+      .select("id,ngay,rows")
+      .eq("factory_id", factoryId)
+      .order("id")
+      .range(from, to),
+    500,
+  ).catch((err: { message?: string }) => { throw new Error(err?.message || "Không tải được phiếu điều xe") })
+  if (!entries.length) return
 
   const fmt = (n: number) => String(Math.round(n * 100) / 100)
   const wdrc = (kho: number, tuoi: number) => tuoi > 0 ? String(Math.round(kho / tuoi * 10000) / 100) : "0"
@@ -291,7 +314,7 @@ export async function writeBackToDispatch(
   const affectedTripUids = new Set<string>()
 
   await Promise.all(
-    (entries as Array<{ id: string; ngay: string; rows?: Array<Record<string, unknown>> }>).map(async (entry) => {
+    entries.map(async (entry) => {
       // Cột `ngay` lẫn định dạng (YYYY-MM-DD / dd/mm/yyyy) nên lọc ở client theo ngày chuẩn hoá.
       // Phiếu không có dòng nào thuộc ngày đang ghi → bỏ qua hẳn, KHÔNG UPDATE (trước đây mọi
       // phiếu của nhà máy đều bị ghi lại kèm updated_at=now(), làm badge "Đã ký — dữ liệu đã
@@ -305,7 +328,10 @@ export async function writeBackToDispatch(
         const rowChuyen = Number(row.chuyen ?? 1)
         const keyExact = `${rawSoXe}:${rowChuyen}`
         const keyParsed = `${parseVehicleCode(rawSoXe).base_xe}:${rowChuyen}`
-        const groupKg = groups.get(keyExact) ?? groups.get(keyParsed) ?? ZERO_KG
+        const groupKg = groups.get(keyExact) ?? groups.get(keyParsed)
+        // Chuyến không còn bản ghi sản lượng nào ⇒ GIỮ NGUYÊN KL đang có trên điều xe (rule 15),
+        // không ghi 0 — KL có thể đã nhập tay ở Điều xe ("Nhập KL") hoặc đang chờ sản lượng.
+        if (!groupKg) return row
         const next = {
           ...(row as Record<string, unknown>),
           ...buildDispatchPayload(groupKg),

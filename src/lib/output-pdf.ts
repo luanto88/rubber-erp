@@ -1,6 +1,6 @@
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import type { ProductionRecord } from "@/app/dashboard/output/_components/output-types"
+import { OUTPUT_MATERIALS, type ProductionRecord } from "@/app/dashboard/output/_components/output-types"
 
 const PDF_FONT_FILE = "NotoSans-Regular.ttf"
 const PDF_FONT_NAME = "NotoSans"
@@ -15,17 +15,7 @@ type PdfWithTable = jsPDF & {
 
 let fontBase64Promise: Promise<string> | null = null
 
-const MATERIAL_COLUMNS = [
-  { label: "Mủ nước", tuoiKey: "mn_tuoi", khoKey: "mn_kho" },
-  { label: "Mủ chén", tuoiKey: "ct_tuoi", khoKey: "ct_kho" },
-  { label: "Mủ đông chén", tuoiKey: "dct_tuoi", khoKey: "dct_kho" },
-  { label: "Mủ đông khối", tuoiKey: "dkt_tuoi", khoKey: "dkt_kho" },
-  { label: "Mủ dây", tuoiKey: "dt_tuoi", khoKey: "dt_kho" },
-] as const satisfies ReadonlyArray<{
-  label: string
-  tuoiKey: keyof ProductionRecord
-  khoKey: keyof ProductionRecord
-}>
+const MATERIAL_COLUMNS = OUTPUT_MATERIALS
 
 async function loadPdfFontBase64() {
   if (!fontBase64Promise) {

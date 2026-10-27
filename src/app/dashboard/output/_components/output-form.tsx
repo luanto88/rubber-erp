@@ -5,8 +5,8 @@ import { AlertTriangle, CheckCircle } from "lucide-react"
 import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
 import type { ProductionRecord, OutputFormState } from "./output-types"
-import { emptyOutputForm, parseVehicleCode } from "./output-types"
-import { formatDateDisplay, getTodayISODate, normalizeDateInput } from "@/lib/date-utils"
+import { OUTPUT_MATERIALS, emptyOutputForm } from "./output-types"
+import { formatDateDisplay, getFactoryTodayISO, normalizeDateInput } from "@/lib/date-utils"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -21,13 +21,7 @@ interface OutputFormProps {
   onClose: () => void
 }
 
-const LATEX_TYPES = [
-  { key: "mn",  label: "Mủ nước" },
-  { key: "ct",  label: "Mủ chén" },
-  { key: "dct", label: "Mủ đông chén" },
-  { key: "dkt", label: "Mủ đông khối" },
-  { key: "dt",  label: "Mủ dây" },
-] as const
+const LATEX_TYPES = OUTPUT_MATERIALS
 
 type LatexKey = typeof LATEX_TYPES[number]["key"]
 
@@ -95,7 +89,7 @@ export function OutputForm({ record, factoryId, initialDate, onSave, onClose }: 
     if (record) return
     setForm({
       ...emptyOutputForm(),
-      ngay: initialDate || getTodayISODate(),
+      ngay: initialDate || getFactoryTodayISO(),
     })
   }, [initialDate, record])
 

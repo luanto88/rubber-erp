@@ -24,7 +24,7 @@ Kho NL) — chi tiết lịch sử: `.claude/history/ke-hoach-dong-bo-ui-history
 - P9 🟡 Ngày mặc định theo UTC (`toISOString().slice(0,10)`) ⇒ 00:00-06:59 ra hôm qua.
 - P10 🟡 Trang in lấy `user.factory_id` thay `getActiveFactoryId()`; `ngans` không lọc nhà máy; `ket_qua` null làm crash; KPI không reset khi rỗng; đổi ngày khi Sửa không tính lại `so_ngay_luu`; effect tự điền `che_do_say` sửa ngầm dòng cũ.
 
-### Sản lượng (`output/`)
+### Sản lượng (`output/`) — ĐÃ SỬA S1–S10 ở U9a (2026-10-28, chờ test tay; chi tiết rule 15; S10 còn biển số 3A1064/đội 1-12 ở form)
 - S1 🔴 Nút "Xóa lọc" đặt ngày = "" ⇒ `.gte("ngay","")` lỗi ⇒ danh sách trống; nút luôn hiện (`page.tsx:474-487`).
 - S2 🔴 `production_records`, `dispatch_entries` (qua `loadDispatchEntriesWithResolvedRows` — cắt mất phiếu MỚI NHẤT), `ngans`, import `loadExistingRecords` không `.range()` ⇒ quá 1000 dòng sai KPI / import nhầm NO_DISPATCH_DATE / chèn trùng.
 - S3 🟠 Sửa bản ghi đổi ngày chỉ write-back ngày mới — điều xe ngày cũ giữ KL cũ (`page.tsx:617`).
@@ -43,8 +43,8 @@ ExpandableRow/RowAction/StatusBadge):
 | GĐ | Module | Hiện có | Cần làm |
 |---|---|---|---|
 | U8a | Kiểm soát quá trình — sửa bug P1-P10 ✅ (test pass 2026-10-28) | banner chỉ Tổng quan, tab Link tay, bảng `w-full`, không ExpandableRow/RowAction/ListState | sửa bug trước (1 phiên) |
-| U8b | Kiểm soát quá trình — UI ✅ (2026-10-28, chờ test tay) | | `ModuleThemeScope teal` + SegmentedTabs ở shell; StatGrid; FilterBar grid; bảng dense; ExpandableRow mẫu đo; RowAction; chi tiết phiếu `/process/measurements/[id]` 70/30 + PDF jsPDF có QR; Quét QR mã phiếu |
-| U9a | Sản lượng — sửa bug S1-S10 | danh sách đã đạt (banner, SegmentedTabs, FilterBar grid, ExpandableRow, RowAction) | sửa bug (1 phiên) |
+| U8b | Kiểm soát quá trình — UI ✅ (test pass 2026-10-28) | | `ModuleThemeScope teal` + SegmentedTabs ở shell; StatGrid; FilterBar grid; bảng dense; ExpandableRow mẫu đo; RowAction; chi tiết phiếu `/process/measurements/[id]` 70/30 + PDF jsPDF có QR; Quét QR mã phiếu |
+| U9a | Sản lượng — sửa bug S1-S10 ✅ (2026-10-28, chờ test tay) | danh sách đã đạt (banner, SegmentedTabs, FilterBar grid, ExpandableRow, RowAction) | sửa bug (1 phiên) |
 | U9b | Sản lượng — UI | | StatusBadge cho cảnh báo/nguồn (domain mới), ListState có lỗi, Quét QR, bảng Thống kê `min-w` + căn phải; chi tiết ngày `/output/day/[date]` 70/30 + PDF nhúng; Converter bọc theme + banner |
 | U10 | Kho vật tư — Thẻ kho/Sổ chi tiết/Tổng quan | banner amber qua `InventoryPageShell`, tab Link tự viết, bảng `w-full text-sm`, FilterBar không grid | `moduleThemeClass("amber")` ở shell, tab → SegmentedTabs, thẻ số → StatGrid, bảng → enterprise-table dense, FilterBar grid |
 | U11 | KPI (`kpi/**`) | banner chỉ trang chủ; route con `<h1>` thường; tab tự viết `kpi-shell.tsx:47-71`; badge span tay `tasks:472` | banner violet mọi route con, ModuleThemeScope, SegmentedTabs, StatusBadge domain mới `kpi_task`, bảng scores → enterprise-table |

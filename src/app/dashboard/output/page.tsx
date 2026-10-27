@@ -29,9 +29,11 @@ import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import type { OutputFormState, ProductionRecord } from "./_components/output-types"
 import {
+  OUTPUT_MATERIALS,
   WARN_LABELS,
   WARN_SEVERITY,
   buildProductionRecordKey,
+  compareSoXe,
   parseVehicleCode,
   writeBackToDispatch,
   type WarnCode,
@@ -43,7 +45,8 @@ import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-sele
 import { loadRequiredNotes } from "@/lib/required-notes"
 import { EMPTY_NOTE_FILTER, isBlankNoteContent, matchesNoteFilterMulti } from "@/lib/note-filter"
 import { downloadOutputDayPdf } from "@/lib/output-pdf"
-import { formatDateDisplay, getTodayISODate } from "@/lib/date-utils"
+import { formatDateDisplay, getFactoryTodayISO, getFirstDayOfMonthISO } from "@/lib/date-utils"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { DateTextInput } from "@/app/dashboard/_components/date-text-input"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -68,10 +71,9 @@ interface DeliveryPoint {
   doi_nho?: string | null
 }
 
-const DOI_LON_OPTIONS = ["0", ...Array.from({ length: 12 }, (_, i) => String(i + 1))]
-const DOI_LON_LABELS: Record<string, string> = Object.fromEntries(
-  DOI_LON_OPTIONS.map((v) => [v, v === "0" ? "Thu mua" : `Đội ${v}`]),
-)
+// Dự phòng khi chưa tải được điểm giao nhận; danh sách thật = các đội có trong dispatch_delivery_points.
+const DOI_LON_FALLBACK = Array.from({ length: 12 }, (_, i) => i + 1)
+const doiLonLabel = (v: string) => (v === "0" ? "Thu mua" : `Đội ${v}`)
 const DOI_NHO_LABELS: Record<string, string> = { [DOI_NHO_UNASSIGNED]: "Chưa gán đội nhỏ" }
 
 function toIsoDateKey(value: string): string {
@@ -80,21 +82,9 @@ function toIsoDateKey(value: string): string {
   return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`
 }
 
-const LATEX_FILTER_OPTIONS = ["Mủ nước", "Mủ chén", "Mủ đông chén", "Mủ đông khối", "Mủ dây"] as const
-type LatexFilterOption = typeof LATEX_FILTER_OPTIONS[number]
-
-const MATERIAL_DEFS = [
-  { label: "Mủ nước", shortLabel: "Nước", tuoiKey: "mn_tuoi", khoKey: "mn_kho" },
-  { label: "Mủ chén", shortLabel: "Chén", tuoiKey: "ct_tuoi", khoKey: "ct_kho" },
-  { label: "Mủ đông chén", shortLabel: "ĐChén", tuoiKey: "dct_tuoi", khoKey: "dct_kho" },
-  { label: "Mủ đông khối", shortLabel: "ĐKhối", tuoiKey: "dkt_tuoi", khoKey: "dkt_kho" },
-  { label: "Mủ dây", shortLabel: "Dây", tuoiKey: "dt_tuoi", khoKey: "dt_kho" },
-] as const satisfies ReadonlyArray<{
-  label: LatexFilterOption
-  shortLabel: string
-  tuoiKey: keyof ProductionRecord
-  khoKey: keyof ProductionRecord
-}>
+const MATERIAL_DEFS = OUTPUT_MATERIALS
+const LATEX_FILTER_OPTIONS = MATERIAL_DEFS.map((def) => def.label)
+type LatexFilterOption = typeof MATERIAL_DEFS[number]["label"]
 
 function getActiveMaterialDefs(selected: string[]) {
   if (selected.length === 0) return MATERIAL_DEFS
@@ -102,13 +92,9 @@ function getActiveMaterialDefs(selected: string[]) {
 }
 
 function getMaterialFlags(record: ProductionRecord) {
-  return {
-    "Mủ nước": (record.mn_tuoi ?? 0) > 0 || (record.mn_kho ?? 0) > 0,
-    "Mủ chén": (record.ct_tuoi ?? 0) > 0 || (record.ct_kho ?? 0) > 0,
-    "Mủ đông chén": (record.dct_tuoi ?? 0) > 0 || (record.dct_kho ?? 0) > 0,
-    "Mủ đông khối": (record.dkt_tuoi ?? 0) > 0 || (record.dkt_kho ?? 0) > 0,
-    "Mủ dây": (record.dt_tuoi ?? 0) > 0 || (record.dt_kho ?? 0) > 0,
-  } as const
+  return Object.fromEntries(
+    MATERIAL_DEFS.map((def) => [def.label, Number(record[def.tuoiKey] ?? 0) > 0 || Number(record[def.khoKey] ?? 0) > 0]),
+  ) as Record<LatexFilterOption, boolean>
 }
 
 function matchesMaterialFilter(record: ProductionRecord, selected: string[]) {
@@ -193,6 +179,11 @@ export default function OutputPage() {
   const [cleaningDuplicates, setCleaningDuplicates] = useState(false)
   const [deletingRows, setDeletingRows] = useState(false)
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set())
+  const [converterToast, setConverterToast] = useState<{ msg: string; ok: boolean } | null>(null)
+  const showConverterToast = useCallback((msg: string, ok = true) => {
+    setConverterToast({ msg, ok })
+    window.setTimeout(() => setConverterToast(null), ok ? 3500 : 6000)
+  }, [])
 
   const toggleDate = (ngay: string) => {
     setExpandedDates((prev) => {
@@ -203,12 +194,13 @@ export default function OutputPage() {
     })
   }
 
-  const [filterFrom, setFilterFrom] = useState(() => {
-    const d = new Date()
-    d.setDate(1)
-    return d.toISOString().slice(0, 10)
+  // Mặc định đầu tháng → hôm nay theo giờ nhà máy (không dùng UTC: 00:00–06:59 ra ngày hôm qua).
+  const [defaultRange] = useState(() => {
+    const today = getFactoryTodayISO()
+    return { from: getFirstDayOfMonthISO(today), to: today }
   })
-  const [filterTo, setFilterTo] = useState(() => getTodayISODate())
+  const [filterFrom, setFilterFrom] = useState(defaultRange.from)
+  const [filterTo, setFilterTo] = useState(defaultRange.to)
   const [filterDoi, setFilterDoi] = useState<string[]>([])
   const [filterDoiNho, setFilterDoiNho] = useState<string[]>([])
   const [filterXe, setFilterXe] = useState("")
@@ -225,24 +217,35 @@ export default function OutputPage() {
   const canEdit = hasPermission(currentUser, "output.edit")
   const canDelete = hasPermission(currentUser, "output.delete")
   const canImport = hasPermission(currentUser, "output.import")
+  // Converter ghi thẳng vào production_records ⇒ ngoài quyền hỗ trợ kỹ thuật còn cần quyền ghi.
+  const canUseConverter = isAdmin || (hasPermission(currentUser, "output.tech_support") && (canImport || canCreate))
+
+  // Phân trang (PostgREST cắt im lặng ở 1000 dòng); ngày rỗng = không giới hạn phía đó.
+  const fetchRecords = useCallback((fid: string) =>
+    fetchAllPaginated<ProductionRecord>((from, to) => {
+      let q = supabase
+        .from("production_records")
+        .select("*")
+        .eq("factory_id", fid)
+        .order("ngay", { ascending: false })
+        .order("so_xe")
+        .order("chuyen")
+        .order("id")
+      if (filterFrom) q = q.gte("ngay", filterFrom)
+      if (filterTo) q = q.lte("ngay", filterTo)
+      return q.range(from, to)
+    }), [filterFrom, filterTo])
 
   const loadRecords = useCallback(async (fid: string) => {
     setLoading(true)
     try {
-      const { data } = await supabase
-        .from("production_records")
-        .select("*")
-        .eq("factory_id", fid)
-        .gte("ngay", filterFrom)
-        .lte("ngay", filterTo)
-        .order("ngay", { ascending: false })
-        .order("so_xe")
-        .order("chuyen")
-      setRecords((data as ProductionRecord[]) || [])
+      setRecords(await fetchRecords(fid))
+    } catch (error) {
+      setSaveError((error as { message?: string } | null)?.message || "Không tải được danh sách sản lượng.")
     } finally {
       setLoading(false)
     }
-  }, [filterFrom, filterTo])
+  }, [fetchRecords])
 
   const loadSupportData = useCallback(async (fid: string) => {
     const { data: dp } = await supabase
@@ -283,15 +286,7 @@ export default function OutputPage() {
       setLoading(true)
       try {
         const [recordsResult, dispatchResult, noteRows] = await Promise.all([
-          supabase
-            .from("production_records")
-            .select("*")
-            .eq("factory_id", factoryId)
-            .gte("ngay", filterFrom)
-            .lte("ngay", filterTo)
-            .order("ngay", { ascending: false })
-            .order("so_xe")
-            .order("chuyen"),
+          fetchRecords(factoryId),
           loadDispatchEntriesWithResolvedRows<Pick<DispatchEntry, "id" | "ngay">>(supabase, {
             factoryId,
             select: "id,ngay,rows",
@@ -300,7 +295,7 @@ export default function OutputPage() {
           loadRequiredNotes(supabase, factoryId),
         ])
         if (!active) return
-        setRecords((recordsResult.data as ProductionRecord[]) || [])
+        setRecords(recordsResult)
         setDispatches(
           (dispatchResult || []).map((entry) => ({
             id: entry.id,
@@ -317,9 +312,10 @@ export default function OutputPage() {
           })) as DispatchEntry[],
         )
         setRequiredNotes(noteRows.map((row) => row.content))
-      } catch {
+      } catch (error) {
         if (!active) return
         setRequiredNotes([])
+        setSaveError((error as { message?: string } | null)?.message || "Không tải được dữ liệu sản lượng.")
       } finally {
         if (active) setLoading(false)
       }
@@ -329,7 +325,7 @@ export default function OutputPage() {
     return () => {
       active = false
     }
-  }, [factoryId, filterFrom, filterTo])
+  }, [factoryId, fetchRecords])
 
   // Đội nhỏ của từng bản ghi: lấy từ chuyến điều xe cùng ngày + xe + chuyến, chỉ giữ điểm GN
   // thuộc đúng đội lớn của bản ghi. Sản lượng nhập theo chuyến nên chuyến đi qua nhiều đội nhỏ
@@ -368,6 +364,16 @@ export default function OutputPage() {
     return true
   }
 
+  const doiLonOptions = useMemo(() => {
+    const fromPoints = [...new Set(deliveryPoints.map((p) => p.doi).filter((d) => Number.isFinite(d) && d > 0))]
+    const dois = (fromPoints.length ? fromPoints : DOI_LON_FALLBACK).sort((a, b) => a - b)
+    return ["0", ...dois.map(String)]
+  }, [deliveryPoints])
+  const doiLonLabels = useMemo(
+    () => Object.fromEntries(doiLonOptions.map((v) => [v, doiLonLabel(v)])) as Record<string, string>,
+    [doiLonOptions],
+  )
+
   // Đội nhỏ: lấy từ điểm GN, lọc theo đội lớn đã chọn (mirror dispatch/page.tsx).
   const doiNhoOptions = (() => {
     const selectedDois = filterDoi.map(Number)
@@ -397,7 +403,7 @@ export default function OutputPage() {
     .sort((a, b) => {
       if (a.ngay !== b.ngay) return b.ngay.localeCompare(a.ngay)
       if (a.doi !== b.doi) return (a.doi ?? 0) - (b.doi ?? 0)
-      const xeCompare = a.so_xe.localeCompare(b.so_xe)
+      const xeCompare = compareSoXe(a.so_xe, b.so_xe)
       if (xeCompare !== 0) return xeCompare
       return a.chuyen - b.chuyen
     })
@@ -472,12 +478,12 @@ export default function OutputPage() {
   }
 
   const hasActiveFilters = Boolean(
-    filterFrom || filterTo || filterDoi.length > 0 || filterDoiNho.length > 0 || filterXe || filterGhiChu.length > 0 || filterLoai.length > 0 || filterWarnOnly,
+    filterFrom !== defaultRange.from || filterTo !== defaultRange.to || filterDoi.length > 0 || filterDoiNho.length > 0 || filterXe || filterGhiChu.length > 0 || filterLoai.length > 0 || filterWarnOnly,
   )
 
   const resetFilters = () => {
-    setFilterFrom("")
-    setFilterTo("")
+    setFilterFrom(defaultRange.from)
+    setFilterTo(defaultRange.to)
     setFilterDoi([])
     setFilterDoiNho([])
     setFilterXe("")
@@ -572,33 +578,39 @@ export default function OutputPage() {
       created_by: currentUser?.id ?? null,
     }
 
-    let savedId: string | null = null
+    // created_by / nguoi_upload chỉ ghi khi TẠO MỚI — sửa không được ghi đè người tạo gốc (S7).
+    const creatorFields = {
+      nguoi_upload: currentUser?.full_name || currentUser?.username || null,
+      created_by: currentUser?.id ?? null,
+    }
+    delete payload.nguoi_upload
+    delete payload.created_by
+
+    // Tìm bản ghi đã có cùng khoá (ngày + xe + chuyến + đội; đội NULL phải so bằng `is`)
+    const findExistingId = async (dataPayload: Record<string, unknown>) => {
+      let query = supabase.from("production_records")
+        .select("id")
+        .eq("factory_id", dataPayload.factory_id as string)
+        .eq("ngay", dataPayload.ngay as string)
+        .eq("so_xe", dataPayload.so_xe as string)
+        .eq("chuyen", dataPayload.chuyen as number)
+      query = dataPayload.doi === null || dataPayload.doi === undefined
+        ? query.is("doi", null)
+        : query.eq("doi", dataPayload.doi as number)
+      const { data, error } = await query.limit(1)
+      if (error) throw new Error(error.message)
+      return (data?.[0] as { id: string } | undefined)?.id ?? null
+    }
+
     const executeSave = async (dataPayload: Record<string, unknown>) => {
       if (editRecord) {
         return supabase.from("production_records").update(dataPayload).eq("id", editRecord.id).select("id").single()
-      } else {
-        const res = await supabase.from("production_records").upsert(dataPayload, { onConflict: "factory_id,ngay,so_xe,chuyen,doi" }).select("id").single()
-        if (res.error && (res.error.message.includes("ON CONFLICT") || res.error.message.includes("constraint"))) {
-          let query = supabase.from("production_records")
-            .select("id")
-            .eq("factory_id", dataPayload.factory_id as string)
-            .eq("ngay", dataPayload.ngay as string)
-            .eq("so_xe", dataPayload.so_xe as string)
-            .eq("chuyen", dataPayload.chuyen as number)
-          if (dataPayload.doi === null || dataPayload.doi === undefined) {
-            query = query.is("doi", null)
-          } else {
-            query = query.eq("doi", dataPayload.doi as number)
-          }
-          const { data: existing } = await query.maybeSingle()
-          if (existing?.id) {
-            return supabase.from("production_records").update(dataPayload).eq("id", existing.id).select("id").single()
-          } else {
-            return supabase.from("production_records").insert(dataPayload).select("id").single()
-          }
-        }
-        return res
       }
+      const existingId = await findExistingId(dataPayload)
+      if (existingId) {
+        return supabase.from("production_records").update(dataPayload).eq("id", existingId).select("id").single()
+      }
+      return supabase.from("production_records").insert({ ...dataPayload, ...creatorFields }).select("id").single()
     }
 
     let res = await executeSave(payload)
@@ -608,13 +620,20 @@ export default function OutputPage() {
       delete fallback.ma_nguon
       res = await executeSave(fallback)
     }
-    const error = res.error
-    savedId = res.data?.id ?? editRecord?.id ?? null
-    if (error) throw new Error(error.message)
+    if (res.error) throw new Error(res.error.message)
+    const savedId = res.data?.id ?? editRecord?.id ?? null
 
+    // Đã lưu xong ⇒ đóng form. Ghi ngược điều xe chạy SAU; lỗi ở bước này phải báo ra (không nuốt)
+    // và danh sách vẫn phải tải lại (S4). Sửa đổi ngày ⇒ ghi ngược cả ngày CŨ (S3).
+    const oldNgay = editRecord?.ngay
     setShowForm(false)
     setEditRecord(null)
-    await writeBackToDispatch(factoryId, form.ngay, supabase)
+    try {
+      await writeBackToDispatch(factoryId, form.ngay, supabase)
+      if (oldNgay && oldNgay !== form.ngay) await writeBackToDispatch(factoryId, oldNgay, supabase)
+    } catch (error) {
+      setSaveError(`Đã lưu sản lượng nhưng chưa ghi ngược được sang Điều xe: ${error instanceof Error ? error.message : "lỗi không xác định"}`)
+    }
     await loadRecords(factoryId)
     if (savedId) {
       setKpiPrompt({
@@ -627,26 +646,32 @@ export default function OutputPage() {
   const handleDelete = async (id: string) => {
     if (!factoryId || !canDelete) return
     const record = records.find((item) => item.id === id)
-    await supabase.from("production_records").delete().eq("id", id)
-    setDelConfirm(null)
-    if (record) await writeBackToDispatch(factoryId, record.ngay, supabase)
-    await loadRecords(factoryId)
+    try {
+      const { error } = await supabase.from("production_records").delete().eq("id", id).eq("factory_id", factoryId)
+      if (error) throw new Error(error.message)
+      setDelConfirm(null)
+      if (record) await writeBackToDispatch(factoryId, record.ngay, supabase)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Không thể xóa bản ghi sản lượng.")
+    } finally {
+      await loadRecords(factoryId)
+    }
   }
 
   const handleDeleteSelectedRows = async () => {
     if (!factoryId || !detailGroup || selectedRowIds.length === 0 || !canDelete) return
     setDeletingRows(true)
     try {
-      const { error } = await supabase.from("production_records").delete().in("id", selectedRowIds)
+      const { error } = await supabase.from("production_records").delete().in("id", selectedRowIds).eq("factory_id", factoryId)
       if (error) throw new Error(error.message)
-      await loadRecords(factoryId)
-      await writeBackToDispatch(factoryId, detailGroup.ngay, supabase)
       setSelectedRowIds([])
       setDetailDay(null)
+      await writeBackToDispatch(factoryId, detailGroup.ngay, supabase)
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Không thể xóa các dòng đã chọn.")
     } finally {
       setDeletingRows(false)
+      await loadRecords(factoryId)
     }
   }
 
@@ -670,17 +695,25 @@ export default function OutputPage() {
     }
   }
 
-  if (view === "converter" && factoryId) {
+  if (view === "converter" && factoryId && canUseConverter) {
     return (
+      <>
+      {converterToast && (
+        <div className={`fixed top-4 left-1/2 z-[120] max-w-xl -translate-x-1/2 rounded-2xl px-5 py-3 text-sm font-bold text-white shadow-2xl ${converterToast.ok ? "bg-emerald-600" : "bg-red-600"}`}>
+          {converterToast.msg}
+        </div>
+      )}
       <OutputConverterView
         currentUser={currentUser}
         factoryId={factoryId}
+        showToast={showConverterToast}
         onBack={() => setView("list")}
         onSuccess={() => {
           setView("list")
           if (factoryId) void loadRecords(factoryId)
         }}
       />
+      </>
     )
   }
 
@@ -699,12 +732,12 @@ export default function OutputPage() {
       )}
       <PageHeaderBanner
         title="Sản lượng"
-        subtitle="Giữ nguyên dữ liệu Sản lượng, đổi giao diện theo cách hiển thị của module Điều xe."
+        subtitle="Sản lượng mủ nhập về theo ngày · đội · xe · chuyến, đối soát với Điều xe"
         theme="forest"
         icon={Droplet}
         action={
           <>
-            {(hasPermission(currentUser, "output.tech_support") || isAdmin) && (
+            {canUseConverter && (
               <button
                 type="button"
                 onClick={() => setView("converter")}
@@ -752,7 +785,7 @@ export default function OutputPage() {
       <FilterBar
         className="mb-5"
         layout="grid"
-        activeCount={[filterFrom, filterTo, filterXe].filter(Boolean).length + (filterDoi.length > 0 ? 1 : 0) + (filterDoiNho.length > 0 ? 1 : 0) + (filterGhiChu.length > 0 ? 1 : 0) + (filterLoai.length > 0 ? 1 : 0) + (filterWarnOnly ? 1 : 0)}
+        activeCount={(filterFrom !== defaultRange.from ? 1 : 0) + (filterTo !== defaultRange.to ? 1 : 0) + (filterXe ? 1 : 0) + (filterDoi.length > 0 ? 1 : 0) + (filterDoiNho.length > 0 ? 1 : 0) + (filterGhiChu.length > 0 ? 1 : 0) + (filterLoai.length > 0 ? 1 : 0) + (filterWarnOnly ? 1 : 0)}
       >
           {tab === "list" && (
             <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-emerald-400">
@@ -771,10 +804,10 @@ export default function OutputPage() {
           {(tab === "list" || tab === "stats") && (
             <>
               <FilterMultiSelect
-                options={DOI_LON_OPTIONS}
+                options={doiLonOptions}
                 selected={filterDoi}
                 onChange={handleDoiChange}
-                labels={DOI_LON_LABELS}
+                labels={doiLonLabels}
                 placeholder="Tất cả đội lớn"
                 searchPlaceholder="Tìm đội lớn..."
                 fullWidth
@@ -1319,10 +1352,12 @@ export default function OutputPage() {
               </ul>
             </div>
           </div>
-          <button onClick={() => setShowImport(true)} className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white shadow-md hover:bg-blue-700">
-            <Upload size={16} />
-            Bắt đầu import
-          </button>
+          {(isAdmin || canImport) && (
+            <button onClick={() => setShowImport(true)} className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white shadow-md hover:bg-blue-700">
+              <Upload size={16} />
+              Bắt đầu import
+            </button>
+          )}
         </div>
       )}
 

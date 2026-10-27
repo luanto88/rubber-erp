@@ -11,7 +11,19 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { supabase } from "@/lib/supabase"
 import type { SessionUser } from "@/lib/auth"
 import type { ParsedSlTruckRow, ParsedOutputReport } from "@/lib/output-parser"
-import { writeBackToDispatch, buildProductionRecordKey } from "./output-types"
+import { writeBackToDispatch, buildProductionRecordKey, type WarnCode } from "./output-types"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
+import { hasPermission } from "@/lib/auth"
+
+// Trạng thái đối soát của Converter → mã cảnh báo chuẩn của production_records.warn_codes.
+// Trước đây ghi thẳng chuỗi trạng thái ("warn_no_dispatch"...) ⇒ badge hiện "undefined" (S5).
+const STATUS_TO_WARN: Partial<Record<MatchStatus, WarnCode>> = {
+  warn_need_split: "CHUYEN_NOT_FOUND",
+  warn_no_dispatch: "VEHICLE_NOT_FOUND",
+  warn_doi_mismatch: "DOI_MISMATCH",
+  warn_duplicate_system: "DUPLICATE_IN_SYSTEM",
+  error_zero_kl: "ZERO_KL",
+}
 import { normalizeDateInput, formatDateDisplay } from "@/lib/date-utils"
 import ExcelJS from "exceljs"
 import { saveAs } from "file-saver"
@@ -122,10 +134,16 @@ export function OutputConverterView({
       try {
         const normalized = normalizeDateInput(activeDate)
         // 1. Tải Lệnh điều xe ngày
-        const { data: entries } = await supabase
-          .from("dispatch_entries")
-          .select("id, ngay, rows")
-          .eq("factory_id", factoryId)
+        type RawEntry = { id: string; ngay: string; rows?: Array<Record<string, unknown> & { so_xe?: string; chuyen?: number; uid?: string; tai_xe?: string; diem_gn?: string[]; doi?: number[] }> }
+        const entries = await fetchAllPaginated<RawEntry>((from, to) =>
+          supabase
+            .from("dispatch_entries")
+            .select("id, ngay, rows")
+            .eq("factory_id", factoryId)
+            .order("id")
+            .range(from, to),
+          500,
+        )
 
         // 2. Tải danh sách điểm giao nhận để tra cứu đội
         const { data: deliveryPoints } = await supabase
@@ -140,7 +158,7 @@ export function OutputConverterView({
         })
 
         const trips: DispatchTripSummary[] = []
-        for (const entry of entries || []) {
+        for (const entry of entries) {
           const entryDate = normalizeDateInput(entry.ngay)
           if (entryDate !== normalized) continue
           for (const r of entry.rows || []) {
@@ -507,6 +525,10 @@ export function OutputConverterView({
       showToast("Chưa chọn dòng dữ liệu nào để đẩy lên hệ thống", false)
       return
     }
+    if (!(hasPermission(currentUser, "output.import") || hasPermission(currentUser, "output.create"))) {
+      showToast("Bạn không có quyền ghi sản lượng (cần quyền nhập hoặc thêm sản lượng).", false)
+      return
+    }
 
     setSavingToDb(true)
     try {
@@ -531,27 +553,43 @@ export function OutputConverterView({
         created_by: currentUser?.id || null,
         nguoi_upload: currentUser?.full_name || currentUser?.username || "Hỗ trợ kỹ thuật",
         import_batch_id: batchId,
-        warn_codes: r.status === "match_ready" ? [] : [r.status],
+        warn_codes: STATUS_TO_WARN[r.status] ? [STATUS_TO_WARN[r.status] as WarnCode] : [],
       }))
 
-      // Xóa các bản ghi trùng của các xe đã chọn để ghi đè sạch sẽ
-      for (const item of insertPayload) {
-        await supabase
+      // Bản ghi đã có cùng khoá (ngày + đội + xe + chuyến) ⇒ CẬP NHẬT tại chỗ (giữ người tạo gốc);
+      // chưa có ⇒ CHÈN. Trước đây xoá rồi chèn: không nguyên tử, và `.eq("doi", null)` không bao
+      // giờ khớp bản ghi đội NULL nên sinh bản trùng.
+      const existing = await fetchAllPaginated<{ id: string; doi: number | null; so_xe: string; chuyen: number }>((from, to) =>
+        supabase
           .from("production_records")
-          .delete()
+          .select("id, doi, so_xe, chuyen")
           .eq("factory_id", factoryId)
           .eq("ngay", normalizedDate)
-          .eq("doi", item.doi)
-          .eq("so_xe", item.so_xe)
-          .eq("chuyen", item.chuyen)
+          .order("id")
+          .range(from, to),
+      )
+      const keyOf = (r: { doi: number | null; so_xe: string; chuyen: number }) =>
+        `${r.doi ?? "null"}|${String(r.so_xe).trim().toUpperCase()}|${r.chuyen}`
+      const existingByKey = new Map<string, string>()
+      for (const r of existing) if (!existingByKey.has(keyOf(r))) existingByKey.set(keyOf(r), r.id)
+
+      const toInsert: typeof insertPayload = []
+      for (const item of insertPayload) {
+        const existingId = existingByKey.get(keyOf(item))
+        if (!existingId) {
+          toInsert.push(item)
+          continue
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { created_by: _createdBy, nguoi_upload: _nguoiUpload, ...updatePayload } = item
+        const { error: updErr } = await supabase.from("production_records").update(updatePayload).eq("id", existingId)
+        if (updErr) throw new Error(updErr.message)
       }
 
-      // Chèn các bản ghi mới
-      const { error: insertErr } = await supabase
-        .from("production_records")
-        .insert(insertPayload)
-
-      if (insertErr) throw new Error(insertErr.message)
+      if (toInsert.length > 0) {
+        const { error: insertErr } = await supabase.from("production_records").insert(toInsert)
+        if (insertErr) throw new Error(insertErr.message)
+      }
 
       // 2. Ghi ngược khối lượng thực tế về Điều xe và cập nhật tổng kho
       await writeBackToDispatch(factoryId, normalizedDate, supabase)

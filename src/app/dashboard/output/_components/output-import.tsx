@@ -7,6 +7,7 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { RequiredNoteSelect } from "@/app/dashboard/_components/required-note-select"
 import type { MatchedSlRow, ParsedSlRow, WarnCode } from "./output-types"
 import {
+  OUTPUT_MATERIALS,
   buildProductionRecordKey,
   parseVehicleCode,
   WARN_LABELS,
@@ -16,16 +17,11 @@ import {
 import { normalizeDateInput, formatDateDisplay } from "@/lib/date-utils"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { isBlankNoteContent } from "@/lib/note-filter"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import type { SessionUser } from "@/lib/auth"
 
 // Danh sách loại mủ cho bảng xem trước (Step 2) — chỉ cột của loại có dữ liệu trong file mới hiện.
-const PREVIEW_MATERIALS = [
-  { label: "Mủ nước", tuoiKey: "mn_tuoi", khoKey: "mn_kho" },
-  { label: "Mủ chén", tuoiKey: "ct_tuoi", khoKey: "ct_kho" },
-  { label: "Mủ đông chén", tuoiKey: "dct_tuoi", khoKey: "dct_kho" },
-  { label: "Mủ đông khối", tuoiKey: "dkt_tuoi", khoKey: "dkt_kho" },
-  { label: "Mủ dây", tuoiKey: "dt_tuoi", khoKey: "dt_kho" },
-] as const satisfies ReadonlyArray<{ label: string; tuoiKey: keyof MatchedSlRow; khoKey: keyof MatchedSlRow }>
+const PREVIEW_MATERIALS = OUTPUT_MATERIALS
 
 // ────────────────────────────────────────────────────────────────
 // Excel helpers
@@ -201,14 +197,20 @@ async function loadExistingRecords(
   const uniqueDates = [...new Set(parsed.map((row) => row.ngay))]
   if (uniqueDates.length === 0) return [] as ExistingProductionRecord[]
 
-  const { data, error } = await supabase
-    .from("production_records")
-    .select("id, ngay, doi, so_xe, chuyen, ma_nguon, created_at, updated_at")
-    .eq("factory_id", factoryId)
-    .in("ngay", uniqueDates)
-
-  if (error) throw new Error(error.message)
-  return (data as ExistingProductionRecord[]) || []
+  // Phân trang: file nhiều ngày dễ vượt 1000 bản ghi đã có ⇒ thiếu ⇒ chèn trùng thay vì cập nhật.
+  try {
+    return await fetchAllPaginated<ExistingProductionRecord>((from, to) =>
+      supabase
+        .from("production_records")
+        .select("id, ngay, doi, so_xe, chuyen, ma_nguon, created_at, updated_at")
+        .eq("factory_id", factoryId)
+        .in("ngay", uniqueDates)
+        .order("id")
+        .range(from, to),
+    )
+  } catch (error) {
+    throw new Error((error as { message?: string } | null)?.message || "Không tải được sản lượng đã có")
+  }
 }
 
 function compareExistingRecordPriority(a: ExistingProductionRecord, b: ExistingProductionRecord) {
@@ -619,7 +621,9 @@ export function OutputImport({
       }
 
       for (const row of updateRows) {
-        const { id, ...payload } = row
+        // Cập nhật bản ghi đã có: KHÔNG ghi đè người tạo / người upload gốc (S7).
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { id, created_by: _createdBy, nguoi_upload: _nguoiUpload, ...payload } = row
         const { error } = await supabase.from("production_records").update(payload).eq("id", id)
         if (error) throw new Error(error.message)
       }

@@ -393,3 +393,24 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
   Không có ứng viên mà xe chỉ có 1 chuyến ⇒ gán chuyến đó + `DOI_MISMATCH`; còn lại
   `CHUYEN_NOT_FOUND` (không chặn, chuyến tạm = 1). Bảng xem trước ghi "tự ghép" dưới số chuyến.
   Chỉ số chuyến được ghép xong mới tính khoá trùng (`getMatchedKey`).
+
+## U9a — sửa bug S1–S10 (2026-10-28, chờ test tay)
+- **Lọc ngày**: mặc định đầu tháng → hôm nay theo **giờ nhà máy** (`getFirstDayOfMonthISO(getFactoryTodayISO())`);
+  "Xóa lọc" đưa về mặc định (không còn đặt ngày "" ⇒ query lỗi), nút chỉ hiện khi khác mặc định.
+- **Phân trang**: `production_records` (trang, import `loadExistingRecords`, converter), `dispatch_entries` +
+  `ngans` trong `writeBackToDispatch`, và hàm dùng chung `loadDispatchEntriesWithResolvedRows`
+  (`src/lib/dispatch-entry-rows.ts`, trang 500, sắp thêm `id`) — ảnh hưởng tốt cho Kho NL / EUDR / form.
+- **Lưu thủ công** (`handleSave`): tìm bản ghi cùng khoá (đội NULL dùng `.is`) ⇒ update, chưa có ⇒ insert;
+  `created_by`/`nguoi_upload` CHỈ ghi khi tạo mới (import + converter cũng vậy khi cập nhật). Sửa đổi ngày ⇒
+  ghi ngược cả ngày CŨ. Ghi ngược lỗi ⇒ báo "Đã lưu nhưng chưa ghi ngược...", danh sách vẫn tải lại.
+  Xoá 1 dòng / nhiều dòng kiểm `error`, luôn tải lại.
+- **Ghi ngược**: chuyến điều xe KHÔNG còn bản ghi sản lượng ⇒ GIỮ NGUYÊN KL (trước đây ghi 0, xoá cả KL nhập tay
+  ở Điều xe). Hệ quả: xoá hết sản lượng của 1 chuyến thì KL điều xe giữ số cũ — sửa tay ở Điều xe nếu cần.
+- **Converter**: trang truyền `showToast` (toast riêng phía trên Converter); `warn_codes` map trạng thái →
+  mã chuẩn (`STATUS_TO_WARN`); bỏ xoá-rồi-chèn, thay bằng update tại chỗ / insert. Nút Converter cần
+  `output.tech_support` + (`output.import` | `output.create`), hàm đẩy dữ liệu kiểm lại quyền.
+- Nút "Bắt đầu import" ở tab Hướng dẫn gate `output.import`.
+- **Dọn hard-code**: `OUTPUT_MATERIALS` (output-types) là nguồn duy nhất 5 loại mủ (trang, form, import, PDF);
+  `compareSoXe` sắp xe tự nhiên ("2A" trước "10A"); đội lớn lọc lấy từ `dispatch_delivery_points` (dự phòng 1-12);
+  phụ đề banner đã viết lại. CÒN LẠI: biển số `3A1064` + mã ghi chú → nguồn mủ trong `output-form.tsx`, đội 1-12
+  trong form/converter (cần bảng cấu hình, chưa làm).

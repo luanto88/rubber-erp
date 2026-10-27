@@ -203,16 +203,24 @@ export async function loadDispatchEntriesWithResolvedRows<TExtra extends Record<
 ): Promise<Array<DispatchEntryWithResolvedRows<TExtra>>> {
   const headerSelect = stripRowsFromSelect(params.select || "id,ngay")
   const fullSelect = headerSelect ? `${headerSelect},rows` : "id,ngay,rows"
-  let query = supabase
-    .from("dispatch_entries")
-    .select(fullSelect)
-    .eq("factory_id", params.factoryId)
-    .order("ngay", { ascending: params.ascending ?? true })
-
-  if (params.entryIds && params.entryIds.length > 0) query = query.in("id", params.entryIds)
-
-  const { data: entries, error } = await query
-  if (error) throw error
+  // Phân trang: PostgREST cắt im lặng ở 1000 dòng. Sắp thêm theo `id` cho ổn định giữa các trang
+  // (`ngay` là text "dd/mm/yyyy" lẫn ISO — sắp theo nó không đủ xác định thứ tự).
+  const entries: unknown[] = []
+  const PAGE_SIZE = 500
+  for (let from = 0; ; from += PAGE_SIZE) {
+    let query = supabase
+      .from("dispatch_entries")
+      .select(fullSelect)
+      .eq("factory_id", params.factoryId)
+      .order("ngay", { ascending: params.ascending ?? true })
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+    if (params.entryIds && params.entryIds.length > 0) query = query.in("id", params.entryIds)
+    const { data, error } = await query
+    if (error) throw error
+    entries.push(...(data || []))
+    if (!data || data.length < PAGE_SIZE) break
+  }
 
   const rawEntries = ((entries || []) as unknown) as Array<TExtra & { id: string; ngay: string; rows?: unknown }>
   return rawEntries
