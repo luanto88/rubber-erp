@@ -86,7 +86,7 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | Kho nguyên liệu | ✅ theme + StatusBadge storage + SegmentedTabs + StatGrid + FilterBar grid; tab Lịch sử `enterprise-table dense` | ✅ (bảng ngăn, ExpandableRow) | ✅ `/dashboard/storage/[id]` (PDF F03 nhúng loadBytes) | — | QR có sẵn trên PDF (trỏ trang công khai `/storage`) + ✅ Quét QR ở ô tìm (mở chi tiết ngăn) |
 | Kho thành phẩm | 🟡 theme orange | — (sơ đồ kho) | — | — | — |
 | Kiểm soát quá trình | ✅ theme teal + SegmentedTabs + banner mọi tab + StatGrid + FilterBar grid + enterprise-table | ✅ (phiếu đo → dòng đo) | ✅ `/dashboard/process/measurements/[id]` (PDF A4 nhúng loadBytes) | — | ✅ QR góc phải trên PDF + Quét QR ở ô tìm |
-| Kho vật tư — Thẻ kho/Sổ chi tiết/Tổng quan | 🟡 banner amber, tab tay, bảng `w-full` — U10 | — | — | — | — |
+| Kho vật tư — Thẻ kho/Sổ chi tiết/Tổng quan | ✅ theme amber (shell) + SegmentedTabs + StatGrid + FilterBar grid + enterprise-table + StatusBadge + ListState (U10) | — (báo cáo phẳng) | con mắt Sổ chi tiết → chi tiết phiếu | — | — |
 | KPI | 🟡 banner chỉ trang chủ, tab tay, badge span — U11 | — | — | — | — |
 | Ghi chú | 🟡 banner rose, FilterBar không grid (giữ thẻ pastel) — U12 | — | — | — | — |
 | Chất lượng phân tích / Báo cáo | ❌ `<h1>` thường — U13 | — | — | — | — |

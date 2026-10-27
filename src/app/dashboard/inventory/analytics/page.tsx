@@ -8,17 +8,20 @@ import {
   Boxes,
   Clock3,
   FileSpreadsheet,
-  PackageMinus,
-  PackagePlus,
   PackageSearch,
   Save,
   Settings2,
   ShieldAlert,
 } from "lucide-react"
-import { InventoryPageShell, InventoryPlaceholderSection, ScrollReveal, ScrollRevealSection } from "../_components/inventory-shell"
+import { InventoryPageShell, InventoryPlaceholderSection, ScrollRevealSection } from "../_components/inventory-shell"
 import { InventoryActionButton } from "../_components/inventory-ui"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import type { StatusTone } from "@/app/dashboard/_components/doc-ui/status-registry"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import {
   loadInventoryMovementData,
   type InventoryItemOption,
@@ -32,45 +35,22 @@ import { supabase } from "@/lib/supabase"
 import { hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 
 const INPUT_CLASS =
-  "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
+  "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-mod-600"
 
-function SummaryCard({
-  icon,
-  label,
-  value,
-  note,
-  tone = "text-slate-800",
-}: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  note: string
-  tone?: string
-}) {
-  const [iconBg, borderAccent] = tone.includes("amber")
-    ? ["bg-amber-50 text-amber-600", "border-l-amber-400"]
-    : tone.includes("rose")
-      ? ["bg-rose-50 text-rose-600", "border-l-rose-400"]
-      : tone.includes("blue")
-        ? ["bg-blue-50 text-blue-600", "border-l-blue-400"]
-        : tone.includes("violet")
-          ? ["bg-violet-50 text-violet-600", "border-l-violet-400"]
-          : ["bg-emerald-50 text-emerald-600", "border-l-emerald-400"]
+const MOVEMENT_BADGE: Record<RecentTxRow["movementType"], { label: string; tone: StatusTone }> = {
+  import: { label: "Nhập", tone: "valid" },
+  export: { label: "Xuất", tone: "warn" },
+  transfer_in: { label: "Chuyển đến", tone: "info" },
+  transfer_out: { label: "Chuyển đi", tone: "info" },
+}
 
-  return (
-    <div
-      className={`rounded-2xl border border-slate-200 border-l-4 ${borderAccent} bg-white p-5 shadow-sm hover-lift`}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className={`rounded-xl p-3 ${iconBg}`}>{icon}</div>
-        <div className="text-right">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
-          <div className={`mt-2 text-2xl font-extrabold ${tone}`}>{value}</div>
-        </div>
-      </div>
-      <div className="mt-3 text-sm leading-relaxed text-slate-500">{note}</div>
-    </div>
-  )
+function alertBadge(row: AlertRow): { label: string; tone: StatusTone } {
+  if (row.lotNo !== null) {
+    return row.daysToExpiry !== null && row.daysToExpiry <= 0
+      ? { label: "Đã hết hạn", tone: "danger" }
+      : { label: "Sắp hết hạn", tone: "info" }
+  }
+  return row.level === "critical" ? { label: "Tồn thấp", tone: "danger" } : { label: "Tồn cao", tone: "warn" }
 }
 
 function formatDate(value: string | null) {
@@ -158,6 +138,8 @@ export default function InventoryAnalyticsPage() {
   const [transactionDays, setTransactionDays] = useState<7 | 30>(7)
   const [recentTx, setRecentTx] = useState<RecentTxRow[]>([])
   const [loadingTx, setLoadingTx] = useState(false)
+  const [txError, setTxError] = useState<string | null>(null)
+  const [txReloadKey, setTxReloadKey] = useState(0)
   const [thresholds, setThresholds] = useState({ export_pct: 50, transfer_pct: 70 })
   const [savingThresholds, setSavingThresholds] = useState(false)
   const [thresholdError, setThresholdError] = useState<string | null>(null)
@@ -207,6 +189,7 @@ export default function InventoryAnalyticsPage() {
     if (!factoryId) return
     const loadRecentTransactions = async () => {
       setLoadingTx(true)
+      setTxError(null)
       try {
         const cutoff = new Date()
         cutoff.setDate(cutoff.getDate() - transactionDays)
@@ -219,7 +202,11 @@ export default function InventoryAnalyticsPage() {
           .order("created_at", { ascending: false })
           .limit(100)
 
-        if (movErr || !movData) { setRecentTx([]); return }
+        if (movErr || !movData) {
+          setRecentTx([])
+          setTxError(movErr?.message || "Không tải được giao dịch gần đây.")
+          return
+        }
 
         const docIds = [...new Set(movData.map((m) => m.document_id).filter(Boolean))]
         const docMap = new Map<string, { document_code: string; requester_name: string | null }>()
@@ -260,12 +247,15 @@ export default function InventoryAnalyticsPage() {
           }
         })
         setRecentTx(rows)
+      } catch (err) {
+        setRecentTx([])
+        setTxError(err instanceof Error ? err.message : "Không tải được giao dịch gần đây.")
       } finally {
         setLoadingTx(false)
       }
     }
     void loadRecentTransactions()
-  }, [factoryId, transactionDays, thresholds.export_pct, thresholds.transfer_pct])
+  }, [factoryId, transactionDays, thresholds.export_pct, thresholds.transfer_pct, txReloadKey])
 
   const warehouseMap = useMemo(
     () => new Map(warehouses.map((warehouse) => [warehouse.id, warehouse])),
@@ -555,41 +545,46 @@ export default function InventoryAnalyticsPage() {
         </div>
       ) : null}
 
-      <ScrollReveal className="stagger-cards grid gap-4 xl:grid-cols-4">
-        <SummaryCard
-          icon={<Boxes size={18} />}
+      <StatGrid cols={4}>
+        <StatCard
+          icon={Boxes}
           label="Vật tư theo dõi"
           value={stats.trackedItems.toLocaleString("vi-VN")}
-          note="Số vật tư đang có tồn trong phạm vi báo cáo hiện tại."
+          sub="Đang có tồn trong phạm vi"
+          loading={loading}
         />
-        <SummaryCard
-          icon={<AlertTriangle size={18} />}
+        <StatCard
+          icon={AlertTriangle}
           label="Tồn thấp"
           value={stats.lowCount.toLocaleString("vi-VN")}
-          note="Các vật tư đang thấp hơn giới hạn dưới."
-          tone="text-amber-600"
+          sub="Dưới giới hạn dưới"
+          valueTone={stats.lowCount > 0 ? "warn" : "default"}
+          loading={loading}
         />
-        <SummaryCard
-          icon={<ShieldAlert size={18} />}
+        <StatCard
+          icon={ShieldAlert}
           label="Tồn cao"
           value={stats.highCount.toLocaleString("vi-VN")}
-          note="Các vật tư đang vượt giới hạn trên."
-          tone="text-rose-700"
+          sub="Vượt giới hạn trên"
+          valueTone={stats.highCount > 0 ? "danger" : "default"}
+          loading={loading}
         />
-        <SummaryCard
-          icon={<Clock3 size={18} />}
+        <StatCard
+          icon={Clock3}
           label="Sắp hết hạn"
           value={stats.expiryCount.toLocaleString("vi-VN")}
-          note="Các lô còn tồn cần theo dõi hạn sử dụng."
-          tone="text-blue-700"
+          sub="Lô cần theo dõi hạn dùng"
+          valueTone={stats.expiryCount > 0 ? "warn" : "default"}
+          loading={loading}
         />
-      </ScrollReveal>
+      </StatGrid>
 
       <ScrollRevealSection className="mb-4">
         <FilterBar
+          layout="grid"
           activeCount={[selectedWarehouseId !== "all", selectedFocus !== "all"].filter(Boolean).length}
         >
-        <div className="min-w-[220px] flex-1">
+        <div className="w-full">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho</label>
           <select
             value={selectedWarehouseId}
@@ -605,7 +600,7 @@ export default function InventoryAnalyticsPage() {
           </select>
         </div>
 
-        <div className="min-w-[220px] flex-1">
+        <div className="w-full">
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Trọng tâm theo dõi</label>
           <select
             value={selectedFocus}
@@ -630,12 +625,14 @@ export default function InventoryAnalyticsPage() {
           </div>
 
           {loading ? (
-            <div className="p-12 text-center text-slate-400">Đang tải...</div>
+            <ListState kind="loading" />
           ) : alertRows.length === 0 ? (
-            <div className="p-12 text-center text-slate-400">Chưa có cảnh báo trong phạm vi đang chọn.</div>
+            <ListState kind="empty" message="Chưa có cảnh báo trong phạm vi đang chọn." />
           ) : (
             <div className="divide-y divide-slate-100">
-              {alertRows.slice(0, 10).map((row) => (
+              {alertRows.slice(0, 10).map((row) => {
+                const badge = alertBadge(row)
+                return (
                 <div key={row.id} className="flex items-start gap-3 px-4 py-4">
                   <div
                     className={`mt-0.5 rounded-xl p-2 ${
@@ -650,6 +647,7 @@ export default function InventoryAnalyticsPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge tone={badge.tone} label={badge.label} size="xs" />
                       <span className="font-bold text-slate-800">{row.itemCode}</span>
                       <span className="text-sm text-slate-600">{row.itemName}</span>
                       <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
@@ -672,7 +670,8 @@ export default function InventoryAnalyticsPage() {
                     </div>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </ScrollRevealSection>
@@ -710,80 +709,73 @@ export default function InventoryAnalyticsPage() {
               Các phát sinh nhập / xuất / chuyển kho gần nhất; ⚠️ đánh dấu giao dịch bất thường theo ngưỡng cấu hình.
             </p>
           </div>
-          <div className="flex rounded-xl border border-slate-200 bg-slate-50 p-1">
-            {([7, 30] as const).map((days) => (
-              <button
-                key={days}
-                type="button"
-                onClick={() => setTransactionDays(days)}
-                className={`rounded-lg px-4 py-1.5 text-xs font-bold transition-all ${
-                  transactionDays === days
-                    ? "bg-white text-emerald-700 shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                {days} ngày
-              </button>
-            ))}
-          </div>
+          <SegmentedTabs
+            size="sm"
+            ariaLabel="Khoảng thời gian giao dịch"
+            value={String(transactionDays) as "7" | "30"}
+            onChange={(key) => setTransactionDays(key === "30" ? 30 : 7)}
+            items={[
+              { key: "7", label: "7 ngày" },
+              { key: "30", label: "30 ngày" },
+            ]}
+          />
         </div>
 
         {loadingTx ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          <ListState kind="loading" />
+        ) : txError ? (
+          <ListState kind="error" message={txError} onRetry={() => setTxReloadKey((k) => k + 1)} />
         ) : recentTx.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">Không có giao dịch trong {transactionDays} ngày qua.</div>
+          <ListState kind="empty" message={`Không có giao dịch trong ${transactionDays} ngày qua.`} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
-                <tr>
-                  {["Thời gian", "Loại", "Mã phiếu", "Vật tư", "Số lượng", "Kho", "Người thực hiện", ""].map((h) => (
-                    <th key={h} className="px-4 py-3 text-left">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {recentTx.slice(0, 8).map((row) => {
-                  const item = itemMap.get(row.itemId)
-                  const warehouse = warehouseMap.get(row.warehouseId)
-                  const typeConfig =
-                    row.movementType === "import"
-                      ? { icon: <PackagePlus size={14} />, label: "Nhập", bg: "bg-emerald-100 text-emerald-700" }
-                      : row.movementType === "export"
-                        ? { icon: <PackageMinus size={14} />, label: "Xuất", bg: "bg-amber-100 text-amber-700" }
-                        : row.movementType === "transfer_in"
-                          ? { icon: <PackagePlus size={14} />, label: "Chuyển đến", bg: "bg-blue-100 text-blue-700" }
-                          : { icon: <PackageMinus size={14} />, label: "Chuyển đi", bg: "bg-sky-100 text-sky-700" }
-                  return (
-                    <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50">
-                      <td className="px-4 py-3 text-slate-500">{formatDate(row.movementDate)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${typeConfig.bg}`}>
-                          {typeConfig.icon}{typeConfig.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-600">{row.documentCode || "—"}</td>
-                      <td className="px-4 py-3 text-slate-700">
-                        <div className="font-semibold">{item?.code || row.itemId}</div>
-                        {item?.name ? <div className="text-xs text-slate-400">{item.name}</div> : null}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-800">{row.quantity.toLocaleString("vi-VN")}</td>
-                      <td className="px-4 py-3 text-slate-500">{warehouse?.code || row.warehouseId}</td>
-                      <td className="px-4 py-3 text-slate-500">{row.actorName || "—"}</td>
-                      <td className="px-4 py-3">
-                        {row.isAnomaly ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700" title={`Xuất ${row.anomalyPct}% tồn kho`}>
-                            <AlertTriangle size={12} />
-                            {row.anomalyPct}%
-                          </span>
-                        ) : null}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+          <table className="enterprise-table dense min-w-[860px]">
+            <thead>
+              <tr>
+                <th>Thời gian</th>
+                <th>Loại</th>
+                <th>Mã phiếu</th>
+                <th>Vật tư</th>
+                <th className="text-right">Số lượng</th>
+                <th>Kho</th>
+                <th>Người thực hiện</th>
+                <th className="text-right">Bất thường</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentTx.slice(0, 8).map((row) => {
+                const item = itemMap.get(row.itemId)
+                const warehouse = warehouseMap.get(row.warehouseId)
+                const typeBadge = MOVEMENT_BADGE[row.movementType]
+                return (
+                  <tr key={row.id}>
+                    <td className="whitespace-nowrap text-slate-500">{formatDate(row.movementDate)}</td>
+                    <td>
+                      <StatusBadge tone={typeBadge.tone} label={typeBadge.label} />
+                    </td>
+                    <td className="font-mono text-xs text-slate-600">{row.documentCode || "—"}</td>
+                    <td className="text-slate-700">
+                      <div className="font-semibold">{item?.code || row.itemId}</div>
+                      {item?.name ? <div className="text-xs text-slate-400">{item.name}</div> : null}
+                    </td>
+                    <td className="whitespace-nowrap text-right font-semibold tabular-nums text-slate-800">
+                      {row.quantity.toLocaleString("vi-VN")}
+                    </td>
+                    <td className="text-slate-500">{warehouse?.code || row.warehouseId}</td>
+                    <td className="text-slate-500">{row.actorName || "—"}</td>
+                    <td className="text-right">
+                      {row.isAnomaly ? (
+                        <StatusBadge
+                          tone="danger"
+                          label={`${row.anomalyPct}%`}
+                          title={`Xuất ${row.anomalyPct}% tồn kho`}
+                        />
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         )}
         <div className="border-t border-slate-100 px-4 py-3">
           <Link
@@ -806,9 +798,9 @@ export default function InventoryAnalyticsPage() {
           </div>
 
           {loading ? (
-            <div className="p-12 text-center text-slate-400">Đang tải...</div>
+            <ListState kind="loading" />
           ) : topItems.length === 0 ? (
-            <div className="p-12 text-center text-slate-400">Chưa có dữ liệu phát sinh.</div>
+            <ListState kind="empty" message="Chưa có dữ liệu phát sinh." />
           ) : (
             <div className="divide-y divide-slate-100">
               {topItems.map((row) => (

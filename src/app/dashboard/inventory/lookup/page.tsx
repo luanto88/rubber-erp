@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, ArrowDownLeft, ArrowRightLeft, ArrowUpRight, Check, Clock3, Eye, FileSpreadsheet, FileText, History, Printer, X } from "lucide-react"
+import { AlertTriangle, ArrowDownLeft, ArrowRightLeft, ArrowUpRight, Clock3, FileSpreadsheet, History, Printer, X } from "lucide-react"
 import { saveAs } from "file-saver"
 import * as XLSX from "xlsx"
 import { getFreshAuthSession, hydrateActiveSession, type SessionUser } from "@/lib/auth"
@@ -15,41 +15,22 @@ import {
 } from "../_components/inventory-data"
 import { InventoryActionButton, InventoryActionLink, MultiSelectField } from "../_components/inventory-ui"
 import { resolveCanApproveInventory } from "../_components/inventory-approval"
+import { inventoryDocumentDetailHref } from "../_components/inventory-document-list"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { FilterBar } from "@/app/dashboard/_components/filter-bar"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import type { StatusTone } from "@/app/dashboard/_components/doc-ui/status-registry"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
+import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { supabase } from "@/lib/supabase"
 
 const INPUT_CLASS =
-  "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
+  "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-mod-600"
 
 type MovementDocumentType = "import" | "export" | "transfer"
-
-function SummaryCard({
-  icon,
-  label,
-  value,
-  note,
-  tone = "text-slate-800",
-}: {
-  icon: React.ReactNode
-  label: string
-  value: string
-  note: string
-  tone?: string
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover-lift">
-      <div className="flex items-start justify-between gap-3">
-        <div className="rounded-xl bg-slate-100 p-3 text-slate-700">{icon}</div>
-        <div className="text-right">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
-          <div className={`mt-2 text-2xl font-extrabold ${tone}`}>{value}</div>
-        </div>
-      </div>
-      <div className="mt-3 text-sm leading-6 text-slate-500">{note}</div>
-    </div>
-  )
-}
 
 function formatDate(value: string) {
   const date = new Date(value)
@@ -63,16 +44,14 @@ function getMovementLabel(movementType: InventoryStockMovementRow["movement_type
   return movementType === "transfer_in" ? "Chuyển đến" : "Chuyển đi"
 }
 
-function getMovementBadgeClass(movementType: InventoryStockMovementRow["movement_type"]) {
-  if (movementType === "import") return "bg-emerald-100 text-emerald-700"
-  if (movementType === "export") return "bg-amber-100 text-amber-700"
-  return "bg-blue-100 text-blue-700"
+function getMovementTone(movementType: InventoryStockMovementRow["movement_type"]): StatusTone {
+  if (movementType === "import") return "valid"
+  if (movementType === "export") return "warn"
+  return "info"
 }
 
 function getDocumentHref(movementType: InventoryStockMovementRow["movement_type"], documentId: string) {
-  if (movementType === "import") return `/dashboard/inventory/receipts?documentId=${encodeURIComponent(documentId)}`
-  if (movementType === "export") return `/dashboard/inventory/issues?documentId=${encodeURIComponent(documentId)}`
-  return `/dashboard/inventory/transfers?documentId=${encodeURIComponent(documentId)}`
+  return inventoryDocumentDetailHref(getDocumentType(movementType), documentId)
 }
 
 function getDocumentType(movementType: InventoryStockMovementRow["movement_type"]): MovementDocumentType {
@@ -490,39 +469,49 @@ export default function InventoryLookupPage() {
         </div>
       ) : null}
 
-      <div ref={revealRef} className="scroll-reveal grid gap-4 xl:grid-cols-4">
-        <SummaryCard
-          icon={<History size={18} />}
+      <StatGrid cols={4}>
+        <StatCard
+          icon={History}
           label="Phát sinh"
           value={stats.movementCount.toLocaleString("vi-VN")}
-          note="Tổng số dòng phát sinh trong phạm vi thẻ kho hiện tại."
+          sub="Dòng phát sinh theo bộ lọc"
+          loading={loading}
         />
-        <SummaryCard
-          icon={<ArrowDownLeft size={18} />}
+        <StatCard
+          icon={ArrowDownLeft}
           label="Nhập kho"
           value={stats.importCount.toLocaleString("vi-VN")}
-          note="Số dòng phát sinh nhập kho."
-          tone="text-emerald-700"
+          sub="Dòng nhập kho"
+          loading={loading}
         />
-        <SummaryCard
-          icon={<ArrowUpRight size={18} />}
+        <StatCard
+          icon={ArrowUpRight}
           label="Xuất kho"
           value={stats.exportCount.toLocaleString("vi-VN")}
-          note="Số dòng phát sinh xuất kho."
-          tone="text-amber-700"
+          sub="Dòng xuất kho"
+          loading={loading}
         />
-        <SummaryCard
-          icon={<ArrowRightLeft size={18} />}
+        <StatCard
+          icon={ArrowRightLeft}
           label="Điều chuyển"
           value={stats.transferCount.toLocaleString("vi-VN")}
-          note={stats.latestDate ? `Phát sinh gần nhất ngày ${formatDate(stats.latestDate)}.` : "Chưa có phát sinh."}
-          tone="text-blue-700"
+          sub={stats.latestDate ? `Gần nhất ${formatDate(stats.latestDate)}` : "Chưa có phát sinh"}
+          loading={loading}
         />
-      </div>
+      </StatGrid>
 
-      <section
-        ref={revealRef}
-        className="scroll-reveal relative z-40 mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-4"
+      <FilterBar
+        layout="grid"
+        className="relative z-40"
+        activeCount={
+          [
+            selectedWarehouseIds.length > 0,
+            selectedCategoryIds.length > 0,
+            selectedItemIds.length > 0,
+            selectedDocumentTypes.length !== 3,
+            selectedApprovalStates.length > 0,
+          ].filter(Boolean).length
+        }
       >
         <div className="w-full">
           <MultiSelectField
@@ -608,7 +597,7 @@ export default function InventoryLookupPage() {
           <label className="mb-1.5 block text-xs font-bold text-slate-600">Đến ngày</label>
           <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} className={INPUT_CLASS} />
         </div>
-      </section>
+      </FilterBar>
 
       <section
         ref={revealRef}
@@ -625,96 +614,89 @@ export default function InventoryLookupPage() {
         </div>
 
         {loading ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          <ListState kind="loading" message="Đang tải sổ chi tiết..." />
         ) : filteredMovements.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">
-            <FileText size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Không có phát sinh phù hợp</p>
-          </div>
+          <ListState kind="empty" message="Không có phát sinh phù hợp bộ lọc." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500">
-                <tr>
-                  {["Ngày", "Kho", "Phân loại", "Mã vật tư", "Tên vật tư", "Loại giao dịch", "Trạng thái", "Người tạo", "Số lượng", "Tồn sau", "Chứng từ"].map(
-                    (head) => (
-                      <th key={head} className="px-4 py-3 text-left font-bold">
-                        {head}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMovements.map((movement) => (
-                  <tr key={movement.id} className="row-hover border-t border-slate-100">
-                    <td className="px-4 py-3 text-slate-500">{formatDate(movement.movement_date)}</td>
-                    <td className="px-4 py-3 text-slate-600">
+          <table className="enterprise-table dense min-w-[1100px]">
+            <thead>
+              <tr>
+                <th>Ngày</th>
+                <th>Kho</th>
+                <th>Phân loại</th>
+                <th>Mã vật tư</th>
+                <th>Tên vật tư</th>
+                <th>Loại giao dịch</th>
+                <th>Trạng thái</th>
+                <th>Người tạo</th>
+                <th className="text-right">Số lượng</th>
+                <th className="text-right">Tồn sau</th>
+                <th className="text-right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredMovements.map((movement) => {
+                const docInfo = documentInfoById[movement.document_id]
+                return (
+                  <tr key={movement.id}>
+                    <td className="whitespace-nowrap text-slate-500">{formatDate(movement.movement_date)}</td>
+                    <td>
                       <div className="font-semibold text-slate-700">{movement.warehouse.code}</div>
                       <div className="text-xs text-slate-500">{movement.warehouse.name}</div>
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{movement.categoryName}</td>
-                    <td className="px-4 py-3">
+                    <td className="text-slate-600">{movement.categoryName}</td>
+                    <td>
                       <Link
                         href={`/dashboard/inventory/item?code=${encodeURIComponent(movement.item.code)}&warehouseId=${encodeURIComponent(movement.warehouse.id)}`}
-                        className="font-bold text-slate-700 transition hover:text-emerald-700"
+                        className="font-bold text-brand-700 hover:underline"
                       >
                         {movement.item.code}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-slate-700">{movement.item.name}</td>
-                    <td className="px-4 py-3">
-                      <span className={`rounded-full px-2 py-1 text-xs font-bold ${getMovementBadgeClass(movement.movement_type)}`}>
-                        {getMovementLabel(movement.movement_type)}
-                      </span>
+                    <td className="text-slate-700">{movement.item.name}</td>
+                    <td>
+                      <StatusBadge
+                        tone={getMovementTone(movement.movement_type)}
+                        label={getMovementLabel(movement.movement_type)}
+                      />
                     </td>
-                    <td className="px-4 py-3">
-                      {documentInfoById[movement.document_id]?.approved ? (
-                        <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">
-                          Đã phê duyệt
-                        </span>
+                    <td>
+                      {docInfo?.approved ? (
+                        <StatusBadge tone="info" label="Đã phê duyệt" />
                       ) : (
-                        <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-700">
-                          Chờ phê duyệt
-                        </span>
+                        <StatusBadge domain="inventory" status="cho_duyet" label="Chờ phê duyệt" />
                       )}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {documentInfoById[movement.document_id]?.requesterName || "—"}
+                    <td className="text-slate-600">{docInfo?.requesterName || "—"}</td>
+                    <td className="whitespace-nowrap text-right font-semibold tabular-nums text-slate-800">
+                      {movement.quantity.toLocaleString("vi-VN")}
                     </td>
-                    <td className="px-4 py-3 font-semibold text-slate-800">{movement.quantity.toLocaleString("vi-VN")}</td>
-                    <td className="px-4 py-3 text-slate-600">
+                    <td className="whitespace-nowrap text-right tabular-nums text-slate-600">
                       {movement.balance_after === null ? "Chưa có" : movement.balance_after.toLocaleString("vi-VN")}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-nowrap items-center gap-2">
-                        {canApprove &&
-                          movement.documentType !== "transfer" &&
-                          !documentInfoById[movement.document_id]?.approved && (
-                            <InventoryActionButton
-                              icon={Check}
-                              tone="emerald"
-                              title="Phê duyệt phiếu"
-                              size="sm"
-                              onClick={() => void handleApproveDocument(movement.document_id)}
-                              disabled={approvingDocumentId === movement.document_id}
-                              label={approvingDocumentId === movement.document_id ? "Đang duyệt..." : "Duyệt"}
-                            />
-                          )}
-                        <InventoryActionLink
-                          icon={Eye}
-                          tone="sky"
-                          size="sm"
-                          label="Mở phiếu"
+                    <td>
+                      <IconActionGroup>
+                        {canApprove && movement.documentType !== "transfer" && !docInfo?.approved && (
+                          <RowAction
+                            kind="approve"
+                            variant="text"
+                            label="Duyệt"
+                            loading={approvingDocumentId === movement.document_id}
+                            onClick={() => void handleApproveDocument(movement.document_id)}
+                          />
+                        )}
+                        <RowAction
+                          kind="view"
+                          label="Xem chi tiết phiếu"
                           href={getDocumentHref(movement.movement_type, movement.document_id)}
                         />
-                      </div>
+                      </IconActionGroup>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                )
+              })}
+            </tbody>
+          </table>
         )}
         </ResponsiveTableWrapper>
       </section>

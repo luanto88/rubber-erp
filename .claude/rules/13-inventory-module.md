@@ -412,3 +412,16 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
   DPH, PM (= MUBEZ + MCH gộp sắt mỏng), ĐG, ĐN (người dùng tự tạo), PMB5, PMB4, PG. Hình thức xuất theo
   `export_pallet_types` (rule 08). Kiện rời kho khi tổng bành gán đơn ≥ bành SX; đơn hoàn tất kiện quyết định hình thức.
   Trang cũ `/dashboard/product/pallet` đã XOÁ; banner Thành phẩm không còn link (gỡ 2026-10-27).
+
+## U10 — Thẻ kho / Sổ chi tiết / Tổng quan theo rule 29 (2026-10-28, test pass)
+- `InventoryPageShell` bọc `moduleThemeClass("amber")` (mọi trang kho); 2 hàng tab (nhóm + thẻ con) →
+  `SegmentedTabs` có `href` (`/cards` vẫn sáng thẻ "Tồn" nhờ `extraPrefixes`).
+- Sổ chi tiết (`lookup`): `StatGrid`/`StatCard`; bộ lọc `FilterBar layout="grid"` (giữ `relative z-40` cho
+  dropdown); bảng `enterprise-table dense min-w-[1100px]`, số căn phải; Loại giao dịch + Trạng thái qua
+  `StatusBadge` (đã duyệt = tone info "Đã phê duyệt", như danh sách phiếu); thao tác `RowAction` approve (text) →
+  view = **trang chi tiết phiếu** `inventoryDocumentDetailHref` (trước mở form `?documentId=`); `ListState`.
+- Tổng quan (`analytics`): `StatGrid`; `FilterBar` grid; cảnh báo có badge mức; 7/30 ngày = `SegmentedTabs`;
+  bảng giao dịch `enterprise-table dense`; lỗi tải giao dịch nay hiện `ListState` lỗi + "Thử lại" (trước bị nuốt
+  thành "Không có giao dịch").
+- Thẻ kho (`cards`): `ListState` cho tải/rỗng; lưới thẻ chọn nhãn giữ nguyên.
+- Không đổi truy vấn, quyền, Excel/in, điều kiện nút.

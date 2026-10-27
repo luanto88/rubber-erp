@@ -1,12 +1,13 @@
 "use client"
 
-import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ArrowRightLeft, BarChart3, Boxes, Layers, LayoutDashboard, PackageMinus, PackagePlus, ScrollText, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { InventoryActionBar } from "./inventory-ui"
 
 type SubTab = {
@@ -77,9 +78,10 @@ export function InventoryPageShell({
   const pathname = usePathname()
   const revealRef = useScrollReveal()
   const activeGroup = TAB_GROUPS.find((group) => group.tabs.some((tab) => isTabActive(pathname, tab))) || TAB_GROUPS[0]
+  const activeTab = activeGroup.tabs.find((tab) => isTabActive(pathname, tab))
 
   return (
-    <div className="space-y-4">
+    <div className={`${moduleThemeClass("amber")} space-y-4`}>
       <PageBackgroundMotif theme="amber" />
       <PageHeaderBanner title={title} subtitle={description} theme="amber" icon={Boxes} />
 
@@ -87,47 +89,30 @@ export function InventoryPageShell({
         ref={revealRef}
         className="scroll-reveal rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
       >
-        <div className="flex gap-1.5 rounded-2xl bg-slate-100 p-1.5">
-          {TAB_GROUPS.map((group) => {
-            const active = group.key === activeGroup.key
-            const Icon = group.icon
-            return (
-              <Link
-                key={group.key}
-                href={group.tabs[0].href}
-                className={
-                  "flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-bold transition-all sm:flex-none sm:px-6 " +
-                  (active ? "bg-white text-amber-800 shadow-sm" : "text-slate-500 hover:text-slate-800")
-                }
-              >
-                <Icon size={16} />
-                {group.label}
-              </Link>
-            )
-          })}
-        </div>
+        <SegmentedTabs
+          ariaLabel="Nhóm chức năng kho"
+          fullWidth
+          className="sm:w-fit"
+          value={activeGroup.key}
+          items={TAB_GROUPS.map((group) => ({
+            key: group.key,
+            label: group.label,
+            icon: group.icon,
+            href: group.tabs[0].href,
+          }))}
+        />
 
         <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
-            {activeGroup.tabs.map((tab) => {
-              const active = isTabActive(pathname, tab)
-              return (
-                <Link
-                  key={tab.href}
-                  href={tab.href}
-                  className={
-                    "flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all " +
-                    (active
-                      ? "bg-amber-600 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-amber-50 hover:text-amber-800")
-                  }
-                >
-                  <tab.icon size={15} />
-                  {tab.label}
-                </Link>
-              )
-            })}
-          </div>
+          <SegmentedTabs
+            ariaLabel="Thẻ chức năng kho"
+            value={activeTab?.href ?? null}
+            items={activeGroup.tabs.map((tab) => ({
+              key: tab.href,
+              label: tab.label,
+              icon: tab.icon,
+              href: tab.href,
+            }))}
+          />
           {action ? <InventoryActionBar className="lg:shrink-0">{action}</InventoryActionBar> : null}
         </div>
       </section>

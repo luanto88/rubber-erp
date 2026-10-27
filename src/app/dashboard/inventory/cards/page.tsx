@@ -7,6 +7,7 @@ import { InventoryActionBar, InventoryActionButton, InventoryActionLink } from "
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { loadInventoryAdminData, type InventoryItemOption, type InventoryWarehouseOption, type InventoryWarehouseRule } from "../_components/inventory-data"
 import { useScrollReveal } from "@/lib/useScrollReveal"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { downloadInventoryCardLabelsPdf, type InventoryCardEntry } from "@/lib/inventory-card-pdf"
 
 function buildQrUrl(params: { code?: string; warehouseId: string }) {
@@ -249,13 +250,12 @@ export default function InventoryCardsPage() {
       </section>
 
       {loading ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-slate-400 shadow-sm">
-          Đang tải...
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <ListState kind="loading" message="Đang tải danh sách nhãn..." />
         </div>
       ) : entries.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-12 text-center text-slate-400 shadow-sm">
-          <Tag size={40} className="mx-auto mb-3 opacity-30" />
-          <p>Chưa có vật tư nào gắn kho để in thẻ.</p>
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <ListState kind="empty" message="Chưa có vật tư nào gắn kho để in thẻ." />
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
