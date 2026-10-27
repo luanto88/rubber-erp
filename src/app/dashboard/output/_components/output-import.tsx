@@ -10,7 +10,6 @@ import {
   OUTPUT_MATERIALS,
   buildProductionRecordKey,
   parseVehicleCode,
-  WARN_LABELS,
   WARN_SEVERITY,
   writeBackToDispatch,
 } from "./output-types"
@@ -18,6 +17,7 @@ import { normalizeDateInput, formatDateDisplay } from "@/lib/date-utils"
 import { createRequiredNote, loadRequiredNotes } from "@/lib/required-notes"
 import { isBlankNoteContent } from "@/lib/note-filter"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
+import { OutputWarnBadge } from "./output-badges"
 import type { SessionUser } from "@/lib/auth"
 
 // Danh sách loại mủ cho bảng xem trước (Step 2) — chỉ cột của loại có dữ liệu trong file mới hiện.
@@ -362,21 +362,6 @@ export function applyNoteWarnings(rows: MatchedSlRow[], catalog: string[]): Matc
         : [...row.warn_codes, "UNKNOWN_NOTE" as WarnCode],
     }
   })
-}
-
-// ────────────────────────────────────────────────────────────────
-// Warn badge component
-// ────────────────────────────────────────────────────────────────
-
-function WarnBadge({ code }: { code: WarnCode }) {
-  const sev = WARN_SEVERITY[code]
-  const cls = sev === "red" ? "bg-red-100 text-red-700" :
-              sev === "amber" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
-  return (
-    <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded mr-1 ${cls}`}>
-      {WARN_LABELS[code]}
-    </span>
-  )
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -900,7 +885,9 @@ export function OutputImport({
                             )}
                           </td>
                           <td className="px-3 py-1.5">
-                            {r.warn_codes.map(c => <WarnBadge key={c} code={c} />)}
+                            <div className="flex flex-wrap gap-1">
+                              {r.warn_codes.map(c => <OutputWarnBadge key={c} code={c} />)}
+                            </div>
                           </td>
                         </tr>
                       )

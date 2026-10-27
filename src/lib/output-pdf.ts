@@ -1,11 +1,12 @@
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import { OUTPUT_MATERIALS, type ProductionRecord } from "@/app/dashboard/output/_components/output-types"
+import { PDF_FONT_NAME, addQrImage, ensurePdfFont, safeName } from "@/lib/pdf-qr-shared"
 
-const PDF_FONT_FILE = "NotoSans-Regular.ttf"
-const PDF_FONT_NAME = "NotoSans"
 const ORG_LINE_1 = "Nhà máy chế biến"
 const ORG_LINE_2 = "Báo cáo sản lượng"
+const QR_SIZE = 18
+const QR_MARGIN = 12
 
 type PdfWithTable = jsPDF & {
   lastAutoTable?: {
@@ -13,48 +14,7 @@ type PdfWithTable = jsPDF & {
   }
 }
 
-let fontBase64Promise: Promise<string> | null = null
-
 const MATERIAL_COLUMNS = OUTPUT_MATERIALS
-
-async function loadPdfFontBase64() {
-  if (!fontBase64Promise) {
-    fontBase64Promise = fetch(`/fonts/${PDF_FONT_FILE}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Không tải được font PDF: ${PDF_FONT_FILE}`)
-        const buffer = await res.arrayBuffer()
-        const bytes = new Uint8Array(buffer)
-        let binary = ""
-        const chunkSize = 0x8000
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
-        }
-        return btoa(binary)
-      })
-      .catch((error) => {
-        fontBase64Promise = null
-        throw error
-      })
-  }
-
-  return fontBase64Promise
-}
-
-async function ensurePdfFont(doc: jsPDF) {
-  const base64 = await loadPdfFontBase64()
-  doc.addFileToVFS(PDF_FONT_FILE, base64)
-  doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "normal")
-  doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "bold")
-  doc.setFont(PDF_FONT_NAME, "normal")
-}
-
-function safeName(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-}
 
 function fmtDate(iso: string) {
   if (!iso) return ""
@@ -117,12 +77,16 @@ function renderFooter(doc: jsPDF) {
   }
 }
 
-export async function downloadOutputDayPdf(params: {
+export type OutputDayPdfParams = {
   ngay: string
   records: ProductionRecord[]
   makerName?: string | null
-}) {
-  const { ngay, records, makerName } = params
+  /** URL trang chi tiết ngày — in QR góc phải trên trang đầu (rule 29 D2). */
+  qrUrl?: string | null
+}
+
+async function buildOutputDayDoc(params: OutputDayPdfParams) {
+  const { ngay, records, makerName, qrUrl } = params
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
 
@@ -142,6 +106,10 @@ export async function downloadOutputDayPdf(params: {
     "Báo cáo sản lượng theo ngày",
     `${fmtDate(ngay)} · ${records.length} dòng · Đội ${doiSet.join(", ") || "-"} · KL tươi ${fmtNum(totalTuoi)} kg · KL khô ${fmtNum(totalKho)} kg`,
   )
+  if (qrUrl) {
+    const pageW = doc.internal.pageSize.getWidth()
+    await addQrImage(doc, qrUrl, pageW - QR_MARGIN - QR_SIZE, 5, QR_SIZE)
+  }
 
   autoTable(doc, {
     startY: 30,
@@ -190,5 +158,15 @@ export async function downloadOutputDayPdf(params: {
   })
 
   renderFooter(doc)
-  doc.save(`san-luong-${safeName(ngay)}.pdf`)
+  return doc
+}
+
+export async function buildOutputDayPdfBytes(params: OutputDayPdfParams): Promise<Uint8Array> {
+  const doc = await buildOutputDayDoc(params)
+  return new Uint8Array(doc.output("arraybuffer"))
+}
+
+export async function downloadOutputDayPdf(params: OutputDayPdfParams) {
+  const doc = await buildOutputDayDoc(params)
+  doc.save(`san-luong-${safeName(params.ngay)}.pdf`)
 }

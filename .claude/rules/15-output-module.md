@@ -414,3 +414,20 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
   `compareSoXe` sắp xe tự nhiên ("2A" trước "10A"); đội lớn lọc lấy từ `dispatch_delivery_points` (dự phòng 1-12);
   phụ đề banner đã viết lại. CÒN LẠI: biển số `3A1064` + mã ghi chú → nguồn mủ trong `output-form.tsx`, đội 1-12
   trong form/converter (cần bảng cấu hình, chưa làm).
+
+## U9b — giao diện rule 29 (2026-10-28, chờ test tay)
+- Badge: `_components/output-badges.tsx` — `OutputWarnBadge` (tông theo `WARN_SEVERITY`: red→danger,
+  amber→warn, slate→draft) và `OutputSourceCell` (Thu mua warn · GC Tân Biên/Chư Păh info · Thanh lý returned ·
+  còn lại "Đội N"). Dùng `StatusBadge tone+label`, KHÔNG thêm domain registry (registry phải thuần, nhãn ở output-types).
+  Đã bỏ `WarnBadge` ở `page.tsx` và `output-import.tsx`.
+- Lỗi TẢI → state `loadError` + `ListState` (Thử lại gọi `refreshAll`); toast `saveError` chỉ còn cho lỗi lưu/xoá/ghi ngược.
+  Tab Thống kê cũng có loading/lỗi/rỗng; bảng "Chi tiết theo xe" `enterprise-table dense min-w-[640px]`, số căn phải.
+- Ô tìm số xe có **Quét QR**: URL `/dashboard/output/day/<YYYY-MM-DD>` ⇒ mở trang ngày; chuỗi khác ⇒ ô tìm.
+- **Trang chi tiết ngày** `/dashboard/output/day/[date]` (chỉ XEM, guard `output.view`): trái "Bản PDF"
+  (`buildOutputDayPdfBytes`, toàn bộ bản ghi của ngày, không theo bộ lọc) / "Bản ghi" (gom theo đội/nguồn + dòng
+  tổng); phải badge cảnh báo → Hành động (Tải PDF; "Thêm dòng" → `/dashboard/output?add=<ngày>`; "Sửa / Xóa dòng" →
+  `?day=<ngày>` mở bảng chọn dòng trong danh sách, tự nới khoảng lọc chứa ngày) → tổng theo loại mủ → thông tin ngày.
+  Con mắt dòng ngày ở danh sách mở trang này; link "Mở bảng chi tiết có chọn dòng xóa/sửa" trong dòng xổ giữ nguyên.
+- `src/lib/output-pdf.ts`: `buildOutputDayPdfBytes` + `downloadOutputDayPdf` (tham số `qrUrl` → QR 18mm góc phải
+  trên), font/QR dùng chung `pdf-qr-shared`. PDF từ danh sách vẫn theo bộ lọc đang chọn, có QR trỏ trang ngày.
+- Converter bọc `moduleThemeClass("forest")` + `PageHeaderBanner` (Quay lại / Tải Excel / Chọn file trên banner).

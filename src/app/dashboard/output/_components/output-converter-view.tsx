@@ -7,6 +7,8 @@ import {
   Database, Send, Split, Search, X
 } from "lucide-react"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { supabase } from "@/lib/supabase"
 import type { SessionUser } from "@/lib/auth"
@@ -678,65 +680,53 @@ export function OutputConverterView({
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-[1600px] mx-auto space-y-6">
+    <div className={`p-4 sm:p-6 max-w-[1600px] mx-auto space-y-6 ${moduleThemeClass("forest")}`}>
       <PageBackgroundMotif theme="forest" />
 
-      {/* ── Top Navigation Bar ────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-white/80 backdrop-blur-md p-4 rounded-2xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 active:scale-95 transition-all text-slate-600 hover:text-slate-900"
-            title="Quay lại danh sách sản lượng"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                <Sparkles className="w-3.5 h-3.5" /> Hỗ trợ Kỹ thuật Sản lượng
-              </span>
-              {activeDate && (
-                <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
-                  Ngày {formatDateDisplay(activeDate)}
-                </span>
-              )}
-            </div>
-            <h1 className="text-lg sm:text-xl font-black text-slate-800 tracking-tight mt-0.5">
-              Bóc tách Báo cáo Trạm cân & Đối soát Điều xe
-            </h1>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {rows.length > 0 && (
+      <PageHeaderBanner
+        title="Bóc tách Báo cáo Trạm cân & Đối soát Điều xe"
+        subtitle={`Hỗ trợ kỹ thuật sản lượng${activeDate ? ` · Ngày ${formatDateDisplay(activeDate)}` : ""}`}
+        theme="forest"
+        icon={Sparkles}
+        action={
+          <>
             <button
-              onClick={handleExportExcel}
-              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-sm shadow-xs transition-all active:scale-95"
+              onClick={onBack}
+              title="Quay lại danh sách sản lượng"
+              className="flex items-center justify-center gap-2 rounded-xl border border-white/40 bg-white/15 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-white/25"
             >
-              <Download className="w-4 h-4 text-emerald-600" />
-              <span>Tải file Excel đối chiếu</span>
+              <ArrowLeft className="h-4 w-4" />
+              <span>Quay lại</span>
             </button>
-          )}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-sm transition-all active:scale-95"
-          >
-            <Upload className="w-4 h-4" />
-            <span>{selectedFile ? "Chọn file khác" : "Chọn file báo cáo"}</span>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls,.pdf"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) handleFileUpload(file)
-            }}
-          />
-        </div>
-      </div>
+            {rows.length > 0 && (
+              <button
+                onClick={handleExportExcel}
+                className="flex items-center justify-center gap-2 rounded-xl border border-white/40 bg-white/15 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:bg-white/25"
+              >
+                <Download className="h-4 w-4" />
+                <span>Tải file Excel đối chiếu</span>
+              </button>
+            )}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-brand shadow-sm transition-all hover:bg-white/90"
+            >
+              <Upload className="h-4 w-4" />
+              <span>{selectedFile ? "Chọn file khác" : "Chọn file báo cáo"}</span>
+            </button>
+          </>
+        }
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.xls,.pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleFileUpload(file)
+        }}
+      />
 
       {/* ── Dropzone & Upload State ────────────────────────────────────── */}
       {!selectedFile && (

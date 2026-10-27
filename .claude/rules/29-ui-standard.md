@@ -77,7 +77,7 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | Điều xe | ✅ | ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ |
 | Kiểm nghiệm | ✅ | ✅ (ngày → lô → số liệu mẫu) | ✅ `/dashboard/quality/[date]` | ✅ | ✅ (tab Xếp hạng) |
 | Đề nghị mua | ✅ | ✅ (dòng vật tư) | ✅ (+ bản chưa ký nhúng khi Nháp) | ✅ | ✅ (Đã tích hợp Quét QR ở ô tìm) |
-| Sản lượng | 🟡 (còn WarnBadge/chip tay, thiếu ListState lỗi; Converter chưa theme) | ✅ (ngày → xe / chuyến) | ❌ (Eye mở bảng trong trang, chưa PDF nhúng) — U9b | — | ❌ chưa Quét QR — U9b |
+| Sản lượng | ✅ StatusBadge (cảnh báo/nguồn) + ListState + bảng Thống kê chuẩn; Converter theme + banner | ✅ (ngày → xe / chuyến) | ✅ `/dashboard/output/day/[date]` (PDF ngày nhúng loadBytes) | — | ✅ QR góc phải trên PDF ngày + Quét QR ở ô tìm |
 | Văn bản | (Doc-UI riêng) | ✅ tiến trình ký | ✅ | ❌ (lưu tên object) | — |
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
 | Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | ✅ `/dashboard/export/[id]` (PDF nhúng loadBytes) | — | ✅ (quét QR EUDR + quét QR kiện lên xe) |

@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { loadDispatchEntriesWithResolvedRows, type LegacyDispatchRow } from "@/lib/dispatch-entry-rows"
@@ -27,6 +28,10 @@ import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card
 import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
 import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { QrScanButton, QrScanPortal } from "@/app/dashboard/_components/qr-scan-portal"
+import { OutputSourceCell, OutputWarnBadge } from "./_components/output-badges"
 import type { OutputFormState, ProductionRecord } from "./_components/output-types"
 import {
   OUTPUT_MATERIALS,
@@ -135,21 +140,6 @@ function getMaterialSummary(record: ProductionRecord, selected: string[] = []) {
     .filter((part): part is string => Boolean(part))
 }
 
-function WarnBadge({ code }: { code: WarnCode }) {
-  const sev = WARN_SEVERITY[code]
-  const cls = sev === "red"
-    ? "bg-red-100 text-red-700"
-    : sev === "amber"
-      ? "bg-amber-100 text-amber-700"
-      : "bg-slate-100 text-slate-500"
-  return (
-    <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${cls}`}>
-      {WARN_LABELS[code]}
-    </span>
-  )
-}
-
-
 function compareProductionRecordPriority(a: ProductionRecord, b: ProductionRecord) {
   const aStamp = a.updated_at || a.created_at || ""
   const bStamp = b.updated_at || b.created_at || ""
@@ -158,7 +148,10 @@ function compareProductionRecordPriority(a: ProductionRecord, b: ProductionRecor
   return b.id.localeCompare(a.id)
 }
 
+const DAY_HREF = (ngay: string) => `/dashboard/output/day/${ngay}`
+
 export default function OutputPage() {
+  const router = useRouter()
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
@@ -176,6 +169,8 @@ export default function OutputPage() {
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([])
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [scanOpen, setScanOpen] = useState(false)
   const [cleaningDuplicates, setCleaningDuplicates] = useState(false)
   const [deletingRows, setDeletingRows] = useState(false)
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set())
@@ -238,10 +233,11 @@ export default function OutputPage() {
 
   const loadRecords = useCallback(async (fid: string) => {
     setLoading(true)
+    setLoadError(null)
     try {
       setRecords(await fetchRecords(fid))
     } catch (error) {
-      setSaveError((error as { message?: string } | null)?.message || "Không tải được danh sách sản lượng.")
+      setLoadError((error as { message?: string } | null)?.message || "Không tải được danh sách sản lượng.")
     } finally {
       setLoading(false)
     }
@@ -278,54 +274,52 @@ export default function OutputPage() {
     void bootstrap()
   }, [loadSupportData])
 
+  // Tải sản lượng + điều xe + danh mục ghi chú; lượt cũ về muộn bị bỏ qua (refreshSeq).
+  const refreshSeq = useRef(0)
+  const refreshAll = useCallback(async (fid: string) => {
+    const seq = ++refreshSeq.current
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const [recordsResult, dispatchResult, noteRows] = await Promise.all([
+        fetchRecords(fid),
+        loadDispatchEntriesWithResolvedRows<Pick<DispatchEntry, "id" | "ngay">>(supabase, {
+          factoryId: fid,
+          select: "id,ngay,rows",
+          ascending: true,
+        }),
+        loadRequiredNotes(supabase, fid),
+      ])
+      if (seq !== refreshSeq.current) return
+      setRecords(recordsResult)
+      setDispatches(
+        (dispatchResult || []).map((entry) => ({
+          id: entry.id,
+          ngay: entry.ngay,
+          rows: Array.isArray(entry.rows)
+            ? entry.rows.map((row: Pick<LegacyDispatchRow, "uid" | "so_xe" | "chuyen" | "tai_xe" | "diem_gn">) => ({
+                uid: String(row.uid ?? ""),
+                so_xe: String(row.so_xe ?? ""),
+                chuyen: Number(row.chuyen ?? 1),
+                tai_xe: String(row.tai_xe ?? ""),
+                diem_gn: Array.isArray(row.diem_gn) ? row.diem_gn.map((item) => String(item)) : [],
+              }))
+            : [],
+        })) as DispatchEntry[],
+      )
+      setRequiredNotes(noteRows.map((row) => row.content))
+    } catch (error) {
+      if (seq !== refreshSeq.current) return
+      setRequiredNotes([])
+      setLoadError((error as { message?: string } | null)?.message || "Không tải được dữ liệu sản lượng.")
+    } finally {
+      if (seq === refreshSeq.current) setLoading(false)
+    }
+  }, [fetchRecords])
+
   useEffect(() => {
-    if (!factoryId) return
-    let active = true
-
-    const refresh = async () => {
-      setLoading(true)
-      try {
-        const [recordsResult, dispatchResult, noteRows] = await Promise.all([
-          fetchRecords(factoryId),
-          loadDispatchEntriesWithResolvedRows<Pick<DispatchEntry, "id" | "ngay">>(supabase, {
-            factoryId,
-            select: "id,ngay,rows",
-            ascending: true,
-          }),
-          loadRequiredNotes(supabase, factoryId),
-        ])
-        if (!active) return
-        setRecords(recordsResult)
-        setDispatches(
-          (dispatchResult || []).map((entry) => ({
-            id: entry.id,
-            ngay: entry.ngay,
-            rows: Array.isArray(entry.rows)
-              ? entry.rows.map((row: Pick<LegacyDispatchRow, "uid" | "so_xe" | "chuyen" | "tai_xe" | "diem_gn">) => ({
-                  uid: String(row.uid ?? ""),
-                  so_xe: String(row.so_xe ?? ""),
-                  chuyen: Number(row.chuyen ?? 1),
-                  tai_xe: String(row.tai_xe ?? ""),
-                  diem_gn: Array.isArray(row.diem_gn) ? row.diem_gn.map((item) => String(item)) : [],
-                }))
-              : [],
-          })) as DispatchEntry[],
-        )
-        setRequiredNotes(noteRows.map((row) => row.content))
-      } catch (error) {
-        if (!active) return
-        setRequiredNotes([])
-        setSaveError((error as { message?: string } | null)?.message || "Không tải được dữ liệu sản lượng.")
-      } finally {
-        if (active) setLoading(false)
-      }
-    }
-
-    void refresh()
-    return () => {
-      active = false
-    }
-  }, [factoryId, fetchRecords])
+    if (factoryId) void refreshAll(factoryId)
+  }, [factoryId, refreshAll])
 
   // Đội nhỏ của từng bản ghi: lấy từ chuyến điều xe cùng ngày + xe + chuyến, chỉ giữ điểm GN
   // thuộc đúng đội lớn của bản ghi. Sản lượng nhập theo chuyến nên chuyến đi qua nhiều đội nhỏ
@@ -526,11 +520,47 @@ export default function OutputPage() {
         ngay,
         records: dayRecords,
         makerName: currentUser?.full_name,
+        qrUrl: `${window.location.origin}${DAY_HREF(ngay)}`,
       })
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "Không tạo được PDF ngày.")
     }
   }
+
+  // Quét QR ở ô tìm: QR trang ngày ⇒ mở trang đó; chuỗi khác ⇒ đưa vào ô tìm số xe.
+  const handleScanDecoded = (text: string) => {
+    setScanOpen(false)
+    const m = text.match(/\/dashboard\/output\/day\/(\d{4}-\d{2}-\d{2})/)
+    if (m) {
+      router.push(DAY_HREF(m[1]))
+      return
+    }
+    setFilterXe(text.trim())
+  }
+
+  // `?day=<ngày>` (Sửa / Xóa dòng) và `?add=<ngày>` (Thêm dòng) từ trang chi tiết ngày — xử lý 1 lần.
+  const queryHandled = useRef(false)
+  useEffect(() => {
+    if (queryHandled.current || !factoryId || !currentUser || loading) return
+    queryHandled.current = true
+    let params: URLSearchParams
+    try { params = new URLSearchParams(window.location.search) } catch { return }
+    const isIso = (v: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v)
+    const day = params.get("day")
+    const add = params.get("add")
+    if (isIso(day)) {
+      if (!filterFrom || day < filterFrom) setFilterFrom(day)
+      if (!filterTo || day > filterTo) setFilterTo(day)
+      setTab("list")
+      setDetailDay(day)
+      setSelectedRowIds([])
+    } else if (isIso(add) && (isAdmin || canCreate)) {
+      setEditRecord(null)
+      setFormInitialDate(add)
+      setShowForm(true)
+    }
+    if (day || add) window.history.replaceState(null, "", window.location.pathname)
+  }, [factoryId, currentUser, loading, filterFrom, filterTo, isAdmin, canCreate])
 
   const handleSave = async (form: OutputFormState) => {
     if (!factoryId) return
@@ -791,6 +821,7 @@ export default function OutputPage() {
             <div className="flex w-full items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 focus-within:border-emerald-400">
               <Search size={15} className="shrink-0 text-slate-400" />
               <input value={filterXe} onChange={(e) => setFilterXe(e.target.value)} placeholder="Tìm số xe..." className="w-full min-w-0 text-sm outline-none" />
+              <QrScanButton onClick={() => setScanOpen(true)} title="Quét QR phiếu sản lượng ngày" />
             </div>
           )}
 
@@ -877,16 +908,18 @@ export default function OutputPage() {
       </FilterBar>
 
       {/* List content */}
-      {loading ? (
-        <div className="p-12 text-center text-sm text-slate-400">Đang tải dữ liệu...</div>
+      {tab === "list" && (loading || loadError || filtered.length === 0) ? (
+        <div className="rounded-2xl border border-slate-200 bg-white">
+          {loading ? (
+            <ListState kind="loading" message="Đang tải dữ liệu sản lượng…" />
+          ) : loadError ? (
+            <ListState kind="error" message={loadError} onRetry={() => { if (factoryId) void refreshAll(factoryId) }} />
+          ) : (
+            <ListState kind="empty" message="Không tìm thấy bản ghi nào — thử đổi khoảng ngày hoặc điều kiện lọc" />
+          )}
+        </div>
       ) : tab === "list" ? (
-        filtered.length === 0 ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-slate-400">
-            <Calendar size={36} className="mx-auto mb-2 opacity-30" />
-            <p className="font-semibold text-slate-600">Không tìm thấy bản ghi nào</p>
-            <p className="mt-1 text-xs">Thử thay đổi khoảng ngày hoặc điều kiện lọc</p>
-          </div>
-        ) : detailGroup ? (
+        detailGroup ? (
           <div className="space-y-4">
             <div className="flex flex-wrap items-start gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
               <button onClick={() => { setDetailDay(null); setSelectedRowIds([]) }} className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100">
@@ -984,17 +1017,7 @@ export default function OutputPage() {
                         <td className="font-bold text-mod-800">{record.so_xe || "—"}</td>
                         <td><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">{record.chuyen}</span></td>
                         <td className="font-semibold text-slate-700">
-                          {record.ma_nguon === "m" || record.doi === 0 ? (
-                            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">Thu mua</span>
-                          ) : record.ma_nguon === "gctpk" ? (
-                            <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-800">GC Tân Biên</span>
-                          ) : record.ma_nguon === "gccpk" ? (
-                            <span className="rounded bg-purple-100 px-2 py-0.5 text-xs font-bold text-purple-800">GC Chư Păh</span>
-                          ) : record.ma_nguon === "tl" ? (
-                            <span className="rounded bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-800">Thanh lý</span>
-                          ) : (
-                            record.doi ? `Đội ${record.doi}` : "—"
-                          )}
+                          <OutputSourceCell record={record} />
                         </td>
                         <td className="text-slate-700">{record.tai_xe || "—"}</td>
                         <td>
@@ -1009,7 +1032,7 @@ export default function OutputPage() {
                         <td>
                           {(record.warn_codes as WarnCode[]).length > 0 ? (
                             <div className="flex flex-wrap gap-1">
-                              {(record.warn_codes as WarnCode[]).map((code) => <WarnBadge key={code} code={code} />)}
+                              {record.warn_codes.map((code) => <OutputWarnBadge key={code} code={code} />)}
                             </div>
                           ) : <span className="text-slate-400">Không có</span>}
                         </td>
@@ -1097,8 +1120,8 @@ export default function OutputPage() {
                           <IconActionGroup>
                             <RowAction
                               kind="view"
-                              label="Mở toàn màn hình ngày này"
-                              onClick={(e) => { e.stopPropagation(); openDayDetail(ngay) }}
+                              label="Xem chi tiết ngày"
+                              onClick={(e) => { e.stopPropagation(); router.push(DAY_HREF(ngay)) }}
                             />
                             <RowAction
                               kind="draft"
@@ -1156,17 +1179,7 @@ export default function OutputPage() {
                                       <td className="font-bold text-mod-800">{record.so_xe || "—"}</td>
                                       <td><span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-bold text-blue-700">{record.chuyen}</span></td>
                                       <td className="font-semibold text-slate-700">
-                                        {record.ma_nguon === "m" || record.doi === 0 ? (
-                                          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">Thu mua</span>
-                                        ) : record.ma_nguon === "gctpk" ? (
-                                          <span className="rounded bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-800">GC Tân Biên</span>
-                                        ) : record.ma_nguon === "gccpk" ? (
-                                          <span className="rounded bg-purple-100 px-2 py-0.5 text-xs font-bold text-purple-800">GC Chư Păh</span>
-                                        ) : record.ma_nguon === "tl" ? (
-                                          <span className="rounded bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-800">Thanh lý</span>
-                                        ) : (
-                                          record.doi ? `Đội ${record.doi}` : "—"
-                                        )}
+                                        <OutputSourceCell record={record} />
                                       </td>
                                       <td className="text-slate-700">{record.tai_xe || "—"}</td>
                                       <td>
@@ -1181,7 +1194,7 @@ export default function OutputPage() {
                                       <td>
                                         {(record.warn_codes as WarnCode[]).length > 0 ? (
                                           <div className="flex flex-wrap gap-1">
-                                            {(record.warn_codes as WarnCode[]).map((code) => <WarnBadge key={code} code={code} />)}
+                                            {record.warn_codes.map((code) => <OutputWarnBadge key={code} code={code} />)}
                                           </div>
                                         ) : <span className="text-slate-400">Không có</span>}
                                       </td>
@@ -1230,7 +1243,7 @@ export default function OutputPage() {
                         <td className="text-slate-500">{uploaders.length > 0 ? uploaders.join(", ") : "—"}</td>
                         <td>
                           {dayWarnCount > 0 ? (
-                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{dayWarnCount} cảnh báo</span>
+                            <StatusBadge tone="warn" label={`${dayWarnCount} cảnh báo`} size="xs" />
                           ) : (
                             <span className="text-slate-400">Không có</span>
                           )}
@@ -1247,7 +1260,19 @@ export default function OutputPage() {
         )
       ) : null}
 
-      {tab === "stats" && (
+      {tab === "stats" && (loading || loadError || statsFiltered.length === 0) && (
+        <div className="rounded-2xl border border-slate-200 bg-white">
+          {loading ? (
+            <ListState kind="loading" message="Đang tải dữ liệu sản lượng…" />
+          ) : loadError ? (
+            <ListState kind="error" message={loadError} onRetry={() => { if (factoryId) void refreshAll(factoryId) }} />
+          ) : (
+            <ListState kind="empty" message="Không có sản lượng trong kỳ / bộ lọc đang chọn" />
+          )}
+        </div>
+      )}
+
+      {tab === "stats" && !loading && !loadError && statsFiltered.length > 0 && (
         <div className="space-y-5">
           <StatGrid cols={4}>
             <StatCard icon={Weight} label="Tổng KL Tươi" value={`${fmtNum(totalTuoiAll, 0)} kg`} />
@@ -1288,12 +1313,15 @@ export default function OutputPage() {
               <h3 className="font-bold text-slate-700">Chi tiết theo xe</h3>
             </div>
             <ResponsiveTableWrapper className="rounded-none border-0 shadow-none">
-              <table className="enterprise-table dense w-full">
+              <table className="enterprise-table dense min-w-[640px]">
                 <thead>
                   <tr>
-                    {["Đội", "Số xe", "Chuyến", "Tài xế", "Tươi (kg)", "Khô (kg)"].map((header) => (
-                      <th key={header} className="text-left font-bold text-slate-600">{header}</th>
-                    ))}
+                    <th>Đội</th>
+                    <th>Số xe</th>
+                    <th className="text-right">Chuyến</th>
+                    <th>Tài xế</th>
+                    <th className="text-right">Tươi (kg)</th>
+                    <th className="text-right">Khô (kg)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1305,7 +1333,7 @@ export default function OutputPage() {
                           {value.doi === 0 ? "Thu mua" : `Đội ${value.doi}`}
                         </td>
                         <td className="font-bold text-slate-800">{soXe}</td>
-                        <td className="text-slate-600">{chuyen}</td>
+                        <td className="text-right text-slate-600">{chuyen}</td>
                         <td className="text-slate-600">{value.taiXe || "—"}</td>
                         <td className="text-right text-slate-700">{fmtNum(value.tuoi, 0)}</td>
                         <td className="text-right font-bold text-emerald-700">{fmtNum(value.kho, 0)}</td>
@@ -1345,7 +1373,7 @@ export default function OutputPage() {
               <ul className="space-y-1">
                 {(Object.entries(WARN_LABELS) as [WarnCode, string][]).map(([code, label]) => (
                   <li key={code} className="flex items-start gap-2">
-                    <WarnBadge code={code} />
+                    <OutputWarnBadge code={code} />
                     <span>{label}</span>
                   </li>
                 ))}
@@ -1395,6 +1423,13 @@ export default function OutputPage() {
           </div>
         </div>
       )}
+
+      <QrScanPortal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onDecoded={handleScanDecoded}
+        hintText="Đưa mã QR trên phiếu sản lượng ngày vào khung"
+      />
 
       {saveError && (
         <div className="fixed left-1/2 top-4 z-50 flex max-w-xl -translate-x-1/2 items-center gap-3 rounded-2xl bg-red-600 px-5 py-3 text-white shadow-2xl">
