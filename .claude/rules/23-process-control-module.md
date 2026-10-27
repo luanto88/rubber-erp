@@ -410,3 +410,40 @@ Fix "Chế độ sấy" (query 2 tầng + cảnh báo + bắt buộc CSR) mới 
 2. Test case chưa từng có dữ liệu cho CSR đang chọn (`csrMatch` rỗng) nhưng dây chuyền có dữ liệu CSR khác → xác nhận fallback dùng đúng `latestAny`, cảnh báo đúng nội dung.
 3. Test lưu Thông số kỹ thuật không chọn Loại CSR → bị chặn `"Vui lòng chọn Loại CSR."`, không tạo được bản ghi `loai_csr = NULL` mới.
 4. Xác nhận việc bấm lại chip CSR đang chọn để bỏ chọn (giữa lúc thao tác, trước khi lưu) vẫn hoạt động bình thường — chỉ chặn ở bước lưu, không chặn ở UI chọn.
+
+## U8a — sửa bug P1–P10 (2026-10-28, chờ test tay)
+- **Quyền**: `measurements` + `params` có guard `process.view` trong bootstrap. Params: Thêm = `process.create`,
+  Sửa = `process.edit`, Xoá = `process.delete` (ẩn nút + kiểm lại trong handler). Đo nhanh: Xoá phiếu =
+  admin hoặc (`process.delete` + người tạo) — `canDeleteSheet`, có hộp xác nhận `ModalShell`, kiểm `error`.
+- **RLS** `20261028_process_permission_rls.sql` (**chạy tay**): bỏ 3 policy `*_write FOR ALL`, tách INSERT/UPDATE/
+  DELETE theo `current_profile_has_permission()`; hàm mới `current_profile_is_admin()`. UPDATE `quick_measurements`
+  cho cả người tạo có `process.create` (cần để đổi mã khi trùng).
+- **API OCR** `/api/process/ocr-image`: `resolveIsoActor` + quyền `process.create|process.edit`, chặn không phải
+  ảnh (400) / >8MB base64 (413). Client gọi qua `authFetch`.
+- **Mã phiếu** = số lớn nhất + 1 (`fetchNextMaPhieuSeq`), tính lại lúc lưu; sau khi chèn, nếu có phiếu khác cùng
+  mã tạo trước → tự đổi sang số kế tiếp (tối đa 3 lần). Không có unique index.
+- **Params Sửa**: ref `autoFillArmed` — mở Sửa không tự điền đè nhiệt độ/thời gian; chỉ điền khi Thêm hoặc khi
+  người dùng tự đổi Dây chuyền/CSR.
+- **Tổng quan**: gom/sắp biểu đồ theo ngày ISO, nhãn `dd/mm` (+`/yy` khi nhiều năm); KPI reset khi lỗi; báo lỗi đỏ.
+- 3 trang tải bằng `fetchAllPaginated` + `.order(id)`, lỗi → thông báo đỏ thay vì "Chưa có dữ liệu".
+- OCR: lỗi từng ảnh không phá cả lượt; chỉ tự điền chỉ tiêu thuộc `CHI_TIEU_BY_CSR[CSR]`; ảnh upload dùng
+  `setRows(prev => …)`.
+- Ngày mặc định `getFactoryTodayISO()`; đổi "Ngày đo" tính lại `so_ngay_luu`; tự điền chế độ sấy bỏ qua dòng đã lưu;
+  trang in dùng `getActiveFactoryId()` + lọc `ngans` theo nhà máy; `ket_qua` null không crash.
+
+## U8b — giao diện rule 29 (2026-10-28, chờ test tay)
+- `ProcessShell`: bọc `moduleThemeClass("teal")`, tab = `SegmentedTabs` (href), prop `banner` (đặt trên tab),
+  `hideTabs` cho trang chi tiết. Mỗi trang có `PageHeaderBanner theme="teal"` (nút chính nền trắng trên banner).
+- Tổng quan: `FilterBar layout="grid"` + `StatGrid cols={3}`; lỗi tải dùng `ListState`.
+- Thông số: FilterBar grid (+ "Xóa lọc"), bảng `enterprise-table dense`, `RowAction` edit/delete, xoá qua `ModalShell`.
+- Đo nhanh (danh sách): ô tìm (mã phiếu / người đo / dây chuyền / CSR) + **Quét QR** (URL chi tiết hoặc trang in
+  `?sheetId=` ⇒ mở chi tiết; chuỗi khác ⇒ ô tìm), `StatGrid` 4 thẻ (phiếu · mẫu · Po TB · Mooney TB theo danh sách
+  đang lọc), `ExpandableRow` xổ bảng dòng đo; thao tác: view → print → chia sẻ ảnh → edit → add → delete.
+  Đã BỎ chế độ xem chi tiết trong trang (`view === "view"`) — con mắt + mã phiếu mở trang chi tiết.
+- **Trang chi tiết** `/dashboard/process/measurements/[id]` (chỉ xem, guard `process.view`): `DetailPageHeader`
+  (Tải PDF, In, `HeaderQr`) + `DetailSplitLayout`; trái tab "Phiếu PDF" (`DocViewer loadBytes` =
+  `buildProcessMeasurementPdfBytes`, `src/lib/process-measurement-pdf.ts`, A4 ngang, QR góc phải trên, trang ảnh
+  hiện trường) / "Dòng đo"; phải `StatusSummaryBar` (badge "Đã lưu") → `SignActionBox` (Tải PDF, In, Sửa
+  `?edit=<id>`, Thêm mẫu `?add=<id>`, Xoá) → Thông tin phiếu. Danh sách đọc `?edit`/`?add` 1 lần sau khi tải xong,
+  kiểm lại quyền rồi mở form dùng chung.
+- Trang in HTML `/dashboard/process/print` giữ nguyên cho nút "In".

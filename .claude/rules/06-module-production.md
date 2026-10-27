@@ -810,7 +810,7 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - `report-bundle.ts`: `resolveShiftReport` (không mở tab) + `shiftBundleBytes`; `openShiftReport` =
   resolve + mở tab (hành vi cũ). Mở trang ngày của ngày đã khoá đủ ca chưa có bản cứng ⇒ tự lưu bản cứng.
 
-## 4.18. "Khóa ca" → "Phê duyệt" + Quét QR ô tìm + Báo cáo pallet tồn (2026-10-26, chờ test tay)
+## 4.18. "Khóa ca" → "Phê duyệt" + Quét QR ô tìm (2026-10-26)
 - Chỉ đổi CHỮ hiển thị (không đổi DB/RPC/tên hàm `product_lock_shift`…): Khóa → Phê duyệt, Đã khóa →
   Đã phê duyệt (badge tông valid xanh, trước là danger đỏ), Mở khóa → Hủy phê duyệt (lý do bắt buộc),
   "N/M ca đã phê duyệt". Áp ở `product/page.tsx` (dòng ngày, bảng con từng ca, `ShiftLockModal`),
@@ -818,11 +818,6 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - Ô tìm Thành phẩm có **Quét QR** (`_components/qr-scan-portal.tsx` dùng chung): nhãn kiện
   `/product-label?f=&lo=&kien=` → ô tìm = mã lô, bỏ lọc ngày, tự mở các ngày có lô (sai `f` → báo lỗi);
   `/dashboard/product/lot/{id}` → mở trang lô.
-- **Báo cáo pallet tồn** `/dashboard/product/pallet` (link "Báo cáo pallet" trên banner, guard `product.view`):
-  server action `loadPalletStockReport` — kiện còn tồn = bành SX > bành đã gán đơn xuất (kể cả xuất một phần),
-  pallet theo giao dịch cuối chứa kiện (fallback `lots.pallet`). Lõi tính tách thành `computeKienAvailability`
-  (dùng chung với `loadSkKienAvailability`). Quy đổi vật tư `src/lib/pallet-usage.ts`: Sắt đế gỗ = sắt dày + đế
-  gỗ; Sắt đế nhựa = sắt dày + đế nhựa; Sắt mỏng; MB5; Gỗ = pallet gỗ; loại lạ / không ghi → "Chưa xác định".
-  Số đo DB 2026-10-26: 1.484 kiện tồn (MB5 875, Sắt mỏng 227, Sắt đế gỗ 382).
-
-- 2026-10-27: trang Báo cáo pallet tồn `/dashboard/product/pallet` và `loadPalletStockReport` đã XOÁ — tồn pallet chuyển sang Kho vật tư → Tồn (rule 13 mục cuối). Banner Thành phẩm: link "Tồn pallet" (gate `inventory.view`).
+- Tồn pallet: trang cũ `/dashboard/product/pallet` + `loadPalletStockReport` đã XOÁ; tồn pallet tính ở Kho vật tư → Tồn
+  (rule 13). Link "Tồn pallet" trên banner Thành phẩm đã GỠ 2026-10-27. `computeKienAvailability` (`product/actions.ts`)
+  chỉ còn phục vụ `loadSkKienAvailability` (Sang kiện / Thay bọc).

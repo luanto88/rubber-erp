@@ -70,14 +70,14 @@ print `Printer` → riêng module → edit `Pencil` → copy `Copy` → delete `
 lại / lệch chuẩn đã thấy. 4. Prompt bàn giao cho phiên sau (đọc rule 29 + phần còn lại).
 Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 
-## F. Tình trạng áp dụng (cập nhật 2026-10-25)
+## F. Tình trạng áp dụng (cập nhật 2026-10-27 — lộ trình U8–U14 ở `.claude/plans/ke-hoach-dong-bo-ui-toan-app.md`)
 | Module | Danh sách | Dòng xổ | Chi tiết 70/30 + PDF | Xem file token | QR phiếu + Quét QR |
 |---|---|---|---|---|---|
 | Bảo trì | ✅ | Lý lịch ✅ · Biên bản ✅ · Tổng quan ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ (quét ở Lý lịch) |
 | Điều xe | ✅ | ✅ | ✅ (+ bản chưa ký nhúng) | ✅ | ✅ |
 | Kiểm nghiệm | ✅ | ✅ (ngày → lô → số liệu mẫu) | ✅ `/dashboard/quality/[date]` | ✅ | ✅ (tab Xếp hạng) |
 | Đề nghị mua | ✅ | ✅ (dòng vật tư) | ✅ (+ bản chưa ký nhúng khi Nháp) | ✅ | ✅ (Đã tích hợp Quét QR ở ô tìm) |
-| Sản lượng | ✅ | ✅ (ngày → xe / chuyến) | (chế độ gom ngày + bảng con) | ✅ | ✅ (Hỗ trợ kỹ thuật converter) |
+| Sản lượng | 🟡 (còn WarnBadge/chip tay, thiếu ListState lỗi; Converter chưa theme) | ✅ (ngày → xe / chuyến) | ❌ (Eye mở bảng trong trang, chưa PDF nhúng) — U9b | — | ❌ chưa Quét QR — U9b |
 | Văn bản | (Doc-UI riêng) | ✅ tiến trình ký | ✅ | ❌ (lưu tên object) | — |
 | ISO tài liệu | (Doc-UI riêng) | ✅ hồ sơ con | ✅ | ❌ (lưu tên object) | — |
 | Xuất hàng | ✅ | ✅ (xe + lô gán + chỉ tiêu + KH được cấp) | ✅ `/dashboard/export/[id]` (PDF nhúng loadBytes) | — | ✅ (quét QR EUDR + quét QR kiện lên xe) |
@@ -85,6 +85,13 @@ Kiểm tra: `npx tsc --noEmit` + `npx eslint <file>` — không `npm run build`.
 | Thành phẩm | ✅ theme + StatusBadge lot + StatGrid + FilterBar grid | ✅ (ngày → ca → lô, DateGroupRow) | ✅ chi tiết NGÀY `/dashboard/product/day/[date]` (F09 nhúng, con mắt dòng ngày) + chi tiết lô `/dashboard/product/lot/[id]` (link mã lô) | — | QR góc phải trên PDF lô + ✅ Quét QR ở ô tìm (nhãn kiện / trang lô) |
 | Kho nguyên liệu | ✅ theme + StatusBadge storage + SegmentedTabs + StatGrid + FilterBar grid; tab Lịch sử `enterprise-table dense` | ✅ (bảng ngăn, ExpandableRow) | ✅ `/dashboard/storage/[id]` (PDF F03 nhúng loadBytes) | — | QR có sẵn trên PDF (trỏ trang công khai `/storage`) + ✅ Quét QR ở ô tìm (mở chi tiết ngăn) |
 | Kho thành phẩm | 🟡 theme orange | — (sơ đồ kho) | — | — | — |
+| Kiểm soát quá trình | ✅ theme teal + SegmentedTabs + banner mọi tab + StatGrid + FilterBar grid + enterprise-table | ✅ (phiếu đo → dòng đo) | ✅ `/dashboard/process/measurements/[id]` (PDF A4 nhúng loadBytes) | — | ✅ QR góc phải trên PDF + Quét QR ở ô tìm |
+| Kho vật tư — Thẻ kho/Sổ chi tiết/Tổng quan | 🟡 banner amber, tab tay, bảng `w-full` — U10 | — | — | — | — |
+| KPI | 🟡 banner chỉ trang chủ, tab tay, badge span — U11 | — | — | — | — |
+| Ghi chú | 🟡 banner rose, FilterBar không grid (giữ thẻ pastel) — U12 | — | — | — | — |
+| Chất lượng phân tích / Báo cáo | ❌ `<h1>` thường — U13 | — | — | — | — |
+| EUDR / Customer portal / Cài đặt | 🟡/❌ — U14 | — | — | — | — |
+| Bản đồ / Dashboard | Không áp đủ rule 29 (màn đặc thù) | — | — | — | — |
 
 ## G. Bản CHƯA ký trong khung xem nhúng (2026-10-14)
 Chưa gửi ký ⇒ tab "Bản xem trước (chưa ký)" dựng PDF ngay trong trình duyệt: `DocViewer`

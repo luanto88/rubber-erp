@@ -1,17 +1,29 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import {
-  AlertTriangle, Camera, ChevronLeft, ClipboardCheck, Eye, Pencil, Plus,
-  Printer, Share2, Trash2, X, ImageIcon, Upload,
+  Activity, AlertTriangle, Camera, ChevronLeft, ClipboardCheck, FlaskConical, Layers, Plus,
+  Search, Share2, Trash2, X, ImageIcon, Upload,
 } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
+import { authFetch } from "@/lib/auth-fetch"
+import { getFactoryTodayISO } from "@/lib/date-utils"
 import { prepareImageForUpload } from "@/lib/image-upload"
 import { isProductSelectableStorageStatus } from "@/lib/storage-status"
 import { ProcessShell } from "../_components/process-shell"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { QrScanButton, QrScanPortal } from "@/app/dashboard/_components/qr-scan-portal"
+import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
+import { IconAction, IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { ExpandableRow, ExpandAllToggle, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import {
   type QuickMeasurementSheet, type QuickMeasurementRow, type MeasurementRowDraft, type CheDoRow,
@@ -31,33 +43,35 @@ type NganItem = {
 
 type SheetWithRows = QuickMeasurementSheet & { rows: QuickMeasurementRow[] }
 
-type ViewMode = "list" | "create" | "view"
+type ViewMode = "list" | "create"
 
 function formatDate(d: string) {
   const [y, m, day] = d.split("-")
   return `${day}/${m}/${y}`
 }
 
-function pad2(n: number) {
-  return n.toString().padStart(2, "0")
-}
-
-// "dd/mm/yyyy hh:mm:ss" — ngày lấy từ trường "Ngày đo" nghiệp vụ (chỉ có ngày, không giờ),
-// giờ:phút:giây lấy từ created_at (nguồn giờ thật duy nhất, vì "Ngày đo" chỉ là <input type="date">).
-function formatDateWithCreatedAtTime(ngay: string, createdAt: string) {
-  const datePart = formatDate(ngay)
-  const d = new Date(createdAt)
-  if (Number.isNaN(d.getTime())) return datePart
-  const hh = pad2(d.getHours())
-  const mi = pad2(d.getMinutes())
-  const ss = pad2(d.getSeconds())
-  return `${datePart} ${hh}:${mi}:${ss}`
-}
-
 function getMaPhieuPreview(day_chuyen: string, ngay: string, count: number) {
   if (!ngay) return ""
   const prefix = getMaPhieuPrefix(day_chuyen)
   return `${prefix}-${formatDdMmYy(ngay)}/${String(count).padStart(3, "0")}`
+}
+
+// Số thứ tự tiếp theo = số LỚN NHẤT đang có + 1 (không đếm số phiếu): đếm sẽ cấp lại mã đã dùng
+// sau khi có phiếu bị xoá ở giữa dãy (vd còn /002 → đếm ra 2 → cấp trùng /002).
+async function fetchNextMaPhieuSeq(factoryId: string, day_chuyen: string, ngay: string): Promise<number> {
+  const codePrefix = `${getMaPhieuPrefix(day_chuyen)}-${formatDdMmYy(ngay)}/`
+  const { data, error } = await supabase
+    .from("quick_measurements")
+    .select("ma_phieu")
+    .eq("factory_id", factoryId)
+    .like("ma_phieu", `${codePrefix}%`)
+  if (error) throw error
+  let max = 0
+  for (const r of (data as { ma_phieu: string | null }[]) || []) {
+    const n = parseInt((r.ma_phieu || "").slice(codePrefix.length), 10)
+    if (Number.isFinite(n) && n > max) max = n
+  }
+  return max + 1
 }
 
 function fmtCheDo(t1: number | null, t2: number | null, tg: number | null): string {
@@ -107,7 +121,7 @@ function rowDraftToFields(row: MeasurementRowDraft) {
     ngan_id: row.ngan_id || null,
     so_ngay_luu: row.so_ngay_luu,
     ket_qua: Object.fromEntries(
-      Object.entries(row.ket_qua).map(([k, v]) => [k, v === "" ? null : Number(v)])
+      Object.entries(row.ket_qua || {}).map(([k, v]) => [k, v === "" ? null : Number(v)])
     ),
     image_urls: row.image_urls,
     nguoi_do: row.nguoi_do || null,
@@ -125,10 +139,25 @@ function rowDraftToPayload(row: MeasurementRowDraft, sheetId: string, factoryId:
   }
 }
 
+const DETAIL_PATH_RE = /\/dashboard\/process\/measurements\/([0-9a-f-]{36})/i
+const PRINT_ID_RE = /\/dashboard\/process\/print\?(?:.*&)?sheetId=([0-9a-f-]{36})/i
+
+function fmtKq(v: number | null | undefined) {
+  if (v == null || !Number.isFinite(v)) return ""
+  return String(v).replace(".", ",")
+}
+
+function avgOf(values: number[]) {
+  if (!values.length) return null
+  return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10
+}
+
 export default function MeasurementsPage() {
+  const router = useRouter()
   const [factoryId, setFactoryId] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SheetWithRows[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [ngans, setNgans] = useState<NganItem[]>([])
   const [currentUserName, setCurrentUserName] = useState("")
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
@@ -143,11 +172,10 @@ export default function MeasurementsPage() {
 
   // view
   const [view, setView] = useState<ViewMode>("list")
-  const [selected, setSelected] = useState<SheetWithRows | null>(null)
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
 
   // create / sửa / thêm mẫu — dùng chung 1 form
-  const [formNgay, setFormNgay] = useState(new Date().toISOString().slice(0, 10))
+  const [formNgay, setFormNgay] = useState(() => getFactoryTodayISO())
   const [formDayChuyen, setFormDayChuyen] = useState("")
   const [formLoaiCsr, setFormLoaiCsr] = useState("")
   const [defaultCheDo, setDefaultCheDo] = useState("")
@@ -181,23 +209,37 @@ export default function MeasurementsPage() {
   const [sharingSheetId, setSharingSheetId] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
 
+  // Tìm nhanh + quét QR + dòng xổ (rule 29)
+  const [search, setSearch] = useState("")
+  const [scanning, setScanning] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  // Xoá phiếu — luôn qua hộp xác nhận
+  const [delSheet, setDelSheet] = useState<SheetWithRows | null>(null)
+  const [deletingSheet, setDeletingSheet] = useState(false)
+
   // Load sheets
   const loadSheets = useCallback(async (fid: string) => {
     setLoading(true)
+    setLoadError(null)
     try {
-      let q = supabase
-        .from("quick_measurements")
-        .select("*, rows:quick_measurement_rows(*)")
-        .eq("factory_id", fid)
-        .order("ngay", { ascending: false })
-        .order("created_at", { ascending: false })
-
-      if (filterFrom) q = q.gte("ngay", filterFrom)
-      if (filterTo) q = q.lte("ngay", filterTo)
-      if (filterDayChuyen) q = q.eq("day_chuyen", filterDayChuyen)
-
-      const { data } = await q
-      setSheets((data as SheetWithRows[]) || [])
+      const data = await fetchAllPaginated<SheetWithRows>((from, to) => {
+        let q = supabase
+          .from("quick_measurements")
+          .select("*, rows:quick_measurement_rows(*)")
+          .eq("factory_id", fid)
+          .order("ngay", { ascending: false })
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+        if (filterFrom) q = q.gte("ngay", filterFrom)
+        if (filterTo) q = q.lte("ngay", filterTo)
+        if (filterDayChuyen) q = q.eq("day_chuyen", filterDayChuyen)
+        return q.range(from, to)
+      })
+      setSheets(data)
+    } catch (err) {
+      setSheets([])
+      setLoadError((err as { message?: string } | null)?.message || "Không tải được danh sách phiếu")
     } finally {
       setLoading(false)
     }
@@ -234,6 +276,12 @@ export default function MeasurementsPage() {
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
       const { user: sessionUser } = await hydrateActiveSession()
+      if (!sessionUser) { setLoading(false); return }
+      if (!hasPermission(sessionUser, "process.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
       setFactoryId(fid)
       setCurrentUser(sessionUser)
       if (sessionUser?.full_name) setCurrentUserName(sessionUser.full_name)
@@ -253,17 +301,11 @@ export default function MeasurementsPage() {
   // Load next phiếu count
   useEffect(() => {
     if (!factoryId || !formNgay || !formDayChuyen) { setNextCount(1); return }
-    const prefix = getMaPhieuPrefix(formDayChuyen)
-    const loadCount = async () => {
-      const { data } = await supabase
-        .from("quick_measurements")
-        .select("ma_phieu")
-        .eq("factory_id", factoryId)
-        .eq("ngay", formNgay)
-        .like("ma_phieu", `${prefix}-${formatDdMmYy(formNgay)}/%`)
-      setNextCount((data?.length || 0) + 1)
-    }
-    void loadCount()
+    let alive = true
+    void fetchNextMaPhieuSeq(factoryId, formDayChuyen, formNgay)
+      .then(seq => { if (alive) setNextCount(seq) })
+      .catch(() => { /* chỉ là bản xem trước — mã thật được tính lại lúc lưu */ })
+    return () => { alive = false }
   }, [factoryId, formNgay, formDayChuyen])
 
   // Lấy chế độ sấy mặc định từ process_params gần nhất cho đúng (dây chuyền, Loại CSR).
@@ -308,12 +350,13 @@ export default function MeasurementsPage() {
     return () => { alive = false }
   }, [factoryId, formDayChuyen, formLoaiCsr, fetchCheDoSuggestion])
 
-  // Auto-fill chế độ sấy vào dòng còn trống
+  // Auto-fill chế độ sấy vào dòng MỚI còn trống — không sửa ngầm dòng đã lưu trong DB khi Sửa phiếu.
   useEffect(() => {
     if (!defaultCheDo) return
     setRows(prev => prev.map(row =>
-      row.che_do_say === "" ? { ...row, che_do_say: defaultCheDo } : row
+      row.che_do_say === "" && !existingRowIds.has(row.id) ? { ...row, che_do_say: defaultCheDo } : row
     ))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultCheDo])
 
   const selectableNgans = ngans.filter(n =>
@@ -353,7 +396,7 @@ export default function MeasurementsPage() {
   }
 
   const openCreate = async () => {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = getFactoryTodayISO()
     resetEditingState()
     setFormNgay(today)
     setFormDayChuyen("Mủ tạp")
@@ -433,15 +476,30 @@ export default function MeasurementsPage() {
     setView("create")
   }
 
-  const openView = async (sheet: SheetWithRows) => {
-    const { data } = await supabase
-      .from("quick_measurement_rows")
-      .select("*")
-      .eq("sheet_id", sheet.id)
-      .order("sort_order")
-    setSelected({ ...sheet, rows: (data as QuickMeasurementRow[]) || [] })
-    setView("view")
-  }
+  // Trang chi tiết mở "Sửa phiếu" / "Thêm mẫu" bằng `?edit=<id>` / `?add=<id>` — xử lý 1 lần sau khi
+  // danh sách tải xong (form dùng chung của trang này), quyền kiểm lại như nút trên dòng.
+  const intentHandledRef = useRef(false)
+  useEffect(() => {
+    if (intentHandledRef.current || loading || !currentUser || !sheets.length) return
+    intentHandledRef.current = true
+    let params: URLSearchParams
+    try { params = new URLSearchParams(window.location.search) } catch { return }
+    const editId = params.get("edit")
+    const addId = params.get("add")
+    if (!editId && !addId) return
+    window.history.replaceState(null, "", window.location.pathname)
+    const target = sheets.find(sh => sh.id === (editId || addId))
+    if (!target) { setListError("Không tìm thấy phiếu cần mở (có thể nằm ngoài bộ lọc hiện tại)."); return }
+    if (editId) {
+      if (currentUser.role === "admin" || (hasPermission(currentUser, "process.edit") && target.created_by === currentUser.id)) void openEdit(target)
+      else setListError("Bạn không có quyền sửa phiếu này.")
+    } else if (hasPermission(currentUser, "process.create")) {
+      void openAddRows(target)
+    } else {
+      setListError("Bạn không có quyền thêm mẫu vào phiếu.")
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, currentUser, sheets])
 
   const addRow = () => {
     setRows(r => [...r, emptyMeasurementRow(currentUserName, defaultCheDo, chiTieuForCsr)])
@@ -531,8 +589,8 @@ export default function MeasurementsPage() {
           if (insertErr) { setSaveError(insertErr.message); return }
         }
       } else {
-        // Tạo phiếu mới
-        const maPhieu = getMaPhieuPreview(formDayChuyen, formNgay, nextCount)
+        // Tạo phiếu mới — mã tính lại ngay lúc lưu (bản xem trước có thể đã cũ)
+        let maPhieu = getMaPhieuPreview(formDayChuyen, formNgay, await fetchNextMaPhieuSeq(factoryId, formDayChuyen, formNgay))
 
         const { data: sheetData, error: sheetErr } = await supabase
           .from("quick_measurements")
@@ -545,7 +603,7 @@ export default function MeasurementsPage() {
             loai_csr: formLoaiCsr || null,
             created_by: currentUser?.id || null,
           })
-          .select("id")
+          .select("id, created_at")
           .single()
 
         if (sheetErr || !sheetData) {
@@ -554,6 +612,25 @@ export default function MeasurementsPage() {
         }
 
         const sheetId = sheetData.id
+        // 2 người lưu cùng lúc có thể cùng nhận 1 mã (không có unique index). Phiếu tạo SAU tự
+        // đổi sang số kế tiếp; thử tối đa 3 lần.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const { data: dupes, error: dupErr } = await supabase
+            .from("quick_measurements")
+            .select("id, created_at")
+            .eq("factory_id", factoryId)
+            .eq("ma_phieu", maPhieu)
+            .neq("id", sheetId)
+          if (dupErr || !dupes?.length) break
+          const someoneEarlier = (dupes as { id: string; created_at: string }[]).some(d =>
+            d.created_at < sheetData.created_at || (d.created_at === sheetData.created_at && d.id < sheetId)
+          )
+          if (!someoneEarlier) break
+          const seq = await fetchNextMaPhieuSeq(factoryId, formDayChuyen, formNgay)
+          maPhieu = getMaPhieuPreview(formDayChuyen, formNgay, seq)
+          const { error: renameErr } = await supabase.from("quick_measurements").update({ ma_phieu: maPhieu }).eq("id", sheetId)
+          if (renameErr) break
+        }
         const rowPayloads = rows.map((row, i) => rowDraftToPayload(row, sheetId, factoryId, i))
         const { data: insertedRows, error: rowsErr } = await supabase.from("quick_measurement_rows").insert(rowPayloads).select("id")
         if (rowsErr) { setSaveError(rowsErr.message); return }
@@ -570,10 +647,30 @@ export default function MeasurementsPage() {
     }
   }
 
-  const handleDeleteSheet = async (id: string) => {
-    if (!factoryId) return
-    await supabase.from("quick_measurements").delete().eq("id", id)
-    void loadSheets(factoryId)
+  const handleDeleteSheet = async () => {
+    if (!factoryId || !delSheet || deletingSheet) return
+    if (!canDeleteSheet(delSheet)) { setListError("Bạn không có quyền xóa phiếu này."); return }
+    setDeletingSheet(true)
+    try {
+      const { error } = await supabase
+        .from("quick_measurements")
+        .delete()
+        .eq("id", delSheet.id)
+        .eq("factory_id", factoryId)
+        .select("id")
+        .single()
+      if (error) {
+        // Không có dòng nào bị xoá (RLS chặn) cũng trả lỗi ở .single() — báo chung là không xoá được.
+        setListError(`Không xóa được phiếu: ${error.message}`)
+        return
+      }
+      setDelSheet(null)
+      void loadSheets(factoryId)
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setDeletingSheet(false)
+    }
   }
 
   // Chia sẻ nhanh toàn bộ ảnh của 1 phiếu (Zalo/Telegram...) ngay từ danh sách,
@@ -639,9 +736,10 @@ export default function MeasurementsPage() {
         setSaveError(`Một số ảnh không tải được:\n${prepareErrors.join("\n")}`)
       }
       if (newUrls.length) {
-        updateRow(rowId, {
-          image_urls: [...(rows.find(r => r.id === rowId)?.image_urls || []), ...newUrls].slice(0, 6)
-        })
+        // Cập nhật theo state MỚI NHẤT — đọc `rows` của closure sẽ ghi đè ảnh vừa thêm ở lượt khác.
+        setRows(prev => prev.map(row =>
+          row.id === rowId ? { ...row, image_urls: [...row.image_urls, ...newUrls].slice(0, 6) } : row
+        ))
       }
     } finally {
       setUploadingRowId(null)
@@ -675,21 +773,30 @@ export default function MeasurementsPage() {
         else prepareErrors.push(`${rawFile.name}: ${prepared.reason}`)
       }
 
+      // Lỗi của 1 ảnh (mạng, phản hồi không phải JSON, hết phiên...) chỉ đánh dấu ảnh đó lỗi —
+      // không được làm hỏng cả lượt (ảnh vẫn phải được lưu).
       const results = await Promise.all(preparedFiles.map(async (file) => {
-        const imageBase64 = await readFileAsBase64(file)
-        const mimeType = file.type || "image/jpeg"
-        const res = await fetch("/api/process/ocr-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64, mimeType }),
-        })
-        const json = await res.json() as { chiTieu?: string; value?: number; error?: string }
-        return { file, json }
+        try {
+          const imageBase64 = await readFileAsBase64(file)
+          const mimeType = file.type || "image/jpeg"
+          const res = await authFetch("/api/process/ocr-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ imageBase64, mimeType }),
+          })
+          const json = await res.json().catch(() => ({ error: `Máy chủ trả lỗi ${res.status}` })) as { chiTieu?: string; value?: number; error?: string }
+          return { file, json }
+        } catch (err) {
+          return { file, json: { error: err instanceof Error ? err.message : "Lỗi mạng" } as { chiTieu?: string; value?: number; error?: string } }
+        }
       }))
 
+      // Chỉ tiêu được phép theo Loại CSR đang chọn (vd CSR L/3L không đo Mo).
+      const allowedCts = formLoaiCsr ? (CHI_TIEU_BY_CSR[formLoaiCsr] || []) : null
       const patchKetQua: Record<string, string> = {}
       const detectedCts: string[] = []
       const failedNames: string[] = []
+      const rejectedMsgs: string[] = []
       const newUrls: string[] = []
 
       for (const { file, json } of results) {
@@ -703,7 +810,11 @@ export default function MeasurementsPage() {
         }
 
         if (json.error || json.value == null || !json.chiTieu) {
-          failedNames.push(file.name)
+          failedNames.push(json.error ? `${file.name}: ${json.error}` : file.name)
+          continue
+        }
+        if (allowedCts && !allowedCts.includes(json.chiTieu)) {
+          rejectedMsgs.push(`Ảnh ${file.name} là ${json.chiTieu} nhưng CSR ${formLoaiCsr} không đo ${json.chiTieu} — không tự điền.`)
           continue
         }
         patchKetQua[json.chiTieu] = String(json.value)
@@ -726,11 +837,12 @@ export default function MeasurementsPage() {
         setOcrToast(`Đã tự nhận dạng và điền ${detectedCts.map(ct => `${ct}=${patchKetQua[ct]}`).join(", ")} từ ảnh`)
         setTimeout(() => setOcrToast(null), 3500)
       }
-      if (failedNames.length || prepareErrors.length) {
+      if (failedNames.length || prepareErrors.length || rejectedMsgs.length) {
         const parts: string[] = []
         if (failedNames.length) {
           parts.push(`Không nhận dạng được ${failedNames.length} ảnh (${failedNames.join(", ")}), vui lòng nhập tay.`)
         }
+        parts.push(...rejectedMsgs)
         if (prepareErrors.length) parts.push(`Một số ảnh không tải được:\n${prepareErrors.join("\n")}`)
         setSaveError(parts.join("\n"))
       }
@@ -745,6 +857,62 @@ export default function MeasurementsPage() {
   const canEditSheet = (sheet: SheetWithRows) =>
     currentUser?.role === "admin" ||
     (hasPermission(currentUser, "process.edit") && !!currentUser && sheet.created_by === currentUser.id)
+  // Xoá: admin mọi phiếu; người có process.delete chỉ phiếu do chính mình tạo (khớp RLS 20261028).
+  const canDeleteSheet = (sheet: SheetWithRows) =>
+    currentUser?.role === "admin" ||
+    (hasPermission(currentUser, "process.delete") && !!currentUser && sheet.created_by === currentUser.id)
+
+  // Lọc theo ô tìm (mã phiếu, người đo, dây chuyền, CSR) — chạy trên dữ liệu đã tải
+  const visibleSheets = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return sheets
+    return sheets.filter(sh => {
+      const hay = [
+        sh.ma_phieu, sh.day_chuyen, sh.loai_csr ? `csr ${sh.loai_csr}` : "",
+        ...(sh.rows || []).map(r => r.nguoi_do),
+      ].filter(Boolean).join(" ").toLowerCase()
+      return hay.includes(q)
+    })
+  }, [sheets, search])
+
+  const listStats = useMemo(() => {
+    const allRows = visibleSheets.flatMap(sh => sh.rows || [])
+    const pick = (ct: string) => allRows
+      .map(r => (r.ket_qua || {})[ct])
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    return { sheets: visibleSheets.length, rows: allRows.length, po: avgOf(pick("Po")), mo: avgOf(pick("Mo")) }
+  }, [visibleSheets])
+
+  const toggleExpanded = (id: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // Quét QR: URL trang chi tiết / trang in của phiếu ⇒ mở chi tiết; chuỗi khác ⇒ đưa vào ô tìm.
+  const handleScanDecoded = (text: string) => {
+    setScanning(false)
+    const raw = text.trim()
+    const id = raw.match(DETAIL_PATH_RE)?.[1] || raw.match(PRINT_ID_RE)?.[1]
+    if (id) {
+      router.push(`/dashboard/process/measurements/${id}`)
+      return
+    }
+    setSearch(raw)
+  }
+
+  // Đổi "Ngày đo" → tính lại số ngày lưu của mọi dòng đã chọn ngăn (trước đây chỉ tính khi đổi ngăn).
+  const changeFormNgay = (ngay: string) => {
+    setFormNgay(ngay)
+    setRows(prev => prev.map(row => {
+      if (!row.ngan_id) return row
+      const ngan = ngans.find(n => n.id === row.ngan_id)
+      return { ...row, so_ngay_luu: ngan?.ngay_bd && ngay ? calcSoNgayLuu(ngay, ngan.ngay_bd) : null }
+    }))
+  }
 
   // ── RENDER ──────────────────────────────────────────────────────────────────
 
@@ -777,119 +945,6 @@ export default function MeasurementsPage() {
       </button>
     </div>
   ) : null
-
-  if (view === "view" && selected) {
-    return (
-      <ProcessShell>
-        {lightbox}
-        <div className="flex items-center gap-3 mb-4">
-          <button onClick={() => setView("list")}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all">
-            <ChevronLeft size={16} /> Quay lại
-          </button>
-          <h2 className="text-xl font-extrabold text-slate-800">{selected.ma_phieu}</h2>
-          <a
-            href={`/dashboard/process/print?sheetId=${selected.id}`}
-            target="_blank"
-            rel="noreferrer"
-            className="ml-auto flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl shadow-md transition-all text-sm"
-          >
-            <Printer size={14} /> Xuất phiếu PDF
-          </a>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-            <div>
-              <span className="text-xs font-bold text-slate-500 block mb-1">Ngày đo</span>
-              <span className="font-bold text-slate-800">{formatDateWithCreatedAtTime(selected.ngay, selected.created_at)}</span>
-            </div>
-            <div>
-              <span className="text-xs font-bold text-slate-500 block mb-1">Dây chuyền</span>
-              <span className="font-bold text-slate-800">{selected.day_chuyen || "—"}</span>
-            </div>
-            <div>
-              <span className="text-xs font-bold text-slate-500 block mb-1">Loại CSR</span>
-              <span className="font-bold text-slate-800">{selected.loai_csr || "—"}</span>
-            </div>
-          </div>
-        </div>
-
-        <ResponsiveTableWrapper className="rounded-2xl">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="text-center px-3 py-3 font-bold text-slate-600 w-10">STT</th>
-                  <th className="text-left px-3 py-3 font-bold text-slate-600">Chỉ tiêu / Thùng-Lô-Mẫu</th>
-                  <th className="text-left px-3 py-3 font-bold text-slate-600">Chế độ sấy</th>
-                  <th className="text-left px-3 py-3 font-bold text-slate-600">Kết quả</th>
-                  <th className="text-left px-3 py-3 font-bold text-slate-600">Ca SX</th>
-                  <th className="text-left px-3 py-3 font-bold text-slate-600">Ngăn / Ngày lưu</th>
-                  <th className="text-left px-3 py-3 font-bold text-slate-600">Người đo</th>
-                  <th className="text-left px-3 py-3 font-bold text-slate-600">Hình ảnh</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {selected.rows.map((row, i) => {
-                  const ngan = ngans.find(n => n.id === row.ngan_id)
-                  const kq = row.ket_qua as Record<string, number | null>
-                  return (
-                    <tr key={row.id} className="hover:bg-slate-50">
-                      <td className="px-3 py-3 text-center text-slate-500">{i + 1}</td>
-                      <td className="px-3 py-3">
-                        <div className="font-semibold text-slate-800">
-                          {row.chi_tieu?.join(", ") || "—"}
-                        </div>
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          {[row.thung, row.lo, row.mau].filter(Boolean).join(" / ") || ""}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">{row.che_do_say || "—"}</td>
-                      <td className="px-3 py-3">
-                        {Object.entries(kq).filter(([, v]) => v != null).map(([k, v]) => (
-                          <div key={k} className="text-sm">
-                            <span className="text-slate-500">{k}:</span>{" "}
-                            <span className="font-mono font-bold text-slate-800">{v}</span>
-                          </div>
-                        ))}
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">{row.ca_sx || "—"}</td>
-                      <td className="px-3 py-3 text-sm">
-                        {ngan ? (
-                          <div>
-                            <div className="font-semibold text-slate-700">{ngan.ma_ngan} – {ngan.ten_ngan}</div>
-                            {row.so_ngay_luu != null && (
-                              <div className="text-xs text-slate-500">{row.so_ngay_luu} ngày lưu</div>
-                            )}
-                          </div>
-                        ) : "—"}
-                      </td>
-                      <td className="px-3 py-3 text-slate-600">{row.nguoi_do || "—"}</td>
-                      <td className="px-3 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {(row.image_urls || []).map((url, j) => (
-                            <button
-                              key={j}
-                              type="button"
-                              onClick={() => setZoomImageUrl(url)}
-                              className="shrink-0 focus:outline-none"
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={url} alt={`Ảnh ${j + 1}`}
-                                className="w-10 h-10 object-cover rounded-lg border border-slate-200 hover:opacity-80 transition-opacity" />
-                            </button>
-                          ))}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-        </ResponsiveTableWrapper>
-      </ProcessShell>
-    )
-  }
 
   if (view === "create") {
     return (
@@ -945,7 +1000,7 @@ export default function MeasurementsPage() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Ngày <span className="text-red-500">*</span></label>
-                <input type="date" value={formNgay} onChange={e => setFormNgay(e.target.value)}
+                <input type="date" value={formNgay} onChange={e => changeFormNgay(e.target.value)}
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
               </div>
               <div>
@@ -1049,9 +1104,36 @@ export default function MeasurementsPage() {
   }
 
   // LIST VIEW
+  const fieldCls = "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:border-mod-600"
+  const filterCount = [search.trim(), filterFrom, filterTo, filterDayChuyen].filter(Boolean).length
+  const expandableIds = visibleSheets.filter(sh => (sh.rows?.length || 0) > 0).map(sh => sh.id)
+
   return (
-    <ProcessShell>
+    <ProcessShell
+      banner={
+        <PageHeaderBanner
+          title="Đo nhanh chỉ tiêu"
+          subtitle="Phiếu đo Po, Mooney tại dây chuyền"
+          theme="teal"
+          icon={ClipboardCheck}
+          action={canCreate ? (
+            <button
+              onClick={() => void openCreate()}
+              className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-teal-700 shadow-sm transition-colors hover:bg-teal-50"
+            >
+              <Plus size={16} /> Tạo phiếu mới
+            </button>
+          ) : undefined}
+        />
+      }
+    >
       {lightbox}
+      <QrScanPortal
+        open={scanning}
+        onClose={() => setScanning(false)}
+        onDecoded={handleScanDecoded}
+        hintText="Đưa camera vào mã QR trên phiếu đo nhanh đã in"
+      />
       {listError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
           <AlertTriangle size={16} className="shrink-0" />
@@ -1069,140 +1151,197 @@ export default function MeasurementsPage() {
           onDone={() => setKpiPrompt(null)}
         />
       )}
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Đo nhanh chỉ tiêu</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Phiếu đo Po, Mooney tại dây chuyền</p>
-        </div>
-        {canCreate && (
-          <button onClick={() => void openCreate()}
-            className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-md transition-all">
-            <Plus size={16} /> Tạo phiếu mới
-          </button>
-        )}
-      </div>
 
-      {/* Filter */}
-      <FilterBar activeCount={[filterFrom, filterTo, filterDayChuyen].filter(Boolean).length}>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
-          <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
+      <FilterBar layout="grid" activeCount={filterCount}>
+        <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-300 bg-white pl-3 pr-1 focus-within:border-mod-600 sm:col-span-2">
+          <Search size={15} className="shrink-0 text-slate-400" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Tìm mã phiếu, người đo, CSR..."
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch("")} className="shrink-0 text-slate-400 hover:text-slate-600" aria-label="Xóa ô tìm">
+              <X size={14} />
+            </button>
+          )}
+          <QrScanButton onClick={() => setScanning(true)} title="Quét QR phiếu đo nhanh" />
         </div>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Đến ngày</label>
-          <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Dây chuyền</label>
-          <select value={filterDayChuyen} onChange={e => setFilterDayChuyen(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500">
-            <option value="">Tất cả</option>
-            <option value="Mủ tạp">Mủ tạp</option>
-            <option value="Mủ nước">Mủ nước</option>
-          </select>
-        </div>
+        <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className={fieldCls} title="Từ ngày" aria-label="Từ ngày" />
+        <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} className={fieldCls} title="Đến ngày" aria-label="Đến ngày" />
+        <select value={filterDayChuyen} onChange={e => setFilterDayChuyen(e.target.value)} className={fieldCls} aria-label="Dây chuyền">
+          <option value="">Tất cả dây chuyền</option>
+          <option value="Mủ tạp">Mủ tạp</option>
+          <option value="Mủ nước">Mủ nước</option>
+        </select>
+        <button
+          onClick={() => { setSearch(""); setFilterFrom(""); setFilterTo(""); setFilterDayChuyen("") }}
+          disabled={filterCount === 0}
+          className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-bold text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+        >
+          Xóa lọc
+        </button>
       </FilterBar>
 
-      {/* Table */}
+      <StatGrid cols={4}>
+        <StatCard icon={ClipboardCheck} label="Số phiếu" value={listStats.sheets} loading={loading} />
+        <StatCard icon={Layers} label="Số mẫu đo" value={listStats.rows} loading={loading} />
+        <StatCard icon={Activity} label="Po trung bình" value={listStats.po ?? "—"} loading={loading} />
+        <StatCard icon={FlaskConical} label="Mooney trung bình" value={listStats.mo ?? "—"} loading={loading} />
+      </StatGrid>
+
       <ResponsiveTableWrapper>
         {loading ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
-        ) : sheets.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">
-            <ClipboardCheck size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Chưa có phiếu đo nào</p>
-          </div>
+          <ListState kind="loading" message="Đang tải danh sách phiếu..." />
+        ) : loadError ? (
+          <ListState kind="error" message={`Không tải được danh sách phiếu: ${loadError}`} onRetry={() => { if (factoryId) void loadSheets(factoryId) }} />
+        ) : visibleSheets.length === 0 ? (
+          <ListState kind="empty" message={sheets.length ? "Không có phiếu phù hợp bộ lọc." : "Chưa có phiếu đo nào"} />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+          <>
+            <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+              <ExpandAllToggle
+                allExpanded={expandableIds.length > 0 && expandableIds.every(id => expanded.has(id))}
+                onExpandAll={() => setExpanded(new Set(expandableIds))}
+                onCollapseAll={() => setExpanded(new Set())}
+                disabled={expandableIds.length === 0}
+              />
+            </div>
+            <table className="enterprise-table dense min-w-[900px]">
+              <thead>
                 <tr>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600">Mã phiếu</th>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600">Ngày</th>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600">Dây chuyền / CSR</th>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600">Người đo</th>
-                  <th className="text-center px-4 py-3 font-bold text-slate-600">Số dòng</th>
-                  <th className="px-4 py-3"></th>
+                  <th>Mã phiếu</th>
+                  <th>Ngày</th>
+                  <th>Dây chuyền / CSR</th>
+                  <th>Người đo</th>
+                  <th className="text-right">Số mẫu</th>
+                  <ExpandHeaderCell>Thao tác</ExpandHeaderCell>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {sheets.map(sheet => {
-                  const nguoiDoList = Array.from(new Set((sheet.rows || []).map(r => r.nguoi_do).filter(Boolean)))
+              <tbody>
+                {visibleSheets.map(sheet => {
+                  const sheetRows = [...(sheet.rows || [])].sort((x, y) => (x.sort_order ?? 0) - (y.sort_order ?? 0))
+                  const nguoiDoList = Array.from(new Set(sheetRows.map(r => r.nguoi_do).filter(Boolean)))
+                  const cts = Array.from(new Set(sheetRows.flatMap(r => r.chi_tieu || [])))
+                  const detailHref = `/dashboard/process/measurements/${sheet.id}`
                   return (
-                  <tr key={sheet.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 font-mono font-bold text-teal-700">{sheet.ma_phieu || "—"}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-700">{formatDate(sheet.ngay)}</td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {sheet.day_chuyen || "—"}
-                      {sheet.loai_csr && <span className="ml-1 px-1.5 py-0.5 bg-slate-100 text-slate-600 text-xs rounded-md">{sheet.loai_csr}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{nguoiDoList.length ? nguoiDoList.join(", ") : "—"}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">
-                        {sheet.rows?.length || 0} mẫu
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 justify-end">
-                        <button onClick={() => openView(sheet)}
-                          className="p-1.5 hover:bg-teal-50 text-slate-400 hover:text-teal-600 rounded-lg transition-colors">
-                          <Eye size={14} />
-                        </button>
-                        <a
-                          href={`/dashboard/process/print?sheetId=${sheet.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
-                        >
-                          <Printer size={14} />
+                    <ExpandableRow
+                      key={sheet.id}
+                      expanded={expanded.has(sheet.id)}
+                      onToggle={() => toggleExpanded(sheet.id)}
+                      canExpand={sheetRows.length > 0}
+                      colSpan={6}
+                      label="Xem dòng đo"
+                      detail={
+                        <table className="enterprise-table dense">
+                          <thead>
+                            <tr>
+                              <th className="w-10">#</th>
+                              <th>Thùng / Lô / Mẫu</th>
+                              <th>Chế độ sấy</th>
+                              {cts.map(ct => <th key={ct} className="text-right">{ct}</th>)}
+                              <th>Ca SX</th>
+                              <th>Ngăn / Ngày lưu</th>
+                              <th>Người đo</th>
+                              <th className="text-right">Ảnh</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sheetRows.map((r, idx) => {
+                              const ngan = ngans.find(n => n.id === r.ngan_id)
+                              const kq = r.ket_qua || {}
+                              return (
+                                <tr key={r.id}>
+                                  <td className="text-slate-500">{idx + 1}</td>
+                                  <td className="whitespace-nowrap">{[r.thung, r.lo, r.mau].filter(Boolean).join(" / ") || "—"}</td>
+                                  <td className="whitespace-nowrap font-code">{r.che_do_say || "—"}</td>
+                                  {cts.map(ct => (
+                                    <td key={ct} className="text-right font-code font-semibold">
+                                      {(r.chi_tieu || []).includes(ct) ? fmtKq(kq[ct]) : ""}
+                                    </td>
+                                  ))}
+                                  <td className="whitespace-nowrap">{r.ca_sx || "—"}</td>
+                                  <td className="whitespace-nowrap">
+                                    {ngan ? `${ngan.ma_ngan} – ${ngan.ten_ngan}` : "—"}
+                                    {r.so_ngay_luu != null && <span className="ml-1 text-xs text-slate-500">({r.so_ngay_luu} ngày)</span>}
+                                  </td>
+                                  <td className="whitespace-nowrap">{r.nguoi_do || "—"}</td>
+                                  <td className="text-right">{r.image_urls?.length || 0}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      }
+                      endCell={
+                        <div className="flex items-center justify-end" onClick={e => e.stopPropagation()}>
+                          <IconActionGroup>
+                            <RowAction kind="view" label="Xem chi tiết phiếu" href={detailHref} />
+                            <RowAction kind="print" label="In phiếu" href={`/dashboard/process/print?sheetId=${sheet.id}`} target="_blank" />
+                            <IconAction
+                              icon={Share2}
+                              label="Chia sẻ ảnh nhanh"
+                              tone="neutral"
+                              loading={sharingSheetId === sheet.id}
+                              disabled={sharingSheetId === sheet.id}
+                              onClick={() => void handleQuickShare(sheet)}
+                            />
+                            {canEditSheet(sheet) && <RowAction kind="edit" label="Sửa phiếu" onClick={() => void openEdit(sheet)} />}
+                            {canCreate && <RowAction kind="add" label="Thêm mẫu vào phiếu này" onClick={() => void openAddRows(sheet)} />}
+                            {canDeleteSheet(sheet) && <RowAction kind="delete" label="Xóa phiếu" onClick={() => setDelSheet(sheet)} />}
+                          </IconActionGroup>
+                        </div>
+                      }
+                    >
+                      <td className="whitespace-nowrap font-bold text-slate-800">
+                        <a href={detailHref} onClick={e => e.stopPropagation()} className="font-code hover:text-brand-700 hover:underline">
+                          {sheet.ma_phieu || "—"}
                         </a>
-                        <button
-                          onClick={() => void handleQuickShare(sheet)}
-                          disabled={sharingSheetId === sheet.id}
-                          title="Chia sẻ ảnh nhanh"
-                          className="p-1.5 hover:bg-teal-50 text-slate-400 hover:text-teal-600 rounded-lg transition-colors disabled:opacity-40"
-                        >
-                          {sharingSheetId === sheet.id ? (
-                            <span className="block w-3.5 h-3.5 border-2 border-teal-400 border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <Share2 size={14} />
-                          )}
-                        </button>
-                        {canEditSheet(sheet) && (
-                          <button
-                            onClick={() => void openEdit(sheet)}
-                            title="Sửa phiếu"
-                            className="p-1.5 hover:bg-amber-50 text-slate-400 hover:text-amber-600 rounded-lg transition-colors"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        )}
-                        {canCreate && (
-                          <button
-                            onClick={() => void openAddRows(sheet)}
-                            title="Thêm mẫu vào phiếu này"
-                            className="p-1.5 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-lg transition-colors"
-                          >
-                            <Plus size={14} />
-                          </button>
-                        )}
-                        <button onClick={() => handleDeleteSheet(sheet.id)}
-                          className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                      <td className="whitespace-nowrap text-slate-600">{formatDate(sheet.ngay)}</td>
+                      <td className="whitespace-nowrap text-slate-700">
+                        {sheet.day_chuyen || "—"}
+                        {sheet.loai_csr && <span className="ml-1 text-slate-500">· CSR {sheet.loai_csr}</span>}
+                      </td>
+                      <td className="max-w-[220px] truncate text-slate-600" title={nguoiDoList.join(", ")}>
+                        {nguoiDoList.length ? nguoiDoList.join(", ") : "—"}
+                      </td>
+                      <td className="text-right font-semibold text-slate-700">{sheetRows.length}</td>
+                    </ExpandableRow>
                   )
                 })}
               </tbody>
             </table>
-          </div>
+          </>
         )}
       </ResponsiveTableWrapper>
+
+      {delSheet && (
+        <ModalShell
+          title="Xác nhận xóa phiếu"
+          onClose={() => { if (!deletingSheet) setDelSheet(null) }}
+          maxWidth="sm"
+          footer={
+            <>
+              <button onClick={() => setDelSheet(null)} disabled={deletingSheet}
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl disabled:opacity-60">
+                Hủy
+              </button>
+              <button onClick={() => void handleDeleteSheet()} disabled={deletingSheet}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all">
+                {deletingSheet ? "Đang xóa..." : "Xóa phiếu"}
+              </button>
+            </>
+          }
+        >
+          <p className="text-sm text-slate-600">
+            Xóa phiếu <span className="font-mono font-bold text-slate-800">{delSheet.ma_phieu || "—"}</span>{" "}
+            ({delSheet.rows?.length || 0} mẫu, ngày {formatDate(delSheet.ngay)})? Toàn bộ dòng đo của phiếu sẽ bị xóa
+            và không khôi phục được.
+          </p>
+        </ModalShell>
+      )}
     </ProcessShell>
   )
 }

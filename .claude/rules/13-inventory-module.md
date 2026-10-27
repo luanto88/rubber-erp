@@ -397,7 +397,7 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
   ngày cuối; đầu kỳ = cuối − nhập + xuất. Nhập = import + transfer_in, xuất = export + transfer_out. Phát sinh tải
   phân trang từ ngày đầu kỳ. Dầu dùng chung bồn gộp theo bồn của kho.
 - "Xuất file kiểm tồn" (Excel, xlsx): STT, Kho, Phân loại, Mã, Tên, ĐVT, [cột kỳ], Tồn sổ sách, Tồn thực tế (trống),
-  Chênh lệch (công thức), Ghi chú; có sheet "Pallet" nếu đang hiện khối pallet.
+  Chênh lệch (công thức), Ghi chú — 1 sheet duy nhất.
 - "In nhãn QR" / "In tồn kho" chỉ bấm được khi đã chọn ≥1 mã vật tư.
 - **Tồn pallet nằm TRONG "Bảng tồn hiện tại"** (2026-10-27, bỏ khối riêng): `palletMode` chỉ bật khi đã chọn phân loại
   có vật tư pallet ("Pallet các loại") hoặc chọn mã pallet; chưa chọn ⇒ KHÔNG gọi `loadPalletFlow`, mã pallet hiện như
@@ -411,4 +411,4 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
   `inventory/pallet-flow-actions.ts` (`inventory.view`). Quy đổi + mã vật tư ở `src/lib/pallet-usage.ts`:
   DPH, PM (= MUBEZ + MCH gộp sắt mỏng), ĐG, ĐN (người dùng tự tạo), PMB5, PMB4, PG. Hình thức xuất theo
   `export_pallet_types` (rule 08). Kiện rời kho khi tổng bành gán đơn ≥ bành SX; đơn hoàn tất kiện quyết định hình thức.
-  Trang cũ `/dashboard/product/pallet` đã XOÁ, banner Thành phẩm có link "Tồn pallet" sang đây.
+  Trang cũ `/dashboard/product/pallet` đã XOÁ; banner Thành phẩm không còn link (gỡ 2026-10-27).

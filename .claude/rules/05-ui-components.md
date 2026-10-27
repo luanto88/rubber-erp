@@ -1,605 +1,69 @@
----
-description: UI components, mau sac, animation
----
-
-# UI Components & Design System
-
-## Nguyen tac
-
-- Chi dung Tailwind CSS + lucide-react
-- Khong import UI library ngoai
-- Component tu viet, uu tien don gian va dong nhat
-- Tren web, luon dam bao noi dung hien thi bang tieng Viet co dau, dung chinh ta, ngoai tru khi nguoi dung yeu cau khac ro rang
-
-## Component classes chuan
-
-### Layout
-
-```text
-Filter bar:       bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex flex-wrap gap-3 items-center
-Table container:  bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden
-Card:             bg-white rounded-xl border border-slate-200 shadow-md p-4
-```
-
-### Buttons
-
-```text
-Primary:   px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all
-Secondary: px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl
-Danger:    bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-md
-Small add: flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg
-```
-
-### Inputs
-
-```text
-Input:  w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500
-Select: w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500
-Label:  text-xs font-bold text-slate-600 block mb-1.5
-```
-
-## Mau trang thai
-
-- Hoan thanh / Dat: `bg-emerald-100 text-emerald-700`
-- Do dang / Warning: `bg-amber-100 text-amber-700`
-- Khong dat / Error: `bg-red-100 text-red-600`
-- Xuat hang / Info: `bg-blue-100 text-blue-700`
-- Neutral: `bg-slate-100 text-slate-600`
-
-## Scroll reveal
-
-`scroll-reveal` chi duoc dung tren container tinh.
-
-Khong dung `scroll-reveal` tren:
-
-- bang du lieu
-- card list du lieu
-- stats card phu thuoc state
-- filter bar re-render lien tuc
-- page co state dong nhieu nhu `quality`, `product`, `storage`
-
-Ly do: React re-render de lam mat class `revealed`, gay an du lieu.
-
-## Hover
-
-- Row: `row-hover` hoac `transition-colors duration-200 hover:bg-gray-50`
-- Card: `hover-lift` hoac `hover:shadow-md hover:scale-[1.02] transition-all duration-200`
-- Button: `btn-press` hoac `active:scale-95 transition-all`
-
-## Header page pattern
-
-```tsx
-<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
-  <div>
-    <h1 className="text-2xl font-extrabold text-slate-800">Ten Module</h1>
-    <p className="text-sm text-slate-500 mt-0.5">Mo ta ngan</p>
-  </div>
-  <button className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition-all">
-    <Plus size={16} /> Them moi
-  </button>
-</div>
-```
-
-Header co nhieu nut hanh dong ben phai (khong chi 1 nut) phai them `flex-wrap` cho cum nut do, tranh tran ngang tren man hinh hep.
-
-## Component dung chung cho mobile responsive (`src/app/dashboard/_components/`)
-
-Ba component nay da duoc ap dung xuyen suot toan bo cac module trong app (Dieu xe, Kiem nghiem, San luong, Thanh pham, Xuat hang, Bao tri, Process, Documents, Storage, Inventory, Dashboard, Chat luong, ISO, Cai dat, Kho Thanh pham...). Khi tao moi hoac sua page co bang/modal/filter bar, **uu tien dung 3 component nay thay vi tu dung lai tu dau**.
-
-### `FilterBar`
-
-Boc quanh cum filter (search/select/input) o dau danh sach. Tren `md:` tro len hien day du nhu filter bar cu (khong doi hanh vi desktop); duoi `md:` thu gon thanh 1 nut toggle "Bo loc" kem badge so luong filter dang active.
-
-```tsx
-import { FilterBar } from "@/app/dashboard/_components/filter-bar"
-
-<FilterBar activeCount={[search, filterA, filterB].filter(Boolean).length}>
-  <input ... />
-  <select ... />
-</FilterBar>
-```
-
-Props: `children`, `activeCount?` (number), `defaultOpen?` (bool, mac dinh false), `className?`.
-
-### `ResponsiveTableWrapper`
-
-Boc quanh `<table>` de cuon ngang an toan tren mobile thay vi vo layout, tu them gradient mo 2 ben khi con noi dung de cuon. Khong doi cau truc ben trong `<table>`.
-
-```tsx
-import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
-
-<ResponsiveTableWrapper>
-  <table className="w-full text-sm">...</table>
-</ResponsiveTableWrapper>
-```
-
-Neu bang da nam san trong 1 card co border/shadow rieng (vd `bg-white rounded-xl border ... overflow-hidden`), dung `className="rounded-none border-0 shadow-none"` de tranh double-border khi long ben trong.
-
-### `ModalShell`
-
-Chuan hoa modal: full-screen tren mobile (khong bo goc, header/footer sticky), card giua man hinh tu `sm:` tro len.
-
-```tsx
-import { ModalShell } from "@/app/dashboard/_components/modal-shell"
-
-<ModalShell
-  title="Tieu de"
-  onClose={() => setModal(null)}
-  maxWidth="lg" // sm | md | lg | xl | 2xl | 3xl | 4xl | 5xl | 6xl
-  footer={<><button>Huy</button><button>Luu</button></>}
->
-  {/* noi dung form */}
-</ModalShell>
-```
-
-Props khac: `closeOnBackdrop?` (mac dinh true), `bodyClassName?`, `zIndexClassName?` (mac dinh `"z-50"` — dung khi can modal long, vd `"z-[60]"` cho modal mo tren 1 modal khac dang mo), `backdropClassName?` (mac dinh `"bg-black/50"` — dung khi can nhan manh thao tac nhay cam nhu xac thuc mat khau/PIN/OTP, vd `"bg-slate-950/50"`).
-
-**Da fix (2026-07-04)**: `ModalShell` dung `useId()` + mot module-level stack (`modalStack`, mang thu tu mount, phan tu cuoi = modal tren cung) de chi modal tren cung phan hoi phim Escape. Moi instance dang ky vao stack luc mount, go khoi stack luc unmount (effect rieng, chi phu thuoc `id` nen khong chay lai moi lan `onClose` doi identity). Listener Escape chi goi `onClose` neu `modalStack[modalStack.length - 1] === id`. Da verify thuc te: modal A mo modal B long ben tren (vd cau hinh xe -> "+ Them tai xe"), nhan Escape lan 1 chi dong B, lan 2 moi dong A; truong hop 1 modal don van dong binh thuong o lan Escape dau (khong regressions). Khong can sua o tung noi goi `<ModalShell>`.
-
-### Ky thuat chuyen doi modal cu sang `ModalShell` an toan voi file lon
-
-Voi modal co noi dung than (giua header va footer) vuot qua ~45 dong, KHONG thay the toan bo block bang 1 lan `Edit` — Edit tool co the fail silently tren block JSX lon (~45+ dong, nhieu tieng Viet) ma van bao "thanh cong". Chia thanh 2 lan edit rieng:
-
-1. Edit dau: thay doan mo dau (tu `{flag && (` den het header) bang tag mo `<ModalShell title=... onClose=... footer={...}>`. Neu footer o qua xa (vai tram dong), khai bao truoc noi dung footer thanh 1 bien const `const xFooter = (...)` dat ngay truoc `return (` chinh cua component, roi tham chieu `footer={xFooter}`.
-2. Edit sau: xoa doan footer/dong cu (da duoc chuyen vao footer prop hoac bien const o buoc 1), dong lai bang `</ModalShell>`.
-
-Phan noi dung than (giua 2 edit nay) khong bi dung tay vao, du dai bao nhieu.
-
-## Pastel Rừng Cao Su (design tokens + banner theme cho Dashboard)
-
-Token khai báo trong `src/app/globals.css` (khối `@theme`, Tailwind v4 CSS-first — không có
-`tailwind.config.*`, mỗi `--color-X` tự sinh class `bg-X`/`text-X`/`border-X`...):
-
-- `--color-app-bg` (`#f2f8f5`) — nền trang, dùng ở `<body>` (`src/app/layout.tsx`).
-- `--color-brand` (`#2f5d52`) / `--color-brand-deep` (`#1c3a32`) — "forest", dùng cho sidebar
-  (`bg-brand` trong `dashboard/layout.tsx`) và widget Sản lượng trên Dashboard.
-- `--color-ocean-50/100/500/600/700` (`#e3f0fb`→`#144171`) — dùng cho widget Xuất hàng + Điều
-  xe trên Dashboard (2 widget riêng, chỉ dùng chung tông màu để đọc như 1 cặp, không gộp DOM).
-- `--color-mint-50/100/500/600/700` (`#eafbf5`→`#1f6a58`) — dùng cho widget Chất lượng trên
-  Dashboard.
-
-**Phạm vi áp dụng hiện tại** (đã triển khai thật, không phải dự kiến): khung sườn (sidebar/
-header, luôn `bg-brand`) + đúng 3/8 khu vực của `src/app/dashboard/page.tsx` (Sản lượng, Xuất
-hàng + Điều xe, Chất lượng) qua `WidgetCard`'s `theme` prop, **cộng thêm** banner header đầu
-trang (chỉ `<h1>`/subtitle/action, không đụng phần còn lại của trang) của 4 trang module thật —
-`dispatch/page.tsx` (ocean), `export/page.tsx` (ocean), `quality/page.tsx` (mint),
-`eudr/EudrClient.tsx` (moss) — qua component riêng `PageHeaderBanner` (xem mục ngay dưới). Các
-khu vực còn lại của Dashboard (Kho & Thành phẩm, Cảnh báo, Việc cần làm, Ghi chú), phần thân
-của 4 trang module trên (nút chính/filter/bảng bên dưới header), và mọi trang module khác
-(ISO, Bảo trì, KPI, Cài đặt...) cố ý giữ nguyên màu cũ.
-
-### `WidgetCard` theme convention (`src/app/dashboard/_components/widgets/widget-shared.tsx`)
-
-Muốn 1 widget Dashboard mới có banner màu theo theme, truyền thêm 2 prop:
-
-```tsx
-<WidgetCard title="..." subtitle="..." theme="forest" icon={Droplet}>
-```
-
-`theme` nhận `"forest" | "ocean" | "mint"`; `icon` là 1 component `LucideIcon` (không phải
-element đã render) — component tự vẽ icon nhỏ trong vòng tròn cạnh tiêu đề lẫn icon lớn mờ làm
-hoa văn nền, không cần truyền 2 icon riêng. Không truyền `theme` → giữ nguyên header trắng
-phẳng như cũ, không ảnh hưởng các widget hiện có.
-
-Nếu 1 widget có tile/stat-box muốn thêm hoa văn nhẹ khớp theme (không phải banner), dùng hằng
-số className dùng chung `TILE_PATTERN_FOREST`/`TILE_PATTERN_OCEAN` export từ cùng file — tự
-chứa trong Tailwind arbitrary-value (`before:[background-image:...]`), không cần thêm CSS toàn
-cục. Chỉ cộng thêm vào className hiện có của tile, không thay `bg-*-50` gốc của tile đó.
-
-### `PageHeaderBanner` — banner header cấp trang (khác `WidgetCard`)
-
-`src/app/dashboard/_components/page-header-banner.tsx` — dùng cho header đầu các **trang
-module thật** (không phải widget Dashboard). Tách file riêng khỏi `WidgetCard` có chủ đích
-(file đó tự ghi rõ "chỉ dùng cho widget Dashboard") — không import chéo.
-
-```tsx
-<PageHeaderBanner
-  title="Điều xe"
-  subtitle="Bảng phân xe thu mủ hằng ngày"
-  theme="ocean" // "ocean" | "mint" | "moss"
-  icon={Truck}
-  action={<button ...>...</button>}
-/>
-```
-
-- Render `<h1>` (không phải `<h2>` như `WidgetCard`) — đúng ngữ nghĩa heading cấp trang.
-- `action` nhận nguyên khối JSX (kể cả logic `hasPermission(...)` ẩn/hiện có sẵn) — component
-  không tự quyết định hiện nút nào, chỉ định vị trí render bên phải.
-- 3 theme hiện có: `ocean` (Điều xe, Xuất hàng), `mint` (Chất lượng), `moss` (EUDR — dùng
-  `--color-moss-*`, giá trị đúng theo mockup, không có bản `earth` vì banner luôn chữ trắng
-  trên nền màu, không cần token cho chữ-trên-nền-sáng).
-- Nút bên trong banner (action) phải tự đổi màu cho hợp nền màu — nút nền trắng dùng
-  `text-{theme}-700` (vd `text-ocean-700`), nút phụ dùng kiểu trong suốt
-  `bg-white/15 hover:bg-white/25 border-white/40 text-white`. Không giữ nguyên màu nút gốc
-  (`border-slate-300`, `bg-emerald-600`...) vì sẽ chìm/lệch tông trên nền banner màu.
-- Phạm vi cố ý dừng ở header — không lan xuống nút chính/filter bar/bảng dữ liệu bên dưới của
-  trang (xem "Phạm vi áp dụng hiện tại" phía trên). Muốn mở rộng thêm phải hỏi lại người dùng.
-
-### Ảnh thật + hiệu ứng mờ dần (2026-08-24, tiếp) — nền tảng cho `/login` và sidebar dashboard
-
-Đã thay thế minh hoạ SVG rừng cao su vẽ tay bằng **ảnh chụp thật** (chủ đề cạo mủ cao su) ở 2
-nơi mang tính "khung sườn" của toàn app — trang đăng nhập (`src/app/login/page.tsx`) và sidebar
-dashboard (`src/app/dashboard/layout.tsx`). Quy trình bắt buộc đã áp dụng và nên lặp lại cho các
-lần thêm ảnh thật tương tự sau này: dựng file HTML tĩnh tham khảo trong `cung_cap_dl/` trước
-(`thiet_ke_dang_nhap_moi.html`, `thiet_ke_sidebar_moi.html`), lặp chụp screenshot bằng
-`npx playwright screenshot` để tự đối chiếu với ảnh mockup gốc, người dùng duyệt xong mới áp
-dụng vào code thật.
-
-**Asset gốc**: `public/login-bg-forest.jpg`, `public/sidebar-bg-forest.jpg` (copy từ
-`cung_cap_dl/r1.jpg`/`r2.jpg`), `public/badges/iso-9001.png`, `iso-14001.png`, `iso-14067.png`
-(logo chứng nhận thật, copy từ `cung_cap_dl/9001_2015.png`/`14001_2015.png`/`14067_2018.png`).
-
-**Kỹ thuật "ảnh lấn dần rồi mờ vào nền"** — kỹ thuật chính, dùng `mask-image`/`-webkit-mask-image`
-với `linear-gradient` để ảnh chụp thật hoà dần vào nền pastel thay vì cắt bằng cạnh cứng
-(border-radius/clip-path đã thử và bị loại vì trông giả tạo — xem lịch sử quyết định ở
-`.claude/plans/xem-logic-c-i-ti-n-rustling-avalanche.md` nếu cần đối chiếu). Áp dụng khác nhau
-theo hướng:
-
-- **Ngang** (trang đăng nhập, cột trái lấn sang phải): `mask-image: linear-gradient(to right,
-  #000 0%, #000 52%, rgba(0,0,0,.55) 68%, transparent 92%)` trên 1 wrapper riêng chứa
-  `<Image fill>` + lớp scrim gradient màu `--color-brand-deep` + hoa văn rãnh cạo mủ hiện có.
-  Container ảnh rộng hơn hẳn phần nội dung text hiển thị (`w-[58%]` chứa ảnh, nhưng
-  `.left-content`/text bên trong chỉ giới hạn `max-width` nhỏ hơn, vd `540px`) — để vùng mờ dần
-  luôn nằm ở khoảng trống giữa 2 cột, không đè lên chữ.
-- **Dọc** (sidebar, ảnh bám đáy mờ dần lên trên): `mask-image: linear-gradient(to top,
-  rgba(0,0,0,.95) 0%, rgba(0,0,0,.85) 28%, rgba(0,0,0,.35) 62%, transparent 100%)` trên 1 wrapper
-  `absolute inset-x-0 bottom-0 h-[52%]` (không phải `fixed` — tránh landmine containing-block đã
-  ghi ở `.claude/rules/24-notification-bell-module-tasks.md`), đặt sau lớp hoa văn hiện có, dùng
-  chung `-z-10` để nằm sau `<nav>`.
-- Luôn kèm 1 lớp scrim gradient màu thương hiệu (`linear-gradient(...)` với giá trị **literal
-  rgba**, không dùng `var(--color-x)` trong style — bài học 2026-08-24 mục 6) phía trên ảnh để
-  chữ trắng vẫn đọc rõ trên vùng ảnh còn đậm.
-
-**Card đăng nhập** — các yếu tố mới đã trở thành pattern chuẩn cho form card kiểu này: avatar
-tròn nổi lên mép trên card (`-top-8`, gradient `linear-gradient(135deg,#3fae66,#1f8a4c)` literal
-hex), divider ngắn có icon `Leaf` ở giữa, input nền kem (`border-[#f0e2b8] bg-[#fdf3d9]`) kèm
-icon prefix bên trái (`User`/`Lock`/`Building2` từ lucide-react, `absolute left-3.5`), toggle
-ẩn/hiện mật khẩu (`Eye`/`EyeOff`), hàng "Ghi nhớ đăng nhập"/"Quên mật khẩu?" **chỉ là UI tĩnh**
-(không có logic auth thật — nếu module khác cần bật thật, đó là quyết định nghiệp vụ riêng, hỏi
-lại người dùng), 3 badge chứng nhận ISO dùng ảnh logo thật (không phải icon generic) crop bằng
-`backgroundSize`/`backgroundPosition` để chỉ lộ phần dấu hiệu tròn, và hàng cam kết thương hiệu 4
-mục cuối trang.
-
-**Mobile giữ nguyên, không đụng**: `src/app/login/page.tsx` cố ý giữ handbrake nguyên bản thiết
-kế gradient + SVG cũ ở `<lg` (class `lg:hidden` trên block cũ, `hidden lg:block` trên block ảnh
-mới) — chỉ desktop (`lg:` trở lên) dùng ảnh thật + mask fade. Lý do: kỹ thuật overlap-mask dùng
-`position: absolute` cho toàn bộ layout 2 cột, không tương thích tự nhiên với flex-col stacking
-trên mobile; tách nhánh theo breakpoint an toàn hơn là viết lại toàn bộ responsive logic. Card
-form (avatar/divider/input kem/badge/cam kết) là markup DÙNG CHUNG cho cả mobile và desktop —
-chỉ phần nền/branding bên trái khác nhau theo breakpoint.
-
-**Khi mở rộng "ảnh thật + mờ dần" sang module khác**: tái dùng đúng công thức mask-image ở trên,
-không tự nghĩ lại cạnh cong/clip-path mới. Luôn dựng HTML tham khảo trong `cung_cap_dl/` trước,
-duyệt bằng screenshot rồi mới sửa code — quy trình này giờ là chuẩn cho mọi thay đổi UI lớn có
-ảnh thật, không riêng gì 2 màn hình này.
-
-### Con lai chua lam (kho khan-tha kien va dat chu ky/QR ISO)
-
-Hai khu vuc dung ky thuat drag-and-drop HTML5 chua duoc lam mobile-friendly, theo dung quyet dinh cua nguoi dung ("de sau, chua quyet dinh huong xu ly"):
-
-- So do Kho Thanh pham (keo kien vao o luu, keo lo vao khung) — `src/app/dashboard/warehouse/_components/warehouse-floor-plan.tsx`, `warehouse-frame.tsx`, `warehouse-slot-cell.tsx`, va cac drag handler trong `lot-panel.tsx`/`warehouse/page.tsx`.
-- Dat chu ky/QR tren PDF cho ISO — `SignPlacementModal` trong `iso/forms/[id]/page.tsx` va inline tuong duong trong `iso/documents/[id]/page.tsx` (dung `react-draggable` + `re-resizable` + pdfjs canvas).
-
-Khong tu y dung guard "chi desktop" hay dau tu touch-drag khi chua hoi lai nguoi dung huong xu ly cu the.
-
-## Doc-UI (ISO + Văn bản + màn ký số) — 2026-10-13
-
-Kế hoạch đầy đủ 7 giai đoạn: `C:\Users\Software\.claude\plans\nh-gi-k-ho-ch-scalable-dahl.md`.
-Bố cục theo mẫu `previews/enterprise-iso-vanban-unified-preview.html`, **màu theo token brand**
-(không dùng thang xanh Tailwind của mẫu). Đã xong GĐ0 (nền tảng) + GĐ1 (shell + trang danh sách).
-
-- Token: thang `brand-50…900` trong `@theme` (600 = brand #2f5d52, 800 = brand-deep #1c3a32),
-  `--font-doc` (Plus Jakarta Sans) / `--font-code` (JetBrains Mono). Font chỉ áp qua class
-  `font-doc` ở `documents-shell.tsx` / `iso-shell.tsx`, không đổi `body`.
-- Banner 2 module: `PageHeaderBanner theme="rubber"`. **Không** sửa theme `forest`
-  (#093719→#166534, Sản lượng/Thành phẩm đang dùng).
-- Bảng: `<table className="enterprise-table">` (CSS ở globals.css) — `<thead>`/`<th>` không cần class.
-- Component dùng chung `src/app/dashboard/_components/doc-ui/`:
-  - `status-registry.ts` — nguồn DUY NHẤT nhãn + tông trạng thái (`DOC_STATUS`, `ISO_STATUS`,
-    `FORM_STATUS`). `TRANG_THAI_LABEL/COLOR` (documents-types, iso-types) và
-    `FORM_INSTANCE_STATUS_*` giờ là alias đọc từ đây — sửa nhãn/màu ở registry.
-  - `StatusBadge` (`domain`+`status` hoặc `tone`+`label`), `DocCodePill`, `SegmentedTabs`
-    (tab module dạng link, tab lọc, bộ chọn), `IconAction`/`IconActionGroup` (32px, xám khi
-    nghỉ, màu theo tone khi hover, luôn có `aria-label`), `TimelineSteps` + `TimelineProgress`,
-    `InspectorCard` / `MetaRow` / `MetaList` / `StatusSummaryBar`.
-  - Hồ sơ thực hiện ISO: `iso/_components/form-status-badge.tsx` (`FormStatusBadge`, nhãn động
-    theo luồng N bước) — thay 3 bản `StatusBadge` copy cũ.
-- Màu trạng thái giữ đúng mẫu (valid xanh lá, pending amber có chấm nhấp nháy, draft xám, danger
-  đỏ, returned hồng). Mọi chỗ còn lại của 2 module dùng `brand-*`, không dùng `emerald-*`.
-- Code mới ở 2 module: không viết span trạng thái tay, không tô màu nút icon khi nghỉ.
-### GĐ2 — trang chi tiết 70/30 (2026-10-13, đã xong)
-
-- Component mới trong `doc-ui/`:
-  - `DetailSplitLayout({ header, banners, document, inspector })` — cột tài liệu ~70% + bảng điều
-    khiển ~30% (`lg:grid-cols-[minmax(0,7fr)_minmax(320px,3fr)]`, inspector sticky). Dưới `lg`
-    là tab "Tài liệu / Thông tin" (mặc định Thông tin), ẩn bằng `hidden`, KHÔNG unmount.
-  - `DetailPageHeader` + `HeaderButton` — nút quay lại, tiêu đề, `DocCodePill`, chip phụ, nút file.
-    Cố ý không có badge trạng thái: trạng thái chỉ hiện 1 lần ở `StatusSummaryBar`.
-  - `SignActionBox({ primary, secondary, danger })` — nút chính gradient brand, nút phụ, nút đỏ;
-    mobile thêm thanh cố định ở đáy (nút chính + "…" mở bottom-sheet các nút còn lại).
-- Áp dụng: `documents/[id]`, `iso/forms/[id]` dùng `DetailSplitLayout`. `iso/documents/[id]` CHỈ
-  chế độ xem (`!isNew && !isEditMode`) dùng 70/30 (tự dựng tab mobile bằng state `mobilePane`
-  vì cột phải còn nhiều khối nhập liệu); tạo mới / chỉnh sửa giữ bố cục `lg:grid-cols-3` cũ và
-  hành động ký hiện trên header.
-- Hành động ký được gom thành mảng `SignAction` ngay trước `return` của từng trang — **giữ nguyên
-  onClick và cờ quyền cũ**. Thêm nút mới thì thêm vào mảng, không viết nút tay.
-- Timeline: cả 3 trang dùng `TimelineSteps` + `TimelineProgress` (đã xoá 2 bản `TimelineStep`,
-  `InfoRow`, `WorkflowStepper` local). Màu bước: Văn bản / hồ sơ thực hiện dùng `getKyBuocColor`
-  + `ROLE_COLORS.phe_duyet`; tài liệu ISO dùng `ISO_STEP_COLORS` (`template-colors.ts`, bản sao có
-  chủ đích của `ISO_ROLE_COLORS` trong `templates.ts` — file đó không import được ở client).
-- `detail-view-ui.tsx`: tone `emerald` giờ hiển thị theo brand (giữ làm alias), thêm tone `brand`;
-  highlight `rose`/`violet` đã ra đúng màu. File này chỉ 3 trang chi tiết dùng.
-- Thân 3 trang đã đổi `emerald-*` → `brand-*`. Còn lại có chủ đích: các modal ký / đặt vị trí
-  (GĐ5), icon file Excel, màu trạng thái.
-- Kho của tôi: route `api/iso/distribute/track` nhận `itemType` ("document"|"form"), trả mốc
-  `first_viewed_at`/`first_downloaded_at`; trang cập nhật ngay dòng đó. Mục do chính người xem
-  tạo/ký (`recipientId` bắt đầu `owner-`) hiện chip "Tài liệu của bạn", không gọi track.
-- Chưa làm: GĐ3 khung xem PDF nhúng, GĐ4 hộp PIN chung, GĐ5 vỏ màn ký chung, GĐ6 trang xác
-  thực + mobile.
-
-### GĐ3 — khung xem PDF nhúng + sửa bố cục sau test tay (2026-10-13, chưa test tay)
-
-- `doc-ui/doc-viewer.tsx` (`DocViewer`, vỏ) nạp `doc-viewer-impl.tsx` bằng `next/dynamic` +
-  `ssr:false` — pdfjs chỉ có ở client. Props: `endpoint` (route `/file-url`), `kind`
-  (`pdf`|`office`|`none`), `label` (nhãn file, KHÔNG lặp tên tài liệu), `fileExt`, `variants`/
-  `variant`/`onVariantChange`, `active`.
-- `active=false` → chỉ khung giữ chỗ, KHÔNG mount phần thân. Trang tính
-  `active = (useIsDesktop() || tabMobile === "doc") && !<modal ký đang mở>` ⇒ không render pdfjs
-  2 lần cùng modal ký; ký xong khung tự nạp lại (thêm `key={fileUrl}`).
-- Phần thân tải TRỌN file 1 lần (`fetchSecureUrl` → `fetch` → `arrayBuffer` →
-  `getDocument({data})`) để Signed URL hết hạn không làm hỏng trang render sau; 400/401/403 → xin
-  URL mới đúng 1 lần. Worker local (`new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url)`).
-  Render dần bằng IntersectionObserver, hủy `RenderTask` khi đổi zoom. Toàn màn hình dùng
-  Fullscreen API, không có thì lớp phủ `fixed inset-0 z-[60]` (Esc đóng). DOCX/XLSX → thẻ "Mở file".
-- `doc-ui/use-is-desktop.ts` (`useIsDesktop`, ≥1024px). `DetailSplitLayout` nhận thêm
-  `mobileTab`/`onMobileTabChange` (tuỳ chọn).
-- Quy ước bố cục 3 trang chi tiết: Xem/Tải/Phân phối/QR CHỈ ở header (thanh công cụ khung xem không
-  có nút tải); `DetailFileCard` không còn dùng ở chế độ xem; inspector = thanh Trạng thái (không
-  `meta`, trừ "Văn bản ký tay") → Hành động ký → Tiến trình; thẻ Thông tin bỏ Số hiệu/Mã (đã ở
-  header) và chip "✓ Đã duyệt". Hồ sơ thực hiện: "Thay file" chuyển vào Hành động ký, ô "Tự chuyển
-  PDF" nằm dưới khung xem; bỏ thêm "Biểu mẫu gốc" (trùng dòng phụ header).
-- ISO tài liệu: state `viewVariant`; tab variant trên thanh công cụ; nút mắt ở thẻ "Tài liệu soát
-  xét" (chế độ xem) đổi file trong khung thay vì mở tab; Xem/Tải ở header theo variant đang xem.
-- `SignActionBox`: nút phụ + nút nguy hiểm chung 1 lưới 2 cột, số lẻ → nút cuối trải cả hàng.
-- Còn lại: modal đặt vị trí `iso/documents/[id]` nạp worker từ CDN (GĐ5); khung xem chưa xem trước DOCX.
-- QR header đồng bộ 3 trang: `doc-ui/header-qr.tsx` (`HeaderQr value code title`) — bấm phóng to,
-  tải PNG/JPG (QR nền trắng + mã tài liệu bên dưới). URL: Văn bản `/dashboard/documents/{id}`,
-  ISO tài liệu `recordUrl`, Hồ sơ `/dashboard/iso/forms/{id}` (khớp QR in trên PDF). Bỏ nút
-  "Làm mới" ở header Hồ sơ thực hiện (trang tự nạp lại sau mỗi thao tác).
-
-### Sửa sau test bản 18304ec (2026-10-13)
-
-- `HeaderQr`: `QRCodeCanvas` tự gắn inline `width/height = size` (thắng mọi class) ⇒ phải ghi đè bằng
-  `style={{ width: "100%", height: "100%" }}` trong khung `aspect-square`. Canvas gốc vẫn 512px cho ảnh tải về.
-  Trên mobile nút QR là nút đầy đủ "Mã QR" (từ `sm:` là ô vuông 36px).
-- `DetailPageHeader`: cụm actions mobile = lưới 2 cột đều, số nút lẻ thì nút cuối trải 2 cột; từ `sm:` 1 hàng
-  căn phải. Nút tự viết đặt trong `actions` phải có `w-full justify-center sm:w-auto` (như `HeaderButton`).
-- `SignActionBox`: **đã bỏ thanh cố định ở đáy mobile** (trùng nút + spacer `h-16` để lại khoảng trống giữa
-  các thẻ inspector). Thẻ "Hành động ký" là nơi duy nhất có nút ký. Prop `mobileBar` không còn.
-- `StatusSummaryBar` có prop `badge` thay badge mặc định — hồ sơ thực hiện truyền `FormStatusBadge` (nhãn động
-  N bước), không dùng thêm `headline` cùng ý (từng ra "Bản nháp" + "Nháp").
-- Tab mobile của trang chi tiết: **"Tài liệu / Ký duyệt"** (không còn "Thông tin" — trùng chữ với thẻ
-  "Thông tin hồ sơ/văn bản" nằm ở tab Tài liệu).
-- `iso/documents/[id]` chế độ XEM: đã bỏ 3 thẻ "Thông tin Phê duyệt & Nhân sự", "Ghi chú & Chi tiết bổ sung",
-  "Thông tin hiệu lực" (trùng Tiến trình ký / thẻ Trạng thái). `renderValidityInfoCard` vẫn dùng ở sidebar
-  tạo mới/chỉnh sửa. Thẻ thông tin đổi tên "Thông tin tài liệu" / "Thông tin hồ sơ" (trước ghi nhầm "văn bản").
-
-### GĐ4 — hộp nhập PIN dùng chung (2026-10-13)
-
-- `doc-ui/pin-dialog.tsx` (`PinDialog`) — CHỈ trình bày: không gọi API, không giữ PIN. Trang gọi giữ
-  `pin`/`pinError`/cờ bận và truyền `onConfirm` (logic xác thực/ký không đổi). Ô PIN tự lọc chữ số,
-  tối đa 6, nút ẩn/hiện (state nội bộ), Enter = xác nhận; `busy` khoá nút và chặn đóng hộp.
-  `children` = nội dung TRÊN ô PIN (vd ô lý do), `after` = DƯỚI ô PIN (ghi chú, tiến độ ký).
-- 4 nơi đã chuyển: Văn bản (bước 1 `SignPlacementModal`), Tài liệu ISO (`pinModal` + ô lý do trả
-  về/từ chối), Hồ sơ thực hiện (bước 1 `SignPlacementModal`), ký hàng loạt ISO
-  (`iso-batch-sign-modal.tsx`, `zIndexClassName="z-[60]"` vì nằm trên overlay z-50).
-- Code mới cần nhập PIN ở 2 module này dùng `PinDialog`, không tự dựng ô PIN.
-
-### Sửa sau test GĐ4 + GĐ5 vỏ màn ký chung (2026-10-13)
-
-- **Trả về / Từ chối / Không phê duyệt KHÔNG cần PIN, lý do BẮT BUỘC** ở cả 3 nơi (ISO tài liệu dùng
-  `ModalShell` riêng `returnModal` + `handleReturnConfirm`, Văn bản server trả 400 khi `ly_do` rỗng,
-  Hồ sơ thực hiện vốn đã bắt buộc). `doTransition(action, null, ...)` bỏ qua ký Office khi token null.
-- **Chức vụ LUÔN trên Tên**: `template-layout.ts` ép `chucVuPosition = "above"` (bỏ qua dữ liệu
-  `below` cũ); đã gỡ công tắc thứ tự ở `ky/mau-vi-tri` và modal ISO tài liệu. Mẫu tắt Tên/Chức vụ ⇒
-  khối mất hẳn trên màn ký (ISO tài liệu thêm `allowName/allowChucVu` vào `placementModal`).
-- **QR luôn vuông**: UI khoá tỉ lệ (`lockAspectRatio` + chỉ góc chéo; mau-vi-tri tính theo px trang),
-  server vẽ qua `squareRect()` (template-layout.ts) — khung cũ hình chữ nhật cũng in vuông, canh giữa.
-- **Đóng dấu PDF trước khi đổi trạng thái** (ISO `gui_xem_xet`/`gui_phe_duyet`/`gui_lai_phe_duyet`):
-  `generateSignedPdfs()` lỗi ⇒ dừng, không chuyển "chờ xem xét". Nguyên nhân bug NMCB-QT77: lượt ký của
-  Nguyễn Hữu Thọ ghi log `gui_xem_xet` nhưng KHÔNG có dòng `generate_pdf` (ảnh chữ ký vẫn đúng chỗ).
-  generate-pdf trả thêm `sigImgMissingNames` / `pageOutOfRangeNames` (trước đây bỏ qua im lặng).
-- **Khung xem tài liệu ISO** có tab cho từng hồ sơ con (`viewVariant = "child:<id>"`, endpoint theo id con).
-- **Không còn trang công khai khi chưa đăng nhập**: `dashboard/layout.tsx` luôn `/login?next=<path+query>`
-  (bỏ `isoPublicFallbackFor`). QR đã in vẫn chạy (URL không đổi) nhưng phải đăng nhập. `/iso-doc/[id]`
-  còn file nhưng không còn được chuyển hướng tới.
-- **GĐ5 — `doc-ui/sign-workspace-shell.tsx`**: `SignWorkspaceShell` (topbar brand + Đóng, `notice`,
-  `rail`, children, `footer`), `SignToolbarButton`, `SignPageNav`, `SignRail`, `SignRailThumb`
-  (`accentColor` = màu vai trò), `SignCanvasArea` (khung trang dùng `relative w-max mx-auto`, KHÔNG flex
-  căn giữa), `SignFooterActions`. Áp cho cả 4 màn: SignPlacementModal Văn bản + Hồ sơ thực hiện, modal
-  đặt vị trí ISO tài liệu (giờ có nút Đóng/Hủy, Xác nhận ở footer), màn ký hàng loạt ISO (rail nhóm theo
-  tài liệu + drawer mobile giữ nguyên bên trong). Chỉ đổi vỏ — toạ độ/kẹp khung/payload không đổi.
-- **`doc-ui/pdfjs-worker.ts` `ensurePdfjsWorker(pdfjsLib)`** — worker luôn từ gói đã cài; đã bỏ worker
-  CDN ở modal ISO tài liệu. (Màn ký hàng loạt còn `cMapUrl` CDN — chưa đổi.)
-
-### Vá sau test GĐ5 + GĐ6 (2026-10-13)
-
-- **Bước Soạn thảo ISO dùng `IsoBatchSignModal`** (cùng màn với Xem xét/Phê duyệt): rail trái liệt kê
-  cả bộ, thumbnail có khung, chức vụ trên tên, 1 lần PIN. Helper `openSignStep()` ở
-  `iso/documents/[id]`: bộ có PDF → màn ký tập trung; bộ chỉ DOCX/XLSX → `PinDialog` (handlePinConfirm
-  tự chuyển trạng thái). Modal đặt vị trí cũ chỉ còn là nhánh dự phòng `fallbackTask`.
-  Ở bước Soạn thảo modal đọc file GỐC (`file-url?source=original`), không hiện chữ ký vòng trước.
-- `IsoBatchSignModal` bỏ `cMapUrl` CDN (từng ghim pdfjs 5.4.449, lệch bản cài 5.7.284) — như DocViewer.
-- **Chống màn trắng**: `src/app/error.tsx` + `global-error.tsx` (`AppErrorView`: thông điệp lỗi, Tải
-  lại, Mở bằng trình duyệt ngoài). Mọi truy cập `localStorage/sessionStorage` lúc khởi động bọc
-  try/catch (`supabase.ts` rơi về bộ nhớ RAM; `auth.ts`, `customer-portal-i18n.ts`, layout). Code mới
-  đọc storage ở luồng khởi động PHẢI bọc try/catch — WebView Telegram/Zalo có thể ném SecurityError.
-- `OpenExternalBrowser` (`src/app/_components/`, `src/lib/in-app-browser.ts`): banner ở /login khi mở
-  trong Telegram/Zalo/Facebook/WebView — "Mở bằng Chrome" (intent:// Android) + Sao chép link.
-- **GĐ6 trang công khai**: `PublicDocShell` (`src/app/_components/public-doc-shell.tsx`, dải brand +
-  `font-doc` + `bg-app-bg`) cho `/van-ban-verify/[logId]` (GIỮ CÔNG KHAI — người dùng chốt) và
-  `/iso-doc/[id]`; nội dung dùng `StatusBadge` / `DocCodePill` / `InspectorCard` + `MetaRow`.
-  Link "Đăng nhập" ở `/iso-doc` → `/login?next=/dashboard/iso/documents/{id}`.
-
-### Vá màn "Cài đặt vị trí ký" — bộ hồ sơ ISO (2026-10-13, chưa test tay)
-
-- Bug thật đo trên DB: chuyển thẻ biểu mẫu trong "Bộ hồ sơ" **tự lưu** mẫu với cờ `dirty` /
-  `templateExisted` lẫn lộn ⇒ ghi đè hàng chục phiên bản `khung = []` (NMCB-QT77-F01 có 25 phiên bản,
-  chỉ 5 bản có khung). API cho ISO lưu rỗng ngầm (`allowEmpty: isIso || …`).
-- Nay: **không tự lưu khi chuyển thẻ**; còn thay đổi chưa lưu ⇒ hộp "Ở lại / Bỏ thay đổi / Lưu &
-  chuyển". Lấy Signed URL trước rồi đổi `activeDocId/activePdfUrl/activeLoai/activeDocLabel` cùng
-  lượt; nạp mẫu chỉ khi `dimsForUrl === activePdfUrl` (khổ giấy đúng file); deps không còn
-  `isoChildDocs/isExemptIsoDoc` (đọc qua `docCtxRef`). Ảnh trang dựng dần (JPEG 1.5x) + đệm theo
-  `activeDocId`. ISO reconcile N bước tách thành hàm thuần `reconcileIsoRoles` (gọi mỗi lần nạp mẫu).
-- API `api/signing/templates`: mẫu rỗng CHỈ khi body `allowEmpty === true`. Màn cài đặt chỉ gửi rỗng
-  sau hộp xác nhận "Biểu mẫu này không cần ký?".
-- `docTemplateStatus`: `"co_khung" | "rong"` theo **phiên bản mới nhất** mỗi khoá (thẻ hiện "Đã đặt" /
-  "Không ký" / "Chưa đặt"; thẻ đang mở hiện "Đang tải…" tới khi mẫu nạp xong).
-- Khôi phục: `scripts/restore-empty-sign-templates.mjs` (mặc định xem; `--apply` chèn phiên bản mới
-  copy từ bản có khung ký gần nhất, không sửa/xoá dòng cũ).
-- 2026-10-13 (tiếp): **đã xoá modal đặt vị trí cũ** ở `iso/documents/[id]` (~1.400 dòng: state
-  `placementModal`, `openPlacementForTask`, `handlePlacementConfirm`, JSX). Có PDF ⇒ luôn
-  `IsoBatchSignModal`; không có PDF ⇒ `PinDialog` rồi `doTransition` trực tiếp.
-
-## Quy chuẩn giao diện toàn app — U0 nền tảng (2026-10-14)
-
-Kế hoạch tổng: `.claude/plans/ke-hoach-dong-bo-ui-toan-app.md`. Trang mẫu đã duyệt:
-`cung_cap_dl/UIUX/chuan-ui.html` (+ ảnh `chuan-ui-desktop.png`, `chuan-ui-mobile.png`,
-`chuan-ui-mau-module.png`). U0 chỉ THÊM nền tảng — chưa module nào đổi bố cục (U1+ mới áp).
-
-### Màu — phương án C "lai" (người dùng chốt, thay quyết định "brand cho mọi thứ" cũ)
-- **Banner** mỗi module giữ màu + hoa văn riêng (`PageHeaderBanner theme`).
-- **Điều hướng** (tab đang chọn, ô nhập khi focus, icon thẻ số liệu, viền nhóm ngày) dùng utility
-  `*-mod-50/200/600/800` → theo màu module. Bọc vùng module bằng `<ModuleThemeScope theme="ocean">`
-  hoặc class `moduleThemeClass(theme)` (`doc-ui/module-theme.tsx`). Không bọc ⇒ rơi về brand
-  (Văn bản/ISO không đổi). Bộ màu: `.mod-theme-*` cuối `globals.css`, khai báo qua `@theme inline`
-  (bắt buộc `inline` để đổi được theo tổ tiên). Thêm theme banner mới ⇒ thêm `.mod-theme-<x>` +
-  một dòng trong `THEME_CLASS`.
-- **Hành động** (nút chính, Ký ngay, link mã, Gửi ký duyệt) LUÔN `brand-*` ở mọi module — tránh nút
-  vàng/cam trùng badge "Đang chờ"/"Huỷ" ở Kho vật tư, Kho TP, Ghi chú.
-- **Trạng thái** chỉ qua `StatusBadge` — 7 tông: valid · pending (chấm nhấp nháy) · warn (vàng,
-  không nhấp nháy) · draft · danger · returned · info (**xanh dương** từ 2026-10-14, trước là brand).
-
-### Domain trạng thái (`doc-ui/status-registry.ts`)
-`doc` `iso` `form` (cũ) + `maintenance`, `dispatch_progress`, `quality`, `purchase`, `inventory`
-(`cho_duyet` phái sinh = posted && !approved_at), `export` (NULL ⇒ caller coi là duyệt), `lot` (key
-= nhãn đã `normalizeLotStatus`), `storage` (có key legacy "Đang nhận (Cần cập nhật)"). Nhãn giữ
-đúng như màn hình hiện tại. Helper cũ (`PURCHASE_STATUS_CLASS`, `getLotStatusBadgeClass`,
-`badgeClass()` kho NL…) CHƯA xoá — mỗi module thay ở giai đoạn của nó.
-
-### Từ điển thao tác (`doc-ui/action-registry.ts` + `row-action.tsx`)
-`<RowAction kind=… />` — một icon = một nghĩa: view `Eye` (CHỈ xem chi tiết) · signed `FileCheck2` ·
-download `Download` · draft `FileText` · print `Printer` · edit `Pencil` (bỏ `Edit2`) · copy `Copy` ·
-delete `Trash2` · add `Plus` · approve `CircleCheck` / cancel `Ban` (`variant="text"`, nút có chữ).
-Thứ tự: [Ký ngay] → view → signed → download → draft/print → riêng module → edit → copy → delete.
-
-### Component mới (`src/app/dashboard/_components/doc-ui/`)
-- `StatCard` / `StatGrid cols={3|4|5}` — 2 cột điện thoại → 3 (sm) → 3/4/5 (lg).
-- `DateGroupCard` — nhóm theo ngày; bấm header mở/thu, `sign`/`actions` chặn nổi bọt; thân là
-  `enterprise-table dense`; mở ra có viền trái `mod-600`.
-- `ListState kind="loading|empty|error" onRetry asRow colSpan` — 3 câu chuẩn.
-- `src/app/dashboard/_components/sign-status-badge.tsx` — `SignStatusBadge` gộp 3 badge ký
-  (`continueRule="approver"|"participant"`, `showProgress`, `hideWhenCannotCreate`, `blockedReason`,
-  `cancelMessage`, `dataChangedTitle`). Tới lượt mình ⇒ chip "Chờ ký" + nút **Ký ngay** brand (kể cả
-  người lập chưa ký ở luồng approver — trước chỉ thấy chip tĩnh). 3 badge cũ vẫn còn, thay ở U1-U3.
-
-### Khác
-- Bảng gọn: `<table className="enterprise-table dense">` (đệm 8×12px, chữ 13px) cho bảng nhiều cột.
-- Font Plus Jakarta Sans cho toàn dashboard: `font-doc` ở div gốc `dashboard/layout.tsx` (sidebar +
-  nội dung). Nhánh `/print`, `/product/confirm`, `/ky/` KHÔNG đổi.
-- `SegmentedTabs`: tab đang chọn chữ `mod-800` + gạch chân `mod-600` (Văn bản/ISO thêm gạch chân brand).
-
-## Quy tắc dòng có chi tiết con + U1 Bảo trì (2026-10-14)
-
-Người dùng chốt, áp cho MỌI danh sách có dòng mở rộng (thay cách mỗi nhóm một khung như Thành phẩm):
-- Mũi tên XUỐNG ở **ô cuối dòng, góc phải**; mũi tên CHỈ để mở/thu, không bao giờ chuyển trang
-  (vào chi tiết = con mắt `RowAction kind="view"`). Bấm bất kỳ đâu trên dòng cũng mở/thu; nút/link
-  trong dòng tự `stopPropagation`.
-- Các dòng liền nhau trong MỘT `enterprise-table`, chi tiết thụt vào ngay dưới, viền trái `mod-600`.
-- Dòng không có con vẫn giữ ô cuối trống để cột thẳng hàng.
-- Có nút "Mở tất cả / Thu gọn tất cả" (`ExpandAllToggle`).
-- Điện thoại: cột cuối (thao tác + mũi tên) **ghim phải** bằng class `sticky-end` (CSS ở globals.css,
-  chỉ `<768px`); header cột đó cũng phải có `sticky-end`.
-- Component: `doc-ui/expandable-row.tsx` — `ExpandableRow` (children = các `<td>` của dòng cha,
-  `endCell` = cụm thao tác đặt trước mũi tên), `ExpandHeaderCell`, `ExpandAllToggle`.
-- Danh sách nhóm theo ngày (Kiểm nghiệm U3, Thành phẩm/Sản lượng U7): dòng cha = dòng ngày + số liệu
-  + nút của ngày, con = bảng con lồng trong ô colSpan. `DateGroupCard` (U0, dạng khung) phải chuyển
-  sang quy tắc này trước U3. ISO/Văn bản hiện đặt mũi tên ĐẦU dòng — đồng bộ sau.
-
-U1 Bảo trì đã áp (chờ test tay): `MaintenanceShell` bọc `ModuleThemeScope theme="slate"` +
-`SegmentedTabs`; Tổng quan → `StatGrid`; Biên bản có `PageHeaderBanner` slate (F07 + Tạo biên bản ở
-banner); 2 bảng danh sách thêm cột Trạng thái (`StatusBadge domain="maintenance"`), cột Thao tác cuối
-(`maintenance/_components/maintenance-row-cells.tsx`: Eye chi tiết → FileCheck2 file ký → Download →
-FileText in chưa ký) + ô Ký duyệt `SignStatusBadge continueRule="participant" showProgress
-hideWhenCannotCreate`; hạng mục là chữ + icon xám (`hang-muc-label.tsx`), không tô đỏ/xanh; Lý lịch
-dùng `ExpandableRow`. Danh sách KHÔNG truyền `blockedReason` KT (như cũ — banner đầu trang + trang chi
-tiết đã khoá). `MaintenanceSignStatusBadge` cũ còn dùng ở `records/[id]`.
-
-Bổ sung sau test U1 (2026-10-14): `BannerAction` (`maintenance/_components/banner-action.tsx`) — nút
-trên banner màu đậm: `solid` (nút chính, nền trắng chữ brand) / `ghost` (trong suốt viền trắng), cao
-40px, chữ 13.5px đậm; thiếu điều kiện ⇒ mờ + tooltip lý do, không điều hướng. Trang Lý lịch: banner
-slate (F07 + In lý lịch), bộ lọc lưới mọi ô `h-10`, ô Tìm + nút **Quét QR** đứng đầu (QR biên bản =
-URL `/dashboard/maintenance/records/{uuid}`; cũng nhận UUID trần hoặc mã biên bản), máy quét
-`QrScanner` render qua `createPortal` ra `document.body` (tránh landmine containing-block của `fixed`).
-
-Sau test U1 (2026-10-14, tiếp): trang Biên bản **bỏ nút F07** (chỉ còn "Tạo biên bản"); F07 chỉ ở
-banner trang Lý lịch. `qr-scanner.tsx` (dùng chung Lý lịch + màn quét Thành phẩm) đã vá lỗi màn
-"Lỗi không xác định": `Html5Qrcode.stop()` ném CHUỖI đồng bộ khi camera chưa chạy (dev StrictMode,
-Hủy sớm, máy không webcam) — cleanup nay chờ `start()` xong mới `stop()`, mọi lời gọi thư viện bọc
-try/catch. Code mới dùng html5-qrcode phải theo đúng cách này.
-
-## U1b trang chi tiết biên bản + DateGroupRow + U2 Điều xe (2026-10-14, chờ test tay)
-
-- `maintenance/records/[id]/page.tsx` CHẾ ĐỘ XEM (`!inEditMode && record`) = `renderViewMode()`:
-  `DetailPageHeader` (mã, chip ngày/giờ · số thiết bị · người tạo; Xem/Tải file ký hoặc "In bản chưa
-  ký"; Chỉnh sửa `Pencil`; `HeaderQr`) + `DetailSplitLayout`. Cột trái: tab "File đã ký" (mặc định khi
-  có file, `DocViewer` qua route mới `GET /api/maintenance/records/[id]/file-url` — `maintenance.view`
-  + đúng nhà máy, mint Signed URL bucket `signing-documents` từ `yeu_cau_ky.file_hien_tai`) / "Nội
-  dung biên bản". Cột phải: `StatusSummaryBar` (trạng thái biên bản + ô ký `SignStatusBadge chipOnly`)
-  → `SignActionBox` (chính DUY NHẤT: Ký ngay / Sửa & ký lại / Gửi ký duyệt — khoá khi thiếu KT; phụ:
-  In bản chưa ký, Gửi duyệt lại; đỏ: Hủy biên bản, Hủy đã duyệt, Đảo xuất kho, Xóa — điều kiện cũ)
-  → khối KT → `TimelineSteps` (NV phụ trách → BGĐ → GĐ; chưa gửi ký ⇒ người ký dự kiến) → Chi phí →
-  Nhân sự. Tạo/Sửa giữ bố cục cũ, chỉ đổi màu `mod-*`/`brand-*`, `Edit3` → `Pencil`.
-- Link "In bản chưa ký" = `/dashboard/maintenance/print?type=…&record_id={effectiveId}` (trước trỏ
-  nhầm `/records/{id}/print` không tồn tại).
-- `SignStatusBadge` thêm prop `chipOnly`: chỉ chip + lý do trả về + "Hủy yêu cầu", không có nút
-  Gửi ký duyệt / Ký ngay / Sửa & ký lại (các nút đó nằm ở `SignActionBox`).
-- Đã xoá `maintenance-sign-status.tsx`; kiểu dữ liệu ở `records/_components/maintenance-sign-types.ts`.
-- `DateGroupCard` → `DateGroupRow` + `DateGroupHead` (`doc-ui/date-group-card.tsx`): mỗi ngày là 1
-  `ExpandableRow` trong MỘT `enterprise-table dense` (cột Ngày · Tóm tắt · Ký duyệt · Thao tác+mũi
-  tên), bảng con là `children`. `hideSign` cho module không ký theo ngày.
-- U2 Điều xe (danh sách): bọc `moduleThemeClass("ocean")`; tab → `SegmentedTabs`; KPI → `StatGrid`;
-  bảng `enterprise-table dense`, bỏ `onClick` từng ô (mã ĐX là link, `Eye` xem chi tiết); tiến độ →
-  `StatusBadge domain="dispatch_progress"`; ký → `SignStatusBadge continueRule="approver"`; thao tác
-  view → signed → download → draft → Ảnh (sky) → edit → copy → delete (cột cuối `sticky-end`).
-  `DispatchSignStatusBadge` còn file nhưng không còn dùng (chỉ còn type).
-
-### Sau test U1b/U2 (2026-10-14, chờ test tay)
-- **Xem file ký đúng tên**: Signed URL Supabase xem inline luôn lưu ra tên object (`v4.pdf`). Nay
-  "Xem" đi qua route app `GET /api/files/view/<token>/<tên>` (`src/lib/file-view-token.ts`: JWT HS256
-  `SIGN_JWT_SECRET`, sống 120s, payload bucket/path/tên) — trả `Content-Disposition: inline;
-  filename*=UTF-8''…`. File > 4MB (hoặc không rõ dung lượng) ⇒ 302 về Signed URL (giới hạn Vercel).
-  Token chỉ được mint bởi route đã xác thực: `api/maintenance/records/[id]/file-url?view=1` và route
-  chung `api/signing/requests/[yeuCauId]/file-url?view=1&name=…` (admin / người ký / quyền view module).
-  Cột "Xem file đã ký" ở danh sách Bảo trì + Điều xe dùng route chung (onClick, không href thẳng).
-  Văn bản/ISO **cùng lỗi, chưa sửa** — thêm `?view=1` vào 2 route `file-url` của chúng khi được duyệt.
-- Biên bản đã có file ký ⇒ bỏ "In bản chưa ký" khỏi hộp hành động.
-- Danh sách Điều xe theo `ExpandableRow`: mũi tên cuối dòng xổ bảng chuyến (Số xe · Chuyến · Tài xế ·
-  Đội · Điểm GN/Phiên · KL tươi · KL khô · Ghi chú), `ExpandAllToggle` trên bảng, mã ĐX/con mắt mở chi
-  tiết, ô Ký duyệt chặn nổi bọt.
-- Còn lệch quy tắc: danh sách Biên bản + Tổng quan Bảo trì chưa xổ danh sách thiết bị của biên bản.
-
-## Quy tắc Cân chỉnh Header/Action và Hình mắt xem chi tiết kèm PDF (2026-10-15)
-
-1. **Cân chỉnh Header & Action (Desktop & Mobile)**:
-   - Các trường header và các action luôn phải cân chỉnh vừa vặn với desktop hoặc mobile, không lệch trái, lệch phải hoặc xuống dòng vô điều kiện.
-   - Header bảng và ô dữ liệu phải thẳng hàng tuyệt đối (chữ căn trái, số liệu căn phải, cột thao tác/mũi tên căn phải).
-   - Thanh lọc (FilterBar) và header: Ô tìm kiếm phải có độ rộng hợp lý (`w-full sm:w-72` hoặc `sm:w-80`), không co giãn chiếm hết diện tích làm xô lệch hoặc đẩy các bộ lọc, nút action xuống dòng tùy tiện trên màn hình desktop.
-2. **Hình mắt (`Eye` / `RowAction kind="view"`): BẮT BUỘC vào View Detail có kèm nhúng file PDF**:
-   - Bấm hình mắt PHẢI mở trang/khung xem CHI TIẾT (Detail View) có kèm khung nhúng file PDF (`DocViewer`), không bao giờ mở file riêng lẻ hay mở form sửa.
-   - Nếu bản ghi đã gửi ký duyệt / có file ký: nhúng file PDF đã ký.
-   - Nếu bản ghi chưa gửi ký duyệt (hoặc đang là bản nháp): BẮT BUỘC render file PDF chưa ký duyệt (bản nháp xem trước được dựng trực tiếp qua `loadBytes`).
-3. **Cột Thao tác không ghim cố định (Hiển thị tự nhiên ở cuối dòng, không dùng `position: sticky`)**:
-   - Cột Thao tác (kèm mũi tên mở rộng nếu có) **KHÔNG ghim cố định** (`position: sticky`) trên cả Desktop lẫn Mobile. Cột nằm tự nhiên ở vị trí cuối dòng của bảng như cũ.
-   - Tránh tuyệt đối việc ghim cố định cụm nút thao tác (do cụm nút dài 160px – 280px sẽ chiếm diện tích lớn và che đè mất nội dung các cột dữ liệu khác khi bảng cuộn ngang).
-   - Mọi bảng `enterprise-table dense` nhiều cột (Điều xe, Chất lượng, Bảo trì, Đề nghị mua...) BẮT BUỘC bọc trong `ResponsiveTableWrapper` và khai báo `min-w-[...]` phù hợp (`min-w-[640px]` đến `min-w-[980px]`). Người dùng cuộn ngang xem dữ liệu sạch sẽ, rõ ràng và thấy cụm thao tác ở cuối dòng mà không bị đè lên bất kỳ nội dung nào.
+# UI Components & Design System (bản rút gọn 2026-10-27)
+
+Chuẩn bố cục module (danh sách / dòng xổ / chi tiết 70/30 / thao tác / bàn giao) nằm ở
+`.claude/rules/29-ui-standard.md` — file này chỉ liệt kê token, component và landmine kỹ thuật.
+Lịch sử đầy đủ (GĐ0–6 Doc-UI, U0–U4, Pastel Rừng Cao Su, ảnh login/sidebar):
+`.claude/history/05-ui-components-history.md`.
+
+## Nguyên tắc
+- Chỉ Tailwind CSS + lucide-react, không UI library ngoài. Nội dung tiếng Việt có dấu.
+- Font Plus Jakarta Sans toàn dashboard (`font-doc` ở div gốc `dashboard/layout.tsx`); mã dùng `font-code`.
+- Không dùng `scroll-reveal` trên bảng/card dữ liệu/filter bar re-render (mất class `revealed`).
+- Header có nhiều nút ⇒ cụm nút `flex-wrap`; mobile ≤430px không tràn ngang.
+
+## Màu — phương án C "lai"
+- Token trong `src/app/globals.css` (`@theme`): `app-bg`, thang `brand-50…900` (600 = #2f5d52, 800 = #1c3a32),
+  họ `ocean-*`, `mint-*`, `moss-*`.
+- **Banner** mỗi module giữ màu riêng: `PageHeaderBanner theme=…` (forest · ocean · mint · moss · amber · slate ·
+  violet · rose · orange · teal · rubber).
+- **Điều hướng** (tab chọn, focus ô nhập, icon thẻ số, viền dòng xổ) dùng utility `*-mod-50/200/600/800`; bọc vùng
+  module bằng `moduleThemeClass(theme)` / `<ModuleThemeScope>` (`doc-ui/module-theme.tsx`, `.mod-theme-*` cuối
+  globals.css, khai báo `@theme inline`). Thêm theme mới ⇒ thêm `.mod-theme-<x>` + 1 dòng `THEME_CLASS`.
+- **Hành động** (nút chính, Ký ngay, link mã) LUÔN `brand-*`.
+- **Trạng thái** CHỈ qua `StatusBadge` — 7 tông: valid · pending (chấm nhấp nháy) · warn · draft · danger ·
+  returned · info (xanh dương).
+- Nút trên banner màu đậm: nền trắng chữ `text-{theme}-700` (chính) hoặc `bg-white/15 border-white/40 text-white`.
+- Không `var(--color-x)` trong style inline — literal hex hoặc class Tailwind.
+
+## Component dùng chung (`src/app/dashboard/_components/`)
+| Component | Ghi chú |
+|---|---|
+| `PageHeaderBanner` | `title`, `subtitle`, `theme`, `icon` (LucideIcon), `action` (JSX, tự giữ logic quyền) — render `<h1>` |
+| `FilterBar` | `layout="grid"` cho mọi module mới; mobile thu gọn thành nút "Bộ lọc" + badge `activeCount` |
+| `ResponsiveTableWrapper` | Bọc bảng, cuộn ngang; lồng trong card thì `className="rounded-none border-0 shadow-none"` |
+| `ModalShell` | Full-screen mobile; `maxWidth`, `zIndexClassName` (modal lồng `z-[60]`), stack Escape chỉ đóng modal trên cùng |
+| `FilterMultiSelect` | `fullWidth`, `searchPlaceholder` |
+| `RequiredNoteSelect` | Ô ghi chú chỉ chọn từ danh mục `required_notes` (portal + fixed) |
+| `QrScanButton` / `QrScanPortal` | Quét QR ở ô tìm; portal ra `document.body`; `scanKey`/`header` để quét liên tục |
+| `SignStatusBadge` | Badge ký duyệt dùng chung (`continueRule`, `showProgress`, `chipOnly`, `blockedReason`) |
+| `resize-handle-icon.tsx` | `ResizeHandleIcon` + `RESIZE_HANDLE_CLASS/STYLE` cho `re-resizable` |
+
+### `doc-ui/` (`src/app/dashboard/_components/doc-ui/`)
+- `status-registry.ts` — nguồn DUY NHẤT nhãn + tông trạng thái theo domain (doc, iso, form, maintenance,
+  dispatch_progress, quality, purchase, inventory, export, lot, storage). Không viết span trạng thái tay.
+- `action-registry.ts` + `RowAction` / `IconActionGroup` — một icon = một nghĩa (view `Eye` · signed `FileCheck2` ·
+  download · draft `FileText` · print · edit `Pencil` · copy · delete; approve/cancel dạng chữ). Thứ tự xem rule 29.
+- `StatGrid` / `StatCard`, `ListState` (loading/empty/error + onRetry), `SegmentedTabs`, `DocCodePill`,
+  `TimelineSteps` + `TimelineProgress`, `InspectorCard` / `MetaRow` / `MetaList` / `StatusSummaryBar`.
+- `ExpandableRow` (mũi tên ô cuối, `endCell`), `ExpandHeaderCell`, `ExpandAllToggle`, `DateGroupRow` / `DateGroupHead`.
+- Trang chi tiết: `DetailPageHeader` + `HeaderButton`, `DetailSplitLayout` (70/30, tab mobile "Tài liệu / Ký duyệt"),
+  `SignActionBox` (primary duy nhất + phụ + nguy hiểm), `HeaderQr`.
+- `DocViewer` — PDF nhúng: `endpoint` (route `/file-url`, Signed URL) hoặc `loadBytes` + `sourceKey` (bản chưa ký dựng
+  trong trình duyệt); `active=false` khi modal ký đang mở; pdfjs nạp `next/dynamic ssr:false`.
+- `PinDialog` (chỉ trình bày, không gọi API), `SignWorkspaceShell` + `SignRail` + `SignCanvasArea` (vỏ màn ký).
+- `use-is-desktop.ts`, `pdfjs-worker.ts` (`ensurePdfjsWorker` — worker local, KHÔNG CDN).
+- Bảng: `<table className="enterprise-table dense min-w-[…]">` (CSS ở globals.css), `<th>` không cần class.
+
+## Landmine kỹ thuật
+- Không `filter/backdrop-filter/transform/perspective/will-change/contain` trên ancestor của overlay `position:fixed`
+  (header, sidebar) — biến ancestor thành containing block, mobile sheet lệch khỏi màn hình.
+- `re-resizable` phải đủ `handleComponent` + `handleClasses` + `handleStyles`; `cancel` của `<Draggable>` là
+  `.resize-handle,.resize-handle *` (không phải `.react-resizable-handle`). React 19: `Draggable` dùng `nodeRef`.
+- `QRCodeCanvas` tự gắn inline width/height ⇒ ghi đè `style={{width:"100%",height:"100%"}}` trong khung `aspect-square`.
+- html5-qrcode: chờ `start()` xong mới `stop()`, bọc try/catch (ném chuỗi đồng bộ).
+- Đọc `localStorage/sessionStorage` lúc khởi động luôn try/catch (WebView chặn). `error.tsx`/`global-error.tsx` có sẵn.
+- Edit modal JSX lớn (>45 dòng, nhiều tiếng Việt) bằng Edit có thể hỏng âm thầm — tách 2 lần edit (mở tag / đóng tag).
+- Tailwind JIT: class màu động `bg-${c}-100` chỉ chạy nếu tổ hợp đó đã xuất hiện literal ở nơi khác.
+
+## Chưa quyết định
+- Kéo-thả mobile: sơ đồ Kho thành phẩm, đặt chữ ký ISO (react-draggable) — hỏi người dùng hướng xử lý trước khi làm.

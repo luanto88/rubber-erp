@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
+import { isoActorHasPermission, isoAuthErrorStatus, resolveIsoActor } from "@/app/api/iso/_lib/iso-actor"
+
+// ~8 MB chuỗi base64 (≈ 6 MB ảnh) — chặn payload khổng lồ đốt quota Gemini.
+const MAX_IMAGE_BASE64_LENGTH = 8 * 1024 * 1024
 
 // OCR ảnh đồng hồ đo chỉ tiêu Po / Mo bằng Gemini Vision — TỰ NHẬN DẠNG thiết bị trong ảnh,
 // không cần biết trước ảnh là Po hay Mo. Cho phép upload nhiều ảnh cùng lúc (mỗi ảnh gọi route
@@ -24,6 +28,17 @@ Respond with EXACTLY one line in this format, nothing else: LABEL:VALUE
 Example outputs: "Po:39.0" or "Mo:82.0"`
 
 export async function POST(req: NextRequest) {
+  // Xác thực trước khi gọi Gemini: route này từng mở cho bất kỳ ai gọi, đốt quota API key.
+  try {
+    const actor = await resolveIsoActor(req)
+    if (!(await isoActorHasPermission(actor, ["process.create", "process.edit"]))) {
+      return NextResponse.json({ error: "Bạn không có quyền nhập phiếu đo nhanh" }, { status: 403 })
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Phiên đăng nhập không hợp lệ"
+    return NextResponse.json({ error: msg }, { status: isoAuthErrorStatus(err) })
+  }
+
   try {
     const { imageBase64, mimeType } = await req.json() as {
       imageBase64?: string
@@ -32,6 +47,12 @@ export async function POST(req: NextRequest) {
 
     if (!imageBase64 || !mimeType) {
       return NextResponse.json({ error: "Thiếu imageBase64 hoặc mimeType" }, { status: 400 })
+    }
+    if (!mimeType.startsWith("image/")) {
+      return NextResponse.json({ error: "Tệp gửi lên không phải ảnh" }, { status: 400 })
+    }
+    if (imageBase64.length > MAX_IMAGE_BASE64_LENGTH) {
+      return NextResponse.json({ error: "Ảnh quá lớn để nhận dạng" }, { status: 413 })
     }
 
     const apiKey = process.env.GEMINI_API_KEY

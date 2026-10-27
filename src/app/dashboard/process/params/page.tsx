@@ -1,13 +1,18 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { AlertTriangle, Pencil, Plus, Thermometer, Trash2, X } from "lucide-react"
-import { getActiveFactoryId } from "@/lib/auth"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { AlertTriangle, Plus, Thermometer, X } from "lucide-react"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { ProcessShell } from "../_components/process-shell"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
+import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import {
   type ProcessParam,
   type CheDoRow,
@@ -32,8 +37,10 @@ function formatDateTime(d: string) {
 
 export default function ProcessParamsPage() {
   const [factoryId, setFactoryId] = useState<string | null>(null)
+  const [currentUser, setCurrentUser] = useState<SessionUser | null>(null)
   const [items, setItems] = useState<ProcessParam[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   // filters
   const [filterFrom, setFilterFrom] = useState("")
@@ -47,24 +54,38 @@ export default function ProcessParamsPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [delConfirm, setDelConfirm] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [cheDoWarning, setCheDoWarning] = useState<string | null>(null)
+  // Chỉ tự điền nhiệt độ/thời gian khi thêm mới hoặc khi người dùng TỰ đổi Dây chuyền/CSR trong form.
+  // Mở "Sửa" không được ghi đè số liệu của chính bản ghi đang sửa bằng bản ghi khác.
+  const autoFillArmed = useRef(false)
+
+  // admin luôn qua (hasPermission tự return true cho role admin)
+  const canCreate = hasPermission(currentUser, "process.create")
+  const canEdit = hasPermission(currentUser, "process.edit")
+  const canDelete = hasPermission(currentUser, "process.delete")
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
+    setLoadError(null)
     try {
-      let q = supabase
-        .from("process_params")
-        .select("*")
-        .eq("factory_id", fid)
-        .order("ngay", { ascending: false })
-        .order("created_at", { ascending: false })
-
-      if (filterFrom) q = q.gte("ngay", filterFrom)
-      if (filterTo) q = q.lte("ngay", filterTo)
-      if (filterDayChuyen) q = q.eq("day_chuyen", filterDayChuyen)
-
-      const { data } = await q
-      setItems((data as ProcessParam[]) || [])
+      const data = await fetchAllPaginated<ProcessParam>((from, to) => {
+        let q = supabase
+          .from("process_params")
+          .select("*")
+          .eq("factory_id", fid)
+          .order("ngay", { ascending: false })
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+        if (filterFrom) q = q.gte("ngay", filterFrom)
+        if (filterTo) q = q.lte("ngay", filterTo)
+        if (filterDayChuyen) q = q.eq("day_chuyen", filterDayChuyen)
+        return q.range(from, to)
+      })
+      setItems(data)
+    } catch (err) {
+      setItems([])
+      setLoadError((err as { message?: string } | null)?.message || "Không tải được dữ liệu thông số")
     } finally {
       setLoading(false)
     }
@@ -74,6 +95,14 @@ export default function ProcessParamsPage() {
     const bootstrap = async () => {
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
+      const { user: sessionUser } = await hydrateActiveSession()
+      if (!sessionUser) { setLoading(false); return }
+      if (!hasPermission(sessionUser, "process.view")) {
+        setLoading(false)
+        window.location.replace("/dashboard")
+        return
+      }
+      setCurrentUser(sessionUser)
       setFactoryId(fid)
     }
     void bootstrap()
@@ -120,6 +149,11 @@ export default function ProcessParamsPage() {
         }))
       }
 
+      if (!autoFillArmed.current) {
+        // Đang sửa và người dùng chưa đổi Dây chuyền/CSR: chỉ hiện cảnh báo, không ghi đè số liệu.
+        setCheDoWarning(form.loai_csr ? resolveCheDoSuggestion(csrMatch, latestAny, form.loai_csr, formatDate).warning : null)
+        return
+      }
       if (!form.loai_csr) {
         applyRow(latestAny)
         setCheDoWarning(null)
@@ -134,6 +168,7 @@ export default function ProcessParamsPage() {
   }, [form.day_chuyen, form.loai_csr, modal])
 
   const openAdd = () => {
+    autoFillArmed.current = true
     setForm(emptyProcessParamForm())
     setEditId(null)
     setSaveError(null)
@@ -141,6 +176,7 @@ export default function ProcessParamsPage() {
   }
 
   const openEdit = (item: ProcessParam) => {
+    autoFillArmed.current = false
     setForm({
       ngay: item.ngay,
       day_chuyen: item.day_chuyen,
@@ -157,6 +193,7 @@ export default function ProcessParamsPage() {
 
   const handleSave = async () => {
     if (!factoryId) return
+    if (editId ? !canEdit : !canCreate) { setSaveError("Bạn không có quyền thực hiện thao tác này."); return }
     if (!form.day_chuyen) { setSaveError("Vui lòng chọn dây chuyền."); return }
     if (!form.loai_csr) { setSaveError("Vui lòng chọn Loại CSR."); return }
     setSaving(true)
@@ -189,14 +226,43 @@ export default function ProcessParamsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!factoryId) return
-    await supabase.from("process_params").delete().eq("id", id)
-    setDelConfirm(null)
-    void loadData(factoryId)
+    if (!factoryId || deleting) return
+    if (!canDelete) { setSaveError("Bạn không có quyền xóa thông số."); return }
+    setDeleting(true)
+    try {
+      const { error } = await supabase.from("process_params").delete().eq("id", id).eq("factory_id", factoryId)
+      if (error) { setSaveError(error.message); return }
+      setDelConfirm(null)
+      void loadData(factoryId)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Lỗi không xác định")
+    } finally {
+      setDeleting(false)
+    }
   }
 
+  const fieldCls = "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none focus:border-mod-600"
+  const filterCount = [filterFrom, filterTo, filterDayChuyen].filter(Boolean).length
+
   return (
-    <ProcessShell>
+    <ProcessShell
+      banner={
+        <PageHeaderBanner
+          title="Thông số kỹ thuật"
+          subtitle="Nhiệt độ và thời gian sấy theo dây chuyền"
+          theme="teal"
+          icon={Thermometer}
+          action={canCreate ? (
+            <button
+              onClick={openAdd}
+              className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-bold text-teal-700 shadow-sm transition-colors hover:bg-teal-50"
+            >
+              <Plus size={16} /> Thêm mới
+            </button>
+          ) : undefined}
+        />
+      }
+    >
       {/* Save error toast */}
       {saveError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
@@ -206,115 +272,74 @@ export default function ProcessParamsPage() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <h1 className="text-2xl font-extrabold text-slate-800">Thông số kỹ thuật</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Nhiệt độ và thời gian sấy theo dây chuyền</p>
-        </div>
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-md transition-all"
-        >
-          <Plus size={16} /> Thêm mới
-        </button>
-      </div>
-
-      {/* Filter bar */}
-      <FilterBar activeCount={[filterFrom, filterTo, filterDayChuyen].filter(Boolean).length}>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Từ ngày</label>
-          <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Đến ngày</label>
-          <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500" />
-        </div>
-        <div>
-          <label className="text-xs font-bold text-slate-600 block mb-1.5">Dây chuyền</label>
-          <select value={filterDayChuyen} onChange={e => setFilterDayChuyen(e.target.value)}
-            className="px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500">
+      <FilterBar layout="grid" activeCount={filterCount}>
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold text-slate-600">Từ ngày</span>
+          <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className={fieldCls} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold text-slate-600">Đến ngày</span>
+          <input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} className={fieldCls} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold text-slate-600">Dây chuyền</span>
+          <select value={filterDayChuyen} onChange={e => setFilterDayChuyen(e.target.value)} className={fieldCls}>
             <option value="">Tất cả</option>
             {DAY_CHUYEN_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
-        </div>
-        {(filterFrom || filterTo || filterDayChuyen) && (
-          <button
-            onClick={() => { setFilterFrom(""); setFilterTo(""); setFilterDayChuyen("") }}
-            className="mt-5 px-3 py-2 text-xs font-bold text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl border border-slate-200 transition-all"
-          >
-            Xóa bộ lọc
-          </button>
-        )}
+        </label>
+        <button
+          onClick={() => { setFilterFrom(""); setFilterTo(""); setFilterDayChuyen("") }}
+          disabled={filterCount === 0}
+          className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm font-bold text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+        >
+          Xóa lọc
+        </button>
       </FilterBar>
 
-      {/* Table */}
       <ResponsiveTableWrapper>
         {loading ? (
-          <div className="p-12 text-center text-slate-400">Đang tải...</div>
+          <ListState kind="loading" />
+        ) : loadError ? (
+          <ListState kind="error" message={`Không tải được dữ liệu: ${loadError}`} onRetry={() => factoryId && void loadData(factoryId)} />
         ) : items.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">
-            <Thermometer size={40} className="mx-auto mb-3 opacity-30" />
-            <p>Chưa có thông số nào</p>
-          </div>
+          <ListState kind="empty" message="Chưa có thông số nào" />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600 whitespace-nowrap">Ngày</th>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600 whitespace-nowrap">Dây chuyền</th>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600 whitespace-nowrap">Loại CSR</th>
-                  <th className="text-right px-4 py-3 font-bold text-slate-600 whitespace-nowrap">Đầu ướt (°C)</th>
-                  <th className="text-right px-4 py-3 font-bold text-slate-600 whitespace-nowrap">Đầu khô (°C)</th>
-                  <th className="text-right px-4 py-3 font-bold text-slate-600 whitespace-nowrap">T.gian sấy (ph)</th>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600">Ghi chú / Lý do</th>
-                  <th className="text-left px-4 py-3 font-bold text-slate-600 whitespace-nowrap">Thời điểm</th>
-                  <th className="px-4 py-3"></th>
+          <table className="enterprise-table dense min-w-[900px]">
+            <thead>
+              <tr>
+                <th>Ngày</th>
+                <th>Dây chuyền</th>
+                <th>Loại CSR</th>
+                <th className="text-right">Đầu ướt (°C)</th>
+                <th className="text-right">Đầu khô (°C)</th>
+                <th className="text-right">T.gian sấy (ph)</th>
+                <th>Ghi chú / Lý do</th>
+                <th>Thời điểm</th>
+                <th className="text-right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map(item => (
+                <tr key={item.id}>
+                  <td className="whitespace-nowrap font-semibold text-slate-700">{formatDate(item.ngay)}</td>
+                  <td className="whitespace-nowrap">{item.day_chuyen}</td>
+                  <td className="whitespace-nowrap">{item.loai_csr ? `CSR ${item.loai_csr}` : <span className="text-slate-300">—</span>}</td>
+                  <td className="text-right font-code">{item.nhiet_do_dau_1 != null ? item.nhiet_do_dau_1 : <span className="text-slate-300">—</span>}</td>
+                  <td className="text-right font-code">{item.nhiet_do_dau_2 != null ? item.nhiet_do_dau_2 : <span className="text-slate-300">—</span>}</td>
+                  <td className="text-right font-code">{item.thoi_gian_say != null ? item.thoi_gian_say : <span className="text-slate-300">—</span>}</td>
+                  <td className="max-w-xs truncate text-slate-600" title={item.ghi_chu || ""}>{item.ghi_chu || ""}</td>
+                  <td className="whitespace-nowrap text-xs text-slate-400">{formatDateTime(item.created_at)}</td>
+                  <td>
+                    <IconActionGroup className="justify-end">
+                      {canEdit && <RowAction kind="edit" label="Sửa thông số" onClick={() => openEdit(item)} />}
+                      {canDelete && <RowAction kind="delete" label="Xóa thông số" onClick={() => setDelConfirm(item.id)} />}
+                    </IconActionGroup>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {items.map(item => (
-                  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 font-semibold text-slate-700">{formatDate(item.ngay)}</td>
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 bg-teal-100 text-teal-700 text-xs font-bold rounded-lg">{item.day_chuyen}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {item.loai_csr
-                        ? <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-lg">CSR {item.loai_csr}</span>
-                        : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-700">
-                      {item.nhiet_do_dau_1 != null ? item.nhiet_do_dau_1 : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-700">
-                      {item.nhiet_do_dau_2 != null ? item.nhiet_do_dau_2 : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-700">
-                      {item.thoi_gian_say != null ? item.thoi_gian_say : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600 max-w-xs truncate">{item.ghi_chu || ""}</td>
-                    <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{formatDateTime(item.created_at)}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 justify-end">
-                        <button onClick={() => openEdit(item)}
-                          className="p-1.5 hover:bg-teal-50 text-slate-400 hover:text-teal-600 rounded-lg transition-colors">
-                          <Pencil size={14} />
-                        </button>
-                        <button onClick={() => setDelConfirm(item.id)}
-                          className="p-1.5 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
       </ResponsiveTableWrapper>
 
@@ -346,7 +371,7 @@ export default function ProcessParamsPage() {
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Dây chuyền <span className="text-red-500">*</span></label>
-                  <select value={form.day_chuyen} onChange={e => setForm(f => ({ ...f, day_chuyen: e.target.value, loai_csr: "" }))}
+                  <select value={form.day_chuyen} onChange={e => { autoFillArmed.current = true; setForm(f => ({ ...f, day_chuyen: e.target.value, loai_csr: "" })) }}
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-teal-500">
                     <option value="">— Chọn —</option>
                     {DAY_CHUYEN_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
@@ -360,7 +385,7 @@ export default function ProcessParamsPage() {
                     <button
                       key={csr}
                       type="button"
-                      onClick={() => setForm(f => ({ ...f, loai_csr: f.loai_csr === csr ? "" : csr }))}
+                      onClick={() => { autoFillArmed.current = true; setForm(f => ({ ...f, loai_csr: f.loai_csr === csr ? "" : csr })) }}
                       className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
                         form.loai_csr === csr
                           ? "bg-blue-600 text-white border-blue-600"
@@ -414,18 +439,23 @@ export default function ProcessParamsPage() {
 
       {/* Delete confirm */}
       {delConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-extrabold text-slate-800 mb-2">Xác nhận xóa</h3>
-            <p className="text-sm text-slate-600 mb-6">Bạn có chắc muốn xóa bản ghi thông số này không?</p>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setDelConfirm(null)}
-                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Hủy</button>
-              <button onClick={() => handleDelete(delConfirm)}
-                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-md transition-all">Xóa</button>
-            </div>
-          </div>
-        </div>
+        <ModalShell
+          title="Xác nhận xóa"
+          onClose={() => { if (!deleting) setDelConfirm(null) }}
+          maxWidth="sm"
+          footer={
+            <>
+              <button onClick={() => setDelConfirm(null)} disabled={deleting}
+                className="px-5 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl disabled:opacity-60">Hủy</button>
+              <button onClick={() => void handleDelete(delConfirm)} disabled={deleting}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white font-bold rounded-xl shadow-md transition-all">
+                {deleting ? "Đang xóa..." : "Xóa"}
+              </button>
+            </>
+          }
+        >
+          <p className="text-sm text-slate-600">Bạn có chắc muốn xóa bản ghi thông số này không?</p>
+        </ModalShell>
       )}
     </ProcessShell>
   )

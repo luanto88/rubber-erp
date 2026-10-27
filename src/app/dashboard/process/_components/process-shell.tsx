@@ -1,78 +1,44 @@
 "use client"
 
-import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Activity, BarChart2, ClipboardCheck, type LucideIcon } from "lucide-react"
+import { Activity, BarChart2, ClipboardCheck } from "lucide-react"
 import type { ReactNode } from "react"
+import { SegmentedTabs, type SegmentedTabItem } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 
-type NavTab = {
-  href: string
-  label: string
-  icon: LucideIcon
-  matchPrefixes?: string[]
-}
+type ProcessTabKey = "overview" | "params" | "measurements"
 
-const tabs: NavTab[] = [
-  {
-    href: "/dashboard/process",
-    label: "Tổng quan",
-    icon: BarChart2,
-    matchPrefixes: [],
-  },
-  {
-    href: "/dashboard/process/params",
-    label: "Thông số kỹ thuật",
-    icon: Activity,
-    matchPrefixes: ["/dashboard/process/params"],
-  },
-  {
-    href: "/dashboard/process/measurements",
-    label: "Đo nhanh chỉ tiêu",
-    icon: ClipboardCheck,
-    matchPrefixes: ["/dashboard/process/measurements"],
-  },
+const TAB_ITEMS: SegmentedTabItem<ProcessTabKey>[] = [
+  { key: "overview", label: "Tổng quan", icon: BarChart2, href: "/dashboard/process" },
+  { key: "params", label: "Thông số kỹ thuật", icon: Activity, href: "/dashboard/process/params" },
+  { key: "measurements", label: "Đo nhanh chỉ tiêu", icon: ClipboardCheck, href: "/dashboard/process/measurements" },
 ]
 
-function isActive(pathname: string, tab: NavTab) {
-  if (tab.matchPrefixes && tab.matchPrefixes.length > 0) {
-    return tab.matchPrefixes.some((p) => pathname === p || pathname.startsWith(`${p}/`))
-  }
-  return pathname === tab.href
+function activeTab(pathname: string): ProcessTabKey | null {
+  if (pathname === "/dashboard/process") return "overview"
+  if (pathname.startsWith("/dashboard/process/params")) return "params"
+  if (pathname.startsWith("/dashboard/process/measurements")) return "measurements"
+  return null
 }
 
 type ProcessShellProps = {
   children?: ReactNode
+  /** Banner `PageHeaderBanner` của trang — luôn đặt trên thanh tab. */
+  banner?: ReactNode
+  /** Ẩn thanh tab (trang chi tiết phiếu có nút quay lại riêng). */
+  hideTabs?: boolean
 }
 
-export function ProcessShell({ children }: ProcessShellProps) {
+// Vỏ module Kiểm soát quá trình (rule 29): màu điều hướng teal + thanh tab chuẩn SegmentedTabs.
+export function ProcessShell({ children, banner, hideTabs = false }: ProcessShellProps) {
   const pathname = usePathname()
 
   return (
-    <div className="space-y-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="flex gap-1 p-2 overflow-x-auto">
-          {tabs.map((tab) => {
-            const active = isActive(pathname, tab)
-            const Icon = tab.icon
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                className={
-                  "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border " +
-                  (active
-                    ? "bg-teal-50 text-teal-700 border-teal-200"
-                    : "bg-white text-slate-600 border-transparent hover:bg-slate-50")
-                }
-              >
-                <Icon size={14} />
-                {tab.label}
-              </Link>
-            )
-          })}
-        </div>
-      </div>
-
+    <div className={`${moduleThemeClass("teal")} space-y-4`}>
+      {banner}
+      {!hideTabs && (
+        <SegmentedTabs ariaLabel="Chọn mục Kiểm soát quá trình" value={activeTab(pathname)} items={TAB_ITEMS} />
+      )}
       {children}
     </div>
   )

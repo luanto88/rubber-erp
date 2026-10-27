@@ -5006,15 +5006,6 @@ export default function ProductPage() {
                 <Wand2 size={15} /> Dự đoán số lô
               </Link>
             )}
-            {hasPermission(currentUser, "inventory.view") && (
-              <Link
-                href="/dashboard/inventory/on-hand"
-                title="Tồn pallet nằm ở Kho vật tư → Tồn (lọc Phân loại: Pallet các loại)"
-                className="flex items-center gap-1.5 px-3 py-2 border border-white/40 bg-white/15 text-white text-sm font-bold rounded-xl shadow-sm transition-all btn-press whitespace-nowrap hover:bg-white/25"
-              >
-                <Layers size={15} /> Tồn pallet
-              </Link>
-            )}
             {hasPermission(currentUser, "product.confirm_scan") && (
               <Link
                 href="/dashboard/product/confirm"

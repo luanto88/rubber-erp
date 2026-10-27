@@ -1,5 +1,7 @@
 // Types và helpers cho module Kiểm soát quá trình
 
+import { getFactoryTodayISO } from "@/lib/date-utils"
+
 export type ProcessParam = {
   id: string
   factory_id: string
@@ -150,7 +152,7 @@ export type EmptyProcessParamForm = {
 
 export function emptyProcessParamForm(): EmptyProcessParamForm {
   return {
-    ngay: new Date().toISOString().slice(0, 10),
+    ngay: getFactoryTodayISO(),
     day_chuyen: "",
     loai_csr: "",
     nhiet_do_dau_1: "",

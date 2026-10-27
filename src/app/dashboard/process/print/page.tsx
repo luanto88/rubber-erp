@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import Image from "next/image"
 import { Printer, Share2, Download, X, ZoomIn, AlertTriangle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
+import { authBlockReason, getActiveFactoryId, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import type { QuickMeasurementSheet, QuickMeasurementRow } from "../_components/process-types"
 
 type NganInfo = { id: string; ten_ngan: string; ma_ngan: string; loai_nl: string; ngay_bd: string }
@@ -77,7 +77,7 @@ export default function ProcessPrintPage() {
         window.location.replace("/dashboard")
         return
       }
-      const fid = user.factory_id
+      const fid = await getActiveFactoryId()
       if (!fid) { setError("Không xác định được nhà máy đang đăng nhập."); setLoading(false); return }
 
       const { data, error: err } = await supabase
@@ -105,6 +105,7 @@ export default function ProcessPrintPage() {
         const { data: nData } = await supabase
           .from("ngans")
           .select("id,ten_ngan,ma_ngan,loai_nl,ngay_bd")
+          .eq("factory_id", fid)
           .in("id", nganIds)
         if (nData) {
           const map: Record<string, NganInfo> = {}
@@ -334,7 +335,7 @@ export default function ProcessPrintPage() {
                       <td style={{ fontSize: "9pt" }}>{ctLabel || "—"}</td>
                       <td style={{ fontSize: "9pt", textAlign: "center" }}>{row.che_do_say || "—"}</td>
                       {chiTieuCols.map(ct => {
-                        const val = (row.ket_qua as Record<string, number | null>)[ct]
+                        const val = (row.ket_qua || {} as Record<string, number | null>)[ct]
                         return (
                           <td key={ct} style={{ textAlign: "center", fontSize: "11pt", fontWeight: "bold" }}>
                             {val != null ? val : "—"}
@@ -505,7 +506,7 @@ export default function ProcessPrintPage() {
                   <td style={{ ...TD, fontSize: "9pt" }}>{z(ctLabel) || "—"}</td>
                   <td style={{ ...TD, fontSize: "9pt", textAlign: "center" }}>{z(row.che_do_say) || "—"}</td>
                   {chiTieuCols.map(ct => {
-                    const val = (row.ket_qua as Record<string, number | null>)[ct]
+                    const val = (row.ket_qua || {} as Record<string, number | null>)[ct]
                     return (
                       <td key={ct} style={{ ...TD, textAlign: "center", fontSize: "11pt", fontWeight: "bold" }}>
                         {val != null ? val : "—"}
