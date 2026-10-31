@@ -4,6 +4,7 @@
  * - Trang `/dashboard/product/confirm` (mọi query): network-first, lưu bản mới nhất để mở được khi mất mạng.
  * - Chunk `/_next/static/*` (tên có hash, bất biến): cache-first, CHỈ khi do trang quét QR tải.
  * - manifest + icon như trước.
+ * - `/login`: KHÔNG cache, chỉ trả trang tĩnh "mất mạng" khi điều hướng lỗi mạng (đăng xuất lúc offline).
  * KHÔNG cache: API, server action (POST), Supabase (khác origin), RSC, mọi trang khác.
  *
  * Mã bản build lấy từ `?v=` của URL script (sw-register.tsx). Mỗi lần deploy = SW mới; giữ cache của bản
@@ -137,6 +138,18 @@ async function handleConfirmNavigation(event) {
   }
 }
 
+const LOGIN_OFFLINE_HTML = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mất mạng</title></head><body style="font-family:system-ui,sans-serif;background:#f1f5f9;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px;text-align:center"><div style="max-width:360px;background:#fff;border-radius:16px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.1)"><h1 style="font-size:18px;color:#b91c1c;margin:0 0 8px">Đang mất mạng</h1><p style="font-size:14px;color:#475569;margin:0 0 16px">Cần có mạng để đăng nhập. Khi có mạng lại, bấm "Thử lại".</p><button onclick="location.reload()" style="background:#059669;color:#fff;border:0;border-radius:10px;padding:10px 18px;font-weight:700">Thử lại</button></div></body></html>`
+
+/** /login: luôn đi mạng, KHÔNG cache. Chỉ khi mất mạng (vd đăng xuất ở màn quét lúc offline) mới trả trang
+ *  tĩnh báo mất mạng, thay vì trang lỗi mặc định của trình duyệt. */
+async function handleLoginNavigation(event) {
+  try {
+    return await fetch(event.request)
+  } catch {
+    return new Response(LOGIN_OFFLINE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } })
+  }
+}
+
 /** Tải HTML trang quét + chunk của nó vào cache. Dùng khi trang tự yêu cầu (postMessage) vì 2 trường hợp
  *  điều hướng KHÔNG đi qua handler navigation ở trên:
  *  - lần mở đầu: SW chưa kiểm soát trang (mới cài) ⇒ HTML + chunk tải thẳng mạng;
@@ -187,6 +200,7 @@ self.addEventListener("fetch", (event) => {
 
   if (req.mode === "navigate") {
     if (isConfirmPath(url.pathname)) event.respondWith(handleConfirmNavigation(event))
+    else if (url.pathname === "/login") event.respondWith(handleLoginNavigation(event))
     return
   }
   if (url.pathname.startsWith("/_next/static/")) {
