@@ -46,6 +46,10 @@ export interface ParsedSlRow {
   chuyen: number
   /** false = file không có cột Chuyến (mẫu SLRpt) — chuyến được ghép tự động từ Điều xe. */
   chuyen_tu_file?: boolean
+  /** Mã xe đúng như ghi trong file (vd "TM12") — đọc lại theo Điều xe trong matchRows. */
+  so_xe_raw?: string
+  /** true khi mã trong file đã được tách xe + chuyến (vd "TM12" → TM1 chuyến 2). */
+  xe_tach_chuyen?: boolean
   ghi_chu: string
   ghi_chu_tu_do?: string
   mn_tuoi: number; mn_drc: number; mn_kho: number
@@ -134,6 +138,28 @@ export function parseVehicleCode(raw: string): { base_xe: string; chuyen: number
   const m = s.match(/^(\d+[A-Z]+)(\d)$/)
   if (!m) return { base_xe: s, chuyen: 1 }
   return { base_xe: m[1], chuyen: parseInt(m[2]) }
+}
+
+/**
+ * Đọc mã xe trong file sản lượng DỰA VÀO Điều xe của chính ngày đó, để tách đúng số chuyến ghi
+ * dính đuôi kể cả mã xe bắt đầu bằng chữ (vd "TM12" = xe TM1 chuyến 2, "1A2" = xe 1A chuyến 2):
+ *  1. Mã nguyên văn có trong Điều xe ngày đó → là chính số xe (giữ X01, N02, TM1, 3A1064…).
+ *  2. Bỏ 1 chữ số cuối (1-9) mà ra số xe có trong Điều xe → chữ số đó là số chuyến.
+ *  3. Không khớp gì → quay về quy tắc cũ `parseVehicleCode`.
+ * `split` = true khi mã trong file đã được tách thành xe + chuyến.
+ */
+export function resolveVehicleTrip(
+  raw: string,
+  vehiclesOfDay: Set<string> | undefined,
+): { base_xe: string; chuyen: number; split: boolean; fromSuffix: boolean } {
+  const s = raw.trim().toUpperCase().replace(/^0+(\d)/, "$1")
+  if (vehiclesOfDay?.has(s)) return { base_xe: s, chuyen: 1, split: false, fromSuffix: false }
+  const m = s.match(/^(.+?)([1-9])$/)
+  if (m && vehiclesOfDay?.has(m[1])) {
+    return { base_xe: m[1], chuyen: parseInt(m[2]), split: true, fromSuffix: true }
+  }
+  const p = parseVehicleCode(s)
+  return { ...p, split: p.base_xe !== s, fromSuffix: p.base_xe !== s }
 }
 
 export function buildProductionRecordKey(input: {

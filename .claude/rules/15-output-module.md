@@ -390,7 +390,7 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
   Tươi/DRC/Khô, T tổng quy khô (bỏ), U ghi chú; bỏ dòng "Tổng cộng". Mẫu cũ (sl_mau) không đổi.
 - **Không có cột Chuyến** ⇒ `matchRows` ghép: ứng viên = chuyến điều xe của xe trong ngày có điểm GN
   thuộc đội lớn của dòng, sắp `chuyen` tăng; dòng thứ k của cùng (ngày, xe, đội) → ứng viên thứ k.
-  Không có ứng viên mà xe chỉ có 1 chuyến ⇒ gán chuyến đó + `DOI_MISMATCH`; còn lại
+  Không có ứng viên mà xe chỉ có 1 chuyến ⇒ gán chuyến đó (cảnh báo `DOI_MISMATCH` chỉ phát sinh ở bước kiểm đội sau đó, không phát sinh cho đội 0); còn lại
   `CHUYEN_NOT_FOUND` (không chặn, chuyến tạm = 1). Bảng xem trước ghi "tự ghép" dưới số chuyến.
   Chỉ số chuyến được ghép xong mới tính khoá trùng (`getMatchedKey`).
 
@@ -431,3 +431,17 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - `src/lib/output-pdf.ts`: `buildOutputDayPdfBytes` + `downloadOutputDayPdf` (tham số `qrUrl` → QR 18mm góc phải
   trên), font/QR dùng chung `pdf-qr-shared`. PDF từ danh sách vẫn theo bộ lọc đang chọn, có QR trỏ trang ngày.
 - Converter bọc `moduleThemeClass("forest")` + `PageHeaderBanner` (Quay lại / Tải Excel / Chọn file trên banner).
+
+## Mã xe ghi dính chuyến + Thu mua + converter (2026-10-30, chờ test tay)
+- **"TM12" = TM1 chuyến 2**: `parseVehicleCode` chỉ tách chuyến khi mã bắt đầu bằng số ⇒ "TM12" từng bị đọc là xe
+  "TM12" ⇒ VEHICLE_NOT_FOUND. Nay `resolveVehicleTrip(raw, xeCủaNgày)` (`output-types.ts`) tra Điều xe CỦA ĐÚNG NGÀY:
+  mã nguyên văn có trong Điều xe ⇒ giữ (X01, N02, TM1, 3A1064); bỏ 1 chữ số cuối (1-9) ra xe có trong Điều xe ⇒ số đó là
+  chuyến; không khớp ⇒ quy tắc cũ. Áp ở `matchRows` (cả sl_mau lẫn SLRpt — SLRpt chỉ nhận chuyến từ mã khi Điều xe xác
+  nhận) và `runSmartMatching` của converter. Dòng đã tách có chú thích "file ghi TM12". `ParsedSlRow.so_xe_raw` /
+  `xe_tach_chuyen` mới.
+- **SLRpt đội 0**: ứng viên = mọi chuyến của xe trong ngày (trước luôn rỗng ⇒ dòng 2 cùng xe luôn CHUYEN_NOT_FOUND).
+- **Converter**: ghi `ma_nguon` ("m" khi đội 0 hoặc ghi chú TM), ghi chú trống + đội 0 ⇒ "TM"; khoá cập nhật/trùng có cả
+  `ma_nguon`. Converter không đọc ghi chú từ file gốc (`output-parser.ts` luôn `ghi_chu: ""`) nên không cần kiểm danh mục.
+- Tab "Hướng dẫn import" viết lại thành component `_components/output-import-guide.tsx` (InspectorCard): 2 cách nhập,
+  cột sl_mau, cách ghi chuyến, SLRpt, ký hiệu KT, nguồn, bảng cảnh báo + cột "chặn lưu?", lưu & ghi ngược. Đổi logic
+  import thì sửa luôn trang này.

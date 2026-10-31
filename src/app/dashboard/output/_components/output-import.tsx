@@ -10,6 +10,7 @@ import {
   OUTPUT_MATERIALS,
   buildProductionRecordKey,
   parseVehicleCode,
+  resolveVehicleTrip,
   WARN_SEVERITY,
   writeBackToDispatch,
 } from "./output-types"
@@ -85,7 +86,7 @@ function parseSlRptRows(raw: unknown[][]): ParsedSlRow[] {
 
     result.push({
       row_index: idx + 3,
-      ngay, doi, base_xe, chuyen: 1, chuyen_tu_file: false, ghi_chu,
+      ngay, doi, base_xe, chuyen: 1, chuyen_tu_file: false, so_xe_raw: xe, ghi_chu,
       mn_tuoi, mn_drc, mn_kho,
       ct_tuoi, ct_drc, ct_kho,
       dct_tuoi, dct_drc, dct_kho,
@@ -138,7 +139,7 @@ async function parseSlFile(file: File): Promise<ParsedSlRow[]> {
 
     result.push({
       row_index: idx + 3,
-      ngay, doi, base_xe, chuyen, ghi_chu,
+      ngay, doi, base_xe, chuyen, so_xe_raw: colC.toUpperCase(), ghi_chu,
       mn_tuoi, mn_drc, mn_kho,
       ct_tuoi, ct_drc, ct_kho,
       dct_tuoi, dct_drc, dct_kho,
@@ -260,6 +261,27 @@ export function matchRows(
   }
   for (const list of tripsByVehicle.values()) list.sort((a, b) => a.chuyen - b.chuyen)
 
+  // Đọc lại mã xe trong file theo Điều xe CỦA NGÀY ĐÓ — tách đúng chuyến ghi dính đuôi kể cả
+  // xe bắt đầu bằng chữ: "TM12" = TM1 chuyến 2 (trước đây bị đọc thành xe "TM12" ⇒ báo
+  // "Xe không có trong điều xe"). Xem resolveVehicleTrip.
+  const vehiclesByDay = new Map<string, Set<string>>()
+  for (const [dateKey, dayMap] of dispIdx) {
+    vehiclesByDay.set(dateKey, new Set([...dayMap.keys()].map((k) => k.slice(0, k.lastIndexOf(":")))))
+  }
+  parsed = parsed.map((row) => {
+    if (!row.so_xe_raw) return row
+    const day = vehiclesByDay.get(row.ngay)
+    const r = resolveVehicleTrip(row.so_xe_raw, day)
+    if (row.chuyen_tu_file === false) {
+      // Mẫu SLRpt: chỉ coi số đuôi là chuyến khi Điều xe xác nhận đúng xe đó.
+      const tripFromCode = r.split && !!day?.has(r.base_xe)
+      return tripFromCode
+        ? { ...row, base_xe: r.base_xe, chuyen: r.chuyen, chuyen_tu_file: true, xe_tach_chuyen: true }
+        : row
+    }
+    return { ...row, base_xe: r.base_xe, chuyen: r.chuyen, xe_tach_chuyen: r.split }
+  })
+
   // Mẫu không có cột Chuyến: gán LẦN LƯỢT dòng thứ k của (ngày, xe, đội) vào chuyến điều xe thứ k
   // có điểm GN thuộc đội đó. Không xác định được thì giữ chuyến 1 + cảnh báo (không chặn).
   const assignWarns = new Map<number, WarnCode>()
@@ -269,9 +291,10 @@ export function matchRows(
     const trips = tripsByVehicle.get(`${row.ngay}|${row.base_xe}`) ?? []
     if (trips.length === 0) return row // VEHICLE_NOT_FOUND / NO_DISPATCH_DATE xử lý bên dưới
     const doi = row.doi ?? 0
+    // Thu mua (đội 0) không có điểm giao nhận theo đội → ghép lần lượt vào mọi chuyến của xe.
     const candidates = doi > 0
       ? trips.filter((t) => t.diem_gn.some((ma) => doiByMaLo.get(ma) === doi))
-      : []
+      : trips
     const gKey = `${row.ngay}|${row.base_xe}|${doi}`
     const k = usedByGroup.get(gKey) ?? 0
     usedByGroup.set(gKey, k + 1)
@@ -771,10 +794,11 @@ export function OutputImport({
                 </div>
               )}
               <div className="mt-4 p-4 bg-slate-50 rounded-xl text-sm text-slate-600">
-                <p className="font-bold mb-2">Cấu trúc file (19 cột A–S):</p>
-                <p>A: Ngày &nbsp;|&nbsp; B: Đội (1–12) &nbsp;|&nbsp; C: Số xe (1A, 1A2, 1A3...)</p>
+                <p className="font-bold mb-2">Mẫu sl_mau (19 cột A–S):</p>
+                <p>A: Ngày &nbsp;|&nbsp; B: Đội 1–12 (Thu mua: TM / 0 / trống) &nbsp;|&nbsp; C: Số xe — chuyến ghi dính đuôi: 1A2, TM12 = TM1 chuyến 2</p>
                 <p>D–F: Mủ nước &nbsp;|&nbsp; G–I: Mủ chén &nbsp;|&nbsp; J–L: Mủ đông chén &nbsp;|&nbsp; M–O: Mủ đông khối &nbsp;|&nbsp; P–R: Mủ dây</p>
-                <p className="mt-1 text-slate-400">Mỗi nhóm: Tươi / DRC% / Khô · Cột S: Ghi chú</p>
+                <p className="mt-1 text-slate-400">Mỗi nhóm: Tươi / DRC% / Khô · Cột S: Ký hiệu KT (phải có trong danh mục)</p>
+                <p className="mt-1 text-slate-400">File SLRpt (STT | Đội | Số xe | Ngày …) được tự nhận diện, chuyến ghép theo Điều xe.</p>
               </div>
             </div>
           )}
@@ -853,7 +877,14 @@ export function OutputImport({
                         <tr key={i} className={rowCls}>
                           <td className="px-3 py-1.5 text-slate-700">{r.ngay}</td>
                           <td className="px-3 py-1.5 text-center font-bold text-slate-700">{r.doi}</td>
-                          <td className="px-3 py-1.5 font-mono font-bold text-slate-800">{r.base_xe}</td>
+                          <td className="px-3 py-1.5 font-mono font-bold text-slate-800">
+                            {r.base_xe}
+                            {r.xe_tach_chuyen && r.so_xe_raw && (
+                              <span className="block font-sans text-[10px] font-normal text-sky-600" title="Mã xe trong file ghi dính số chuyến — đã đọc theo Điều xe của ngày">
+                                file ghi {r.so_xe_raw}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 py-1.5 text-center text-slate-600">
                             {r.chuyen}
                             {r.chuyen_tu_file === false && (

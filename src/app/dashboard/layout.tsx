@@ -35,11 +35,14 @@ import {
   hasPermission,
   hydrateActiveSession,
   isAuthSessionError,
+  isBrowserOffline,
+  readCachedSessionUser,
   signOutEverywhere,
   type AppRole,
   type SessionUser,
 } from "@/lib/auth"
 import { getModuleTasks, type ModuleTaskSummary } from "./_components/module-tasks"
+import { logoutWithConfirmQueueCheck } from "@/lib/confirm-logout"
 import {
   broadcastCustomerPortalLangChange,
   getStoredCustomerPortalLang,
@@ -226,6 +229,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     let syncing = false
     let lastSyncTime = 0
     let bootstrapDone = false
+    // Màn quét QR khi MẤT MẠNG (GĐ-B offline): chạy bằng phiên cache `erp_user`, không kết luận
+    // "chưa đăng nhập", không redirect, không xoá gì. Có mạng lại ⇒ full hydration như rule 09.
+    // Mọi trang khác giữ nguyên hành vi cũ.
+    const isConfirmRoute = () => window.location.pathname.startsWith("/dashboard/product/confirm")
+    const holdForOffline = () => isConfirmRoute() && isBrowserOffline()
+    let sessionSettled = false
 
     /**
      * fullHydration=true  → fetch profile + permissions (bootstrap / SIGNED_IN)
@@ -245,6 +254,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           // Lightweight: chỉ verify token còn sống, không gọi DB
           const session = await getFreshAuthSession()
           if (!session?.user) {
+            if (holdForOffline()) return
             if (alive) {
               setAuthResolved("unauthenticated")
               setUser(null)
@@ -259,6 +269,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         // Full hydration: fetch profile + permissions
         const { session, user: sessionUser } = await hydrateActiveSession()
         if (!session?.user) {
+          if (holdForOffline()) return
           if (alive) {
             setAuthResolved("unauthenticated")
             setUser(null)
@@ -278,6 +289,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
 
         if (alive) {
+          sessionSettled = true
           setUser(sessionUser)
           setAuthResolved("authenticated")
         }
@@ -290,6 +302,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
         // Lỗi xác thực thật — nhưng rất có thể chỉ là race thoáng qua giữa nhiều nguồn refresh
         // token cùng lúc. Thử lại đúng 1 lần trước khi kết luận hẳn "unauthenticated".
+        if (holdForOffline()) return
         if (!isRetry) {
           await new Promise((resolve) => setTimeout(resolve, 800))
           if (alive) await runSyncOnce(redirectBase, fullHydration, true)
@@ -313,7 +326,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       }
     }
 
+    const applyCachedUserForConfirm = () => {
+      const cached = readCachedSessionUser()
+      if (!cached || !alive) return false
+      sessionSettled = true
+      setUser(cached)
+      setAuthResolved("authenticated")
+      return true
+    }
+
     const bootstrap = async () => {
+      if (holdForOffline() && applyCachedUserForConfirm()) {
+        bootstrapDone = true
+        setLoading(false)
+        return
+      }
       try {
         // Timeout 20s: nếu hydrateActiveSession treo do mạng mobile chậm, vẫn hạ `loading` để
         // tránh spinner-blocking-DOM, NHƯNG không kết luận gì về xác thực — `authResolved` vẫn
@@ -324,11 +351,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           syncSession(resolveUnauthenticatedRedirect(), true),
           new Promise<void>((resolve) => setTimeout(resolve, 20_000)),
         ])
+        // Mạng chập chờn (onLine vẫn true) quá 20s trên màn quét ⇒ dùng phiên cache thay vì spinner.
+        if (!sessionSettled && isConfirmRoute()) applyCachedUserForConfirm()
       } finally {
         bootstrapDone = true
         if (alive) setLoading(false)
       }
     }
+
+    // Màn quét: có mạng lại ⇒ đồng bộ phiên đầy đủ (rule 09); phiên thật hết hạn thì về /login như cũ.
+    const handleOnline = () => {
+      if (isConfirmRoute()) void syncSession(resolveUnauthenticatedRedirect(), true)
+    }
+    window.addEventListener("online", handleOnline)
 
     void bootstrap()
 
@@ -344,6 +379,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (event === "SIGNED_OUT" || !session?.user) {
         // Bỏ qua nếu đang logout thủ công — handleLogout sẽ navigate
         if (isLoggingOutRef.current) return
+        if (holdForOffline()) return
         // Supabase có thể fire SIGNED_OUT khi network blip xảy ra lúc auto-refresh, hoặc khi
         // mobile OS vừa resume tab sau thời gian dài ở nền. Thử lấy lại session, đợi ngắn rồi
         // thử thêm 1 lần nữa trước khi kết luận thật sự đã đăng xuất.
@@ -378,12 +414,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     // Interval: lightweight — chỉ verify token, không fetch DB
     const intervalId = window.setInterval(() => {
+      if (holdForOffline()) return
       void syncSession(resolveUnauthenticatedRedirect(), false)
     }, 60_000)
 
     const handleVisibilityOrFocus = () => {
       const now = Date.now()
       if (document.visibilityState === "visible" && now - lastSyncTime > 30_000) {
+        if (holdForOffline()) return
         lastSyncTime = now
         void syncSession(resolveUnauthenticatedRedirect(), false)
       }
@@ -397,6 +435,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       subscription.unsubscribe()
       window.clearInterval(intervalId)
       window.clearTimeout(slowNetworkTimer)
+      window.removeEventListener("online", handleOnline)
       window.removeEventListener("focus", handleVisibilityOrFocus)
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus)
     }
@@ -540,12 +579,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   })
 
   const handleLogout = async () => {
-    isLoggingOutRef.current = true
-    try {
-      await signOutEverywhere()
-    } finally {
-      window.location.replace("/login")
-    }
+    // Kiện quét khi mất mạng còn trên máy ⇒ helper tự hỏi trước khi xoá (dùng chung với màn quét QR).
+    await logoutWithConfirmQueueCheck(user, () => {
+      isLoggingOutRef.current = true
+    })
   }
 
   useEffect(() => {

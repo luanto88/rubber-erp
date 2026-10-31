@@ -821,3 +821,54 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - Tồn pallet: trang cũ `/dashboard/product/pallet` + `loadPalletStockReport` đã XOÁ; tồn pallet tính ở Kho vật tư → Tồn
   (rule 13). Link "Tồn pallet" trên banner Thành phẩm đã GỠ 2026-10-27. `computeKienAvailability` (`product/actions.ts`)
   chỉ còn phục vụ `loadSkKienAvailability` (Sang kiện / Thay bọc).
+
+## 4.19. Lưu tạm chống bấm lặp + kế hoạch quét khi mất mạng (2026-10-30)
+- `saveDraftKien` nhận `accessToken` (xác thực `assertProductAccess`, quyền tạo thành phẩm) — không còn tin `userId`
+  client gửi. Nhận `draftId` (UUID client sinh mỗi lần mở form, `draftKeyRef` ở page): nháp cùng id đã có ⇒ trả
+  `alreadySaved` (kiểm TRƯỚC bước tính bành, nếu không chính nháp đó bị tính và báo vượt); trùng khoá chính 23505 ⇒ cũng
+  coi là đã lưu. Không migration. Đọc/ghi `product_confirm_last_ca` bọc try/catch.
+- Kế hoạch offline (hàng đợi IndexedDB, gói tải sẵn, thanh trạng thái mạng, SW cache trang): `.claude/plans/quet-qr-offline.md`.
+  GĐ-A đã code (mục 4.20); GĐ-B (cache trang) chưa làm.
+
+## 4.20. Quét QR khi mất mạng — GĐ-A (2026-10-31, chờ test tay)
+- Chốt với người dùng: quét trùng kiện giữa 2 máy offline ⇒ mục đến sau "Lỗi"; khoá ca kiểm ngay khi Lưu tạm; mã ngoài
+  gói cho nhập với nhãn "Chưa kiểm tra"; còn mục trên máy ⇒ khoá cứng "Gửi tất cả" + "Kết thúc ca". Không migration.
+- Logic tra kiện tách thành hàm THUẦN `computeKienLookup` (`confirm/kien-lookup.ts`, không import server). Server
+  `resolveKienForConfirm` chỉ gom dữ liệu rồi gọi hàm này; client offline gọi cùng hàm trên gói tải sẵn ⇒ 1 nguồn logic.
+  Sửa quy tắc tra kiện thì sửa ở `kien-lookup.ts`. Type `ConfirmKienLookup` re-export từ `actions.ts`.
+- Gói tải sẵn `loadConfirmOfflinePack(factoryId, token)`: ngăn Chờ/Đang SX, dự đoán trỏ các ngăn đó, lô của chúng + lô
+  Dở dang, giao dịch, toàn bộ nháp nhà máy, tên ca hôm nay/hôm qua, khoá ca 3 ngày gần nhất, các CSR. Tải khi vào màn
+  và khi có mạng lại (≥ 2 phút/lần). Gói > 12 giờ ⇒ cảnh báo "đã cũ".
+- Hàng đợi IndexedDB `rubber-erp-confirm` (`src/lib/confirm-offline-store.ts`), khoá `factoryId:userId`, trạng thái
+  `tren_may`/`cho_dong_bo`/`dang_gui`/`loi` (`StatusBadge domain="confirm_queue"`). Hook `confirm/use-offline-queue.ts`:
+  đồng bộ TUẦN TỰ khi có mạng lại / mở trang / mỗi 60s nếu còn mục; lỗi mạng ⇒ dừng lượt; lỗi nghiệp vụ ⇒ "Lỗi" + lý
+  do; phiên hết hạn ⇒ giữ nguyên hàng đợi, thanh đỏ yêu cầu đăng nhập lại.
+- "Lưu tạm" luôn ghi IndexedDB TRƯỚC rồi có mạng thì gửi ngay (`saveDraftKien` với draftId = id mục): thành công ⇒ xoá
+  mục (UX như cũ); lỗi nghiệp vụ khi đang online ⇒ xoá mục, báo trên form như cũ; lỗi mạng ⇒ giữ trên máy. IndexedDB
+  không dùng được ⇒ gửi thẳng như trước.
+- `saveDraftKien` thêm: `assertShiftNotLocked` (sau nhánh alreadySaved); chặn mã lô không có cả lô thật lẫn dự đoán;
+  `unverified` ⇒ đối chiếu ngăn kế hoạch / CSR / bành dự đoán, lệch thì từ chối kèm giá trị đúng; `is_new_lot` tính ở server.
+- Offline: Hub không gọi lịch sử / nháp; ghi chú lô ẩn (danh mục cần server); ngăn chọn tay lấy từ gói.
+- Đăng xuất (`dashboard/layout.tsx`) còn mục ⇒ hỏi xác nhận; đồng ý thì chỉ xoá dữ liệu của tài khoản đó.
+- GĐ-A chỉ chống mất mạng KHI TRANG ĐÃ MỞ; F5 lúc offline chưa mở được trang (GĐ-B service worker).
+- Chữ Khmer của phần offline do máy soạn — cần người bản ngữ duyệt.
+
+## 4.21. Quét QR khi mất mạng — GĐ-B mở trang offline + Đăng xuất màn quét (2026-10-31, chờ test tay)
+- SW `public/service-worker.js` (chỉ bản production; dev tự gỡ SW cũ — `sw-register.tsx`), đăng ký
+  `/service-worker.js?v=<NEXT_PUBLIC_BUILD_ID>` (`next.config.ts`: 12 ký tự `VERCEL_GIT_COMMIT_SHA`, local = Date.now).
+  Navigation `/dashboard/product/confirm*`: network-first (5s), lưu khoá chuẩn không query + quét HTML/CSS lưu đủ
+  `/_next/static/*`; static chỉ cache khi client là trang quét; khớp `ignoreSearch` (Vercel `?dpl=`). Không cache
+  POST/server action, `/api`, `_rsc`, khác origin, trang khác. Giữ cache 2 bản build gần nhất (`qlsxkpt-meta`).
+  Chưa từng mở màn quét lúc có mạng ⇒ trang offline tĩnh "chưa tải sẵn".
+- Trang quét nạp sẵn chunk `qr-scanner` khi online + SW đang kiểm soát (để camera chạy được offline).
+- Khởi động offline: `readCachedSessionUser()` / `isBrowserOffline()` (`src/lib/auth.ts`). `dashboard/layout.tsx` CHỈ trên
+  màn quét: offline ⇒ dùng `erp_user`, không redirect/không xoá; interval/focus/SIGNED_OUT/nhánh session null bỏ qua khi
+  offline; bootstrap quá 20s vẫn pending ⇒ dùng cache; sự kiện `online` ⇒ full hydration (rule 09). Trang khác không đổi.
+  `confirm/page.tsx` bootstrap: offline hoặc lỗi mạng + có cache ⇒ chạy bằng cache; tên ca lấy `pack.shiftNames`.
+- Chức vụ header = `maintenance_staff.chuc_vu_chinh_quyen || chuc_vu` (KHÔNG hard-code; "Trực ca" chỉ là dự phòng),
+  hiện đúng nguyên văn (bỏ `uppercase`), cache `localStorage confirm_chuc_vu:{userId}`.
+- Header màn quét: bấm tên/avatar ⇒ menu "Về trang chính" (khoá khi offline) + "Đăng xuất". Đăng xuất dùng chung
+  `logoutWithConfirmQueueCheck` (`src/lib/confirm-logout.ts`, cả layout): còn hàng đợi ⇒ hỏi; offline ⇒ thêm cảnh báo.
+- Rủi ro: tab cũ quá 2 lần deploy khi offline ⇒ lỗi nạp chunk; WebView Telegram/Zalo không có SW (chỉ GĐ-A);
+  iOS Safari quota ~50MB + xoá dữ liệu site (cả IndexedDB) sau 7 ngày không dùng nếu không cài PWA; mạng "giả có"
+  + token hết hạn vẫn có thể về /login (không sửa `refreshSessionOnce` toàn app).

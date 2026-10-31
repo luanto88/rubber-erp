@@ -10,6 +10,7 @@ import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background
 import { supabase } from "@/lib/supabase"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import type { SessionUser } from "@/lib/auth"
+import { addDaysISO, formatDateDisplay } from "@/lib/date-utils"
 
 type SampleMap = Record<string, (string | number)[]>
 
@@ -49,6 +50,7 @@ type ParseResponse = {
   filename: string
   ngay_sx: string | null
   ngay_kn: string
+  ngay_kn_source?: "pdf" | "filename" | "today"
   total_lots: number
   lots: ParsedLot[]
   excel_base64: string
@@ -87,10 +89,21 @@ type ExistingQc = {
 type MatchEvaluation = {
   lot: ParsedLot
   matchedLot: FactoryLot | null
-  status: "match_ready" | "wrong_date" | "wrong_csr" | "already_tested" | "not_found" | "lo_nm_missing"
+  // date_shift: lô khớp nhưng ngày hoàn thành ≠ ngày SX trên phiếu → được chọn để dời sang phiếu
+  //   KN khác (ngày KN mặc định = ngày hoàn thành + 1).
+  // sx_unknown: PDF không đọc được ngày SX → chỉ nhập khi người dùng tự tick (ngày SX = ngày
+  //   hoàn thành của lô).
+  status:
+    | "match_ready" | "date_shift" | "sx_unknown"
+    | "wrong_csr" | "already_tested" | "not_found" | "lo_nm_missing"
   message: string
   selected: boolean
+  /** Ngày SX / ngày KN (ISO) sẽ ghi vào qc_results nếu lô được nhập. */
+  targetNgaySx: string
+  targetNgayKn: string
 }
+
+const SELECTABLE_STATUSES: MatchEvaluation["status"][] = ["match_ready", "date_shift", "sx_unknown"]
 
 // Chuyển ngày dd/mm/yyyy -> yyyy-mm-dd
 function parseVnDateToIso(vnDateStr: string | null): string {
@@ -186,6 +199,8 @@ export function QualityConverterView({
   const [analyzing, setAnalyzing] = useState(false)
   const [parseResult, setParseResult] = useState<ParseResponse | null>(null)
   const [selectedLotsMap, setSelectedLotsMap] = useState<Record<string, boolean>>({})
+  // Ngày KN người dùng tự đổi cho nhóm lô lệch ngày, theo khoá = ngày SX đích (ISO).
+  const [knOverride, setKnOverride] = useState<Record<string, string>>({})
   const [savingToDb, setSavingToDb] = useState(false)
   
   // Internal fetched data if not provided
@@ -267,7 +282,10 @@ export function QualityConverterView({
 
     const ngayKN_Iso = parseVnDateToIso(parseResult.ngay_kn)
     const ngaySX_Iso = parseVnDateToIso(parseResult.ngay_sx)
-    const isDateLocked = currentUser?.role !== "admin" && Boolean(signingStatusByDate.get(ngayKN_Iso))
+    // Ngày KN đã gửi ký (bất kỳ trạng thái nào) thì không thêm lô — trừ admin. Giống luồng
+    // nhập Excel: thêm lô vào phiếu đang ký sẽ làm lệch nội dung bản đã gửi.
+    const isDateLocked = (iso: string) =>
+      currentUser?.role !== "admin" && Boolean(signingStatusByDate.get(iso))
 
     const seenLotIds = new Set<string>()
     return parseResult.lots.map((lot) => {
@@ -279,6 +297,9 @@ export function QualityConverterView({
 
       let status: MatchEvaluation["status"] = "match_ready"
       let message = "Khớp 4 tiêu chí — Sẵn sàng nhập"
+      const lotDate = matched ? getLotQcDate(matched) : ""
+      let targetNgaySx = lotDate || ngaySX_Iso
+      let targetNgayKn = ngayKN_Iso
 
       if (lot.lo_nm_missing) {
         status = "lo_nm_missing"
@@ -290,35 +311,39 @@ export function QualityConverterView({
         // Kiểm tra chủng loại: Hạng ĐK trên PDF phải khớp loai_csr trong kho
         const lotLoaiCsrNormalized = matched.loai_csr.replace(/^SVR/, "CSR")
         const pdfLoaiCsrNormalized = lot.loai_csr.replace(/^SVR/, "CSR")
+        const alreadyQc = existingQcRows.find(
+          (qc) => qc.lot_id === matched.id || normalizeLotCode(qc.ma_lo) === exactKey
+        )
         if (lotLoaiCsrNormalized !== pdfLoaiCsrNormalized) {
           status = "wrong_csr"
           message = `Lệch chủng loại: PDF ghi ${lot.loai_csr}, kho là ${matched.loai_csr}`
-        } else {
-          // Kiểm tra ngày sản xuất: Ngày SX trên PDF phải khớp ngày hoàn thành lô trong kho
-          const lotDate = getLotQcDate(matched)
-          if (ngaySX_Iso && lotDate && lotDate !== ngaySX_Iso) {
-            status = "wrong_date"
-            message = `Lệch ngày SX: PDF là ${parseResult.ngay_sx}, kho là ${lotDate}`
-          } else {
-            // Kiểm tra đã có phiếu KN chưa
-            const alreadyQc = existingQcRows.find(
-              (qc) => qc.lot_id === matched.id || normalizeLotCode(qc.ma_lo) === exactKey
-            )
-            if (alreadyQc) {
-              status = "already_tested"
-              message = `Đã kiểm nghiệm ngày ${alreadyQc.ngay_kn}`
-            } else if (seenLotIds.has(matched.id)) {
-              status = "already_tested"
-              message = "Trùng lô với cột khác trong cùng file PDF"
-            } else if (isDateLocked) {
-              status = "already_tested"
-              message = `Ngày ${parseResult.ngay_kn} đã gửi ký duyệt (bị khóa)`
-            }
-          }
+        } else if (alreadyQc) {
+          // Kiểm trùng KN TRƯỚC kiểm ngày — lô đã KN không được hiện thành "lệch ngày".
+          status = "already_tested"
+          message = `Đã kiểm nghiệm ngày ${formatDateDisplay(alreadyQc.ngay_kn)}`
+        } else if (seenLotIds.has(matched.id)) {
+          status = "already_tested"
+          message = "Trùng lô với cột khác trong cùng file PDF"
+        } else if (!ngaySX_Iso) {
+          status = "sx_unknown"
+          message = `PDF không có ngày SX — tick để nhập theo ngày hoàn thành ${formatDateDisplay(lotDate)}`
+        } else if (lotDate && lotDate !== ngaySX_Iso) {
+          // Ngày hoàn thành của lô ≠ ngày SX trên phiếu → đề xuất dời sang phiếu KN ngày HT + 1.
+          status = "date_shift"
+          targetNgaySx = lotDate
+          targetNgayKn = knOverride[lotDate] || addDaysISO(lotDate, 1)
+          message =
+            `Lô ${matched.ma_lo} hoàn thành ${formatDateDisplay(lotDate)} không khớp ngày sản xuất của phiếu ` +
+            `${parseResult.ngay_sx} — Đẩy vào ngày kiểm nghiệm ${formatDateDisplay(targetNgayKn)}, ` +
+            `ngày sản xuất ${formatDateDisplay(lotDate)}`
+        }
+        if (SELECTABLE_STATUSES.includes(status) && isDateLocked(targetNgayKn)) {
+          status = "already_tested"
+          message = `Ngày KN ${formatDateDisplay(targetNgayKn)} đã gửi ký duyệt (bị khóa)`
         }
       }
 
-      if (matched && status === "match_ready") seenLotIds.add(matched.id)
+      if (matched && SELECTABLE_STATUSES.includes(status)) seenLotIds.add(matched.id)
 
       const defaultSelected = status === "match_ready"
       const isSelected = selectedLotsMap[lot.lo_nm_full] !== undefined 
@@ -330,10 +355,13 @@ export function QualityConverterView({
         matchedLot: matched,
         status,
         message,
-        selected: isSelected,
+        selected: SELECTABLE_STATUSES.includes(status) && isSelected,
+        targetNgaySx,
+        targetNgayKn,
       }
     })
   }, [
+    knOverride,
     parseResult,
     lotByExact,
     lotByBase,
@@ -360,8 +388,22 @@ export function QualityConverterView({
 
   // Số lượng lô hợp lệ được tick chọn
   const readyLotsToImport = useMemo(() => {
-    return evaluations.filter((e) => e.status === "match_ready" && e.selected)
+    return evaluations.filter((e) => SELECTABLE_STATUSES.includes(e.status) && e.selected)
   }, [evaluations])
+
+  // Nhóm lô lệch ngày theo ngày SX đích → hiện banner cảnh báo + cho đổi ngày KN của nhóm.
+  const shiftGroups = useMemo(() => {
+    const map = new Map<string, { ngaySx: string; ngayKn: string; items: MatchEvaluation[] }>()
+    evaluations
+      .filter((e) => e.status === "date_shift")
+      .forEach((e) => {
+        const g = map.get(e.targetNgaySx) || { ngaySx: e.targetNgaySx, ngayKn: e.targetNgayKn, items: [] }
+        g.items.push(e)
+        map.set(e.targetNgaySx, g)
+      })
+    return Array.from(map.values()).sort((a, b) => a.ngaySx.localeCompare(b.ngaySx))
+  }, [evaluations])
+  const sxUnknownCount = evaluations.filter((e) => e.status === "sx_unknown").length
 
   // Xử lý gửi file PDF lên API phân tích
   const handleAnalyze = async (fileToProcess?: File) => {
@@ -374,6 +416,7 @@ export function QualityConverterView({
     setAnalyzing(true)
     setParseResult(null)
     setSelectedLotsMap({})
+    setKnOverride({})
 
     try {
       const { data: sessionData } = await supabase.auth.getSession()
@@ -446,8 +489,6 @@ export function QualityConverterView({
     }
 
     const ngayKN_Iso = parseVnDateToIso(parseResult.ngay_kn)
-    const ngaySX_Iso = parseVnDateToIso(parseResult.ngay_sx)
-    const year = new Date(ngayKN_Iso).getFullYear()
 
     setSavingToDb(true)
     try {
@@ -480,21 +521,74 @@ export function QualityConverterView({
         return
       }
 
-      const [startPKN, startLoKN] = await Promise.all([
-        getNextPKN(factoryId, year),
-        getNextLoKN(factoryId),
-      ])
+      // Gom lô theo NGÀY KN đích: phiếu chính (ngày KN của PDF) + các phiếu cho lô lệch ngày.
+      const groups = new Map<string, MatchEvaluation[]>()
+      toImport.forEach((e) => {
+        const arr = groups.get(e.targetNgayKn) || []
+        arr.push(e)
+        groups.set(e.targetNgayKn, arr)
+      })
 
-      let curLoKN = startLoKN
-      const batchId = crypto.randomUUID()
+      let curLoKN = await getNextLoKN(factoryId)
+      // PKN cấp mới theo năm: lấy 1 lần từ DB rồi tăng dần cục bộ để các phiếu mới không trùng số.
+      const nextPknByYear = new Map<number, number>()
+      const allocPKN = async (year: number) => {
+        const next = nextPknByYear.get(year) ?? (await getNextPKN(factoryId, year))
+        nextPknByYear.set(year, next + 1)
+        return next
+      }
       const loaiKN = nSamples >= 14 ? "ngat" : "thuong"
 
       let successCount = 0
       const errors: string[] = []
+      const summaries: string[] = []
+      let firstPKN: number | null = null
+      let firstNgayKN = ngayKN_Iso
 
-      for (const item of toImport) {
-        const { lot, matchedLot } = item
-        if (!matchedLot) continue
+      const groupDates = Array.from(groups.keys()).sort((a, b) =>
+        a === ngayKN_Iso ? -1 : b === ngayKN_Iso ? 1 : a.localeCompare(b),
+      )
+      for (const ngayKnGroup of groupDates) {
+        const items = groups.get(ngayKnGroup) || []
+        const year = Number(ngayKnGroup.slice(0, 4))
+        let groupPKN: number
+        let batchId: string
+        let joined = false
+        if (ngayKnGroup === ngayKN_Iso) {
+          groupPKN = await allocPKN(year)
+          batchId = crypto.randomUUID()
+        } else {
+          // Ngày KN khác ngày phiếu: nếu ngày đó đã có phiếu (chưa khoá) thì gộp vào phiếu đó.
+          if (currentUser?.role !== "admin" && signingStatusByDate.get(ngayKnGroup)) {
+            errors.push(`Ngày KN ${formatDateDisplay(ngayKnGroup)} đã gửi ký duyệt — bỏ qua ${items.length} lô`)
+            continue
+          }
+          const { data: dayRows, error: dayErr } = await supabase
+            .from("qc_results")
+            .select("pkn,batch_id")
+            .eq("factory_id", factoryId)
+            .eq("ngay_kn", ngayKnGroup)
+            .not("pkn", "is", null)
+            .order("pkn", { ascending: true })
+            .limit(1)
+          if (dayErr) {
+            errors.push(`Không đọc được phiếu ngày ${formatDateDisplay(ngayKnGroup)}: ${dayErr.message}`)
+            continue
+          }
+          if (dayRows?.[0]?.pkn) {
+            groupPKN = dayRows[0].pkn as number
+            batchId = (dayRows[0].batch_id as string | null) || crypto.randomUUID()
+            joined = true
+          } else {
+            groupPKN = await allocPKN(year)
+            batchId = crypto.randomUUID()
+          }
+        }
+
+        let groupCount = 0
+        for (const item of items) {
+          const { lot, matchedLot } = item
+          if (!matchedLot) continue
 
         // Tính xếp hạng grade theo chủng loại riêng của từng lô
         const { grade, dat_hang, trang_thai } = calcGrade(
@@ -508,10 +602,10 @@ export function QualityConverterView({
           lot_id: matchedLot.id,
           ma_lo: matchedLot.ma_lo,
           batch_id: batchId,
-          pkn: startPKN,
+          pkn: groupPKN,
           lo_kn: curLoKN,
-          ngay_kn: ngayKN_Iso,
-          ngay_sx: getLotQcDate(matchedLot) || ngaySX_Iso,
+          ngay_kn: ngayKnGroup,
+          ngay_sx: item.targetNgaySx,
           chung_loai: lot.chung_loai,
           loai_csr: matchedLot.loai_csr,
           loai_kn: loaiKN,
@@ -531,19 +625,30 @@ export function QualityConverterView({
           errors.push(`Lô ${lot.lo_nm_full}: ${error.message}`)
         } else {
           successCount++
+          groupCount++
           curLoKN++
+        }
+        }
+        if (groupCount > 0) {
+          if (firstPKN === null) {
+            firstPKN = groupPKN
+            firstNgayKN = ngayKnGroup
+          }
+          summaries.push(
+            `${groupCount} lô vào phiếu ${formatDateDisplay(ngayKnGroup)} (${formatPKN(groupPKN, ngayKnGroup, factoryCode)}${joined ? ", gộp phiếu đã có" : ""})`,
+          )
         }
       }
 
       if (successCount > 0) {
         showToast(
-          `Đã nhập thành công ${successCount} lô vào phân hệ Kiểm nghiệm (${formatPKN(startPKN, ngayKN_Iso, factoryCode)})!` +
+          `Đã nhập ${summaries.join("; ")}.` +
             (skippedDup.length
               ? ` Bỏ qua ${skippedDup.length} lô đã có phiếu KN: ${skippedDup.join(", ")}.`
               : "") +
             (errors.length ? ` Lỗi: ${errors.join("; ")}` : ""),
         )
-        onSuccess(successCount, startPKN, ngayKN_Iso)
+        onSuccess(successCount, firstPKN ?? 0, firstNgayKN)
       } else {
         showToast("Không nhập được lô nào: " + errors.join("; "), false)
       }
@@ -812,6 +917,74 @@ export function QualityConverterView({
               </div>
             )}
 
+            {parseResult.ngay_kn_source && parseResult.ngay_kn_source !== "pdf" && (
+              <div className="flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                <span>
+                  <strong>Không đọc được ngày kiểm nghiệm trong nội dung PDF</strong> — đang tạm lấy{" "}
+                  {parseResult.ngay_kn_source === "filename" ? "theo tên file" : "ngày hôm nay"}:{" "}
+                  <strong>{parseResult.ngay_kn}</strong>. Kiểm tra lại trước khi đẩy lên.
+                </span>
+              </div>
+            )}
+            {sxUnknownCount > 0 && (
+              <div className="flex items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                <XCircle size={18} className="mt-0.5 shrink-0" />
+                <span>
+                  <strong>Không đọc được ngày sản xuất trên phiếu.</strong> {sxUnknownCount} lô không được tự chọn —
+                  tick từng lô nếu chắc chắn muốn nhập theo ngày hoàn thành của lô trong kho.
+                </span>
+              </div>
+            )}
+
+            {/* Lô lệch ngày: cảnh báo nổi (dính đầu vùng kết quả khi cuộn) + đổi ngày KN theo nhóm */}
+            {shiftGroups.length > 0 && (
+              <div className="sticky top-2 z-20 rounded-2xl border border-amber-300 bg-amber-50/95 px-4 py-3 text-sm text-amber-900 shadow-lg backdrop-blur">
+                <div className="flex items-center gap-2 font-extrabold">
+                  <Calendar size={18} className="shrink-0 text-amber-600" />
+                  {shiftGroups.reduce((s, g) => s + g.items.length, 0)} lô lệch ngày sản xuất với phiếu{" "}
+                  {parseResult.ngay_sx} — tick các lô muốn dời sang phiếu kiểm nghiệm khác
+                </div>
+                <div className="mt-2 space-y-2">
+                  {shiftGroups.map((g) => (
+                    <div key={g.ngaySx} className="rounded-xl border border-amber-200 bg-white/70 px-3 py-2">
+                      <ul className="list-disc space-y-0.5 pl-5 text-xs">
+                        {g.items.map((it) => (
+                          <li key={it.lot.lo_nm_full}>{it.message}</li>
+                        ))}
+                      </ul>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-bold">Ngày KN cho nhóm SX {formatDateDisplay(g.ngaySx)}:</span>
+                        <input
+                          type="date"
+                          value={g.ngayKn}
+                          min={g.ngaySx}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            if (v) setKnOverride((prev) => ({ ...prev, [g.ngaySx]: v }))
+                          }}
+                          className="h-8 rounded-lg border border-amber-300 bg-white px-2 text-xs font-bold"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedLotsMap((prev) => {
+                              const next = { ...prev }
+                              g.items.forEach((it) => { next[it.lot.lo_nm_full] = true })
+                              return next
+                            })
+                          }
+                          className="rounded-lg bg-amber-600 px-3 py-1.5 font-bold text-white hover:bg-amber-700"
+                        >
+                          Chọn {g.items.length} lô này
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Bảng Đối soát 4 Tiêu chí */}
             <div className="bg-white border border-slate-200/90 rounded-2xl shadow-sm overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-200/90 flex flex-wrap items-center justify-between gap-4">
@@ -892,19 +1065,20 @@ export function QualityConverterView({
                     {evaluations.map((item, idx) => {
                       const { lot, matchedLot, status, message, selected } = item
                       const isMatch = status === "match_ready"
+                      const isSelectable = SELECTABLE_STATUSES.includes(status)
 
                       return (
                         <tr
                           key={`${lot.pkn}-${lot.lo_nm_full || idx}`}
                           className={`hover:bg-slate-50/80 transition-colors ${
-                            isMatch ? "bg-white" : "bg-slate-50/40 opacity-90"
+                            isMatch ? "bg-white" : isSelectable ? "bg-amber-50/40" : "bg-slate-50/40 opacity-90"
                           }`}
                         >
                           {/* Checkbox */}
                           <td className="py-3 px-4 text-center">
                             <input
                               type="checkbox"
-                              disabled={!isMatch}
+                              disabled={!isSelectable}
                               checked={selected}
                               onChange={(e) => {
                                 setSelectedLotsMap((prev) => ({
@@ -937,8 +1111,13 @@ export function QualityConverterView({
                               <div>
                                 <span className="font-bold text-slate-800">{matchedLot.ma_lo}</span>
                                 <div className="text-[10px] text-slate-500">
-                                  Loại: {matchedLot.loai_csr} • Ngày: {getLotQcDate(matchedLot)}
+                                  Loại: {matchedLot.loai_csr} • Hoàn thành: {formatDateDisplay(getLotQcDate(matchedLot))}
                                 </div>
+                                {status === "date_shift" && (
+                                  <div className="text-[10px] font-bold text-amber-700">
+                                    → Phiếu KN {formatDateDisplay(item.targetNgayKn)}
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <span className="text-slate-400 italic">Chưa có trong kho</span>
@@ -951,9 +1130,10 @@ export function QualityConverterView({
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                                 <CheckCircle2 size={13} /> Khớp 4 tiêu chí (Hợp lệ)
                               </span>
-                            ) : status === "wrong_date" ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                                <AlertTriangle size={13} /> {message}
+                            ) : status === "date_shift" || status === "sx_unknown" ? (
+                              <span className="inline-flex items-start gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                                {status === "date_shift" ? "Lệch ngày SX — tick để dời sang phiếu khác" : message}
                               </span>
                             ) : status === "wrong_csr" ? (
                               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-orange-50 text-orange-700 border border-orange-200">

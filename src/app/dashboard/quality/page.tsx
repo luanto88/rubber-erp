@@ -988,10 +988,14 @@ export default function QualityPage() {
     return (data?.[0]?.pkn ?? 0) + 1
   }
 
+  // Số lô KN cộng dồn theo nhà máy: lấy số LỚN NHẤT + 1. Trước đây dùng đếm số dòng + 1 nên
+  // sau khi xoá phiếu sẽ cấp lại số đã dùng (trùng lo_kn).
   const getNextLoKN = async (fid: string): Promise<number> => {
-    const { count } = await supabase.from("qc_results")
-      .select("id",{count:"exact",head:true}).eq("factory_id",fid)
-    return (count ?? 0) + 1
+    const { data, error } = await supabase.from("qc_results").select("lo_kn")
+      .eq("factory_id",fid).not("lo_kn","is",null)
+      .order("lo_kn",{ascending:false}).limit(1)
+    if (error) throw new Error("Không lấy được số lô KN: " + error.message)
+    return (Number(data?.[0]?.lo_kn) || 0) + 1
   }
 
   // ── Create flow ──────────────────────────────────────────────────────────────

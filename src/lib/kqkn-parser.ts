@@ -3,6 +3,7 @@ import fs from "node:fs"
 import { pathToFileURL } from "node:url"
 import ExcelJS from "exceljs"
 import { loadPdfjs } from "@/lib/pdfjs-server"
+import { getFactoryTodayISO } from "@/lib/date-utils"
 
 // Polyfill DOMMatrix cho Node.js runtime (Vercel Serverless Function thiếu Web API này)
 if (typeof globalThis.DOMMatrix === "undefined") {
@@ -83,6 +84,8 @@ export type ParseKqknResult = {
   filename: string
   ngay_sx: string | null
   ngay_kn: string
+  /** Nguồn ngày KN: đọc từ nội dung PDF, từ tên file, hay tạm lấy hôm nay (giờ nhà máy). */
+  ngay_kn_source: "pdf" | "filename" | "today"
   total_lots: number
   lots: ParsedLot[]
   excel_base64: string
@@ -305,6 +308,156 @@ export async function generateExcelBuffer(
   return Buffer.from(uintBuf)
 }
 
+// ── Đọc vị trí chữ trên PDF ──────────────────────────────────────────────────
+// PDF gốc của phòng QLCL: trang xoay 90°, chữ chạy theo trục +y. Logic bóc tách bên dưới dò
+// theo tọa độ cố định của bản gốc (gọi là "hệ chuẩn"): nhãn "PKN" ở (113,43), chữ "HẠNG" của
+// dòng "ĐẠT HẠNG" ở (113,715). File đã qua phần mềm sửa / in lại có thể xoay, co giãn, dời lề —
+// ta tìm 2 nhãn đó rồi quy toàn bộ chữ về hệ chuẩn bằng 1 phép xoay + tỷ lệ + tịnh tiến.
+
+type RawPdfItem = { str: string; x: number; y: number; width: number; dirX: number; dirY: number }
+type PdfItem = { str: string; x: number; y: number; w: number }
+
+const ANCHOR_PKN = { x: 113, y: 43 }
+const ANCHOR_HANG = { x: 113, y: 715 }
+
+function normLabel(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[đĐ]/g, "D")
+    .replace(/\s+/g, "")
+    .toUpperCase()
+}
+
+function calibrateItems(raw: RawPdfItem[]): PdfItem[] | null {
+  const pkn = raw.find((i) => {
+    const n = normLabel(i.str)
+    return n === "PKN" || n === "LOPKN"
+  })
+  if (!pkn) return null
+  const hang = raw
+    .filter((i) => /HANG$/.test(normLabel(i.str)))
+    .map((i) => ({ i, d: Math.hypot(i.x - pkn.x, i.y - pkn.y) }))
+    .sort((a, b) => b.d - a.d)[0]
+  if (!hang || hang.d < 100) return null
+
+  const isIdentity =
+    Math.abs(pkn.x - ANCHOR_PKN.x) <= 2 && Math.abs(pkn.y - ANCHOR_PKN.y) <= 2 &&
+    Math.abs(hang.i.x - ANCHOR_HANG.x) <= 2 && Math.abs(hang.i.y - ANCHOR_HANG.y) <= 2
+  if (isIdentity) return raw.map((i) => ({ str: i.str, x: i.x, y: i.y, w: i.width }))
+
+  // c = (vector chuẩn) / (vector đọc được), tính như số phức → phép xoay + tỷ lệ.
+  const vx = hang.i.x - pkn.x
+  const vy = hang.i.y - pkn.y
+  const cx = ANCHOR_HANG.x - ANCHOR_PKN.x
+  const cy = ANCHOR_HANG.y - ANCHOR_PKN.y
+  const denom = vx * vx + vy * vy
+  const cr = (cx * vx + cy * vy) / denom
+  const ci = (cy * vx - cx * vy) / denom
+  const scale = Math.hypot(cr, ci)
+  return raw.map((i) => {
+    const dx = i.x - pkn.x
+    const dy = i.y - pkn.y
+    return {
+      str: i.str,
+      x: ANCHOR_PKN.x + cr * dx - ci * dy,
+      y: ANCHOR_PKN.y + ci * dx + cr * dy,
+      w: i.width * scale,
+    }
+  })
+}
+
+/**
+ * Nối các mẩu chữ bị phần mềm tách rời trong cùng 1 ô (vd "17"+"67" → "1767", "1764"+"cs").
+ * Chỉ nối khi 2 mẩu cùng dòng chữ và nằm sát nhau (khe ≤ 1,5pt) — các ô khác nhau trong bảng
+ * cách nhau ≥ 8pt nên không bị nối nhầm. Cuối cùng làm tròn tọa độ như logic cũ.
+ */
+function mergeSplitCells(items: PdfItem[]): { str: string; x: number; y: number }[] {
+  const cellRe = /^[0-9A-Za-z.,/]+$/
+  const list = items.map((i) => ({ ...i }))
+  let merged = true
+  while (merged) {
+    merged = false
+    for (let a = 0; a < list.length && !merged; a++) {
+      if (!cellRe.test(list[a].str)) continue
+      const end = list[a].y + list[a].w
+      for (let b = 0; b < list.length; b++) {
+        if (b === a || !cellRe.test(list[b].str)) continue
+        const gap = list[b].y - end
+        if (Math.abs(list[b].x - list[a].x) <= 1.5 && gap >= -1 && gap <= 1.5) {
+          list[a].str += list[b].str
+          list[a].w = list[b].y + list[b].w - list[a].y
+          list.splice(b, 1)
+          merged = true
+          break
+        }
+      }
+    }
+  }
+  return list.map((i) => ({ str: i.str, x: Math.round(i.x), y: Math.round(i.y) }))
+}
+
+type TextLine = { x: number; text: string; norm: string }
+
+/** Gom chữ thành từng dòng (cùng trục x trong hệ chuẩn), ghép theo thứ tự trục y. */
+function buildTextLines(items: { str: string; x: number; y: number }[]): TextLine[] {
+  const sorted = [...items].sort((a, b) => a.x - b.x)
+  const groups: { x: number; items: typeof items }[] = []
+  for (const it of sorted) {
+    const g = groups[groups.length - 1]
+    if (g && Math.abs(it.x - g.x) <= 3) g.items.push(it)
+    else groups.push({ x: it.x, items: [it] })
+  }
+  return groups.map((g) => {
+    const text = g.items.sort((a, b) => a.y - b.y).map((i) => i.str).join(" ")
+    return { x: g.x, text, norm: normLabel(text) }
+  })
+}
+
+function fmtDate(d: string, m: string, y: string): string | null {
+  const dn = Number(d)
+  const mn = Number(m)
+  if (!(dn >= 1 && dn <= 31 && mn >= 1 && mn <= 12)) return null
+  return `${String(dn).padStart(2, "0")}/${String(mn).padStart(2, "0")}/${y}`
+}
+
+const DATE_RE = /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/
+
+function findNgaySx(lines: TextLine[], fullText: string): string | null {
+  for (const line of lines) {
+    const idx = line.norm.indexOf("NGAYSANXUAT")
+    if (idx < 0) continue
+    const m = line.norm.slice(idx).match(DATE_RE)
+    const v = m && fmtDate(m[1], m[2], m[3])
+    if (v) return v
+  }
+  // Dự phòng: dòng có ngày đầu tiên nằm ngay dưới tiêu đề "BẢNG KẾT QUẢ KIỂM NGHIỆM CAO SU CSR".
+  const title = lines.find((l) => l.norm.includes("BANGKETQUAKIEMNGHIEM"))
+  if (title) {
+    const below = lines.filter((l) => l.x > title.x && l.x <= title.x + 40).sort((a, b) => a.x - b.x)
+    for (const l of below) {
+      const m = l.norm.match(DATE_RE)
+      const v = m && fmtDate(m[1], m[2], m[3])
+      if (v) return v
+    }
+  }
+  const m = normLabel(fullText).match(/NGAYSANXUAT:?(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/)
+  return m ? fmtDate(m[1], m[2], m[3]) : null
+}
+
+function findNgayKn(lines: TextLine[], fullText: string): string | null {
+  const re = /NGAY(\d{1,2})THANG(\d{1,2})NAM(\d{4})/
+  // Ngày KN nằm góc phải dưới bảng → lấy dòng khớp nằm thấp nhất (x lớn nhất trong hệ chuẩn).
+  const hits = lines.filter((l) => re.test(l.norm)).sort((a, b) => b.x - a.x)
+  for (const l of hits) {
+    const m = l.norm.match(re)!
+    const v = fmtDate(m[1], m[2], m[3])
+    if (v) return v
+  }
+  const m = normLabel(fullText).match(re)
+  return m ? fmtDate(m[1], m[2], m[3]) : null
+}
+
 export async function processKqknPdf(
   pdfBuffer: Buffer | Uint8Array,
   options: {
@@ -338,49 +491,60 @@ export async function processKqknPdf(
     throw new Error("Tệp PDF rỗng, không chứa trang dữ liệu nào")
   }
 
-  const page = await doc.getPage(1)
-  const textContent = await page.getTextContent()
+  // Đọc mọi trang, quy tọa độ về "hệ chuẩn" của PDF gốc (xem calibrateItems). PDF đã qua phần
+  // mềm sửa / in lại có thể đổi chiều xoay, tỷ lệ, lề, hoặc tách số thành nhiều mẩu chữ — trước
+  // đây parser dò cứng tọa độ nên báo "không nhận diện được cột PKN".
+  const tablePages: { str: string; x: number; y: number }[][] = []
+  let totalTextItems = 0
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p)
+    const textContent = await page.getTextContent()
+    const rawItems: RawPdfItem[] = textContent.items
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .filter((i: any) => i.str && i.str.trim())
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((i: any) => ({
+        str: i.str.trim(),
+        x: i.transform[4],
+        y: i.transform[5],
+        width: i.width || 0,
+        dirX: i.transform[0],
+        dirY: i.transform[1],
+      }))
+    totalTextItems += rawItems.length
+    const calibrated = calibrateItems(rawItems)
+    if (calibrated) tablePages.push(mergeSplitCells(calibrated))
+  }
 
-  const allItems = textContent.items
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((i: any) => i.str && i.str.trim())
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((i: any) => ({
-      str: i.str.trim(),
-      x: Math.round(i.transform[4]),
-      y: Math.round(i.transform[5]),
-    }))
+  if (tablePages.length === 0) {
+    throw new Error(
+      totalTextItems === 0
+        ? "Không đọc được chữ trong file PDF (có thể PDF đã bị in ra dạng ảnh). Hãy dùng file PDF gốc xuất từ phần mềm kiểm nghiệm."
+        : "Không tìm thấy bảng kết quả kiểm nghiệm cao su trong file PDF (không thấy nhãn \"LÔ PKN\" / \"ĐẠT HẠNG\"). Hãy dùng file PDF gốc — nếu lô lệch ngày, dùng chức năng dời lô sang ngày kiểm nghiệm khác thay vì sửa PDF.",
+    )
+  }
 
-  const fullText = allItems.map((i: { str: string }) => i.str).join(" ")
+  const firstPage = tablePages[0]
+  const lines = buildTextLines(firstPage)
+  const fullText = firstPage.map((i) => i.str).join(" ")
 
-  // 1. Ngày sản xuất
-  const mSx = fullText.match(/NGÀY\s*SẢN\s*XUẤT:\s*(\d{2}\/\d{2}\/\d{4})/i)
-  const ngay_sx = mSx ? mSx[1] : null
+  // 1. Ngày sản xuất — dòng "NGÀY SẢN XUẤT: dd/mm/yyyy" nằm ngay dưới tiêu đề bảng.
+  const ngay_sx = findNgaySx(lines, fullText)
 
-  // 2. Ngày kiểm nghiệm
-  const mKn = fullText.match(/ngày\s*(\d{2})\s*tháng\s*(\d{2})\s*năm\s*(\d{4})/i)
-  let ngay_kn = mKn ? `${mKn[1]}/${mKn[2]}/${mKn[3]}` : null
+  // 2. Ngày kiểm nghiệm — "Kampong Thom, ngày dd tháng mm năm yyyy" góc phải dưới bảng
+  // (pdfjs tách chữ "năm" thành "n"+"ă"+"m" nên phải đọc theo dòng đã ghép, bỏ dấu).
+  let ngay_kn = findNgayKn(lines, fullText)
+  let ngay_kn_source: "pdf" | "filename" | "today" = "pdf"
   if (!ngay_kn) {
     const mFile = filename.match(/(\d{2})[-/](\d{2})[-/](\d{4})/)
     if (mFile) {
       ngay_kn = `${mFile[1]}/${mFile[2]}/${mFile[3]}`
+      ngay_kn_source = "filename"
     } else {
-      const today = new Date()
-      const dd = String(today.getDate()).padStart(2, "0")
-      const mm = String(today.getMonth() + 1).padStart(2, "0")
-      const yyyy = today.getFullYear()
+      const [yyyy, mm, dd] = getFactoryTodayISO().split("-")
       ngay_kn = `${dd}/${mm}/${yyyy}`
+      ngay_kn_source = "today"
     }
-  }
-
-  // 3. Tìm các cột Lô theo dòng PKN ở Y ≈ 43
-  const pknItems = allItems.filter(
-    (i: { x: number; y: number; str: string }) => Math.abs(i.y - 43) <= 4 && /^\d{3,5}$/.test(i.str),
-  )
-  pknItems.sort((a: { x: number }, b: { x: number }) => a.x - b.x)
-
-  if (pknItems.length === 0) {
-    throw new Error("Không tìm thấy bảng kết quả kiểm nghiệm cao su trong file PDF (không nhận diện được cột PKN)")
   }
 
   const lots: ParsedLot[] = []
@@ -390,6 +554,13 @@ export async function processKqknPdf(
   const reportStepMl: Record<string, string> = {}
   const reportRhLots: [string, string][] = []
   const anomalies: string[] = []
+
+  // 3. Tìm các cột Lô theo dòng PKN ở Y ≈ 43 (hệ chuẩn), trên từng trang có bảng.
+  for (const allItems of tablePages) {
+  const pknItems = allItems.filter(
+    (i: { x: number; y: number; str: string }) => Math.abs(i.y - 43) <= 4 && /^\d{3,5}$/.test(i.str),
+  )
+  pknItems.sort((a: { x: number }, b: { x: number }) => a.x - b.x)
 
   for (const pknItem of pknItems) {
     const x = pknItem.x
@@ -521,6 +692,11 @@ export async function processKqknPdf(
       },
     })
   }
+  }
+
+  if (lots.length === 0) {
+    throw new Error("Không tìm thấy bảng kết quả kiểm nghiệm cao su trong file PDF (không nhận diện được cột PKN)")
+  }
 
   // Tạo file Excel đối chiếu bằng ExcelJS
   const excelBuffer = await generateExcelBuffer(lots, ngay_kn, ngay_sx, n, tieuChuan)
@@ -539,6 +715,7 @@ export async function processKqknPdf(
     filename: outFilename,
     ngay_sx,
     ngay_kn,
+    ngay_kn_source,
     total_lots: lots.length,
     lots,
     excel_base64,

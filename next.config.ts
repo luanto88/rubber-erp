@@ -2,6 +2,11 @@ import type { NextConfig } from "next"
 import path from "path"
 
 const nextConfig: NextConfig = {
+  // Mã bản build — gắn vào URL service worker (`/service-worker.js?v=`) để mỗi lần deploy trình duyệt
+  // cài SW mới và đặt tên cache theo bản (xem public/service-worker.js, GĐ-B quét QR offline).
+  env: {
+    NEXT_PUBLIC_BUILD_ID: (process.env.VERCEL_GIT_COMMIT_SHA || "").slice(0, 12) || String(Date.now()),
+  },
   turbopack: {
     root: path.resolve(__dirname),
   },

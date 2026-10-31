@@ -35,7 +35,6 @@ import { OutputSourceCell, OutputWarnBadge } from "./_components/output-badges"
 import type { OutputFormState, ProductionRecord } from "./_components/output-types"
 import {
   OUTPUT_MATERIALS,
-  WARN_LABELS,
   WARN_SEVERITY,
   buildProductionRecordKey,
   compareSoXe,
@@ -44,6 +43,7 @@ import {
   type WarnCode,
 } from "./_components/output-types"
 import { OutputImport } from "./_components/output-import"
+import { OutputImportGuide } from "./_components/output-import-guide"
 import { OutputForm } from "./_components/output-form"
 import { OutputConverterView, FxToExcelIcon } from "./_components/output-converter-view"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
@@ -1348,45 +1348,12 @@ export default function OutputPage() {
       )}
 
       {tab === "import" && (
-        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-700 shadow-sm">
-          <h3 className="text-base font-bold text-slate-800">Hướng dẫn import file sản lượng</h3>
-          <p>Giữ nguyên cấu trúc 19 cột A-S, import lại sẽ upsert theo Ngày + Xe + Chuyến + Đội.</p>
-          <div className="grid gap-6 md:grid-cols-2">
-            <div>
-              <p className="mb-2 font-bold">Cột chủ đạo:</p>
-              <ul className="space-y-1 text-slate-600">
-                <li>A: Ngày</li>
-                <li>B: Đội</li>
-                <li>C: Số xe</li>
-                <li>D-R: 5 nhóm nguyên liệu, mỗi nhóm gồm Tươi / DRC / Khô</li>
-                <li>S: Ghi chú</li>
-              </ul>
-              <p className="mb-2 mt-4 font-bold">Mẫu báo cáo SLRpt (Sản lượng ngày tổng hợp):</p>
-              <ul className="space-y-1 text-slate-600">
-                <li>Cột: STT / Đội / Số xe / Ngày / 5 nhóm Tươi-DRC-Khô / Tổng quy khô / Ghi chú — hệ thống tự nhận diện.</li>
-                <li>File không có cột Chuyến: hệ thống ghép theo Ngày + Số xe + Đội lớn với phiếu Điều xe. Xe chạy nhiều chuyến vào cùng đội thì gán lần lượt theo thứ tự dòng trong file.</li>
-                <li>Dòng &quot;Tổng cộng&quot; cuối file được bỏ qua.</li>
-              </ul>
-            </div>
-            <div>
-              <p className="mb-2 font-bold">Cảnh báo sau import:</p>
-              <ul className="space-y-1">
-                {(Object.entries(WARN_LABELS) as [WarnCode, string][]).map(([code, label]) => (
-                  <li key={code} className="flex items-start gap-2">
-                    <OutputWarnBadge code={code} />
-                    <span>{label}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-          {(isAdmin || canImport) && (
-            <button onClick={() => setShowImport(true)} className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white shadow-md hover:bg-blue-700">
-              <Upload size={16} />
-              Bắt đầu import
-            </button>
-          )}
-        </div>
+        <OutputImportGuide
+          canImport={isAdmin || canImport}
+          canUseConverter={canUseConverter}
+          onStartImport={() => setShowImport(true)}
+          onOpenConverter={() => setView("converter")}
+        />
       )}
 
       {showImport && factoryId && (

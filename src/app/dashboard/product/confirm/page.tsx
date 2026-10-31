@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -17,6 +17,8 @@ import {
   Inbox,
   Layers,
   Loader2,
+  LogOut,
+  LayoutDashboard,
   Lock,
   Minus,
   Package,
@@ -36,10 +38,22 @@ import {
   getFreshAuthSession,
   hasPermission,
   hydrateActiveSession,
+  isBrowserOffline,
+  readCachedSessionUser,
   type SessionUser,
 } from "@/lib/auth";
+import { logoutWithConfirmQueueCheck } from "@/lib/confirm-logout";
 import { getTodayISODate } from "@/lib/date-utils";
-import { getBocsForLoaiCSR, getLoaiBanhConfig } from "@/lib/product-lot-config";
+import { getBocsForLoaiCSR, getLoaiBanhConfig, getLoaiBanhOptions, getLoaiCSRByDayChuyen } from "@/lib/product-lot-config";
+import type { ConfirmQueueItem } from "@/lib/confirm-offline-store";
+import {
+  computeKienLookup,
+  offlineUnknownLookup,
+  type KienLookupDraft,
+} from "@/app/dashboard/product/confirm/kien-lookup";
+import { PACK_STALE_MS, useOfflineQueue } from "@/app/dashboard/product/confirm/use-offline-queue";
+import { NetworkStatusBar } from "@/app/dashboard/product/confirm/network-status-bar";
+import { OfflineQueueCard } from "@/app/dashboard/product/confirm/offline-queue-card";
 import { buildProductLabelLookupPath, KIEN_LETTERS, type KienLetter } from "@/lib/product-label";
 import {
   checkIncompleteLotsForDay,
@@ -94,12 +108,21 @@ const CA_STORAGE_VALUES = ["A", "B", "C"] as const;
 // duyệt này (đã chốt với người dùng — không đoán theo khung giờ), cuối cùng mới về "A".
 function loadStoredCa(): string | null {
   if (typeof window === "undefined") return null;
-  const stored = window.localStorage.getItem(LAST_CA_STORAGE_KEY);
-  return stored && (CA_STORAGE_VALUES as readonly string[]).includes(stored) ? stored : null;
+  // WebView Telegram/Zalo có thể chặn localStorage (SecurityError) — không được làm vỡ trang quét.
+  try {
+    const stored = window.localStorage.getItem(LAST_CA_STORAGE_KEY);
+    return stored && (CA_STORAGE_VALUES as readonly string[]).includes(stored) ? stored : null;
+  } catch {
+    return null;
+  }
 }
 function storeCa(ca: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(LAST_CA_STORAGE_KEY, ca);
+  try {
+    window.localStorage.setItem(LAST_CA_STORAGE_KEY, ca);
+  } catch {
+    /* bỏ qua — chỉ là gợi ý ca */
+  }
 }
 
 const QrScanner = dynamic(
@@ -192,10 +215,38 @@ export default function ConfirmKienProductionPage() {
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [factoryMismatch, setFactoryMismatch] = useState(false);
 
+  // Quét khi MẤT MẠNG (GĐ-A, .claude/plans/quet-qr-offline.md): "Lưu tạm" luôn ghi vào hàng đợi trên
+  // máy trước rồi mới gửi; gói tra cứu tải sẵn để tra kiện khi offline. onSynced đi qua ref vì
+  // refreshPendingDrafts khai báo phía dưới.
+  const onQueueSyncedRef = useRef<(() => void) | null>(null);
+  const offline = useOfflineQueue({
+    factoryId,
+    userId: currentUser?.id ?? null,
+    onSynced: useCallback(() => onQueueSyncedRef.current?.(), []),
+  });
+  const isOnline = offline.online;
+  // Lookup đang hiển thị được dựng từ gói tải sẵn (không phải server) ⇒ hiện cảnh báo "ước tính".
+  const [lookupFromPack, setLookupFromPack] = useState(false);
+  const [editingQueueItem, setEditingQueueItem] = useState<ConfirmQueueItem | null>(null);
+
   // "Gắn bản ghi tại chỗ" — gợi ý gắn lô vừa gửi vào công việc KPI đang mở hôm nay
   const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null);
 
   const [chucVu, setChucVu] = useState<string | null>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [userMenuOpen]);
   // Tên ca sản xuất theo cấu hình nhà máy (Cài đặt → Danh mục → Thông tin công ty → "Tên ca sản
   // xuất") — chỉ dùng để làm nhãn gợi ý trong 2 dropdown "Ca sản xuất" (form quét + Hub), không
   // ảnh hưởng dữ liệu lưu (vẫn lưu mã ca "A"/"B"/"C" như trước).
@@ -229,6 +280,9 @@ export default function ConfirmKienProductionPage() {
   const [kien, setKien] = useState<KienLetter>("A");
 
   const [lookup, setLookup] = useState<ConfirmKienLookup | null>(null);
+  // Khoá chống bấm lặp "Lưu tạm": 1 UUID cho mỗi lần mở form (xem saveDraftKien). Giữ nguyên qua
+  // các lần bấm lại khi lỗi mạng; đổi khi tra cứu kiện mới hoặc sau khi lưu thành công.
+  const draftKeyRef = useRef<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   // Cảnh báo (không chặn) các lô KHÁC cùng chủng loại (loai_csr) đang dở dang — tính cả nháp chưa
@@ -244,14 +298,20 @@ export default function ConfirmKienProductionPage() {
 
   // Tên ca trưởng có ngày hiệu lực (bảng production_shift_names) — nạp lại theo đúng ngày sản xuất
   // đang chọn trên form quét, để nhãn dropdown khớp ca trưởng của ngày đó.
+  // Mất mạng ⇒ lấy tên ca từ gói tải sẵn (hôm nay / hôm qua), không gọi server.
+  const packShiftNames = offline.pack?.shiftNames;
   useEffect(() => {
     if (!factoryId) return;
+    if (!isOnline) {
+      setShiftNames(packShiftNames?.[ngaySx] ?? {});
+      return;
+    }
     let alive = true;
     loadFactoryShiftNames(factoryId, ngaySx)
       .then((names) => { if (alive) setShiftNames(names); })
-      .catch(() => { if (alive) setShiftNames({}); });
+      .catch(() => { if (alive) setShiftNames(packShiftNames?.[ngaySx] ?? {}); });
     return () => { alive = false; };
-  }, [factoryId, ngaySx]);
+  }, [factoryId, ngaySx, isOnline, packShiftNames]);
   const [ghiChu, setGhiChu] = useState("");
   const [manualNganId, setManualNganId] = useState("");
   const [activeNgans, setActiveNgans] = useState<ActiveNganOption[]>([]);
@@ -314,13 +374,35 @@ export default function ConfirmKienProductionPage() {
   }, [toast]);
 
   useEffect(() => {
+    // Mở trang khi MẤT MẠNG (GĐ-B): dùng phiên cache erp_user — layout cũng đã giữ phiên này, không
+    // redirect. Có mạng thì đi luồng cũ; luồng cũ ném lỗi mạng mà có cache thì cũng rơi về cache.
+    const resolveSession = async (): Promise<{ fid: string | null; user: SessionUser | null; fromCache: boolean }> => {
+      const cached = readCachedSessionUser();
+      if (isBrowserOffline() && cached) return { fid: cached.factory_id, user: cached, fromCache: true };
+      try {
+        const fid = await getActiveFactoryId();
+        if (!fid) return { fid: null, user: null, fromCache: false };
+        const { user } = await hydrateActiveSession();
+        return { fid, user, fromCache: false };
+      } catch (err) {
+        if (cached) return { fid: cached.factory_id, user: cached, fromCache: true };
+        throw err;
+      }
+    };
+
     const bootstrap = async () => {
-      const fid = await getActiveFactoryId();
+      let resolved: Awaited<ReturnType<typeof resolveSession>>;
+      try {
+        resolved = await resolveSession();
+      } catch {
+        setLoading(false);
+        return;
+      }
+      const { fid, user, fromCache } = resolved;
       if (!fid) {
         setLoading(false);
         return;
       }
-      const { user } = await hydrateActiveSession();
       if (!user || !hasPermission(user, "product.confirm_scan")) {
         setPermissionDenied(true);
         setLoading(false);
@@ -334,8 +416,21 @@ export default function ConfirmKienProductionPage() {
       }
       setFactoryId(fid);
       setCurrentUser(user);
-      loadUserChucVu(fid, user.id).then(setChucVu).catch(() => setChucVu(null));
-      loadUserShiftAssignment(fid, user.id).then(setAssignedCa).catch(() => setAssignedCa(null));
+      // Chức vụ thật (Cài đặt → Nhân sự) — cache trên máy để mở offline vẫn hiện.
+      const chucVuKey = `confirm_chuc_vu:${user.id}`;
+      try { setChucVu(localStorage.getItem(chucVuKey)); } catch { /* storage bị chặn */ }
+      if (!fromCache) {
+        loadUserChucVu(fid, user.id)
+          .then((value) => {
+            setChucVu(value);
+            try {
+              if (value) localStorage.setItem(chucVuKey, value);
+              else localStorage.removeItem(chucVuKey);
+            } catch { /* storage bị chặn */ }
+          })
+          .catch(() => { /* giữ bản cache */ });
+        loadUserShiftAssignment(fid, user.id).then(setAssignedCa).catch(() => setAssignedCa(null));
+      }
 
       const paramLo = (searchParams.get("lo") || "").trim();
       if (paramLo) {
@@ -355,8 +450,25 @@ export default function ConfirmKienProductionPage() {
 
   const isAdmin = currentUser?.role === "admin";
 
+  // GĐ-B: khi có mạng và service worker đang kiểm soát trang, nạp sẵn chunk máy quét QR (nạp lười
+  // qua next/dynamic) để SW lưu vào cache — mở lại trang lúc mất mạng vẫn bật được camera.
+  useEffect(() => {
+    if (loading || !isOnline) return;
+    if (typeof navigator === "undefined" || !navigator.serviceWorker?.controller) return;
+    const warm = () => {
+      void import("@/app/dashboard/product/confirm/qr-scanner").catch(() => {});
+    };
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
+    if (w.requestIdleCallback) w.requestIdleCallback(warm);
+    else window.setTimeout(warm, 2000);
+  }, [loading, isOnline]);
+
   const refreshHistory = useCallback(async () => {
     if (!factoryId) return;
+    if (!isOnline) {
+      setHistoryError(tt("hubOfflineNotice"));
+      return;
+    }
     setHistoryLoading(true);
     setHistoryError(null);
     try {
@@ -371,7 +483,7 @@ export default function ConfirmKienProductionPage() {
     } finally {
       setHistoryLoading(false);
     }
-  }, [factoryId, historyNgay, historyCa, isAdmin]);
+  }, [factoryId, historyNgay, historyCa, isAdmin, isOnline, tt]);
 
   useEffect(() => {
     if (view !== "hub" || !factoryId) return;
@@ -380,6 +492,10 @@ export default function ConfirmKienProductionPage() {
 
   const refreshPendingDrafts = useCallback(async () => {
     if (!factoryId || !currentUser) return;
+    if (!isOnline) {
+      setPendingDraftsError(tt("hubOfflineNotice"));
+      return;
+    }
     setPendingDraftsLoading(true);
     setPendingDraftsError(null);
     try {
@@ -390,12 +506,66 @@ export default function ConfirmKienProductionPage() {
     } finally {
       setPendingDraftsLoading(false);
     }
-  }, [factoryId, currentUser]);
+  }, [factoryId, currentUser, isOnline, tt]);
+
+  useEffect(() => {
+    onQueueSyncedRef.current = () => void refreshPendingDrafts();
+  }, [refreshPendingDrafts]);
 
   useEffect(() => {
     if (view !== "hub" || !factoryId || !currentUser) return;
     void refreshPendingDrafts();
   }, [view, factoryId, currentUser, refreshPendingDrafts]);
+
+  // CSR chọn tay cho mã ngoài gói khi offline: các CSR đang có trong gói, thiếu thì danh mục mặc định.
+  const offlineCsrOptions = useMemo(() => {
+    const fromPack = offline.pack?.csrOptions || [];
+    if (fromPack.length > 0) return fromPack;
+    return [...getLoaiCSRByDayChuyen("Mủ tạp", "CSR"), ...getLoaiCSRByDayChuyen("Mủ nước", "CSR")].filter(
+      (c) => c !== "Ngoại lệ",
+    );
+  }, [offline.pack]);
+
+  // Tra kiện khi mất mạng: cùng logic với server (computeKienLookup) trên gói tải sẵn, cộng thêm các
+  // kiện CHÍNH MÁY NÀY đã lưu trong hàng đợi (chưa có trên server) để không đếm hụt số bành đã nhập.
+  const buildOfflineLookup = (maLoRaw: string, kienValue: KienLetter): ConfirmKienLookup => {
+    const code = maLoRaw.trim();
+    const pack = offline.pack;
+    const src = pack?.sources[code];
+    if (!pack || !src) {
+      const csr = offlineCsrOptions[0] || "CSR10";
+      return offlineUnknownLookup(code, kienValue, csr, getLoaiBanhOptions(csr)[0]);
+    }
+    const userId = currentUser?.id || "";
+    const known = new Set(src.drafts.map((d) => d.id));
+    const local: KienLookupDraft[] = offline.queue
+      .filter((q) => q.maLo === code && !known.has(q.id))
+      .map((q) => ({
+        id: q.id,
+        kien: q.kien,
+        so_banh: q.soBanh,
+        boc: q.boc,
+        pallet: q.pallet,
+        created_by: userId,
+        loai_csr: q.loaiCsr,
+        loai_banh: q.loaiBanh,
+        created_at: q.scannedAt,
+      }));
+    const drafts = [...src.drafts, ...local].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+    return computeKienLookup({ ...src, drafts }, code, kienValue, {
+      ...pack.ctx,
+      profileNames: { ...pack.ctx.profileNames, [userId]: currentUser?.full_name || currentUser?.username || "—" },
+    });
+  };
+
+  // Đổi CSR / loại bành cho mã ngoài gói ⇒ dựng lại lookup tạm (bọc, số bành tối đa đổi theo).
+  const changeOfflineUnknown = (loaiCsr: string, loaiBanh: number) => {
+    if (!lookup) return;
+    const next = offlineUnknownLookup(lookup.maLo, lookup.kien, loaiCsr, loaiBanh);
+    setLookup(next);
+    setBoc("");
+    setSoBanh(next.maxPerKien || 36);
+  };
 
   useEffect(() => {
     if (!factoryId || !maLo || view !== "form") return;
@@ -407,13 +577,34 @@ export default function ConfirmKienProductionPage() {
       setLookupLoading(true);
       setLookupError(null);
       setLookup(null);
+      draftKeyRef.current = null;
       setDraftSaveError(null);
       setManualNganId("");
+      setLookupFromPack(false);
       try {
-        const result = await resolveKienForConfirm(factoryId, maLo, kien);
+        let result: ConfirmKienLookup;
+        let fromPack = false;
+        if (navigator.onLine) {
+          try {
+            result = await resolveKienForConfirm(factoryId, maLo, kien);
+          } catch {
+            // Không tới được server (mạng chập chờn dù onLine=true) ⇒ tra bằng gói tải sẵn.
+            result = buildOfflineLookup(maLo, kien);
+            fromPack = true;
+          }
+        } else {
+          result = buildOfflineLookup(maLo, kien);
+          fromPack = true;
+        }
         if (!alive) return;
         setLookup(result);
-        if (result.status === "predicted" || result.status === "partial" || result.status === "partial_kien") {
+        setLookupFromPack(fromPack);
+        if (
+          result.status === "predicted" ||
+          result.status === "partial" ||
+          result.status === "partial_kien" ||
+          result.status === "offline_unknown"
+        ) {
           setSoBanh(result.status === "partial_kien" ? Math.max(1, result.remainingBanh || 1) : result.maxPerKien || 36);
           setNgaySx(getDefaultNgaySx(new Date()));
           setCa(getDefaultCa());
@@ -422,13 +613,17 @@ export default function ConfirmKienProductionPage() {
           setChiThi(result.chiThi || "");
           setGhiChu("");
           if (!result.nganId) {
-            const ngans = await loadActiveNgansForFactory(factoryId);
-            if (alive) setActiveNgans(ngans);
+            if (fromPack) {
+              setActiveNgans(offline.pack?.ngans || []);
+            } else {
+              const ngans = await loadActiveNgansForFactory(factoryId);
+              if (alive) setActiveNgans(ngans);
+            }
           }
         }
         // Cảnh báo lô khác cùng chủng loại còn dở dang — không chặn thao tác, không đợi trước khi
         // hạ lookupLoading (chạy độc lập, có thể trễ hơn 1 nhịp so với form chính).
-        if (result.status !== "not_found" && result.loaiCsr) {
+        if (!fromPack && result.status !== "not_found" && result.loaiCsr) {
           checkOtherIncompleteLotsForCategory(factoryId, result.loaiCsr, maLo)
             .then((rows) => {
               if (alive) setOtherIncompleteLots(rows);
@@ -496,7 +691,10 @@ export default function ConfirmKienProductionPage() {
   // qua RPC submit_confirm_draft_batch (xem confirm/actions.ts).
   const canSaveDraft =
     !!lookup &&
-    (lookup.status === "predicted" || lookup.status === "partial" || lookup.status === "partial_kien") &&
+    (lookup.status === "predicted" ||
+      lookup.status === "partial" ||
+      lookup.status === "partial_kien" ||
+      lookup.status === "offline_unknown") &&
     !!effectiveNganId &&
     soBanh > 0 &&
     soBanh <= stepperMax &&
@@ -530,10 +728,76 @@ export default function ConfirmKienProductionPage() {
   // liên tục nhiều kiện rồi mới "Gửi tất cả" 1 lần từ Hub (xem saveDraftKien, submitConfirmDraftBatch).
   const handleSaveDraft = async () => {
     if (!factoryId || !lookup || !currentUser) return;
+    // Mất mạng: kiểm khoá ca theo gói tải sẵn (server kiểm lại khi đồng bộ; admin vẫn được lưu).
+    if (!isOnline && !isAdmin && offline.pack?.lockedShifts.includes(`${ngaySx}|${ca}`)) {
+      setDraftSaveError(tt("offlineShiftLocked", { ngay: ngaySx, ca }));
+      return;
+    }
     setSavingDraft(true);
     setDraftSaveError(null);
     try {
+      if (!draftKeyRef.current) draftKeyRef.current = crypto.randomUUID();
+
+      const finishSaved = (message: string) => {
+        draftKeyRef.current = null;
+        setToast({ message, variant: "success" });
+        if (!assignedCa) storeCa(ca);
+        setView("hub");
+      };
+
+      // Ghi vào hàng đợi trên máy TRƯỚC (tab chết giữa chừng cũng không mất), rồi có mạng thì gửi ngay.
+      if (offline.available) {
+        const manualNgan = activeNgans.find((n) => n.id === effectiveNganId);
+        const item = await offline.enqueue({
+          id: draftKeyRef.current,
+          factoryId,
+          maLo: maLo.trim(),
+          kien,
+          isNewLot: lookup.isNewLot,
+          nganId: effectiveNganId,
+          nganMa: lookup.nganId ? lookup.nganMa : manualNgan?.ma_ngan ?? null,
+          nganTen: lookup.nganId ? lookup.nganTen : manualNgan?.ten_ngan ?? null,
+          loaiCsr: lookup.loaiCsr || "",
+          loaiBanh: Number(lookup.loaiBanh) || 35,
+          dayChuyen: lookup.dayChuyen,
+          soBanh,
+          ngaySx,
+          ca,
+          boc,
+          pallet,
+          chiThi: chiThi || null,
+          tham: lookup.tham,
+          ghiChu: lookup.isNewLot ? (ghiChu || null) : null,
+          unverified: lookup.status === "offline_unknown",
+        });
+        if (item) {
+          if (!navigator.onLine) {
+            finishSaved(tt("queueSavedOffline"));
+            return;
+          }
+          const outcome = await offline.sendNow(item);
+          if (outcome.kind === "ok") {
+            finishSaved(outcome.alreadySaved ? tt("daLuuTamTruocDo") : tt("daLuuTamThanhCong"));
+          } else if (outcome.kind === "error") {
+            // Lỗi nghiệp vụ khi đang có mạng: giữ hành vi cũ — báo ngay trên form, không để lại trên máy.
+            await offline.removeItem(item.id);
+            setDraftSaveError(outcome.error);
+          } else {
+            finishSaved(tt("queueSavedOffline"));
+          }
+          return;
+        }
+      }
+      if (!navigator.onLine) {
+        setDraftSaveError(tt("queueSaveFailed"));
+        return;
+      }
+
+      // IndexedDB không dùng được (WebView chặn...) ⇒ gửi thẳng như trước.
+      const session = await getFreshAuthSession();
       const result = await saveDraftKien({
+        draftId: draftKeyRef.current,
+        accessToken: session?.access_token ?? null,
         factoryId,
         maLo,
         kien,
@@ -552,13 +816,16 @@ export default function ConfirmKienProductionPage() {
         chiThi,
         tham: lookup.tham,
         ghiChu: lookup.isNewLot ? (ghiChu || null) : null,
-        userId: currentUser.id,
       });
       if (!result.success) {
         setDraftSaveError(result.error);
         return;
       }
-      setToast({ message: tt("daLuuTamThanhCong"), variant: "success" });
+      draftKeyRef.current = null;
+      setToast({
+        message: result.alreadySaved ? tt("daLuuTamTruocDo") : tt("daLuuTamThanhCong"),
+        variant: "success",
+      });
       // Mục 6: nhớ Ca vừa dùng trên chính thiết bị này làm gợi ý mặc định cho lần quét sau (chỉ
       // khi tài khoản chưa được gán cứng qua bảng phân công — không ghi đè gợi ý ưu tiên cao hơn).
       if (!assignedCa) storeCa(ca);
@@ -642,6 +909,7 @@ export default function ConfirmKienProductionPage() {
   // 1 nháp lỗi thì hiện đúng 1 message lỗi, giữ nguyên toàn bộ danh sách nháp để sửa/xóa rồi thử lại.
   const handleSubmitAllDrafts = async () => {
     if (!factoryId || !currentUser || pendingDrafts.length === 0) return;
+    if (!navigator.onLine || offline.queue.length > 0) return;
     setSubmittingBatch(true);
     setSubmitBatchError(null);
     try {
@@ -856,7 +1124,19 @@ export default function ConfirmKienProductionPage() {
     }
   };
 
+  // Còn kiện trên máy chưa đồng bộ (hoặc đang mất mạng) ⇒ khoá cứng "Gửi tất cả" và "Kết thúc ca"
+  // (đã chốt 2026-10-31) — phiếu F09 không được thiếu kiện còn nằm trên máy.
+  const sendBlockedReason = !isOnline
+    ? tt("blockedOffline")
+    : offline.queue.length > 0
+      ? tt("blockedByQueue", { count: offline.queue.length })
+      : null;
+
   const handleEndShiftFirstConfirm = async () => {
+    if (sendBlockedReason) {
+      setEndShiftError(sendBlockedReason);
+      return;
+    }
     if (!factoryId) {
       setEndShiftConfirmOpen(false);
       router.push("/dashboard/product");
@@ -978,18 +1258,69 @@ export default function ConfirmKienProductionPage() {
                 </p>
               </div>
               {currentUser && (
-                <div className="flex shrink-0 items-center gap-2">
-                  <div className="text-right">
-                    <div className="text-sm font-extrabold leading-tight text-slate-700">{userDisplayName}</div>
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-amber-600">
-                      {chucVu || tt("shiftLabel")}
+                <div ref={userMenuRef} className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setUserMenuOpen((v) => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={userMenuOpen}
+                    className="flex items-center gap-2 rounded-full py-0.5 pl-2 pr-0.5 hover:bg-slate-50"
+                  >
+                    <div className="text-right">
+                      <div className="text-sm font-extrabold leading-tight text-slate-700">{userDisplayName}</div>
+                      {/* Chức vụ đúng nguyên văn Cài đặt → Nhân sự; "Trực ca" chỉ khi chưa liên kết nhân sự. */}
+                      <div className="text-[11px] font-bold tracking-wide text-amber-600">
+                        {chucVu || tt("shiftLabel")}
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                    <User size={18} />
-                  </div>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                      <User size={18} />
+                    </div>
+                  </button>
+                  {userMenuOpen && (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          router.push("/dashboard");
+                        }}
+                        disabled={!isOnline}
+                        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <LayoutDashboard size={16} />
+                        {tt("backToDashboard")}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          void logoutWithConfirmQueueCheck(currentUser);
+                        }}
+                        className="flex w-full items-center gap-2 border-t border-slate-100 px-4 py-3 text-left text-sm font-semibold text-red-600 hover:bg-red-50"
+                      >
+                        <LogOut size={16} />
+                        {tt("logout")}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
+            </div>
+            {/* Thanh trạng thái mạng nằm TRONG header dính (tràn lề bằng margin âm) để luôn thấy. */}
+            <div className="-mx-4 -mb-3 mt-3 empty:hidden">
+              <NetworkStatusBar
+                tt={tt}
+                online={isOnline}
+                queueCount={offline.queue.length}
+                syncProgress={offline.syncProgress}
+                authExpired={offline.authExpired}
+              />
             </div>
           </div>
 
@@ -1061,6 +1392,21 @@ export default function ConfirmKienProductionPage() {
                 factoryId={factoryId}
                 kpiPrompt={kpiPrompt}
                 onKpiPromptDone={() => setKpiPrompt(null)}
+                sendBlockedReason={sendBlockedReason}
+                queueSlot={
+                  <OfflineQueueCard
+                    tt={tt}
+                    caLabel={caLabel}
+                    queue={offline.queue}
+                    online={isOnline}
+                    syncing={!!offline.syncProgress}
+                    onSyncNow={() => void offline.syncNow()}
+                    onEdit={setEditingQueueItem}
+                    onDelete={(item) => {
+                      if (window.confirm(tt("queueDeleteConfirm"))) void offline.removeItem(item.id);
+                    }}
+                  />
+                }
               />
             ) : lookupLoading ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
@@ -1113,6 +1459,56 @@ export default function ConfirmKienProductionPage() {
               </div>
             ) : (
               <div className="space-y-4">
+                {lookupFromPack && (
+                  <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-800">
+                    <div>{tt("offlineFormNotice")}</div>
+                    {!offline.pack ? (
+                      <div className="mt-1">{tt("offlineNoPack")}</div>
+                    ) : Date.now() - new Date(offline.pack.generatedAt).getTime() > PACK_STALE_MS ? (
+                      <div className="mt-1">
+                        {tt("offlinePackStale", { time: formatDMYHMS(new Date(offline.pack.generatedAt)) })}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+                {lookup.status === "offline_unknown" && (
+                  <div className="space-y-3 rounded-xl border-2 border-amber-400 bg-amber-50 p-3">
+                    <div className="flex items-start gap-2 text-sm font-extrabold text-amber-800">
+                      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                      {tt("offlineUnknownTitle")}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label={tt("offlineChonCsr")}>
+                        <select
+                          value={lookup.loaiCsr || ""}
+                          onChange={(e) =>
+                            changeOfflineUnknown(e.target.value, getLoaiBanhOptions(e.target.value)[0])
+                          }
+                          className={highlightFieldClassAmber}
+                        >
+                          {offlineCsrOptions.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label={tt("offlineChonBanh")}>
+                        <select
+                          value={String(lookup.loaiBanh ?? "")}
+                          onChange={(e) => changeOfflineUnknown(lookup.loaiCsr || "", Number(e.target.value))}
+                          className={highlightFieldClassAmber}
+                        >
+                          {getLoaiBanhOptions(lookup.loaiCsr || "").map((b) => (
+                            <option key={b} value={String(b)}>
+                              {b}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                    </div>
+                  </div>
+                )}
                 <Field label={tt("ngaySanXuat")} icon={<Calendar size={13} />}>
                   <input
                     type="date"
@@ -1374,7 +1770,8 @@ export default function ConfirmKienProductionPage() {
                   <div className="text-xs text-slate-400">{tt("lotExistsNote")}</div>
                 )}
 
-                {lookup.isNewLot && (
+                {/* Danh mục ghi chú tải từ server ⇒ ẩn khi mất mạng (ghi chú không bắt buộc). */}
+                {lookup.isNewLot && isOnline && (
                   <Field label={tt("ghiChu")}>
                     <RequiredNoteSelect
                       factoryId={factoryId}
@@ -1462,6 +1859,57 @@ export default function ConfirmKienProductionPage() {
             setDraftEditError(null);
           }}
           onSave={handleSaveEditDraft}
+        />
+      )}
+
+      {/* Sửa 1 kiện còn trong hàng đợi trên máy — ghi lại IndexedDB, đặt về "Chờ đồng bộ" (có mạng thì
+          đồng bộ ngay). Ngăn lấy từ gói tải sẵn nên dùng được cả khi mất mạng. */}
+      {editingQueueItem && factoryId && (
+        <EditDraftModal
+          key={editingQueueItem.id}
+          tt={tt}
+          lang={lang}
+          caLabel={caLabel}
+          factoryId={factoryId}
+          draft={{
+            id: editingQueueItem.id,
+            maLo: editingQueueItem.maLo,
+            kien: editingQueueItem.kien,
+            isNewLot: editingQueueItem.isNewLot,
+            nganId: editingQueueItem.nganId,
+            nganMa: editingQueueItem.nganMa,
+            nganTen: editingQueueItem.nganTen,
+            loaiCsr: editingQueueItem.loaiCsr,
+            loaiBanh: editingQueueItem.loaiBanh,
+            dayChuyen: editingQueueItem.dayChuyen,
+            soBanh: editingQueueItem.soBanh,
+            soKg: Math.round(editingQueueItem.soBanh * editingQueueItem.loaiBanh * 100) / 100,
+            maxPerKien: getLoaiBanhConfig(editingQueueItem.loaiCsr, editingQueueItem.loaiBanh).max_per_kien,
+            ngaySx: editingQueueItem.ngaySx,
+            ca: editingQueueItem.ca,
+            boc: editingQueueItem.boc,
+            pallet: editingQueueItem.pallet,
+            chiThi: editingQueueItem.chiThi,
+            tham: editingQueueItem.tham,
+            ghiChu: editingQueueItem.ghiChu,
+            createdAt: editingQueueItem.scannedAt,
+          }}
+          nganOptionsOverride={offline.pack?.ngans || []}
+          saving={false}
+          error={null}
+          onCancel={() => setEditingQueueItem(null)}
+          onSave={(input) => {
+            const item = editingQueueItem;
+            const ngan = offline.pack?.ngans.find((n) => n.id === input.nganId);
+            setEditingQueueItem(null);
+            void offline.updateItem({
+              ...item,
+              ...input,
+              chiThi: input.chiThi || null,
+              nganMa: ngan ? ngan.ma_ngan : input.nganId === item.nganId ? item.nganMa : null,
+              nganTen: ngan ? ngan.ten_ngan : input.nganId === item.nganId ? item.nganTen : null,
+            });
+          }}
         />
       )}
     </div>
@@ -1613,7 +2061,11 @@ function HubView({
   factoryId,
   kpiPrompt,
   onKpiPromptDone,
+  sendBlockedReason,
+  queueSlot,
 }: {
+  sendBlockedReason: string | null;
+  queueSlot: React.ReactNode;
   tt: (key: string, vars?: Record<string, string | number>) => string;
   caLabel: (c: string) => string;
   historyNgay: string;
@@ -1675,6 +2127,8 @@ function HubView({
         <ScanLine size={26} />
         {tt("scanQr")}
       </button>
+
+      {queueSlot}
 
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
         <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-amber-800">
@@ -1740,13 +2194,16 @@ function HubView({
 
         <button
           type="button"
-          disabled={pendingDrafts.length === 0 || submittingBatch}
+          disabled={pendingDrafts.length === 0 || submittingBatch || !!sendBlockedReason}
           onClick={onSubmitAllDrafts}
           className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-amber-600 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {submittingBatch ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           {submittingBatch ? tt("submittingAllDrafts") : tt("submitAllDrafts", { count: pendingDrafts.length })}
         </button>
+        {sendBlockedReason && pendingDrafts.length > 0 && (
+          <p className="mt-1.5 text-center text-[11px] font-semibold text-amber-800">{sendBlockedReason}</p>
+        )}
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -1918,11 +2375,15 @@ function HubView({
       <div className="border-t border-dashed border-slate-300 pt-4">
         <button
           type="button"
+          disabled={!!sendBlockedReason}
           onClick={onEndShift}
-          className="w-full rounded-2xl bg-red-600 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:bg-red-700"
+          className="w-full rounded-2xl bg-red-600 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {tt("endShift")}
         </button>
+        {sendBlockedReason && (
+          <p className="mt-1.5 text-center text-[11px] font-semibold text-slate-500">{sendBlockedReason}</p>
+        )}
       </div>
     </div>
   );
@@ -2368,12 +2829,15 @@ function EditDraftModal({
   error,
   onCancel,
   onSave,
+  nganOptionsOverride,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
   lang: Lang;
   caLabel: (c: string) => string;
   factoryId: string;
   draft: ConfirmDraftRow;
+  /** Danh sách ngăn có sẵn (gói tải sẵn) — có thì KHÔNG gọi server, dùng được khi mất mạng. */
+  nganOptionsOverride?: ActiveNganOption[];
   saving: boolean;
   error: string | null;
   onCancel: () => void;
@@ -2394,12 +2858,15 @@ function EditDraftModal({
   const [boc, setBoc] = useState(draft.boc || "");
   const [pallet, setPallet] = useState<string[]>(draft.pallet || []);
   const [chiThi, setChiThi] = useState(draft.chiThi || "");
-  const [nganOptions, setNganOptions] = useState<ActiveNganOption[]>(
-    draft.nganId
+  const [nganOptions, setNganOptions] = useState<ActiveNganOption[]>(() => {
+    const current = draft.nganId
       ? [{ id: draft.nganId, ma_ngan: draft.nganMa || "—", ten_ngan: draft.nganTen || "", loai_nl: "" }]
-      : [],
-  );
+      : [];
+    if (!nganOptionsOverride) return current;
+    return [...current.filter((c) => !nganOptionsOverride.some((n) => n.id === c.id)), ...nganOptionsOverride];
+  });
   useEffect(() => {
+    if (nganOptionsOverride) return;
     let alive = true;
     loadActiveNgansForFactory(factoryId)
       .then((list) => {

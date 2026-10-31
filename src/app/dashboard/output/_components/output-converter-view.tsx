@@ -13,7 +13,12 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { supabase } from "@/lib/supabase"
 import type { SessionUser } from "@/lib/auth"
 import type { ParsedSlTruckRow, ParsedOutputReport } from "@/lib/output-parser"
-import { writeBackToDispatch, buildProductionRecordKey, type WarnCode } from "./output-types"
+import { writeBackToDispatch, buildProductionRecordKey, resolveVehicleTrip, type WarnCode } from "./output-types"
+
+/** Nguồn sản lượng — giống import theo mẫu: đội 0 hoặc ghi chú "TM" = Thu mua ("m"). */
+function converterMaNguon(r: { doi: number | null; ghi_chu?: string | null }) {
+  return r.doi === 0 || (r.ghi_chu || "").trim().toUpperCase() === "TM" ? "m" : "cs"
+}
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { hasPermission } from "@/lib/auth"
 
@@ -185,17 +190,18 @@ export function OutputConverterView({
         // 3. Tải sản lượng đã có trong hệ thống ngày này
         const { data: existingRecords } = await supabase
           .from("production_records")
-          .select("id, ngay, doi, so_xe, chuyen")
+          .select("id, ngay, doi, so_xe, chuyen, ma_nguon")
           .eq("factory_id", factoryId)
           .eq("ngay", normalized)
 
         const existingSet = new Set<string>()
-        ;(existingRecords || []).forEach((rec: { ngay: string; doi: number; so_xe: string; chuyen: number }) => {
+        ;(existingRecords || []).forEach((rec: { ngay: string; doi: number; so_xe: string; chuyen: number; ma_nguon?: string | null }) => {
           existingSet.add(buildProductionRecordKey({
             ngay: rec.ngay,
             doi: rec.doi,
             so_xe: rec.so_xe,
             chuyen: rec.chuyen,
+            ma_nguon: rec.ma_nguon,
           }))
         })
 
@@ -229,7 +235,14 @@ export function OutputConverterView({
       tripsByVeh.set(vKey, list)
     }
 
-    return parsedRows.map((row, idx) => {
+    const vehiclesOfDay = new Set(tripsByVeh.keys())
+    return parsedRows.map((inputRow, idx) => {
+      // "TM12" = xe TM1 chuyến 2 (xe bắt đầu bằng chữ) — tách theo Điều xe của ngày.
+      let row = inputRow
+      if (!row.chuyen_tu_ten) {
+        const r = resolveVehicleTrip(row.base_xe, vehiclesOfDay)
+        if (r.split) row = { ...row, base_xe: r.base_xe, chuyen: r.chuyen, chuyen_tu_ten: true }
+      }
       const vKey = row.base_xe
       const candidateTrips = tripsByVeh.get(vKey) || []
       const uid = `row_${idx}_${row.doi}_${row.base_xe}_${row.chuyen}`
@@ -252,6 +265,7 @@ export function OutputConverterView({
         doi: row.doi,
         so_xe: row.base_xe,
         chuyen: row.chuyen,
+        ma_nguon: converterMaNguon(row),
       })
       const isDuplicateInDb = existingSet.has(fileKey)
 
@@ -551,7 +565,8 @@ export function OutputConverterView({
         dct_tuoi: r.dct_tuoi, dct_drc: r.dct_drc, dct_kho: r.dct_kho,
         dkt_tuoi: r.dkt_tuoi, dkt_drc: r.dkt_drc, dkt_kho: r.dkt_kho,
         dt_tuoi: r.dt_tuoi, dt_drc: r.dt_drc, dt_kho: r.dt_kho,
-        ghi_chu: r.ghi_chu || null,
+        ghi_chu: r.ghi_chu || (r.doi === 0 ? "TM" : null),
+        ma_nguon: converterMaNguon(r),
         created_by: currentUser?.id || null,
         nguoi_upload: currentUser?.full_name || currentUser?.username || "Hỗ trợ kỹ thuật",
         import_batch_id: batchId,
@@ -561,17 +576,18 @@ export function OutputConverterView({
       // Bản ghi đã có cùng khoá (ngày + đội + xe + chuyến) ⇒ CẬP NHẬT tại chỗ (giữ người tạo gốc);
       // chưa có ⇒ CHÈN. Trước đây xoá rồi chèn: không nguyên tử, và `.eq("doi", null)` không bao
       // giờ khớp bản ghi đội NULL nên sinh bản trùng.
-      const existing = await fetchAllPaginated<{ id: string; doi: number | null; so_xe: string; chuyen: number }>((from, to) =>
+      const existing = await fetchAllPaginated<{ id: string; doi: number | null; so_xe: string; chuyen: number; ma_nguon?: string | null }>((from, to) =>
         supabase
           .from("production_records")
-          .select("id, doi, so_xe, chuyen")
+          .select("id, doi, so_xe, chuyen, ma_nguon")
           .eq("factory_id", factoryId)
           .eq("ngay", normalizedDate)
           .order("id")
           .range(from, to),
       )
-      const keyOf = (r: { doi: number | null; so_xe: string; chuyen: number }) =>
-        `${r.doi ?? "null"}|${String(r.so_xe).trim().toUpperCase()}|${r.chuyen}`
+      // Khoá có cả NGUỒN (ma_nguon) — không ghi đè bản ghi nguồn khác cùng đội + xe + chuyến.
+      const keyOf = (r: { doi: number | null; so_xe: string; chuyen: number; ma_nguon?: string | null }) =>
+        `${r.doi ?? "null"}|${String(r.so_xe).trim().toUpperCase()}|${r.chuyen}|${r.ma_nguon || "cs"}`
       const existingByKey = new Map<string, string>()
       for (const r of existing) if (!existingByKey.has(keyOf(r))) existingByKey.set(keyOf(r), r.id)
 

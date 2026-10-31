@@ -224,3 +224,23 @@ Danh sách = 1 bảng `DateGroupRow` (mỗi ngày KN 1 dòng xổ; lô bên tron
 liệu mẫu). Trang chi tiết mới `/dashboard/quality/[date]` (70/30: PDF đã ký hoặc bản chưa ký dựng
 sẵn + trạng thái/ký/tiến trình) — chỉ xem + ký; Thêm/Sửa/Xoá phiếu vẫn ở danh sách. Xem file đã
 ký qua `/api/signing/requests/{id}/file-url?view=1&name=Phiếu KQKN …`. Chi tiết: rule 29.
+
+## Hỗ trợ kỹ thuật PDF KQKN — PDF đã sửa + lô lệch ngày (2026-10-30, chờ test tay)
+- **Lỗi "không nhận diện được cột PKN"**: parser dò TOẠ ĐỘ CỐ ĐỊNH của PDF gốc (trang xoay 90°, PKN y≈43). File đã qua
+  phần mềm sửa / in lại bị xoay, co giãn, dời lề ⇒ hết khớp. Nay `calibrateItems()` (`src/lib/kqkn-parser.ts`) tìm nhãn
+  "PKN" (hệ chuẩn 113,43) và chữ "HẠNG" xa nhất (dòng ĐẠT HẠNG, 113,715) rồi quy mọi chữ về hệ chuẩn bằng 1 phép xoay +
+  tỷ lệ + tịnh tiến; PDF gốc ⇒ đồng nhất, không đổi gì. `mergeSplitCells()` nối mẩu chữ bị tách trong cùng ô. Đọc mọi
+  trang. Không có lớp chữ / không thấy nhãn ⇒ lỗi có chẩn đoán. Đã kiểm: 6 PDF mẫu cho kết quả giống hệt bản cũ (trừ
+  `samples` vốn ngẫu nhiên); 2 PDF dựng lại (thu nhỏ + dời lề, xoay) bản cũ báo lỗi PKN, bản mới đọc đủ 13 lô.
+- **Ngày đọc từ nội dung PDF theo dòng** (`buildTextLines`): ngày SX = dòng "NGÀY SẢN XUẤT" (dự phòng: dòng có ngày ngay
+  dưới tiêu đề "BẢNG KẾT QUẢ KIỂM NGHIỆM CAO SU CSR"); ngày KN = "ngày dd tháng mm năm yyyy" thấp nhất (pdfjs tách
+  "n"+"ă"+"m" nên regex cũ chưa từng khớp). Dự phòng ngày KN: tên file → hôm nay theo giờ nhà máy; trả
+  `ngay_kn_source` và UI cảnh báo vàng khi không phải "pdf".
+- **Lô lệch ngày** (`quality-converter-view.tsx`): trạng thái `date_shift` thay `wrong_date` — tick chọn được (mặc định
+  không), ngày SX = ngày hoàn thành lô (`getLotQcDate`), ngày KN đích = ngày HT + 1 (sửa được theo nhóm). Banner nổi
+  (sticky) liệt kê từng lô "Lô X hoàn thành … không khớp ngày sản xuất của phiếu … — Đẩy vào ngày kiểm nghiệm …".
+  Khi đẩy gom theo ngày KN: ngày của PDF ⇒ PKN mới như cũ; ngày khác đã có phiếu ⇒ dùng lại `pkn` + `batch_id` phiếu đó;
+  chưa có ⇒ PKN mới (cấp tăng dần cục bộ, không trùng); ngày đã gửi ký (non-admin) ⇒ bỏ qua nhóm + báo lỗi.
+  `sx_unknown`: PDF không đọc được ngày SX ⇒ không tự chọn, banner đỏ. Kiểm "đã KN" nay chạy TRƯỚC kiểm ngày.
+- `getNextLoKN` (`quality/page.tsx`) = `lo_kn` lớn nhất + 1 (trước: số dòng + 1 ⇒ trùng sau khi xoá phiếu).
+- Khuyến nghị vận hành: KHÔNG sửa ngày trên PDF — upload bản gốc và dùng chức năng dời lô.

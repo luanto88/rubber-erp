@@ -25,6 +25,18 @@ import { getLoaiBanhConfig } from "@/lib/product-lot-config";
 import { getFactoryTodayISO, getTodayISODate } from "@/lib/date-utils";
 import { resolveShiftNamesAt, SHIFT_CODES } from "@/app/dashboard/product/confirm/shift-names";
 import { fetchAllPaginated } from "@/lib/supabase-helpers";
+import { assertShiftNotLocked } from "@/app/dashboard/product/shift-lock";
+import {
+  computeKienLookup,
+  notFoundLookup,
+  type ConfirmKienLookup,
+  type KienLookupContext,
+  type KienLookupDraft,
+  type KienLookupLot,
+  type KienLookupPredicted,
+  type KienLookupSource,
+  type KienLookupTx,
+} from "@/app/dashboard/product/confirm/kien-lookup";
 
 const KIEN_LOWER: Record<KienLetter, "a" | "b" | "c" | "d"> = {
   A: "a",
@@ -33,89 +45,8 @@ const KIEN_LOWER: Record<KienLetter, "a" | "b" | "c" | "d"> = {
   D: "d",
 };
 
-// "partial_kien": kiện đã có MỘT PHẦN bành (do top-up dở dang trước đó, tính CẢ committed lẫn nháp
-// chưa gửi của bất kỳ ai — xem loadPendingDraftAggregateForKien) — vẫn cho quét lại, nhưng số bành
-// tối đa cho phép nhập = maxPerKien - (existingBanh + pendingDraftBanh) (mục 5 rule 06-module-production.md).
-// "drafted_full": kiện đã đủ maxPerKien nhưng phần lớn/toàn bộ là NHÁP CHƯA GỬI (chưa thật sự sản
-// xuất) — khác "produced" (đã gửi thật) để tránh thông báo sai là "đã sản xuất".
-export type ConfirmKienStatus = "predicted" | "partial" | "partial_kien" | "drafted_full" | "produced" | "not_found";
 
-export type ConfirmKienLookup = {
-  status: ConfirmKienStatus;
-  maLo: string;
-  kien: KienLetter;
-  isNewLot: boolean;
-  lotId: string | null;
-  loaiCsr: string | null;
-  loaiBanh: number | null;
-  dayChuyen: string | null;
-  boc: string | null;
-  tham: string | null;
-  pallet: string[] | null;
-  chiThi: string | null;
-  ghiChu: string | null;
-  nganId: string | null;
-  nganMa: string | null;
-  nganTen: string | null;
-  maxPerKien: number | null;
-  kienWeightKg: number | null;
-  // Số bành kiện này ĐÃ GỬI THẬT (committed, lot_transactions) — giữ nguyên ý nghĩa cũ, KHÔNG gồm
-  // nháp chưa gửi (xem pendingDraftBanh). remainingBanh giờ đã trừ luôn cả nháp chưa gửi.
-  existingBanh: number;
-  remainingBanh: number | null;
-  // Số bành đang nằm trong nháp CHƯA GỬI của đúng kiện này — tính từ TẤT CẢ người dùng trong nhà
-  // máy (không chỉ người đang quét), để ca sau biết chính xác ca trước đã "giữ chỗ" bao nhiêu dù
-  // chưa Gửi. pendingDraftBy là tên hiển thị của những người đang có nháp đó (rỗng nếu không ai).
-  pendingDraftBanh: number;
-  pendingDraftBy: string[];
-  // Bọc/Pallet "gần nhất" của ĐÚNG kiện đang xác nhận (không phải toàn lô) — ưu tiên nháp chưa gửi
-  // mới nhất nếu có, else dữ liệu đã gửi gần nhất. Chỉ có giá trị khi kiện này đã có đóng góp trước
-  // đó (committed hoặc nháp). Quy tắc đã chốt: các lần nhập tiếp theo của CÙNG 1 kiện được phép khác
-  // Ca SX/Số chỉ thị/Ngày SX, nhưng BẮT BUỘC cùng Bọc/Pallet với lần nhập trước của chính kiện đó —
-  // UI dùng 2 field này để pre-fill và cảnh báo khi người dùng chọn khác đi.
-  existingKienBoc: string | null;
-  existingKienPallet: string[] | null;
-  // Thuộc tính đã ghi nhận của lô (từ lots hoặc nháp trước đó) — dùng để kiểm tra tính đồng nhất
-  // Quy tắc: Trong cùng 1 lô, tất cả các kiện bắt buộc cùng Chủng loại, Loại bọc và Loại bành.
-  existingLotCsr: string | null;
-  existingLotBanh: number | null;
-  existingLotBoc: string | null;
-  // Ngăn KẾ HOẠCH của đúng kiện này (lot_prediction_lots.kien_X_ngan_id) — chỉ có khi lô có dự đoán.
-  // UI chỉ cho "Đổi ngăn" khi kiện chưa có bành (thật lẫn nháp) và ngăn đang dùng chính là ngăn kế hoạch.
-  predictionNganId?: string | null;
-};
-
-function notFoundResult(maLo: string, kien: KienLetter): ConfirmKienLookup {
-  return {
-    status: "not_found",
-    maLo,
-    kien,
-    isNewLot: false,
-    lotId: null,
-    loaiCsr: null,
-    loaiBanh: null,
-    dayChuyen: null,
-    boc: null,
-    tham: null,
-    pallet: null,
-    chiThi: null,
-    ghiChu: null,
-    nganId: null,
-    nganMa: null,
-    nganTen: null,
-    maxPerKien: null,
-    kienWeightKg: null,
-    existingBanh: 0,
-    remainingBanh: null,
-    pendingDraftBanh: 0,
-    pendingDraftBy: [],
-    existingKienBoc: null,
-    existingKienPallet: null,
-    existingLotCsr: null,
-    existingLotBanh: null,
-    existingLotBoc: null,
-  };
-}
+export type { ConfirmKienLookup, ConfirmKienStatus } from "@/app/dashboard/product/confirm/kien-lookup";
 
 // Gợi ý "Số chỉ thị" cho lô MỚI (chưa từng tồn tại trong `lots`) — mặc định theo lô có ngày
 // thành phẩm gần nhất của nhà máy, mirror đúng nguồn `lots[0]?.chi_thi` mà product/page.tsx
@@ -131,17 +62,6 @@ async function loadSuggestedChiThiForNewLot(factoryId: string): Promise<string> 
     .limit(1)
     .maybeSingle();
   return data?.chi_thi || "1";
-}
-
-async function loadNganInfo(nganId: string | null) {
-  if (!nganId) return { nganMa: null as string | null, nganTen: null as string | null };
-  const supabase = getSupabaseAdmin();
-  const { data } = await supabase
-    .from("ngans")
-    .select("ma_ngan,ten_ngan")
-    .eq("id", nganId)
-    .maybeSingle();
-  return { nganMa: data?.ma_ngan ?? null, nganTen: data?.ten_ngan ?? null };
 }
 
 type PendingDraftAgg = {
@@ -180,19 +100,18 @@ async function loadPendingDraftAggregateForKien(
   };
 }
 
+// Tra cứu 1 kiện để mở form xác nhận — chỉ GOM DỮ LIỆU từ DB, quyết định trạng thái nằm ở hàm thuần
+// computeKienLookup (confirm/kien-lookup.ts), dùng chung với chế độ mất mạng ở client.
 export async function resolveKienForConfirm(
   factoryId: string,
   maLoRaw: string,
   kien: KienLetter,
 ): Promise<ConfirmKienLookup> {
   const maLo = maLoRaw.trim();
-  if (!factoryId || !maLo) return notFoundResult(maLo, kien);
+  if (!factoryId || !maLo) return notFoundLookup(maLo, kien);
 
   const supabase = getSupabaseAdmin();
-  const kienKey = KIEN_LOWER[kien];
-  const nganIdField = `kien_${kienKey}_ngan_id`;
-
-  const [{ data: lot }, { data: predicted }] = await Promise.all([
+  const [{ data: lot }, { data: predicted }, { data: draftRows }] = await Promise.all([
     supabase
       .from("lots")
       .select("id,ma_lo,loai_csr,loai_banh,day_chuyen,boc,tham,pallet,chi_thi,ghi_chu,ngan_id")
@@ -207,273 +126,61 @@ export async function resolveKienForConfirm(
       .eq("factory_id", factoryId)
       .eq("ma_lo", maLo)
       .maybeSingle(),
-  ]);
-
-  const predictedNganId = predicted
-    ? ((predicted as Record<string, unknown>)[nganIdField] as string | null)
-    : null;
-
-  // Chỉ cần tra day_chuyen từ batch dự đoán khi lô thật CHƯA có (hoặc lô có nhưng thiếu
-  // day_chuyen) — nếu lot.day_chuyen đã có sẵn, giá trị này sẽ không bao giờ được dùng tới
-  // (xem "?? dayChuyenFromBatch" bên dưới), nên bỏ qua query để tiết kiệm 1 round-trip cho
-  // trường hợp phổ biến nhất (kiện 2-4 của 1 lô đã có day_chuyen).
-  let dayChuyenFromBatch: string | null = null;
-  if (predicted?.origin_batch_id && (!lot || !lot.day_chuyen)) {
-    const { data: batch } = await supabase
-      .from("lot_prediction_batches")
-      .select("day_chuyen")
-      .eq("id", predicted.origin_batch_id)
-      .maybeSingle();
-    dayChuyenFromBatch = batch?.day_chuyen ?? null;
-  }
-
-  // Tra cứu xem lô này đã có kiện nào được ghi nhận trước đó hay chưa (kể cả trong nháp)
-  // Quy tắc nghiệp vụ: tất cả các kiện của cùng 1 lô bắt buộc phải cùng Chủng loại, Bọc, Loại bành.
-  let existingLotCsr: string | null = lot?.loai_csr ?? null;
-  let existingLotBanh: number | null = lot?.loai_banh ? Number(lot.loai_banh) : null;
-  let existingLotBoc: string | null = lot?.boc ?? null;
-
-  if (!existingLotCsr || !existingLotBoc || !existingLotBanh) {
-    const { data: siblingDraft } = await supabase
+    // Nháp CHƯA GỬI của cả lô, từ BẤT KỲ ai — vừa là "kiện trước" để kiểm đồng nhất lô, vừa để ca sau
+    // thấy đúng phần ca trước đã giữ chỗ dù chưa Gửi.
+    supabase
       .from("product_confirm_drafts")
-      .select("loai_csr, loai_banh, boc")
+      .select("id, kien, so_banh, boc, pallet, created_by, loai_csr, loai_banh, created_at")
       .eq("factory_id", factoryId)
       .eq("ma_lo", maLo)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .order("created_at", { ascending: true }),
+  ]);
+  if (!lot && !predicted) return notFoundLookup(maLo, kien);
 
-    if (siblingDraft) {
-      if (!existingLotCsr) existingLotCsr = siblingDraft.loai_csr;
-      if (!existingLotBanh) existingLotBanh = Number(siblingDraft.loai_banh);
-      if (!existingLotBoc) existingLotBoc = siblingDraft.boc;
-    }
-  }
-
-  if (lot) {
-    // nganIdForPartial không phụ thuộc lot_transactions — tính được ngay từ dữ liệu đã có, nên
-    // có thể prefetch song song với truy vấn lot_transactions thay vì đợi tuần tự. Chỉ cần tra
-    // thêm ngăn thứ 2 khi ngăn dự đoán khác ngăn hiện tại của lô (hiếm gặp).
-    const nganIdForPartial = predictedNganId || lot.ngan_id || null;
-    const needsSecondNganLookup = !!lot.ngan_id && !!nganIdForPartial && lot.ngan_id !== nganIdForPartial;
-
-    const [{ data: txRows }, primaryNganInfo, secondaryNganInfo, pendingAgg] = await Promise.all([
-      supabase
+  // day_chuyen của batch dự đoán chỉ cần khi lô thật chưa có (hoặc thiếu) day_chuyen.
+  const batchPromise =
+    predicted?.origin_batch_id && (!lot || !lot.day_chuyen)
+      ? supabase.from("lot_prediction_batches").select("day_chuyen").eq("id", predicted.origin_batch_id).maybeSingle()
+      : Promise.resolve({ data: null as { day_chuyen: string | null } | null });
+  const txPromise = lot
+    ? supabase
         .from("lot_transactions")
         .select("kien_a,kien_b,kien_c,kien_d,boc,pallet,created_at")
         .eq("lot_id", lot.id)
-        .order("created_at", { ascending: true }),
-      loadNganInfo(lot.ngan_id),
-      needsSecondNganLookup ? loadNganInfo(nganIdForPartial) : Promise.resolve(null),
-      // Nháp CHƯA GỬI của đúng kiện này, từ BẤT KỲ ai — để ca sau thấy đúng phần ca trước đã giữ
-      // chỗ dù chưa Gửi (xem loadPendingDraftAggregateForKien).
-      loadPendingDraftAggregateForKien(factoryId, maLo, kien),
-    ]);
-    const rows = (txRows || []) as Array<{
-      kien_a: number; kien_b: number; kien_c: number; kien_d: number;
-      boc: string | null; pallet: string[] | null; created_at: string | null;
-    }>;
-    const existingBanh = rows.reduce(
-      (sum, row) => sum + Number((row as Record<string, unknown>)[`kien_${kienKey}`] || 0),
-      0,
-    );
-    // Bọc/Pallet của lần nhập GẦN NHẤT của ĐÚNG kiện này (không phải toàn lô) — dùng để bắt buộc
-    // các lần nhập sau của cùng kiện phải đồng nhất (xem ghi chú ở ConfirmKienLookup). Ưu tiên nháp
-    // chưa gửi mới nhất (pendingAgg) nếu có — nó luôn mới hơn dữ liệu đã gửi vì workflow tuần tự
-    // theo thời gian (không ai top-up một kiện đã gửi bằng cách quay lại quét cũ hơn).
-    const kienField = `kien_${kienKey}` as "kien_a" | "kien_b" | "kien_c" | "kien_d";
-    const lastKienTx = [...rows].reverse().find((row) => Number(row[kienField] || 0) > 0) || null;
-    const committedKienBoc = lastKienTx?.boc ?? null;
-    const committedKienPallet = lastKienTx?.pallet ?? null;
-    const existingKienBoc = pendingAgg.lastBoc ?? committedKienBoc;
-    const existingKienPallet = pendingAgg.lastPallet ?? committedKienPallet;
+        .order("created_at", { ascending: true })
+    : Promise.resolve({ data: [] as KienLookupTx[] });
 
-    const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined) : null;
-    const maxPerKien = config?.max_per_kien ?? 36;
-    const totalClaimed = existingBanh + pendingAgg.totalBanh;
+  const kienKey = KIEN_LOWER[kien];
+  const predictedNganId = predicted
+    ? ((predicted as Record<string, unknown>)[`kien_${kienKey}_ngan_id`] as string | null)
+    : null;
+  const nganIds = [...new Set([lot?.ngan_id, predictedNganId].filter((v): v is string => !!v))];
+  const drafts = (draftRows || []) as KienLookupDraft[];
+  const creatorIds = drafts.filter((d) => d.kien === kien).map((d) => d.created_by || "");
 
-    if (existingBanh >= maxPerKien) {
-      const { nganMa, nganTen } = primaryNganInfo;
-      return {
-        status: "produced",
-        maLo,
-        kien,
-        isNewLot: false,
-        lotId: lot.id,
-        loaiCsr: lot.loai_csr,
-        loaiBanh: lot.loai_banh,
-        dayChuyen: lot.day_chuyen,
-        boc: lot.boc,
-        tham: lot.tham,
-        pallet: lot.pallet,
-        chiThi: lot.chi_thi,
-        ghiChu: lot.ghi_chu,
-        nganId: lot.ngan_id,
-        nganMa,
-        nganTen,
-        maxPerKien: config?.max_per_kien ?? null,
-        kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
-        existingBanh,
-        remainingBanh: 0,
-        pendingDraftBanh: pendingAgg.totalBanh,
-        pendingDraftBy: pendingAgg.byNames,
-        existingKienBoc,
-        existingKienPallet,
-        existingLotCsr,
-        existingLotBanh,
-        existingLotBoc,
-      };
-    }
+  const [{ data: batch }, { data: txRows }, nganRes, nameMap, suggestedChiThi] = await Promise.all([
+    batchPromise,
+    txPromise,
+    nganIds.length > 0
+      ? supabase.from("ngans").select("id,ma_ngan,ten_ngan").in("id", nganIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; ma_ngan: string | null; ten_ngan: string | null }> }),
+    resolveProfileNames(creatorIds),
+    !lot ? loadSuggestedChiThiForNewLot(factoryId) : Promise.resolve(""),
+  ]);
 
-    // Kiện đã ĐỦ maxPerKien nếu tính cả nháp chưa gửi (nhưng chưa thật sự sản xuất) — khác "produced"
-    // để không báo nhầm là đã sản xuất; chặn quét thêm cho tới khi nháp được gửi hoặc xóa.
-    if (totalClaimed >= maxPerKien) {
-      const { nganMa, nganTen } = secondaryNganInfo ?? primaryNganInfo;
-      return {
-        status: "drafted_full",
-        maLo,
-        kien,
-        isNewLot: false,
-        lotId: lot.id,
-        loaiCsr: lot.loai_csr,
-        loaiBanh: lot.loai_banh,
-        dayChuyen: lot.day_chuyen ?? dayChuyenFromBatch,
-        boc: existingKienBoc ?? lot.boc,
-        tham: lot.tham,
-        pallet: existingKienPallet ?? lot.pallet,
-        chiThi: lot.chi_thi,
-        ghiChu: lot.ghi_chu,
-        nganId: nganIdForPartial,
-        nganMa,
-        nganTen,
-        maxPerKien: config?.max_per_kien ?? null,
-        kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
-        existingBanh,
-        remainingBanh: 0,
-        pendingDraftBanh: pendingAgg.totalBanh,
-        pendingDraftBy: pendingAgg.byNames,
-        existingKienBoc,
-        existingKienPallet,
-        existingLotCsr,
-        existingLotBanh,
-        existingLotBoc,
-      };
-    }
-
-    // Lô đã tồn tại, kiện này chưa đủ dù đã tính cả nháp chưa gửi — ưu tiên ngăn theo dòng dự
-    // đoán per-kiện, fallback về ngan_id chung của lô (đúng thứ tự ưu tiên đã chốt trong plan).
-    const nganId = nganIdForPartial;
-    const { nganMa, nganTen } = secondaryNganInfo ?? primaryNganInfo;
-    const isPartialKien = totalClaimed > 0;
-    return {
-      status: isPartialKien ? "partial_kien" : "partial",
-      maLo,
-      kien,
-      isNewLot: false,
-      lotId: lot.id,
-      loaiCsr: lot.loai_csr,
-      loaiBanh: lot.loai_banh,
-      dayChuyen: lot.day_chuyen ?? dayChuyenFromBatch,
-      // Kiện đã có một phần hoặc lô đã có bọc chuẩn: ưu tiên existingLotBoc để toàn lô đồng nhất
-      boc: existingLotBoc ?? (isPartialKien ? existingKienBoc ?? lot.boc : lot.boc),
-      tham: lot.tham,
-      pallet: isPartialKien ? existingKienPallet ?? lot.pallet : lot.pallet,
-      chiThi: lot.chi_thi,
-      ghiChu: lot.ghi_chu,
-      nganId,
-      nganMa,
-      nganTen,
-      maxPerKien: config?.max_per_kien ?? null,
-      kienWeightKg: config ? Math.round(config.max_per_kien * config.loai_banh * 100) / 100 : null,
-      existingBanh,
-      remainingBanh: maxPerKien - totalClaimed,
-      pendingDraftBanh: pendingAgg.totalBanh,
-      pendingDraftBy: pendingAgg.byNames,
-      existingKienBoc,
-      existingKienPallet,
-      existingLotCsr,
-      existingLotBanh,
-      existingLotBoc,
-      predictionNganId: predictedNganId,
-    };
-  }
-
-  if (predicted) {
-    const config = getLoaiBanhConfig(predicted.loai_csr, Number(predicted.loai_banh) || undefined);
-    const [{ nganMa, nganTen }, chiThi, pendingAgg] = await Promise.all([
-      loadNganInfo(predictedNganId),
-      loadSuggestedChiThiForNewLot(factoryId),
-      loadPendingDraftAggregateForKien(factoryId, maLo, kien),
-    ]);
-    const totalClaimed = pendingAgg.totalBanh; // lot chưa tồn tại nên existingBanh committed = 0
-
-    if (totalClaimed >= config.max_per_kien) {
-      return {
-        status: "drafted_full",
-        maLo,
-        kien,
-        isNewLot: true,
-        lotId: null,
-        loaiCsr: predicted.loai_csr,
-        loaiBanh: predicted.loai_banh,
-        dayChuyen: dayChuyenFromBatch,
-        boc: existingLotBoc ?? pendingAgg.lastBoc ?? predicted.boc,
-        tham: predicted.tham,
-        pallet: pendingAgg.lastPallet,
-        chiThi,
-        ghiChu: null,
-        nganId: predictedNganId,
-        nganMa,
-        nganTen,
-        maxPerKien: config.max_per_kien,
-        kienWeightKg: Math.round(config.max_per_kien * config.loai_banh * 100) / 100,
-        existingBanh: 0,
-        remainingBanh: 0,
-        pendingDraftBanh: pendingAgg.totalBanh,
-        pendingDraftBy: pendingAgg.byNames,
-        existingKienBoc: pendingAgg.lastBoc,
-        existingKienPallet: pendingAgg.lastPallet,
-        existingLotCsr,
-        existingLotBanh,
-        existingLotBoc,
-      };
-    }
-
-    return {
-      // Nếu đã có nháp chưa gửi cho kiện này (dù lô thật chưa tồn tại), coi như "partial_kien" thay
-      // vì "predicted" thuần túy — để bắt buộc đồng nhất Bọc/Pallet với nháp đó (mirror nhánh lot).
-      status: totalClaimed > 0 ? "partial_kien" : "predicted",
-      maLo,
-      kien,
-      isNewLot: true,
-      lotId: null,
-      loaiCsr: predicted.loai_csr,
-      loaiBanh: predicted.loai_banh,
-      dayChuyen: dayChuyenFromBatch,
-      boc: existingLotBoc ?? pendingAgg.lastBoc ?? predicted.boc,
-      tham: predicted.tham,
-      pallet: pendingAgg.lastPallet,
-      chiThi,
-      ghiChu: null,
-      nganId: predictedNganId,
-      nganMa,
-      nganTen,
-      maxPerKien: config.max_per_kien,
-      kienWeightKg: Math.round(config.max_per_kien * config.loai_banh * 100) / 100,
-      existingBanh: 0,
-      remainingBanh: config.max_per_kien - totalClaimed,
-      pendingDraftBanh: pendingAgg.totalBanh,
-      pendingDraftBy: pendingAgg.byNames,
-      existingKienBoc: pendingAgg.lastBoc,
-      existingKienPallet: pendingAgg.lastPallet,
-      existingLotCsr,
-      existingLotBanh,
-      existingLotBoc,
-      predictionNganId: predictedNganId,
-    };
-  }
-
-  return notFoundResult(maLo, kien);
+  const source: KienLookupSource = {
+    lot: (lot as KienLookupLot | null) ?? null,
+    predicted: (predicted as KienLookupPredicted | null) ?? null,
+    batchDayChuyen: batch?.day_chuyen ?? null,
+    txRows: (txRows || []) as KienLookupTx[],
+    drafts,
+  };
+  const ctx: KienLookupContext = {
+    nganInfo: Object.fromEntries((nganRes.data || []).map((n) => [n.id, { ma_ngan: n.ma_ngan, ten_ngan: n.ten_ngan }])),
+    profileNames: Object.fromEntries(nameMap),
+    suggestedChiThi,
+  };
+  return computeKienLookup(source, maLo, kien, ctx);
 }
 
 export type ActiveNganOption = { id: string; ma_ngan: string; ten_ngan: string; loai_nl: string };
@@ -1855,10 +1562,25 @@ export type SaveDraftKienInput = {
   chiThi: string | null;
   tham: string | null;
   ghiChu: string | null;
-  userId: string;
+  /** Access token của phiên — server tự xác thực người lưu, không tin userId client gửi. */
+  accessToken: string | null;
+  /**
+   * Khoá chống bấm lặp: client sinh 1 UUID cho mỗi lần mở form và dùng làm id của nháp. Mạng chập
+   * chờn (lưu xong nhưng mất phản hồi) rồi bấm lại ⇒ nhận ra nháp đã có, không tạo bản thứ 2.
+   */
+  draftId?: string;
+  /**
+   * Mục lưu khi MẤT MẠNG cho mã không có trong gói tải sẵn ("Chưa kiểm tra") — người dùng tự chọn
+   * ngăn/CSR/loại bành, nên server đối chiếu lại với dự đoán và từ chối nếu lệch.
+   */
+  unverified?: boolean;
 };
 
-export type SaveDraftKienResult = { success: true; draftId: string } | { success: false; error: string };
+export type SaveDraftKienResult =
+  | { success: true; draftId: string; alreadySaved?: boolean }
+  | { success: false; error: string };
+
+const DRAFT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // "Lưu tạm" — ghi nhanh 1 nháp, KHÔNG validate tồn kho/capacity (rẻ, để quét liên tục nhiều kiện
 // trước khi gửi cả lượt). Chỉ chặn khi thiếu các trường bắt buộc (giống canSubmit hiện có, trừ phần
@@ -1871,10 +1593,31 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
   if (!input.soBanh || input.soBanh <= 0) return { success: false, error: "Số bành phải lớn hơn 0." };
   if (!input.boc) return { success: false, error: "Chưa chọn bọc." };
   if (!input.pallet || input.pallet.length === 0) return { success: false, error: "Chưa chọn loại pallet." };
-  if (!input.userId) return { success: false, error: "Không xác định được người dùng." };
+  const draftId = input.draftId && DRAFT_ID_RE.test(input.draftId) ? input.draftId : undefined;
 
   try {
+    const userId = await assertProductAccess(input.accessToken, input.factoryId, PRODUCT_CREATE_PERMISSIONS, "lưu tạm");
     const supabase = getSupabaseAdmin();
+
+    // Bấm lại sau lần lưu đã thành công nhưng mất phản hồi: nháp cùng id đã có ⇒ trả thành công
+    // luôn (phải kiểm TRƯỚC bước tính bành, nếu không chính nháp đó bị tính vào và báo "vượt").
+    if (draftId) {
+      const { data: prior, error: priorErr } = await supabase
+        .from("product_confirm_drafts")
+        .select("id, created_by")
+        .eq("id", draftId)
+        .maybeSingle();
+      if (priorErr) return { success: false, error: priorErr.message };
+      if (prior) {
+        if (prior.created_by !== userId) return { success: false, error: "Mã nháp không hợp lệ, vui lòng quét lại." };
+        return { success: true, draftId: prior.id, alreadySaved: true };
+      }
+    }
+
+    // Ca đã phê duyệt (khoá) ⇒ chặn ngay khi lưu tạm, không đợi tới lúc "Gửi tất cả" (admin vẫn qua).
+    // Đặt SAU nhánh alreadySaved: nháp đã lưu trước khi khoá vẫn được xác nhận lại bình thường.
+    await assertShiftNotLocked({ factoryId: input.factoryId, ngaySx: input.ngaySx, ca: input.ca, actorUserId: userId });
+
     const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh);
     const soKg = Math.round(input.soBanh * input.loaiBanh * 100) / 100;
 
@@ -1883,7 +1626,7 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
     // BẤT KỲ ai khác cho đúng (ma_lo, kiện) này, để "ca sau" không thể nhập vượt số còn lại dù
     // "ca trước" chưa Gửi (mục đích chính của tính năng này).
     const kienKey = KIEN_LOWER[input.kien];
-    const [{ data: existingLot }, { data: siblingDrafts }, pendingAgg] = await Promise.all([
+    const [{ data: existingLot }, { data: siblingDrafts }, pendingAgg, { data: predictedLot }] = await Promise.all([
       supabase
         .from("lots")
         .select("id, loai_csr, loai_banh, boc")
@@ -1898,7 +1641,39 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
         .order("created_at", { ascending: true })
         .limit(1),
       loadPendingDraftAggregateForKien(input.factoryId, maLo, input.kien),
+      supabase
+        .from("lot_prediction_lots")
+        .select(`loai_csr, loai_banh, kien_${kienKey}_ngan_id`)
+        .eq("factory_id", input.factoryId)
+        .eq("ma_lo", maLo)
+        .maybeSingle(),
     ]);
+
+    // Mã lô phải có lô thật hoặc dự đoán (online vốn đã chặn ở bước tra cứu; mục lưu khi mất mạng
+    // cho mã ngoài gói tải sẵn chỉ bị kiểm ở đây).
+    if (!existingLot && !predictedLot) {
+      return { success: false, error: `Mã lô ${maLo} chưa có dự đoán và chưa có lô thật — kiểm tra lại nhãn QR.` };
+    }
+
+    // Mục "Chưa kiểm tra": người dùng tự chọn ngăn/CSR/loại bành khi mất mạng ⇒ đối chiếu với dự đoán,
+    // lệch thì từ chối kèm giá trị đúng (không tự sửa âm thầm).
+    if (input.unverified && predictedLot) {
+      const plan = predictedLot as Record<string, unknown>;
+      const planNganId = plan[`kien_${kienKey}_ngan_id`] as string | null;
+      if (planNganId && planNganId !== input.nganId) {
+        const { data: planNgan } = await supabase.from("ngans").select("ma_ngan").eq("id", planNganId).maybeSingle();
+        return {
+          success: false,
+          error: `Kiện ${input.kien} lô ${maLo} theo kế hoạch lấy từ ngăn ${planNgan?.ma_ngan || "khác"} — sửa lại ngăn rồi đồng bộ.`,
+        };
+      }
+      if (!existingLot && plan.loai_csr && plan.loai_csr !== input.loaiCsr) {
+        return { success: false, error: `Lô ${maLo} dự đoán chủng loại "${plan.loai_csr}", đang chọn "${input.loaiCsr}".` };
+      }
+      if (!existingLot && plan.loai_banh && Number(plan.loai_banh) !== Number(input.loaiBanh)) {
+        return { success: false, error: `Lô ${maLo} dự đoán loại bành ${plan.loai_banh}kg, đang chọn ${input.loaiBanh}kg.` };
+      }
+    }
 
     // Đồng nhất thuộc tính toàn lô: Nếu kiện A chủng loại gì, loại bọc gì, loại bành gì thì
     // các kiện còn lại khác KHÔNG THỂ LƯU.
@@ -1952,11 +1727,13 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
     const { data, error } = await supabase
       .from("product_confirm_drafts")
       .insert({
+        ...(draftId ? { id: draftId } : {}),
         factory_id: input.factoryId,
-        created_by: input.userId,
+        created_by: userId,
         ma_lo: maLo,
         kien: input.kien,
-        is_new_lot: input.isNewLot,
+        // Tính ở server, không tin client (mục lưu khi mất mạng có thể đoán sai).
+        is_new_lot: !existingLot,
         ngan_id: input.nganId,
         loai_csr: input.loaiCsr,
         loai_banh: input.loaiBanh,
@@ -1974,6 +1751,8 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
       })
       .select("id")
       .single();
+    // Hai lần bấm gần như đồng thời cùng id: lần sau đụng khoá chính ⇒ coi như đã lưu.
+    if (error?.code === "23505" && draftId) return { success: true, draftId, alreadySaved: true };
     if (error || !data) return { success: false, error: error?.message || "Không lưu được nháp." };
     return { success: true, draftId: data.id };
   } catch (error) {
@@ -2312,6 +2091,221 @@ export async function submitConfirmDraftBatch(
     return {
       success: false,
       error: error instanceof Error ? error.message : "Lỗi không xác định khi gửi nháp.",
+    };
+  }
+}
+
+// ============================================================================
+// Gói dữ liệu tải sẵn cho chế độ MẤT MẠNG ở màn quét QR (xem .claude/plans/quet-qr-offline.md, GĐ-A).
+// Client lưu vào IndexedDB rồi tra kiện bằng computeKienLookup khi offline — số bành còn lại chỉ là
+// ƯỚC TÍNH (không thấy nháp máy khác tạo sau thời điểm tải). Server vẫn kiểm đầy đủ khi đồng bộ.
+// ============================================================================
+
+export type ConfirmOfflinePack = {
+  generatedAt: string;
+  sources: Record<string, KienLookupSource>;
+  ctx: KienLookupContext;
+  ngans: ActiveNganOption[];
+  /** Tên ca theo ngày (hôm nay + hôm qua theo giờ nhà máy). */
+  shiftNames: Record<string, Record<string, string>>;
+  /** Khoá ca đang active, khoá `${ngay_sx}|${ca}`. */
+  lockedShifts: string[];
+  /** Các loại CSR đang có trong dữ liệu (để chọn tay khi mã ngoài gói). */
+  csrOptions: string[];
+};
+
+export type LoadConfirmOfflinePackResult =
+  | { success: true; pack: ConfirmOfflinePack }
+  | { success: false; error: string };
+
+function chunkIds<T>(items: T[], size = 200): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function shiftIsoDate(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function loadConfirmOfflinePack(
+  factoryId: string,
+  accessToken: string | null,
+): Promise<LoadConfirmOfflinePackResult> {
+  try {
+    await assertProductAccess(accessToken, factoryId, PRODUCT_CREATE_PERMISSIONS, "tải dữ liệu quét khi mất mạng");
+    const supabase = getSupabaseAdmin();
+    const today = getFactoryTodayISO();
+    const yesterday = shiftIsoDate(today, -1);
+
+    const ngans = await loadActiveNgansForFactory(factoryId);
+    const nganIds = ngans.map((n) => n.id);
+
+    type PredRow = KienLookupPredicted & { ma_lo: string; origin_batch_id: string | null };
+    const predRows: PredRow[] =
+      nganIds.length === 0
+        ? []
+        : await fetchAllPaginated<PredRow>((from, to) => {
+            const list = nganIds.join(",");
+            return supabase
+              .from("lot_prediction_lots")
+              .select(
+                "ma_lo,loai_csr,loai_banh,boc,tham,origin_batch_id,kien_a_ngan_id,kien_b_ngan_id,kien_c_ngan_id,kien_d_ngan_id",
+              )
+              .eq("factory_id", factoryId)
+              .neq("trang_thai", "Hủy")
+              .or(`kien_a_ngan_id.in.(${list}),kien_b_ngan_id.in.(${list}),kien_c_ngan_id.in.(${list}),kien_d_ngan_id.in.(${list})`)
+              .order("ma_lo", { ascending: true })
+              .range(from, to) as unknown as PromiseLike<{ data: PredRow[] | null; error: unknown }>;
+          });
+
+    type LotRow = KienLookupLot & { ma_lo: string };
+    const lotCols = "id,ma_lo,loai_csr,loai_banh,day_chuyen,boc,tham,pallet,chi_thi,ghi_chu,ngan_id";
+    const lotById = new Map<string, LotRow>();
+    const dangLots = await fetchAllPaginated<LotRow>((from, to) =>
+      supabase
+        .from("lots")
+        .select(lotCols)
+        .eq("factory_id", factoryId)
+        .in("trang_thai", ["Dở dang", "Do dang"])
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{ data: LotRow[] | null; error: unknown }>,
+    );
+    for (const l of dangLots) lotById.set(l.id, l);
+    for (const part of chunkIds([...new Set(predRows.map((p) => p.ma_lo))])) {
+      const { data, error } = await supabase.from("lots").select(lotCols).eq("factory_id", factoryId).in("ma_lo", part);
+      if (error) throw new Error(error.message);
+      for (const l of (data || []) as LotRow[]) lotById.set(l.id, l);
+    }
+    const lots = [...lotById.values()];
+
+    type TxRow = KienLookupTx & { lot_id: string; id: string };
+    const txByLot = new Map<string, KienLookupTx[]>();
+    for (const part of chunkIds(lots.map((l) => l.id))) {
+      const rows = await fetchAllPaginated<TxRow>((from, to) =>
+        supabase
+          .from("lot_transactions")
+          .select("id,lot_id,kien_a,kien_b,kien_c,kien_d,boc,pallet,created_at")
+          .in("lot_id", part)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to) as unknown as PromiseLike<{ data: TxRow[] | null; error: unknown }>,
+      );
+      for (const r of rows) {
+        const list = txByLot.get(r.lot_id) || [];
+        list.push(r);
+        txByLot.set(r.lot_id, list);
+      }
+    }
+
+    type DraftRow = KienLookupDraft & { ma_lo: string };
+    const draftRows = await fetchAllPaginated<DraftRow>((from, to) =>
+      supabase
+        .from("product_confirm_drafts")
+        .select("id,ma_lo,kien,so_banh,boc,pallet,created_by,loai_csr,loai_banh,created_at")
+        .eq("factory_id", factoryId)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{ data: DraftRow[] | null; error: unknown }>,
+    );
+
+    const batchIds = [...new Set(predRows.map((p) => p.origin_batch_id).filter((v): v is string => !!v))];
+    const batchDc = new Map<string, string | null>();
+    for (const part of chunkIds(batchIds)) {
+      const { data, error } = await supabase.from("lot_prediction_batches").select("id, day_chuyen").in("id", part);
+      if (error) throw new Error(error.message);
+      for (const b of data || []) batchDc.set(b.id, b.day_chuyen ?? null);
+    }
+
+    const sources: Record<string, KienLookupSource> = {};
+    const ensure = (maLo: string) =>
+      (sources[maLo] ||= { lot: null, predicted: null, batchDayChuyen: null, txRows: [], drafts: [] });
+    for (const p of predRows) {
+      const s = ensure(p.ma_lo);
+      s.predicted = {
+        loai_csr: p.loai_csr,
+        loai_banh: p.loai_banh,
+        boc: p.boc,
+        tham: p.tham,
+        kien_a_ngan_id: p.kien_a_ngan_id,
+        kien_b_ngan_id: p.kien_b_ngan_id,
+        kien_c_ngan_id: p.kien_c_ngan_id,
+        kien_d_ngan_id: p.kien_d_ngan_id,
+      };
+      s.batchDayChuyen = p.origin_batch_id ? batchDc.get(p.origin_batch_id) ?? null : null;
+    }
+    for (const l of lots) {
+      const s = ensure(l.ma_lo);
+      const { ma_lo: _maLo, ...lot } = l;
+      void _maLo;
+      s.lot = lot;
+      s.txRows = txByLot.get(l.id) || [];
+    }
+    for (const d of draftRows) {
+      // Chỉ gắn nháp vào mã đã có trong gói — mã lạ đằng nào cũng ra "không tìm thấy".
+      if (!sources[d.ma_lo]) continue;
+      const { ma_lo: _maLo, ...draft } = d;
+      void _maLo;
+      sources[d.ma_lo].drafts.push(draft);
+    }
+
+    // Ngăn: cả ngăn đang hoạt động lẫn ngăn mà lô/dự đoán đang trỏ tới (có thể đã đổi trạng thái).
+    const nganInfo: KienLookupContext["nganInfo"] = {};
+    for (const n of ngans) nganInfo[n.id] = { ma_ngan: n.ma_ngan, ten_ngan: n.ten_ngan };
+    const extraNganIds = new Set<string>();
+    for (const s of Object.values(sources)) {
+      for (const id of [
+        s.lot?.ngan_id,
+        s.predicted?.kien_a_ngan_id,
+        s.predicted?.kien_b_ngan_id,
+        s.predicted?.kien_c_ngan_id,
+        s.predicted?.kien_d_ngan_id,
+      ]) {
+        if (id && !nganInfo[id]) extraNganIds.add(id);
+      }
+    }
+    for (const part of chunkIds([...extraNganIds])) {
+      const { data } = await supabase.from("ngans").select("id,ma_ngan,ten_ngan").in("id", part);
+      for (const n of data || []) nganInfo[n.id] = { ma_ngan: n.ma_ngan, ten_ngan: n.ten_ngan };
+    }
+
+    const [nameMap, suggestedChiThi, namesToday, namesYesterday, { data: lockRows }] = await Promise.all([
+      resolveProfileNames(draftRows.map((d) => d.created_by || "")),
+      loadSuggestedChiThiForNewLot(factoryId),
+      resolveShiftNamesAt(factoryId, today),
+      resolveShiftNamesAt(factoryId, yesterday),
+      supabase
+        .from("product_shift_locks")
+        .select("ngay_sx, ca")
+        .eq("factory_id", factoryId)
+        .eq("is_active", true)
+        .gte("ngay_sx", shiftIsoDate(today, -3)),
+    ]);
+
+    const csrSet = new Set<string>();
+    for (const s of Object.values(sources)) {
+      if (s.lot?.loai_csr) csrSet.add(s.lot.loai_csr);
+      if (s.predicted?.loai_csr) csrSet.add(s.predicted.loai_csr);
+    }
+
+    return {
+      success: true,
+      pack: {
+        generatedAt: new Date().toISOString(),
+        sources,
+        ctx: { nganInfo, profileNames: Object.fromEntries(nameMap), suggestedChiThi },
+        ngans,
+        shiftNames: { [today]: namesToday, [yesterday]: namesYesterday },
+        lockedShifts: (lockRows || []).map((r) => `${r.ngay_sx}|${r.ca}`),
+        csrOptions: [...csrSet].sort(),
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Không tải được dữ liệu quét khi mất mạng.",
     };
   }
 }

@@ -95,6 +95,24 @@ export function persistLegacySession(user: SessionUser) {
   }
 }
 
+// Đọc lại bản cache `erp_user` (KHÔNG gọi mạng) — chỉ dùng cho màn quét QR khi mất mạng
+// (GĐ-B offline), để mở được trang bằng phiên đã có trên máy. Không phải source of truth.
+export function readCachedSessionUser(): SessionUser | null {
+  try {
+    const raw = localStorage.getItem("erp_user")
+    if (!raw) return null
+    const user = JSON.parse(raw) as SessionUser
+    if (!user?.id || !user.factory_id || user.status !== "active") return null
+    return user
+  } catch {
+    return null
+  }
+}
+
+export function isBrowserOffline() {
+  return typeof navigator !== "undefined" && navigator.onLine === false
+}
+
 export async function getAuthSession() {
   const { data, error } = await supabase.auth.getSession()
   if (error) throw error
