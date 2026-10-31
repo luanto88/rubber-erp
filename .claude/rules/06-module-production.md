@@ -853,14 +853,17 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - GĐ-A chỉ chống mất mạng KHI TRANG ĐÃ MỞ; F5 lúc offline chưa mở được trang (GĐ-B service worker).
 - Chữ Khmer của phần offline do máy soạn — cần người bản ngữ duyệt.
 
-## 4.21. Quét QR khi mất mạng — GĐ-B mở trang offline + Đăng xuất màn quét (2026-10-31, chờ test tay)
+## 4.21. Quét QR khi mất mạng — GĐ-B mở trang offline + Đăng xuất màn quét (2026-10-31, preview PASS)
 - SW `public/service-worker.js` (chỉ bản production; dev tự gỡ SW cũ — `sw-register.tsx`), đăng ký
   `/service-worker.js?v=<NEXT_PUBLIC_BUILD_ID>` (`next.config.ts`: 12 ký tự `VERCEL_GIT_COMMIT_SHA`, local = Date.now).
   Navigation `/dashboard/product/confirm*`: network-first (5s), lưu khoá chuẩn không query + quét HTML/CSS lưu đủ
   `/_next/static/*`; static chỉ cache khi client là trang quét; khớp `ignoreSearch` (Vercel `?dpl=`). Không cache
   POST/server action, `/api`, `_rsc`, khác origin, trang khác. Giữ cache 2 bản build gần nhất (`qlsxkpt-meta`).
   Chưa từng mở màn quét lúc có mạng ⇒ trang offline tĩnh "chưa tải sẵn".
-- Trang quét nạp sẵn chunk `qr-scanner` khi online + SW đang kiểm soát (để camera chạy được offline).
+- Trang quét (online) nạp sẵn chunk `qr-scanner` rồi `postMessage({type:"cache-confirm", statics})` cho SW tự tải HTML
+  trang quét + mọi `/_next/static/*` đã dùng. BẮT BUỘC: lần mở đầu SW chưa kiểm soát trang, và vào màn quét bằng link
+  trong app Next.js chỉ tải RSC ⇒ handler navigation không bao giờ lưu được HTML (bug preview 2026-10-31, đã sửa `3fc8bc1`).
+- Đăng xuất màn quét: sau khi xác nhận hiện lớp phủ "Đang đăng xuất..." (portal, `onBeforeSignOut`). Test preview PASS 2026-10-31.
 - Khởi động offline: `readCachedSessionUser()` / `isBrowserOffline()` (`src/lib/auth.ts`). `dashboard/layout.tsx` CHỈ trên
   màn quét: offline ⇒ dùng `erp_user`, không redirect/không xoá; interval/focus/SIGNED_OUT/nhánh session null bỏ qua khi
   offline; bootstrap quá 20s vẫn pending ⇒ dùng cache; sự kiện `online` ⇒ full hydration (rule 09). Trang khác không đổi.

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
@@ -234,6 +235,7 @@ export default function ConfirmKienProductionPage() {
 
   const [chucVu, setChucVu] = useState<string | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!userMenuOpen) return;
@@ -1326,8 +1328,11 @@ export default function ConfirmKienProductionPage() {
                         role="menuitem"
                         onClick={() => {
                           setUserMenuOpen(false);
-                          void logoutWithConfirmQueueCheck(currentUser);
+                          // Hiện lớp "Đang đăng xuất" ngay sau khi người dùng xác nhận (signOut + chuyển trang
+                          // có thể mất vài giây); huỷ hộp xác nhận thì không hiện gì.
+                          void logoutWithConfirmQueueCheck(currentUser, () => setLoggingOut(true));
                         }}
+                        disabled={loggingOut}
                         className="flex w-full items-center gap-2 border-t border-slate-100 px-4 py-3 text-left text-sm font-semibold text-red-600 hover:bg-red-50"
                       >
                         <LogOut size={16} />
@@ -1337,6 +1342,18 @@ export default function ConfirmKienProductionPage() {
                   )}
                 </div>
               )}
+              {loggingOut &&
+                createPortal(
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-3 bg-slate-900/60 text-white"
+                  >
+                    <Loader2 size={36} className="animate-spin" />
+                    <span className="text-base font-semibold">{tt("loggingOut")}</span>
+                  </div>,
+                  document.body,
+                )}
             </div>
             {/* Thanh trạng thái mạng nằm TRONG header dính (tràn lề bằng margin âm) để luôn thấy. */}
             <div className="-mx-4 -mb-3 mt-3 empty:hidden">
