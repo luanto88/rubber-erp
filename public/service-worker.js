@@ -137,6 +137,32 @@ async function handleConfirmNavigation(event) {
   }
 }
 
+/** Tải HTML trang quét + chunk của nó vào cache. Dùng khi trang tự yêu cầu (postMessage) vì 2 trường hợp
+ *  điều hướng KHÔNG đi qua handler navigation ở trên:
+ *  - lần mở đầu: SW chưa kiểm soát trang (mới cài) ⇒ HTML + chunk tải thẳng mạng;
+ *  - vào màn quét bằng link trong app: Next.js tải RSC (bị bỏ qua), không phải HTML.
+ *  `extra` = các file /_next/static/ trang đã tải (gồm chunk nạp lười như máy quét QR). */
+async function cacheConfirmPage(origin, extra) {
+  const cache = await caches.open(CONFIRM_CACHE)
+  const res = await fetch(origin + CONFIRM_PATH, { credentials: "same-origin" })
+  const type = res.headers.get("content-type") || ""
+  if (res.ok && !res.redirected && type.includes("text/html")) {
+    const html = await res.text()
+    await cache.put(new Request(origin + CONFIRM_PATH), new Response(html, { headers: { "Content-Type": type } }))
+    await precacheStaticFrom(html, origin, cache)
+  }
+  const paths = (Array.isArray(extra) ? extra : [])
+    .filter((p) => typeof p === "string" && p.startsWith("/_next/static/"))
+    .join(" ")
+  if (paths) await precacheStaticFrom(paths, origin, cache)
+}
+
+self.addEventListener("message", (event) => {
+  const data = event.data
+  if (!data || data.type !== "cache-confirm") return
+  event.waitUntil(cacheConfirmPage(self.location.origin, data.statics).catch(() => {}))
+})
+
 async function handleStatic(event) {
   const cached = await matchConfirmCaches(event.request)
   if (cached) return cached

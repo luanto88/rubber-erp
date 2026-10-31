@@ -450,17 +450,43 @@ export default function ConfirmKienProductionPage() {
 
   const isAdmin = currentUser?.role === "admin";
 
-  // GĐ-B: khi có mạng và service worker đang kiểm soát trang, nạp sẵn chunk máy quét QR (nạp lười
-  // qua next/dynamic) để SW lưu vào cache — mở lại trang lúc mất mạng vẫn bật được camera.
+  // GĐ-B: khi có mạng, nạp sẵn chunk máy quét QR (nạp lười qua next/dynamic) rồi nhờ service worker
+  // lưu HTML trang quét + mọi chunk đã tải vào cache. Không dựa vào việc SW chặn điều hướng: lần mở đầu
+  // SW chưa kiểm soát trang, còn vào bằng link trong app thì Next.js tải RSC chứ không tải HTML.
   useEffect(() => {
     if (loading || !isOnline) return;
-    if (typeof navigator === "undefined" || !navigator.serviceWorker?.controller) return;
-    const warm = () => {
-      void import("@/app/dashboard/product/confirm/qr-scanner").catch(() => {});
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        await import("@/app/dashboard/product/confirm/qr-scanner");
+      } catch {
+        /* chunk máy quét không tải được — vẫn lưu phần còn lại */
+      }
+      if (cancelled) return;
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const statics = performance
+          .getEntriesByType("resource")
+          .map((e) => {
+            try {
+              return new URL(e.name).pathname;
+            } catch {
+              return "";
+            }
+          })
+          .filter((p) => p.startsWith("/_next/static/"));
+        reg.active?.postMessage({ type: "cache-confirm", statics });
+      } catch {
+        /* trình duyệt chặn SW (WebView) — chỉ còn hàng đợi GĐ-A */
+      }
     };
     const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
-    if (w.requestIdleCallback) w.requestIdleCallback(warm);
-    else window.setTimeout(warm, 2000);
+    if (w.requestIdleCallback) w.requestIdleCallback(() => void run());
+    else window.setTimeout(() => void run(), 2000);
+    return () => {
+      cancelled = true;
+    };
   }, [loading, isOnline]);
 
   const refreshHistory = useCallback(async () => {
