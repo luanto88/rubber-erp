@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { findKtWarehouse, KT_WAREHOUSE_CODE } from "@/lib/maintenance-kt"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
-import { isPurchaseParticipant, loadEffectiveLines, loadPurchaseLines, loadPurchaseSigners } from "@/lib/purchase/server"
+import { isMaintenanceRecordTeam, isPurchaseParticipant, loadEffectiveLines, loadPurchaseLines, loadPurchaseSigners, syncPurchaseFromSigning } from "@/lib/purchase/server"
 import {
   isPurchaseBuying, isPurchaseEditable, remainingQty,
   type PurchaseAdjustmentSummary, type PurchaseEffectiveLine, type PurchaseReceiptRow, type PurchaseServiceCompletionRow, type PurchaseRequestRow, type PurchaseStatus, type PurchaseMaintenanceSource,
@@ -27,14 +27,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const request = row as PurchaseRequestRow & { created_by: string | null; huy_boi: string | null }
 
     const canAll = actor.isAdmin || (await isoActorHasPermission(actor, ["purchase.view_all"]))
-    // GĐ2g: phiếu lập từ biên bản bảo trì còn nháp/bị trả về → người có purchase.create được mở để nhận xử lý.
+    // Phiếu lập từ biên bản bảo trì còn Nháp/Bị trả về:
+    //  - nhóm phụ trách biên bản (người tạo + NV phụ trách) có purchase.create → thao tác ngang người đề
+    //    nghị; ai gửi ký thì thành người đề nghị (claimOnSubmit);
+    //  - người ngoài có purchase.create → "Nhận xử lý" (lưu phiếu ⇒ thành người đề nghị) rồi mới gửi ký.
     const linkedRecordId = (row as { maintenance_record_id?: string | null }).maintenance_record_id || null
-    const canTakeOver =
+    const hasCreatePerm = await isoActorHasPermission(actor, ["purchase.create"])
+    const isRecordTeam = await isMaintenanceRecordTeam(linkedRecordId, actor.userId)
+    const openLinked =
       !!linkedRecordId &&
       isPurchaseEditable(request.trang_thai as PurchaseStatus) &&
       request.loai !== "dieu_chinh" &&
-      (await isoActorHasPermission(actor, ["purchase.create"]))
-    if (!canAll && !canTakeOver && !isPurchaseParticipant(request, actor.userId)) {
+      hasCreatePerm
+    const canTakeOver = openLinked && !isRecordTeam
+    if (!canAll && !canTakeOver && !isRecordTeam && !isPurchaseParticipant(request, actor.userId)) {
       return NextResponse.json({ error: "Bạn không có quyền xem phiếu này" }, { status: 403 })
     }
 
@@ -45,7 +51,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     ])
 
     const ids = new Set<string>()
-    ;[request.nguoi_de_nghi_id, request.giam_doc_user_id, request.ke_toan_user_id, request.huy_boi].forEach((v) => v && ids.add(v))
+    const lapBoiId = (row as { lap_boi_id?: string | null }).lap_boi_id || null
+    ;[request.nguoi_de_nghi_id, request.giam_doc_user_id, request.ke_toan_user_id, request.huy_boi, lapBoiId].forEach((v) => v && ids.add(v))
     for (const l of (logsRes.data || []) as { user_id: string | null }[]) if (l.user_id) ids.add(l.user_id)
     const names: Record<string, string> = {}
     if (ids.size) {
@@ -66,19 +73,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       fileHienTai = (yc?.file_hien_tai as string) || null
       traVeLyDo = (yc?.tra_ve_ly_do as string) || null
 
-      // Tự động đồng bộ (auto-reconcile): Nếu yeu_cau_ky đã hoàn tất hoặc 3/3 signer đã ký
-      // mà purchase_requests vẫn là 'cho_ky', tự động cập nhật sang da_duyet / hoan_tat.
-      const allSignersDone = signers.length > 0 && signers.every((s) => s.trangThai === "da_ky")
-      if ((yc?.trang_thai === "hoan_tat" || allSignersDone) && (request.trang_thai === "cho_ky" || request.trang_thai === "tra_ve")) {
-        const nextStatus = request.loai === "dieu_chinh" ? "hoan_tat" : "da_duyet"
-        const now = new Date().toISOString()
-        await supabaseAdmin.from("purchase_requests").update({
-          trang_thai: nextStatus,
-          ngay_duyet: now,
-          updated_at: now,
-        }).eq("id", id)
-        request.trang_thai = nextStatus
-        request.ngay_duyet = now
+      // Yêu cầu ký đã hoàn tất mà phiếu vẫn 'cho_ky'/'tra_ve' (lượt ký trước lỡ đồng bộ hỏng) →
+      // đồng bộ qua hàm chuẩn (ghi nhật ký + tính lại phiếu gốc của phiếu điều chỉnh), rồi đọc lại.
+      if (yc?.trang_thai === "hoan_tat" && (request.trang_thai === "cho_ky" || request.trang_thai === "tra_ve")) {
+        await syncPurchaseFromSigning(request.yeu_cau_ky_id)
+        const { data: fresh } = await supabaseAdmin.from("purchase_requests").select("trang_thai, ngay_duyet").eq("id", id).maybeSingle()
+        if (fresh) {
+          request.trang_thai = fresh.trang_thai as PurchaseStatus
+          request.ngay_duyet = fresh.ngay_duyet as string | null
+        }
       }
     }
 
@@ -86,6 +89,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const isOwner = request.nguoi_de_nghi_id === actor.userId
     const anySigned = signers.some((s) => s.trangThai === "da_ky")
     const isAdjustment = request.loai === "dieu_chinh"
+    // Người trong nhóm phụ trách biên bản (không phải người đề nghị) — chỉ khi Nháp/Bị trả về.
+    const teamActsAsOwner = openLinked && isRecordTeam && !isOwner
 
     // ── GĐ2: tình hình mua thực tế (chỉ phiếu gốc đã duyệt trở đi) ──
     let effectiveLines: PurchaseEffectiveLine[] = []
@@ -191,15 +196,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       parent,
       perms: {
         // Phiếu điều chỉnh không sửa bằng form thường (form ghi lại toàn bộ dòng → mất liên kết dòng gốc).
-        canEdit: (isOwner || canTakeOver) && isPurchaseEditable(status) && !isAdjustment,
-        // Phiếu từ biên bản, người xem chưa phải người đề nghị: phải bấm Lưu ("Nhận xử lý") trước khi gửi ký.
+        // Sửa / gửi ký cần quyền purchase.create — người tạo biên bản lập nháp hộ (chỉ có quyền bảo
+        // trì) đứng tên người đề nghị nhưng không được tự gửi phiếu đi ký.
+        canEdit: ((isOwner && hasCreatePerm) || teamActsAsOwner || canTakeOver) && isPurchaseEditable(status) && !isAdjustment,
+        // Người ngoài nhóm phụ trách biên bản: phải bấm "Nhận xử lý" (Lưu) trước, rồi mới gửi ký.
         canTakeOver: canTakeOver && !isOwner,
-        canSubmit: isOwner && isPurchaseEditable(status),
-        // Huỷ: người đề nghị khi Nháp/Bị trả về; ADMIN ở mọi trạng thái chưa huỷ/hoàn tất, trừ phiếu
-        // đã nhập kho một phần (dùng "Đóng phiếu").
+        canSubmit: ((isOwner && hasCreatePerm) || teamActsAsOwner) && isPurchaseEditable(status),
+        // Nhóm phụ trách biên bản gửi ký phiếu người khác đang đứng tên ⇒ qua panel chọn người ký, ở đó
+        // người gửi thành người đề nghị (ký bước 1, ghi nhận mua).
+        claimOnSubmit: teamActsAsOwner,
+        // Người đề nghị hiện tại không có quyền mua hàng → chờ người có quyền "Nhận xử lý".
+        needsBuyer: isOwner && !hasCreatePerm && isPurchaseEditable(status) && !isAdjustment,
+        isRecordTeam,
+        // Huỷ: người đề nghị / nhóm phụ trách biên bản khi Nháp/Bị trả về (chưa ai ký); ADMIN mọi trạng thái
+        // chưa huỷ/hoàn tất, kể cả Đã duyệt mà chưa nhập kho lần nào; trừ phiếu đã nhập kho một phần.
         canCancel:
-          (isOwner && (status === "nhap" || (status === "tra_ve" && !anySigned))) ||
-          (actor.isAdmin && status !== "huy" && status !== "hoan_tat" && status !== "da_duyet" && status !== "dang_mua" && status !== "dong"),
+          ((isOwner || teamActsAsOwner) && (status === "nhap" || (status === "tra_ve" && !anySigned))) ||
+          (actor.isAdmin && status !== "huy" && status !== "hoan_tat" && status !== "dang_mua" && status !== "dong"),
         // Ghi nhận mua / nhập kho: CHỈ người đề nghị + admin (GĐ2f — bỏ quyền inventory.create).
         canReceive: buying && hasRemaining && (isOwner || actor.isAdmin),
         // "Xác nhận hoàn thành" dịch vụ gia công: cùng quy tắc với Ghi nhận mua.

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
   AlertCircle, AlertTriangle, ArrowLeft, Ban, CheckCircle2, ChevronDown, ChevronUp, Coins, Download, Eye, ExternalLink, FileSignature, FileText, GitBranch, ImagePlus, Loader2, Pencil, PenTool, Plus,
-  Printer, QrCode, RotateCcw, Save, Send, ShoppingCart, Trash2, Users, Wrench, X,
+  Printer, QrCode, RefreshCw, RotateCcw, Save, Send, ShoppingCart, Trash2, Users, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
@@ -628,6 +628,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // giữa lúc đó sẽ làm các chữ ký đã đóng dấu không còn khớp dữ liệu. Mirror khóa sửa/xóa đã
   // áp dụng cho Kiểm nghiệm/Điều xe.
   const isSigningInProgress = signingStatus?.trangThai === "dang_luan_chuyen"
+  // Biên bản KẸT: ký số hoàn tất nhưng tự xuất kho lỗi ⇒ vẫn cho_duyet (bug.md #3).
+  const isStockStuck = record?.trang_thai === "cho_duyet" && signingStatus?.trangThai === "hoan_tat"
   // Admin luôn được sửa ở mọi trạng thái. Người tạo được sửa khi Chờ duyệt hoặc Từ chối;
   // Đã duyệt/Đã hủy/đang luân chuyển ký chỉ admin mới sửa được.
   const isReadOnly =
@@ -1126,6 +1128,24 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
+  // GĐ2 (bug.md #3) — biên bản KẸT: ký xong nhưng xuất kho lỗi ⇒ admin "Thử xuất kho lại".
+  const handleRetryIssue = async () => {
+    if (!factoryId || !id || id === "new") return
+    if (!window.confirm("Thử xuất kho lại cho biên bản này? Hệ thống kiểm tồn rồi tạo phiếu xuất kho; thành công thì biên bản chuyển Đã duyệt.")) return
+    setSaving(true); setSaveError(null)
+    try {
+      const res = await authFetch(`/api/maintenance/records/${id}/retry-issue`, { method: "POST" })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setSaveError(data.error || "Lỗi thử xuất kho lại"); return }
+      setSaveSuccess(`Đã xuất kho. Biên bản ${record?.ma_bb || ""} chuyển Đã duyệt.`)
+      void loadRecord(factoryId, id)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Lỗi thử xuất kho lại")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const handleResubmit = async () => {
     if (!factoryId || !id || id === "new") return
     setSaving(true); setSaveError(null)
@@ -1192,15 +1212,25 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       ),
     )
     const freshItemsForSave = saveStockItemIds.length > 0 ? await refreshMaterialStock(factoryId, saveStockItemIds) : inventoryItems
-    const stockViolations: string[] = []
+    // GĐ2 (bug.md #4): CỘNG DỒN số lượng theo mã qua mọi thiết bị — trước đây so từng dòng riêng,
+    // 2 thiết bị cùng dùng 1 mã mỗi dòng vừa đủ tồn nhưng tổng vượt tồn vẫn lưu được.
+    const needByItem = new Map<string, { name: string; dvt: string; need: number; lineCount: number }>()
     for (const ln of lines) {
       for (const mat of ln.materials) {
-        if (mat.nguon === "trong_kho" && mat.inventory_item_id) {
-          const item = freshItemsForSave.find((i) => i.id === mat.inventory_item_id)
-          if (item && parseFloat(mat.so_luong) > item.currentStock) {
-            stockViolations.push(`${mat.ten_vat_tu || "Vật tư"}: cần ${mat.so_luong} ${mat.dvt}, tồn ${item.currentStock}`)
-          }
-        }
+        if (mat.nguon !== "trong_kho" || !mat.inventory_item_id) continue
+        const qty = parseFloat(mat.so_luong) || 0
+        const cur = needByItem.get(mat.inventory_item_id)
+        if (cur) { cur.need += qty; cur.lineCount += 1 }
+        else needByItem.set(mat.inventory_item_id, { name: mat.ten_vat_tu || "Vật tư", dvt: mat.dvt, need: qty, lineCount: 1 })
+      }
+    }
+    const stockViolations: string[] = []
+    for (const [itemId, n] of needByItem) {
+      const item = freshItemsForSave.find((i) => i.id === itemId)
+      if (item && n.need > item.currentStock) {
+        const where = item.primaryWarehouseCode ? ` (kho ${item.primaryWarehouseCode})` : ""
+        const sum = n.lineCount > 1 ? ` — tổng ${n.lineCount} dòng thiết bị` : ""
+        stockViolations.push(`${n.name}: cần ${n.need} ${n.dvt}${sum}, tồn ${item.currentStock}${where}`)
       }
     }
     if (stockViolations.length > 0) {
@@ -2781,17 +2811,26 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     const noWarehouse = goods.some((it) => !it.warehouseId)
     const done = st.trangThai === "da_duyet" || st.trangThai === "huy"
     const short = st.totalShortage > 0
-    const canDraft = !done && st.needsRequest && (isAdmin || (isCreator && hasPermission(user, "maintenance.create")))
+    // Mirror quyền server (purchase-draft/route.ts): người tạo, NV phụ trách (so theo tên profile),
+    // người có quyền mua hàng, hoặc admin.
+    const myNames = [user?.full_name, user?.username].filter((v): v is string => !!v)
+    const isInCharge = [record?.nv_phu_trach, record?.phu_trach_bao_tri].some((n) => !!n && myNames.includes(n))
+    const canDraft = !done && st.needsRequest &&
+      (isAdmin || isCreator || isInCharge || hasPermission(user, "purchase.create"))
+    // Có nháp gốc ⇒ nút cập nhật chính nháp đó (route chỉ tăng SL / thêm dòng). Chỉ có phiếu bị trả về ⇒
+    // không có nút, người đề nghị tự sửa SL trên phiếu.
+    const draftNo = st.draftRequest ? `${String(st.draftRequest.so).padStart(2, "0")}/ĐNMVT` : null
+    const returnedOnly = !st.draftRequest && !!st.returnedRequest
     return (
       <div className={`p-3 rounded-xl border ${short ? "bg-amber-50 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
         <label className="text-[11px] font-bold text-slate-600 block mb-2 uppercase tracking-wider">
-          {goods.length ? <>Vật tư mua ngoài — kho {code}</> : null}
+          {goods.length ? <>Vật tư mua ngoài — {codes.length === 1 ? `kho ${code}` : "theo kho mặc định của từng vật tư"}</> : null}
           {goods.length && services.length ? " · " : null}
           {services.length ? "Gia công ngoài" : null}
         </label>
         {noWarehouse && (
           <p className="text-xs font-semibold text-red-600 mb-2">
-            Có vật tư chưa xác định được kho (chưa nhập kho, chưa có kho chính, không có kho tạm KT) — gán kho chính trong Cài đặt.
+            Có vật tư chưa xác định được kho (chưa nhập kho, chưa có kho mặc định) — gán kho mặc định cho vật tư trong Cài đặt.
           </p>
         )}
         <div className="space-y-1">
@@ -2825,12 +2864,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           <p className="mt-2 text-[11px] text-slate-500">{goods.length ? <>Biên bản đã xuất kho — vật tư mua ngoài xuất từ kho {code}.</> : "Biên bản đã duyệt."}</p>
         ) : short ? (
           <p className="mt-2 text-[11px] text-amber-800">
-            {goodsShort && <>Chưa đủ hàng ở kho {code} — chưa gửi ký duyệt được. Hàng nhập kho thường không được giữ riêng cho biên bản: nếu đã nhập mà vẫn thiếu, có thể kho đã bị xuất cho việc khác. </>}
+            {goodsShort && <>Chưa đủ hàng ở kho mặc định của vật tư ({code}) — chưa gửi ký duyệt được. Hàng nhập kho thường không được giữ riêng cho biên bản: nếu đã nhập mà vẫn thiếu, có thể kho đã bị xuất cho việc khác. </>}
             {servicesShort && <>Dịch vụ gia công chưa xác nhận hoàn thành — người đề nghị bấm “Ghi nhận mua &amp; hoàn thành” trên phiếu đề nghị mua. </>}
             Lưu biên bản vẫn bình thường.
           </p>
         ) : (
-          <p className="mt-2 text-[11px] text-emerald-700">{goods.length ? <>Kho {code} đủ hàng{services.length ? ", gia công đã hoàn thành" : ""} — có thể gửi ký duyệt; ký xong tự xuất kho {code}.</> : "Gia công đã hoàn thành — có thể gửi ký duyệt."}</p>
+          <p className="mt-2 text-[11px] text-emerald-700">{goods.length ? <>Kho mặc định của vật tư ({code}) đủ hàng{services.length ? ", gia công đã hoàn thành" : ""} — có thể gửi ký duyệt; ký xong tự xuất kho từ kho của từng vật tư.</> : "Gia công đã hoàn thành — có thể gửi ký duyệt."}</p>
         )}
         {st.linkedRequests.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -2841,13 +2880,19 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             ))}
           </div>
         )}
-        {canDraft && (
+        {canDraft && returnedOnly && (
+          <p className="mt-2 text-[11px] font-semibold text-rose-700">
+            Phiếu đề nghị đang bị trả về — người đề nghị sửa số lượng trên phiếu rồi gửi ký lại.
+          </p>
+        )}
+        {canDraft && !returnedOnly && (
           <button
             onClick={handleCreatePurchaseDraft}
             disabled={ktDrafting}
             className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-lg disabled:opacity-60"
           >
-            {ktDrafting ? <Loader2 size={12} className="animate-spin" /> : <ShoppingCart size={12} />} Lập đề nghị mua
+            {ktDrafting ? <Loader2 size={12} className="animate-spin" /> : <ShoppingCart size={12} />}
+            {draftNo ? `Cập nhật đề nghị nháp ${draftNo}` : "Lập đề nghị mua"}
           </button>
         )}
       </div>
@@ -2958,6 +3003,27 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               >
                 <X size={14} /> Hủy biên bản đã duyệt
               </button>
+            )}
+
+            {!effectiveIsNew && isStockStuck && isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleRetryIssue}
+                  disabled={saving || isUploadingAnyImage}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-teal-50 text-teal-700 border border-teal-200 text-xs font-bold hover:bg-teal-100 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={14} /> Thử xuất kho lại
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReverseApproval}
+                  disabled={saving || isUploadingAnyImage}
+                  className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 text-xs font-bold hover:bg-amber-100 transition-colors disabled:opacity-50"
+                >
+                  <RotateCcw size={14} /> Huỷ ký duyệt (về chờ ký)
+                </button>
+              </>
             )}
 
             {!effectiveIsNew && record?.trang_thai === "da_duyet" && isAdmin && (
@@ -3312,6 +3378,17 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   if (record?.trang_thai === "cho_duyet" && isCreator) {
     dangerActions.push({ key: "cancel", label: "Hủy biên bản", icon: <Ban size={14} />, onClick: () => void handleCancel(), disabled: busy })
   }
+  if (isStockStuck && isAdmin) {
+    secondaryActions.push({ key: "retry-issue", label: "Thử xuất kho lại", icon: <RefreshCw size={14} />, onClick: () => void handleRetryIssue(), disabled: busy })
+    dangerActions.push({
+      key: "reverse-stuck",
+      label: "Huỷ ký duyệt (về chờ ký)",
+      icon: <RotateCcw size={14} />,
+      onClick: () => void handleReverseApproval(),
+      disabled: busy,
+      title: "Huỷ yêu cầu ký đã hoàn tất + phiếu xuất dở dang (nếu có), đưa biên bản về chờ ký để sửa rồi gửi ký lại",
+    })
+  }
   if (record?.trang_thai === "da_duyet" && isAdmin) {
     dangerActions.push({ key: "cancel-approved", label: "Hủy biên bản đã duyệt", icon: <Ban size={14} />, onClick: () => void handleCancel(), disabled: busy })
     dangerActions.push({
@@ -3445,6 +3522,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               ) : undefined
             }
           />
+          {isStockStuck && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              <p className="font-bold">Đã ký đủ nhưng chưa xuất kho được</p>
+              <p className="mt-1">
+                {isAdmin
+                  ? "Nhập đủ hàng rồi bấm “Thử xuất kho lại”, hoặc “Huỷ ký duyệt” để sửa biên bản và gửi ký lại."
+                  : "Báo admin xử lý: nhập đủ hàng rồi thử xuất kho lại, hoặc huỷ ký duyệt để sửa biên bản."}
+              </p>
+            </div>
+          )}
           <SignActionBox
             primary={primaryAction}
             secondary={secondaryActions}

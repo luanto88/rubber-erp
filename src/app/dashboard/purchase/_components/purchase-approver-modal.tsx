@@ -20,7 +20,7 @@ export function PurchaseApproverModal({
   userId: string
   initialGiamDocId: string | null
   initialKeToanId: string | null
-  /** Phiếu từ biên bản, người xem chưa là người đề nghị: gửi = nhận xử lý. */
+  /** Người trong nhóm phụ trách biên bản, chưa đứng tên đề nghị: gửi = chiếm quyền người đề nghị. */
   takeOver: boolean
   busy: boolean
   error: string | null
@@ -29,19 +29,18 @@ export function PurchaseApproverModal({
 }) {
   const [approvers, setApprovers] = useState<ApproversResponse | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [giamDocId, setGiamDocId] = useState(initialGiamDocId || "")
-  const [keToanId, setKeToanId] = useState(initialKeToanId || "")
+  // null = người dùng chưa tự chọn ⇒ lấy người đã lưu trên phiếu (kể cả khi phiếu vừa tải lại xong sau khi
+  // panel đã mở), trống thì gợi ý mặc định (bỏ qua nếu trùng chính người đề nghị).
+  const [gdChoice, setGiamDocId] = useState<string | null>(null)
+  const [ktChoice, setKeToanId] = useState<string | null>(null)
+  const suggest = (id: string | null | undefined) => (id && id !== userId ? id : "")
+  const giamDocId = gdChoice ?? (initialGiamDocId || suggest(approvers?.defaultGiamDocId))
+  const keToanId = ktChoice ?? (initialKeToanId || suggest(approvers?.defaultKeToanId))
 
   useEffect(() => {
     let alive = true
     fetchApprovers()
-      .then((a) => {
-        if (!alive) return
-        setApprovers(a)
-        // Gợi ý mặc định chỉ điền ô còn trống, bỏ qua nếu trùng chính người đề nghị.
-        setGiamDocId((cur) => cur || (a.defaultGiamDocId && a.defaultGiamDocId !== userId ? a.defaultGiamDocId : ""))
-        setKeToanId((cur) => cur || (a.defaultKeToanId && a.defaultKeToanId !== userId ? a.defaultKeToanId : ""))
-      })
+      .then((a) => { if (alive) setApprovers(a) })
       .catch((err) => { if (alive) setLoadError(err instanceof Error ? err.message : "Không tải được danh sách người ký") })
     return () => { alive = false }
   }, [userId])
@@ -72,7 +71,7 @@ export function PurchaseApproverModal({
       <div className="space-y-4">
         <p className="text-sm text-slate-600">
           Chọn người ký theo thứ tự: <b>Người đề nghị → Giám đốc → Kế toán</b>.
-          {takeOver && " Bạn sẽ nhận xử lý phiếu này: đứng tên người đề nghị, ký bước 1 và ghi nhận mua."}
+          {takeOver && " Bạn sẽ đứng tên người đề nghị: ký bước 1 và ghi nhận mua."}
         </p>
         {loadError && <p className="text-sm font-semibold text-red-600">{loadError}</p>}
         {!approvers && !loadError ? (

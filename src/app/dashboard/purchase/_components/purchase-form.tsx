@@ -308,7 +308,7 @@ export function PurchaseForm({
 
   // Modal tạo vật tư mới
   const [newItemFor, setNewItemFor] = useState<string | null>(null)
-  const [newItem, setNewItem] = useState({ name: "", unit: "", categoryId: "", warehouseId: "", specification: "" })
+  const [newItem, setNewItem] = useState({ name: "", unit: "", categoryId: "", warehouseId: "", specification: "", laDichVu: false })
   const [newItemConfirmed, setNewItemConfirmed] = useState(false)
   const [newItemSaving, setNewItemSaving] = useState(false)
   const [newItemError, setNewItemError] = useState<string | null>(null)
@@ -410,7 +410,7 @@ export function PurchaseForm({
 
   const openNewItem = (key: string, name: string, categoryId = "") => {
     setNewItemFor(key)
-    setNewItem({ name, unit: "", categoryId, warehouseId: warehouses[0]?.id || "", specification: "" })
+    setNewItem({ name, unit: "", categoryId, warehouseId: warehouses[0]?.id || "", specification: "", laDichVu: false })
     setNewItemConfirmed(false)
     setNewItemError(null)
   }
@@ -434,7 +434,7 @@ export function PurchaseForm({
         setNewItemError(json.error || "Không tạo được vật tư")
         return
       }
-      const created: ItemOpt = { ...json.item, nguon_tao: "de_nghi_mua" }
+      const created: ItemOpt = { ...json.item, nguon_tao: json.item.nguon_tao || (newItem.laDichVu ? "bao_tri_gia_cong" : "de_nghi_mua") }
       setItems((prev) => [...prev, created].sort((a, b) => a.code.localeCompare(b.code, "vi")))
       selectItem(newItemFor, created, true)
       setNewItemFor(null)
@@ -805,7 +805,7 @@ export function PurchaseForm({
 
       {newItemFor && (
         <ModalShell
-          title="Tạo vật tư mới vào danh mục kho"
+          title={newItem.laDichVu ? "Tạo dịch vụ gia công mới" : "Tạo vật tư mới vào danh mục kho"}
           onClose={() => setNewItemFor(null)}
           maxWidth="lg"
           footer={
@@ -819,7 +819,25 @@ export function PurchaseForm({
         >
           <div className="space-y-3">
             <div>
-              <label className={labelCls}>Tên vật tư *</label>
+              <label className={labelCls}>Loại</label>
+              <div className="grid grid-cols-2 gap-2">
+                {([false, true] as const).map((dv) => (
+                  <button
+                    key={String(dv)}
+                    type="button"
+                    onClick={() => setNewItem((v) => ({ ...v, laDichVu: dv }))}
+                    className={`px-3 py-2 rounded-xl border text-sm font-bold ${newItem.laDichVu === dv ? (dv ? "bg-violet-50 border-violet-400 text-violet-800" : "bg-emerald-50 border-emerald-400 text-emerald-800") : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                  >
+                    {dv ? "Dịch vụ gia công ngoài" : "Vật tư nhập kho"}
+                  </button>
+                ))}
+              </div>
+              {newItem.laDichVu && (
+                <p className="mt-1 text-xs text-violet-700">Không qua kho, không có tồn kho. Sau khi phiếu duyệt, người đề nghị bấm “Xác nhận hoàn thành” thay cho nhập kho.</p>
+              )}
+            </div>
+            <div>
+              <label className={labelCls}>Tên {newItem.laDichVu ? "dịch vụ" : "vật tư"} *</label>
               <input className={inputCls} value={newItem.name} autoFocus onChange={(e) => { setNewItem((v) => ({ ...v, name: e.target.value })); setNewItemConfirmed(false) }} />
             </div>
             {similar.length > 0 && (
@@ -851,13 +869,15 @@ export function PurchaseForm({
                   {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className={labelCls}>Kho nhập dự kiến *</label>
-                <select className={inputCls} value={newItem.warehouseId} onChange={(e) => setNewItem((v) => ({ ...v, warehouseId: e.target.value }))}>
-                  <option value="">— Chọn —</option>
-                  {warehouses.map((w) => <option key={w.id} value={w.id}>{w.code} — {w.name}</option>)}
-                </select>
-              </div>
+              {!newItem.laDichVu && (
+                <div>
+                  <label className={labelCls}>Kho nhập dự kiến *</label>
+                  <select className={inputCls} value={newItem.warehouseId} onChange={(e) => setNewItem((v) => ({ ...v, warehouseId: e.target.value }))}>
+                    <option value="">— Chọn —</option>
+                    {warehouses.map((w) => <option key={w.id} value={w.id}>{w.code} — {w.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className={labelCls}>Quy cách</label>
                 <input className={inputCls} value={newItem.specification} onChange={(e) => setNewItem((v) => ({ ...v, specification: e.target.value }))} />

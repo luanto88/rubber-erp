@@ -18,6 +18,8 @@ type Body = {
   code?: string | null
   donGia?: number | null
   loaiTien?: string | null
+  /** Dịch vụ gia công ngoài: không kho, không tồn — sau duyệt "Xác nhận hoàn thành" thay nhập kho. */
+  laDichVu?: boolean
 }
 
 async function nextCode(factoryId: string, prefix: string): Promise<string> {
@@ -43,17 +45,21 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as Body
     const name = String(body.name || "").trim()
     const unit = String(body.unit || "").trim()
-    if (!name || !unit || !body.categoryId || !body.warehouseId) {
-      return NextResponse.json({ error: "Cần nhập Tên, ĐVT, Phân loại và Kho" }, { status: 400 })
+    const laDichVu = body.laDichVu === true
+    const warehouseId = laDichVu ? "" : String(body.warehouseId || "").trim()
+    if (!name || !unit || !body.categoryId || (!laDichVu && !warehouseId)) {
+      return NextResponse.json({ error: laDichVu ? "Cần nhập Tên, ĐVT và Phân loại" : "Cần nhập Tên, ĐVT, Phân loại và Kho" }, { status: 400 })
     }
 
     const factoryId = actor.factoryId
     const [{ data: category }, { data: warehouse }] = await Promise.all([
       supabaseAdmin.from("inventory_item_categories").select("id, code").eq("id", body.categoryId).eq("factory_id", factoryId).maybeSingle(),
-      supabaseAdmin.from("inventory_warehouses").select("id, code").eq("id", body.warehouseId).eq("factory_id", factoryId).maybeSingle(),
+      warehouseId
+        ? supabaseAdmin.from("inventory_warehouses").select("id, code").eq("id", warehouseId).eq("factory_id", factoryId).maybeSingle()
+        : Promise.resolve({ data: null }),
     ])
     if (!category) return NextResponse.json({ error: "Phân loại vật tư không hợp lệ" }, { status: 400 })
-    if (!warehouse) return NextResponse.json({ error: "Kho không hợp lệ" }, { status: 400 })
+    if (!laDichVu && !warehouse) return NextResponse.json({ error: "Kho không hợp lệ" }, { status: 400 })
 
     // Trùng tuyệt đối tên (sau chuẩn hoá bỏ dấu) → chặn, trả vật tư đang có để client chọn dùng.
     const target = normalizeName(name)
@@ -95,7 +101,7 @@ export async function POST(req: NextRequest) {
         name,
         unit,
         specification: body.specification?.trim() || null,
-        default_warehouse_ids: [body.warehouseId],
+        default_warehouse_ids: laDichVu ? [] : [warehouseId],
         manages_lot: false,
         manages_expiry: false,
         min_stock: 0,
@@ -105,16 +111,19 @@ export async function POST(req: NextRequest) {
         is_active: true,
         don_gia: Number(body.donGia) > 0 ? Number(body.donGia) : 0,
         loai_tien: body.loaiTien || "USD",
-        nguon_tao: "de_nghi_mua",
+        nguon_tao: laDichVu ? "bao_tri_gia_cong" : "de_nghi_mua",
+        ...(laDichVu ? { la_dich_vu: true } : {}),
       })
-      .select("id, code, name, unit, category_id, don_gia, loai_tien")
+      .select("id, code, name, unit, category_id, don_gia, loai_tien, nguon_tao")
       .single()
     if (error || !item) return NextResponse.json({ error: error?.message || "Không tạo được vật tư" }, { status: 400 })
+
+    if (laDichVu) return NextResponse.json({ item })
 
     const { error: ruleErr } = await supabaseAdmin.from("inventory_item_warehouse_rules").insert({
       factory_id: factoryId,
       item_id: item.id,
-      warehouse_id: body.warehouseId,
+      warehouse_id: warehouseId,
       min_stock: 0,
       max_stock: 0,
       reorder_point: 0,

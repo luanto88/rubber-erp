@@ -37,10 +37,6 @@ export async function POST(req: NextRequest) {
     if (recordErr || !record) {
       return NextResponse.json({ error: "Không tìm thấy biên bản" }, { status: 404 })
     }
-    if (record.trang_thai !== "da_duyet") {
-      return NextResponse.json({ error: "Biên bản này chưa ở trạng thái đã duyệt." }, { status: 400 })
-    }
-
     const { data: yeuCau, error: ycErr } = await supabaseAdmin
       .from("yeu_cau_ky")
       .select("id, trang_thai")
@@ -50,8 +46,32 @@ export async function POST(req: NextRequest) {
       .maybeSingle()
     if (ycErr) return NextResponse.json({ error: ycErr.message }, { status: 400 })
 
+    // GĐ2 (bug.md #3) — đường thoát cho biên bản KẸT: ký số đã hoàn tất nhưng xuất kho lỗi nên
+    // biên bản vẫn `cho_duyet`. Trước đây chỉ nhận `da_duyet` ⇒ không ai gỡ được.
+    const stuck = record.trang_thai === "cho_duyet" && !!yeuCau
+    if (record.trang_thai !== "da_duyet" && !stuck) {
+      return NextResponse.json(
+        { error: "Chỉ huỷ được biên bản đã duyệt, hoặc biên bản đã ký xong nhưng xuất kho lỗi." },
+        { status: 400 },
+      )
+    }
+
     const issueDocIds: string[] = (record.inventory_issue_doc_ids as string[] | null) ||
       (record.inventory_issue_doc_id ? [record.inventory_issue_doc_id as string] : [])
+    // Biên bản kẹt có thể còn "phiếu xuất mồ côi" (đã ghi sổ ở lượt xuất dở dang trước khi có hoàn
+    // tác tự động) — id không lưu vào biên bản nên tìm theo mã phiếu X-BT-<mã biên bản>.
+    if (stuck && record.ma_bb) {
+      const { data: orphanDocs, error: orphanErr } = await supabaseAdmin
+        .from("inventory_documents")
+        .select("id")
+        .eq("factory_id", factoryId)
+        .eq("status", "posted")
+        .like("document_code", `X-BT-${record.ma_bb}%`)
+      if (orphanErr) return NextResponse.json({ error: orphanErr.message }, { status: 400 })
+      for (const d of (orphanDocs || []) as { id: string }[]) {
+        if (!issueDocIds.includes(d.id)) issueDocIds.push(d.id)
+      }
+    }
     if (issueDocIds.length > 0) {
       await reverseMaintenanceStockIssuance({
         factoryId,
@@ -81,7 +101,7 @@ export async function POST(req: NextRequest) {
         yeu_cau_id: yeuCau.id,
         hanh_dong: "huy_sau_hoan_tat",
         user_id: authUser.id,
-        chi_tiet: { ma_bb: record.ma_bb, issue_doc_ids: issueDocIds },
+        chi_tiet: { ma_bb: record.ma_bb, issue_doc_ids: issueDocIds, ...(stuck ? { bien_ban_ket_xuat_kho: true } : {}) },
       })
     }
 

@@ -1355,6 +1355,39 @@ Kế hoạch đầy đủ: `.claude/plans/vat-tu-mua-ngoai-gia-cong-2026-10-18.m
   vẫn tính ở khối riêng — tránh trùng). Khối KT trang biên bản hiện dòng "Gia công · đã hoàn thành N".
   Ví dụ dữ liệu thật: `DX-261026/001` có gia công chưa hoàn thành → từ nay không gửi ký được.
 
+## Ký biên bản an toàn — GĐ2 theo `bug.md` (2026-10-31, chờ test tay)
+Kế hoạch: `C:\Users\Software\.claude\plans\c-file-bug-md-x-c-quizzical-meerkat.md`. Không migration.
+- **Lập đề nghị mua** từ biên bản (`purchase-draft`): người tạo biên bản, NV phụ trách (`nv_phu_trach` /
+  `phu_trach_bao_tri`, so với `full_name`/`username` của profile), người có `purchase.create`, hoặc admin.
+  Nút trên khung "Vật tư mua ngoài" mirror đúng điều kiện. Đã có nháp/trả về ⇒ mở lại phiếu đó. Câu chữ khung
+  bỏ "kho KT" cứng — nói theo kho mặc định của từng vật tư.
+- `checkMaintenanceStock(factoryId, recordId)` (`maintenance-stock-issuance.ts`): dùng chung bước lập kế hoạch
+  (`buildIssuePlan`) với `issueMaintenanceStock` — gom theo kho nguồn, CỘNG DỒN SL theo (kho, mã) qua mọi
+  thiết bị, cả "Trong kho" lẫn "Mua ngoài", so `on_hand`; cộng lại phần tồn của phiếu `X-BT-<mã>` đã ghi sổ
+  (sẽ bị huỷ khi xuất lại). Trả `{ ok, shortages, problems, message }`, chỉ đọc. Dòng "Trong kho" không có mã
+  vẫn bị bỏ qua như cũ.
+- Gọi ở `create-request` (409 khi gửi ký) và trong `signField` khi lượt ký sẽ HOÀN TẤT hồ sơ — chạy TRƯỚC khi
+  đóng dấu ⇒ thiếu hàng thì từ chối ký, chưa ghi gì, hồ sơ vẫn đang luân chuyển.
+- `issueMaintenanceStock`: kiểm toàn bộ trước khi ghi; kho thứ N lỗi ⇒ huỷ (`inventory_cancel_document`) các
+  phiếu đã ghi sổ trong lượt rồi mới ném lỗi. Mã biên bản rỗng ⇒ từ chối (tránh `like "X-BT-%"`).
+- `handleSave` (form biên bản): so tồn theo TỔNG SL mỗi mã "Trong kho" qua mọi thiết bị.
+- **Biên bản kẹt** (`cho_duyet` + `yeu_cau_ky` `hoan_tat`): banner đỏ trên trang chi tiết; admin có
+  "Thử xuất kho lại" (`POST /api/maintenance/records/[id]/retry-issue` — xuất kho, set `da_duyet`, người duyệt
+  = người ký cuối, log `nhat_ky_ky` `thu_xuat_kho_lai`) và "Huỷ ký duyệt (về chờ ký)" (`reverse-approval` nay
+  nhận cả trạng thái kẹt, tự huỷ thêm phiếu xuất mồ côi `X-BT-<mã>` đã ghi sổ).
+- **Sau test tay (2026-11-01, chờ test lại)**:
+  - Lỗi A (người có `purchase.create` không phải người tạo/NV phụ trách vẫn lập được) = ĐÚNG THIẾT KẾ, người
+    dùng chốt giữ nguyên (đã xác nhận htho2000 được cấp `purchase.create` tường minh).
+  - Lỗi B (sửa SL biên bản sau khi đã có nháp ⇒ 2 lối vào cùng mở nháp cũ SL cũ): `purchase-draft` nay ĐỒNG BỘ
+    phiếu gốc `nhap` liên kết — cộng đúng phần còn thiếu (`shortage − pendingRequested`, pending đã gồm chính
+    nháp) vào dòng cùng `item_id`, thêm dòng vật tư mới; **không bao giờ giảm SL, không xoá dòng** (giữ mua dư
+    + dòng người mua tự thêm — người dùng chốt). Dòng đổi SL xoá `insight_snapshot`, tính lại `tong_tien`,
+    log `cap_nhat_tu_bao_tri`. Nháp đã đủ ⇒ chỉ mở lại. Chỉ có phiếu `tra_ve` ⇒ mở lại, không đụng.
+  - `computeKtStatuses` trả thêm `draftRequest` / `returnedRequest`. Khung "Vật tư mua ngoài": có nháp ⇒ nút
+    "Cập nhật đề nghị nháp NN/ĐNMVT" (thay "Lập đề nghị mua"); chỉ có phiếu bị trả về ⇒ dòng chữ đỏ, không nút.
+  - Trên phiếu đề nghị lập từ biên bản, người tạo + NV phụ trách là "nhóm phụ trách": cùng Sửa/Gửi ký/Huỷ khi
+    Nháp/Bị trả về; người gửi ký thành người đề nghị. Chi tiết: rule 28 mục "Nhóm phụ trách biên bản".
+
 ## Sửa: mã tạo mới là Dịch vụ gia công ⇒ dòng tự thành "Gia công ngoài" (2026-10-27)
 `applyExtMatToLine` (`records/[id]/page.tsx`) đặt `nguon` theo `la_dich_vu` của mã vừa tạo/chọn ("Dùng mã này")
 — trước đây dòng giữ nguyên "Mua ngoài".

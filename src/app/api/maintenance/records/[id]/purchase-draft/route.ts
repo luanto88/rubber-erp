@@ -2,16 +2,19 @@ import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { computeKtStatuses, PURCHASE_ACTIVE_FOR_KT } from "@/lib/maintenance-kt"
-import { insertPurchaseLog } from "@/lib/purchase/server"
+import { insertPurchaseLog, isRecordTeamMember } from "@/lib/purchase/server"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { isBoPhan } from "@/lib/bo-phan"
 
 export const dynamic = "force-dynamic"
 
 // POST — "Lập đề nghị mua" từ biên bản bảo trì (GĐ2g): tạo phiếu Đề nghị mua NHÁP cho phần vật tư
-// mua ngoài còn thiếu ở kho tạm KT (đã trừ phần đang đề nghị). Người tạo biên bản (hoặc admin) lập,
-// kể cả khi không có purchase.create; người có purchase.create bấm "Nhận xử lý" (Lưu) rồi gửi ký.
-// Đã có phiếu nháp/bị trả về liên kết → trả lại phiếu đó, không tạo trùng.
+// mua ngoài còn thiếu ở kho mặc định của từng vật tư (đã trừ phần đang đề nghị). Người lập: người tạo
+// biên bản, NV phụ trách, người có purchase.create, hoặc admin; người không có purchase.create lập nháp
+// xong thì người có quyền bấm "Nhận xử lý" (Lưu) rồi gửi ký.
+// Đã có phiếu gốc NHÁP liên kết → đồng bộ theo biên bản (chỉ tăng SL dòng cùng vật tư / thêm dòng vật tư
+// mới, không giảm, không xoá dòng — giữ phần mua dư và dòng người mua tự thêm). Chỉ có phiếu BỊ TRẢ VỀ →
+// trả lại phiếu đó, không đụng. Không bao giờ tạo trùng.
 
 const DEFAULT_USD_RATE: Record<string, number> = { USD: 1, KHR: 4100, VND: 25000 }
 
@@ -38,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { data: rec } = await supabaseAdmin
       .from("maintenance_records")
-      .select("id, ma_bb, bo_phan, trang_thai, created_by, nguoi_tao")
+      .select("id, ma_bb, bo_phan, trang_thai, created_by, nguoi_tao, nv_phu_trach, phu_trach_bao_tri")
       .eq("id", id)
       .eq("factory_id", factoryId)
       .maybeSingle()
@@ -46,25 +49,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { data: me } = await supabaseAdmin.from("profiles").select("full_name, username").eq("id", actor.userId).single()
     const myName = (me?.full_name || me?.username || "") as string
-    const isCreator =
-      rec.created_by === actor.userId ||
-      (!!rec.nguoi_tao && (rec.nguoi_tao === me?.full_name || rec.nguoi_tao === me?.username))
-    if (!actor.isAdmin && !(isCreator && (await isoActorHasPermission(actor, ["maintenance.create"])))) {
-      return NextResponse.json({ error: "Chỉ người tạo biên bản hoặc admin được lập đề nghị mua" }, { status: 403 })
+    const myNames = [me?.full_name, me?.username].filter((v): v is string => !!v)
+    // Người tạo / NV phụ trách so theo tên profile (cột tên là snapshot) — dùng chung với phiếu đề nghị.
+    const canDraft =
+      actor.isAdmin || isRecordTeamMember(rec, actor.userId, myNames) ||
+      (await isoActorHasPermission(actor, ["purchase.create"]))
+    if (!canDraft) {
+      return NextResponse.json(
+        { error: "Chỉ người tạo biên bản, NV phụ trách, người có quyền mua hàng hoặc admin được lập đề nghị mua" },
+        { status: 403 },
+      )
     }
     if (rec.trang_thai === "da_duyet" || rec.trang_thai === "huy") {
       return NextResponse.json({ error: "Biên bản đã duyệt/huỷ — không cần lập đề nghị" }, { status: 409 })
     }
 
-    const { data: existingDraft } = await supabaseAdmin
+    const { data: openReqs } = await supabaseAdmin
       .from("purchase_requests")
-      .select("id")
+      .select("id, so, loai, trang_thai, loai_tien")
       .eq("factory_id", factoryId)
       .eq("maintenance_record_id", id)
       .in("trang_thai", ["nhap", "tra_ve"])
-      .limit(1)
-      .maybeSingle()
-    if (existingDraft) return NextResponse.json({ id: existingDraft.id, existed: true })
+      .order("created_at")
+    const openRows = (openReqs || []) as { id: string; so: number; loai: string; trang_thai: string; loai_tien: string | null }[]
+    // Phiếu NHÁP gốc: đồng bộ theo biên bản (bên dưới). Chỉ có phiếu BỊ TRẢ VỀ (đã có chữ ký) thì
+    // không đụng — mở lại để người đề nghị tự sửa SL trên phiếu.
+    const draft = openRows.find((r) => r.loai === "goc" && r.trang_thai === "nhap") || null
+    if (!draft && openRows.length) return NextResponse.json({ id: openRows[0].id, existed: true })
 
     // Chặn sớm — TRƯỚC khi cấp số/tạo phiếu: mọi vật tư mua ngoài phải có mã trong danh mục kho.
     // Trước đây id vật tư nằm ở bảng cũ maintenance_external_materials ⇒ insert dòng phiếu lỗi khoá
@@ -161,6 +172,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       for (const n of serviceNeed.values()) if (n.qty > 0) needs.push(n)
     }
 
+    // `needs` là phần CÒN THIẾU sau khi đã trừ mọi phiếu đang đề nghị (kể cả chính phiếu nháp) ⇒ đồng bộ
+    // nháp = cộng thêm đúng phần này. Nháp đã đủ/dư thì chỉ mở lại (không bao giờ giảm SL, không xoá dòng).
+    if (!needs.length && draft) return NextResponse.json({ id: draft.id, existed: true, updated: false })
     if (!needs.length) {
       return NextResponse.json({ error: "Kho đã đủ và dịch vụ gia công đã có đề nghị — không cần lập thêm" }, { status: 409 })
     }
@@ -182,7 +196,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const rate: Record<string, number> = { ...DEFAULT_USD_RATE }
     if (Number(fac?.ty_gia_usd_vnd) > 0) rate.VND = Number(fac?.ty_gia_usd_vnd)
     if (Number(fac?.ty_gia_usd_khr) > 0) rate.KHR = Number(fac?.ty_gia_usd_khr)
-    const loaiTien = ["USD", "VND", "KHR"].includes(needs[0].loaiTien) ? needs[0].loaiTien : "USD"
+    const isCurrency = (c: string | null | undefined): c is string => !!c && ["USD", "VND", "KHR"].includes(c)
+    const loaiTien = isCurrency(draft?.loai_tien) ? draft.loai_tien : isCurrency(needs[0].loaiTien) ? needs[0].loaiTien : "USD"
     const convert = (amount: number, from: string) =>
       from === loaiTien ? amount : (amount / (rate[from] || 1)) * (rate[loaiTien] || 1)
 
@@ -205,6 +220,52 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         ngay_can_hang: today,
       }
     })
+
+    if (draft) {
+      const { data: dLines, error: dErr } = await supabaseAdmin
+        .from("purchase_request_lines")
+        .select("id, item_id, so_luong, don_gia, sort_order")
+        .eq("request_id", draft.id)
+      if (dErr) return NextResponse.json({ error: dErr.message }, { status: 500 })
+      const existing = (dLines || []) as { id: string; item_id: string | null; so_luong: number | null; don_gia: number | null; sort_order: number | null }[]
+      let nextSort = existing.reduce((m, l) => Math.max(m, Number(l.sort_order) || 0), -1) + 1
+      const changes: string[] = []
+      for (const row of lineRows) {
+        const cur = existing.find((l) => l.item_id === row.item_id)
+        if (cur) {
+          const soLuong = (Number(cur.so_luong) || 0) + row.so_luong
+          const donGia = Number(cur.don_gia) || 0
+          // Bản chụp bằng chứng của dòng đổi SL không còn khớp ⇒ xoá, gửi ký sẽ chụp lại.
+          const { error } = await supabaseAdmin
+            .from("purchase_request_lines")
+            .update({ so_luong: soLuong, thanh_tien: Math.round(soLuong * donGia * 100) / 100, insight_snapshot: null })
+            .eq("id", cur.id)
+          if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+          changes.push(`${row.item_name}: ${Number(cur.so_luong) || 0} → ${soLuong}`)
+        } else {
+          const { error } = await supabaseAdmin
+            .from("purchase_request_lines")
+            .insert({ ...row, sort_order: nextSort++, request_id: draft.id })
+          if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+          changes.push(`thêm ${row.item_name} (${row.so_luong})`)
+        }
+      }
+      const { data: allLines } = await supabaseAdmin
+        .from("purchase_request_lines")
+        .select("thanh_tien")
+        .eq("request_id", draft.id)
+      const tong = ((allLines || []) as { thanh_tien: number | null }[]).reduce((s, l) => s + (Number(l.thanh_tien) || 0), 0)
+      await supabaseAdmin
+        .from("purchase_requests")
+        .update({ tong_tien: Math.round(tong * 100) / 100 })
+        .eq("id", draft.id)
+        .eq("trang_thai", "nhap")
+      await insertPurchaseLog({
+        requestId: draft.id, factoryId, userId: actor.userId, hanhDong: "cap_nhat_tu_bao_tri",
+        noiDung: `Cập nhật theo biên bản ${rec.ma_bb || ""}: ${changes.join("; ")}`,
+      })
+      return NextResponse.json({ id: draft.id, existed: true, updated: true })
+    }
 
     const { data: so, error: soErr } = await supabaseAdmin.rpc("get_next_purchase_so", { p_factory_id: factoryId, p_nam: nam })
     if (soErr || !so) return NextResponse.json({ error: soErr?.message || "Không cấp được số phiếu" }, { status: 500 })

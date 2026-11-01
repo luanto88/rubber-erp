@@ -5,6 +5,7 @@ import { scheduleSigningNotify } from "@/lib/signing/notify"
 import { computeRecordFingerprint } from "@/lib/signing/data-fingerprint"
 import { computeKtStatuses } from "@/lib/maintenance-kt"
 import { describeKtShortage } from "@/lib/maintenance-kt-message"
+import { checkMaintenanceStock } from "@/lib/maintenance-stock-issuance"
 
 export const dynamic = "force-dynamic"
 
@@ -98,6 +99,12 @@ export async function POST(req: NextRequest) {
           { error: describeKtShortage(st.items) || "Chưa đủ vật tư / dịch vụ gia công để gửi ký." },
           { status: 409 },
         )
+      }
+      // GĐ2 (bug.md #4 + C2): cộng dồn SL theo mã qua mọi thiết bị, cả "Trong kho" lẫn "Mua ngoài",
+      // so tồn thật — chặn ngay khi gửi ký thay vì để ký xong mới nổ lỗi xuất kho.
+      const stock = await checkMaintenanceStock(body.factoryId, body.banGhiId)
+      if (!stock.ok) {
+        return NextResponse.json({ error: `Chưa gửi ký được — ${stock.message}` }, { status: 409 })
       }
     }
 

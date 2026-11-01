@@ -9,7 +9,7 @@ import { computeIntegrityHash } from "./hash"
 import { drawSignatureImage, drawTextFit, loadSignerNameFont } from "./stamp-pdf"
 import { getTodayISODate, formatDateDisplay } from "@/lib/date-utils"
 import { hasPadesRootCa, applyPadesSignatureToDoc } from "./pades"
-import { issueMaintenanceStock } from "@/lib/maintenance-stock-issuance"
+import { checkMaintenanceStock, issueMaintenanceStock } from "@/lib/maintenance-stock-issuance"
 // CHỈ import type — không kéo `next/server`/nodemailer vào lõi ký. Việc GỬI thông báo do 3 route
 // handler thực hiện qua scheduleSigningNotify(), file này chỉ DỰNG kế hoạch (xem ./notify.ts).
 import type { SigningNotifyPlan } from "./notify"
@@ -258,7 +258,7 @@ export async function signField(params: {
   // ky/[id]/page.tsx), đây là lớp chặn cứng phía server (không tin tưởng riêng UI).
   const { data: signersBeforeStamp, error: signersBeforeStampErr } = await supabase
     .from("nguoi_ky")
-    .select("thu_tu, trang_thai")
+    .select("id, thu_tu, trang_thai")
     .eq("yeu_cau_id", params.yeuCauId)
   if (signersBeforeStampErr) throw new Error(signersBeforeStampErr.message)
   const notYetMyTurn = (signersBeforeStamp || []).some(
@@ -266,6 +266,22 @@ export async function signField(params: {
   )
   if (notYetMyTurn) {
     throw new Error("Chưa tới lượt ký của bạn — cần người ký trước hoàn tất trước.")
+  }
+
+  // GĐ2 (bug.md #3): biên bản Bảo trì — lượt ký này sẽ HOÀN TẤT hồ sơ (mọi người khác đã ký) ⇒ kiểm
+  // tồn kho TRƯỚC khi đóng dấu. Thiếu hàng ⇒ từ chối ký: chưa ghi chữ ký, yêu cầu ký vẫn đang luân
+  // chuyển, biên bản không bị kẹt "đã ký xong nhưng chưa xuất kho".
+  const maintenanceRecordId = (yeuCau.ban_ghi_id as string | null) || (yeuCau.ma_ho_so as string | null)
+  const willComplete = ((signersBeforeStamp || []) as { id: string; trang_thai: string }[]).every(
+    (s) => s.id === nguoiKy.id || s.trang_thai === "da_ky",
+  )
+  if (willComplete && yeuCau.modun === "maintenance" && maintenanceRecordId) {
+    const stock = await checkMaintenanceStock(yeuCau.factory_id as string, maintenanceRecordId)
+    if (!stock.ok) {
+      throw new Error(
+        `Chưa ký được — biên bản sẽ tự xuất kho ngay khi ký xong nhưng kho chưa đủ: ${stock.message} Nhập thêm hàng (hoặc người lập sửa biên bản) rồi ký lại.`,
+      )
+    }
   }
 
   const { data: fields, error: fieldsErr } = await supabase

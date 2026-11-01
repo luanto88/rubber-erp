@@ -253,3 +253,48 @@ log `hoan_thanh_dich_vu`). Xem rule 14 mục "Bước 2–3".
 - Tab **"Gia công ngoài"** (`_components/service-completions-view.tsx`, API `GET /api/purchase/service-completions`):
   lọc ngày/bộ phận/đơn vị gia công/tìm, tổng quy USD (tỷ giá nhà máy), link phiếu + biên bản, ảnh, xuất Excel.
   Phạm vi: `purchase.view_all`/admin toàn nhà máy, còn lại phiếu mình liên quan.
+
+## Sửa lỗi theo `bug.md` — GĐ1 (2026-10-31, chờ test tay)
+Kế hoạch 4 GĐ: `C:\Users\Software\.claude\plans\c-file-bug-md-x-c-quizzical-meerkat.md`. Không migration.
+- **Huỷ**: admin huỷ được phiếu `da_duyet` chưa nhập kho lần nào (trước đây treo vĩnh viễn — nút ẩn, API
+  Đóng chỉ nhận `dang_mua`). Nút Huỷ trang chi tiết dùng thẳng `perms.canCancel` (server tính đủ). API huỷ:
+  người đề nghị chỉ huỷ phiếu `tra_ve` khi chưa ai ký (khớp giao diện).
+- **Quyền mua**: người đứng tên đề nghị mà không có `purchase.create` (người tạo biên bản lập nháp hộ) KHÔNG
+  sửa / chọn người ký / gửi ký được (`canEdit`, `canSubmit`, route `submit`, `approvers` đều kiểm), trang
+  hiện `perms.needsBuyer` → banner chờ người có quyền "Nhận xử lý". `submit` chặn dòng đơn giá = 0.
+- **GET không tự ghi DB nữa**: danh sách + chi tiết khi `yeu_cau_ky = hoan_tat` mà phiếu còn `cho_ky/tra_ve`
+  ⇒ gọi `syncPurchaseFromSigning()` (có nhật ký + tính lại phiếu gốc của phiếu điều chỉnh). Bỏ điều kiện
+  "đủ chữ ký nhưng yêu cầu ký chưa hoàn tất".
+- Modal "Tạo vật tư mới" trong form đề nghị có lựa chọn **Dịch vụ gia công ngoài** (`/api/purchase/items`
+  nhận `laDichVu` → `la_dich_vu=true`, `nguon_tao='bao_tri_gia_cong'`, không kho, không rule kho).
+- Banner phiếu lập từ biên bản bỏ câu cứng "kho tạm KT".
+
+## Sửa lỗi theo `bug.md` — GĐ2 (2026-10-31, chờ test tay)
+Ký biên bản an toàn (bug 3, 4, C1, C2) — chi tiết ở rule 14 mục "Ký biên bản an toàn". Liên quan module này:
+"Lập đề nghị mua" từ biên bản mở cho người tạo biên bản, NV phụ trách, người có `purchase.create`, admin
+(trước: chỉ người tạo có `maintenance.create` / admin). Người không có `purchase.create` lập nháp xong vẫn cần
+người có quyền "Nhận xử lý" (GĐ1).
+Sau test tay (2026-11-01): biên bản đổi SL khi đã có phiếu NHÁP liên kết ⇒ "Cập nhật đề nghị nháp" (cùng route
+`purchase-draft`) chỉ TĂNG SL / thêm dòng trên nháp, không giảm, không xoá dòng; log `cap_nhat_tu_bao_tri`.
+Phiếu `tra_ve` không đồng bộ. Chi tiết: rule 14 mục "Ký biên bản an toàn".
+
+## Nhóm phụ trách biên bản — "người gửi ký đầu tiên chiếm quyền" (2026-11-01, chờ test tay)
+Người dùng chốt phương án A (plan `C:\Users\Software\.claude\plans\purchase-dong-xu-ly-bien-ban-2026-11-01.md`).
+- Nhóm = người tạo biên bản + NV phụ trách (`isRecordTeamMember` / `isMaintenanceRecordTeam` trong
+  `src/lib/purchase/server.ts`, so tên profile — dùng chung với `purchase-draft`).
+- Phiếu gốc lập từ biên bản, đang `nhap`/`tra_ve`: người trong nhóm có `purchase.create` thao tác NGANG người đề
+  nghị — "Sửa phiếu", "Gửi ký duyệt", "Huỷ phiếu" (huỷ khi chưa ai ký). Sửa phiếu KHÔNG đổi người đề nghị.
+- Người trong nhóm bấm "Gửi ký duyệt" phiếu người khác đứng tên (`perms.claimOnSubmit`) ⇒ luôn qua panel chọn
+  người ký; PATCH `approvers` chuyển `nguoi_de_nghi_id` sang người gửi, log `nhan_xu_ly` "Đảm nhận phiếu khi gửi
+  ký (người phụ trách biên bản)". Sau khi gửi, chỉ người đề nghị thao tác; bị trả về thì nhóm lại can thiệp được.
+- Người NGOÀI nhóm có `purchase.create`: chỉ "Nhận xử lý" (Lưu ⇒ thành người đề nghị), rồi mới gửi ký. Không còn
+  nút gửi ký thẳng; PATCH `approvers` từ chối 403 "Bấm Nhận xử lý trước".
+- Trang phiếu hiện "Người lập" (`lap_boi_id`) khi khác "Người đề nghị". Không migration.
+- Sửa sau test (2026-11-01, chờ test lại):
+  - Lưu ở form sửa ⇒ trang TẢI LẠI phiếu (await) rồi mới đóng form; nút "Gửi ký" khoá khi đang tải. "Lưu & gửi ký"
+    của người trong nhóm (`claimOnSubmit`) mở panel (điền sẵn người ký vừa lưu) thay vì gửi thẳng — gửi thẳng từng
+    bị 403 vì người lưu chưa đứng tên đề nghị.
+  - `PurchaseApproverModal`: giá trị = lựa chọn của người dùng, chưa chọn thì người đã lưu trên phiếu (cập nhật theo
+    prop), trống mới dùng gợi ý. Câu "đứng tên người đề nghị" hiện theo `claimOnSubmit`.
+  - Nút "Mở màn ký" chỉ hiện cho người ký / người đề nghị / admin (RLS `yeu_cau_ky_select`); người khác xem PDF +
+    tiến trình ngay trên trang (người dùng chốt phương án A).

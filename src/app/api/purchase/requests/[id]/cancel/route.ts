@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
-import { resolveIsoActor, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
+import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { cancelSigningRequest } from "@/lib/signing/requests"
 import { scheduleModuleBroadcast } from "@/lib/signing/notify"
-import { insertPurchaseLog } from "@/lib/purchase/server"
+import { insertPurchaseLog, isMaintenanceRecordTeam } from "@/lib/purchase/server"
 import { formatSoPhieuFull, type PurchaseStatus } from "@/lib/purchase/types"
 
 export const dynamic = "force-dynamic"
 
 // POST { lyDo } — Huỷ phiếu đề nghị. KHÔNG xoá: số phiếu giữ nguyên, dãy số không bị hở.
-//  - Người đề nghị: chỉ khi Nháp / Bị trả về (chưa ai ký).
+//  - Người đề nghị (và nhóm phụ trách biên bản với phiếu lập từ biên bản): chỉ khi Nháp / Bị trả về (chưa ai ký).
 //  - Admin: mọi trạng thái trừ Đã huỷ / Hoàn tất, kể cả phiếu ĐÃ DUYỆT nhưng không mua
 //    (yêu cầu ký giữ 'hoan_tat', PDF đã ký giữ nguyên làm bằng chứng).
 // Lý do bắt buộc ở mọi trường hợp.
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { data: request } = await supabaseAdmin
       .from("purchase_requests")
-      .select("id, factory_id, nam, so, nguoi_de_nghi_id, giam_doc_user_id, ke_toan_user_id, trang_thai, yeu_cau_ky_id")
+      .select("id, factory_id, nam, so, nguoi_de_nghi_id, giam_doc_user_id, ke_toan_user_id, trang_thai, yeu_cau_ky_id, loai, maintenance_record_id")
       .eq("id", id)
       .eq("factory_id", actor.factoryId)
       .maybeSingle()
@@ -38,7 +38,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     const isOwner = request.nguoi_de_nghi_id === actor.userId
-    const ownerAllowed = isOwner && (status === "nhap" || status === "tra_ve")
+    const editable = status === "nhap" || status === "tra_ve"
+    // Nhóm phụ trách biên bản (người tạo + NV phụ trách, có purchase.create) được huỷ như người đề nghị
+    // khi phiếu lập từ biên bản còn Nháp / Bị trả về.
+    const isTeam =
+      !isOwner && editable && request.loai !== "dieu_chinh" &&
+      (await isMaintenanceRecordTeam(request.maintenance_record_id, actor.userId)) &&
+      (await isoActorHasPermission(actor, ["purchase.create"]))
+    let ownerAllowed = (isOwner || isTeam) && editable
+    // Bị trả về nhưng đã có người ký trước đó → chỉ admin huỷ (cùng quy tắc với nút trên giao diện).
+    if (ownerAllowed && status === "tra_ve" && request.yeu_cau_ky_id) {
+      const { count } = await supabaseAdmin
+        .from("nguoi_ky")
+        .select("id", { count: "exact", head: true })
+        .eq("yeu_cau_id", request.yeu_cau_ky_id)
+        .eq("trang_thai", "da_ky")
+      if ((count || 0) > 0) ownerAllowed = false
+    }
     if (!actor.isAdmin && !ownerAllowed) {
       return NextResponse.json({ error: "Chỉ admin được huỷ phiếu đã gửi ký / đã duyệt" }, { status: 403 })
     }

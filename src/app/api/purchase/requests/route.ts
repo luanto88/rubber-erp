@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { BO_PHAN_LIST, isBoPhan } from "@/lib/bo-phan"
-import { insertPurchaseLog } from "@/lib/purchase/server"
+import { insertPurchaseLog, isMaintenanceRecordTeam, syncPurchaseFromSigning } from "@/lib/purchase/server"
 import {
   isPriceDeviationExceeded, isPurchaseEditable, minIsoDate, normalizeIsoDate, priceDeviationPct, sanitizeImageUrls,
   type PurchaseLineInput, type PurchaseRequestRow, type PurchaseStatus,
@@ -87,32 +87,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Tự động đồng bộ (auto-reconcile): Nếu yeu_cau_ky đã hoan_tat hoặc signers đã ký 3/3
-    // mà purchase_requests vẫn là 'cho_ky', tự động update DB và sửa trạng thái trong bộ nhớ.
-    const reconcileRows: { id: string; nextStatus: string }[] = []
-    const nowIso = new Date().toISOString()
-    for (const r of rows) {
-      if (r.yeu_cau_ky_id && (r.trang_thai === "cho_ky" || r.trang_thai === "tra_ve")) {
-        const ycTrangThai = ycStatusByYc.get(r.yeu_cau_ky_id)
-        const signers = signersByYc.get(r.yeu_cau_ky_id) || []
-        const allDone = (signers.length > 0 && signers.every((s) => s.trang_thai === "da_ky")) || ycTrangThai === "hoan_tat"
-        if (allDone) {
-          const nextStatus = r.loai === "dieu_chinh" ? "hoan_tat" : "da_duyet"
-          r.trang_thai = nextStatus
-          r.ngay_duyet = nowIso
-          reconcileRows.push({ id: r.id, nextStatus })
-        }
-      }
-    }
-    if (reconcileRows.length > 0) {
-      void Promise.all(
-        reconcileRows.map((item) =>
-          supabaseAdmin
-            .from("purchase_requests")
-            .update({ trang_thai: item.nextStatus, ngay_duyet: nowIso, updated_at: nowIso })
-            .eq("id", item.id),
-        ),
-      ).catch((e) => console.error("[purchase/reconcile] Lỗi auto-reconcile danh sách:", e))
+    // Yêu cầu ký đã hoàn tất mà phiếu vẫn 'cho_ky'/'tra_ve' (lượt ký trước lỡ đồng bộ hỏng) →
+    // đồng bộ qua hàm chuẩn (ghi nhật ký + tính lại phiếu gốc của phiếu điều chỉnh).
+    const lagging = rows.filter(
+      (r) => r.yeu_cau_ky_id && (r.trang_thai === "cho_ky" || r.trang_thai === "tra_ve") && ycStatusByYc.get(r.yeu_cau_ky_id) === "hoan_tat",
+    )
+    for (const r of lagging) {
+      await syncPurchaseFromSigning(r.yeu_cau_ky_id as string)
+      r.trang_thai = r.loai === "dieu_chinh" ? "hoan_tat" : "da_duyet"
+      r.ngay_duyet = r.ngay_duyet || new Date().toISOString()
     }
 
     // Dòng vật tư rút gọn — cho dòng xổ ở danh sách (rule 29 mục A.3).
@@ -302,10 +285,15 @@ export async function POST(req: NextRequest) {
         .eq("factory_id", factoryId)
         .maybeSingle()
       if (!existing) return NextResponse.json({ error: "Không tìm thấy phiếu" }, { status: 404 })
-      // GĐ2g: phiếu lập từ biên bản bảo trì — ai có purchase.create cũng được sửa; người lưu
-      // trở thành người đề nghị (ký bước 1, sau đó ghi nhận mua). Phiếu thường: chỉ người đề nghị.
-      const takeOver = !!existing.maintenance_record_id && existing.nguoi_de_nghi_id !== actor.userId
-      if (existing.nguoi_de_nghi_id !== actor.userId && !takeOver) {
+      // Phiếu lập từ biên bản bảo trì (có purchase.create — đã kiểm ở trên):
+      //  - nhóm phụ trách biên bản (người tạo + NV phụ trách) sửa nháp KHÔNG đổi người đề nghị — ai gửi ký
+      //    mới thành người đề nghị (PATCH approvers);
+      //  - người ngoài nhóm lưu = "Nhận xử lý" ⇒ thành người đề nghị.
+      // Phiếu thường: chỉ người đề nghị.
+      const notOwner = existing.nguoi_de_nghi_id !== actor.userId
+      const isTeam = notOwner && (await isMaintenanceRecordTeam(existing.maintenance_record_id, actor.userId))
+      const takeOver = notOwner && !isTeam && !!existing.maintenance_record_id
+      if (notOwner && !isTeam && !takeOver) {
         return NextResponse.json({ error: "Chỉ người đề nghị được sửa phiếu" }, { status: 403 })
       }
       if (existing.loai === "dieu_chinh") {

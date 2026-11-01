@@ -55,6 +55,7 @@ const LOG_LABEL: Record<string, string> = {
   dong: "Đóng phiếu",
   cap_nhat_anh: "Cập nhật ảnh dòng vật tư",
   tao_tu_bao_tri: "Lập từ biên bản bảo trì",
+  cap_nhat_tu_bao_tri: "Cập nhật theo biên bản bảo trì",
   nhan_xu_ly: "Nhận xử lý phiếu từ biên bản bảo trì",
   chon_nguoi_ky: "Chọn người ký (Giám đốc, Kế toán)",
 }
@@ -190,12 +191,14 @@ function PurchaseDetailInner() {
 
   const existing = useMemo(() => (detail ? { request: detail.request, lines: detail.lines } : null), [detail])
 
-  const handleSubmit = async (opts?: { skipPanel?: boolean }) => {
+  /** `fresh`: dữ liệu vừa tải lại (sau khi Lưu) — không đọc `detail` cũ của closure. */
+  const handleSubmit = async (opts?: { skipPanel?: boolean; fresh?: PurchaseDetail }) => {
     if (!factoryId) return
-    // Thiếu Giám đốc/Kế toán (luôn đúng với phiếu lập từ biên bản bảo trì) hoặc người xem đang nhận xử lý
-    // phiếu từ biên bản → mở panel chọn người ký thay vì báo lỗi rồi bắt vào "Sửa phiếu".
-    const r = detail?.request
-    const needPanel = !!r && (!r.giam_doc_user_id || !r.ke_toan_user_id || !!detail?.perms.canTakeOver)
+    // Thiếu Giám đốc/Kế toán (luôn đúng với phiếu lập từ biên bản bảo trì) hoặc người trong nhóm phụ trách
+    // biên bản gửi ký (sẽ chiếm quyền người đề nghị) → mở panel chọn người ký.
+    const d = opts?.fresh ?? detail
+    const r = d?.request
+    const needPanel = !!r && (!r.giam_doc_user_id || !r.ke_toan_user_id || !!d?.perms.claimOnSubmit)
     if (needPanel && !opts?.skipPanel) {
       setApproverError(null)
       setActionError(null)
@@ -323,10 +326,19 @@ function PurchaseDetailInner() {
             existing={existing}
             onCancel={() => setEditing(false)}
             onSaved={async (_id, submitAfter) => {
+              // Tải lại TRƯỚC khi đóng form để nút "Gửi ký" / panel không đọc người ký cũ.
+              let fresh: PurchaseDetail | null = null
+              try {
+                fresh = await fetchPurchaseDetail(id)
+                setDetail(fresh)
+              } catch {
+                void load()
+              }
               setEditing(false)
-              // Form đã bắt buộc chọn Giám đốc/Kế toán và đã lưu (kể cả nhận xử lý) → gửi thẳng.
-              if (submitAfter) await handleSubmit({ skipPanel: true })
-              else void load()
+              if (!submitAfter || !fresh) return
+              // Form đã bắt buộc chọn Giám đốc/Kế toán → gửi thẳng; riêng nhóm phụ trách biên bản (chưa đứng
+              // tên đề nghị) phải qua panel để PATCH approvers chuyển người đề nghị rồi mới gửi.
+              await handleSubmit({ skipPanel: !fresh.perms.claimOnSubmit, fresh })
             }}
           />
         )}
@@ -336,6 +348,8 @@ function PurchaseDetailInner() {
 
   const docLabel = isAdjustment ? "Phiếu điều chỉnh" : "Phiếu đề nghị mua"
   const nguoiDeNghiTen = req.nguoi_de_nghi_ten || detail.names[req.nguoi_de_nghi_id] || ""
+  const lapBoiId = (req as { lap_boi_id?: string | null }).lap_boi_id || null
+  const lapBoiTen = lapBoiId ? detail.names[lapBoiId] || "" : ""
   const hasSignedFile = !!(detail.fileHienTai && req.yeu_cau_ky_id)
   // Bản PDF: Luôn cho phép hiển thị bản xem trước PDF qua buildPurchaseDraftPdfBytes khi chưa có file ký (Rule 29)
   const hasDraft = !hasSignedFile && detail.lines.length > 0 && !!factoryId
@@ -367,8 +381,10 @@ function PurchaseDetailInner() {
         <div className="rounded-xl bg-orange-50 border border-orange-200 px-4 py-3 text-sm text-orange-900">
           <b>Lập từ biên bản bảo trì</b>{" "}
           <Link href={`/dashboard/maintenance/records/${detail.maintenanceSource.id}`} className="font-bold underline">{detail.maintenanceSource.maBb || "(chưa có mã)"}</Link>
-          {" "}— vật tư mua ngoài, nhập kho vào kho tạm {detail.maintenanceSource.ktCode}; biên bản chỉ gửi ký được khi kho tạm đủ hàng.
-          {detail.perms.canTakeOver && " Bấm “Gửi ký duyệt” để chọn Giám đốc, Kế toán và gửi luôn — bạn sẽ là người đề nghị (ký bước 1 và ghi nhận mua). Cần thêm/bớt vật tư, đổi số lượng thì bấm “Nhận xử lý”."}
+          {" "}— vật tư mua ngoài nhập vào kho mặc định của từng vật tư; biên bản chỉ gửi ký được khi kho đó đủ hàng (dịch vụ gia công: khi đã xác nhận hoàn thành).
+          {detail.perms.claimOnSubmit && ` Bạn thuộc nhóm phụ trách biên bản: sửa và gửi ký trực tiếp được. Người gửi ký sẽ là người đề nghị (ký bước 1, ghi nhận mua) — sau đó chỉ người đó thao tác, trừ khi phiếu bị trả về.`}
+          {detail.perms.canTakeOver && " Bấm “Nhận xử lý” để kiểm giá, sửa phiếu — bạn sẽ là người đề nghị, rồi mới gửi ký."}
+          {detail.perms.needsBuyer && " Bạn đang tạm đứng tên người đề nghị nhưng chưa có quyền lập đề nghị mua — người phụ trách mua hàng (có quyền này) sẽ mở phiếu, kiểm giá, bấm “Nhận xử lý” và gửi ký."}
         </div>
       )}
       {isAdjustment && (
@@ -558,14 +574,15 @@ function PurchaseDetailInner() {
   if (myTurn && req.yeu_cau_ky_id && !isApproved) {
     actions.push({ key: "sign", label: "Ký ngay", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
   }
-  if ((detail.perms.canSubmit || detail.perms.canTakeOver) && !isApproved) {
+  // Người ngoài nhóm phụ trách biên bản phải "Nhận xử lý" trước, nên không có nút gửi ký ở đây.
+  if (detail.perms.canSubmit && !isApproved) {
     actions.push({
       key: "submit",
       label: req.trang_thai === "tra_ve" ? "Gửi ký lại" : "Gửi ký duyệt",
       icon: <Send size={16} />,
       onClick: () => void handleSubmit(),
-      loading: busy,
-      disabled: busy,
+      loading: busy || loading,
+      disabled: busy || loading,
     })
   }
   if (detail.perms.canReceive || detail.perms.canCompleteService) {
@@ -577,7 +594,11 @@ function PurchaseDetailInner() {
       onClick: startFulfill,
     })
   }
-  if (!myTurn && req.trang_thai === "cho_ky" && req.yeu_cau_ky_id && !isApproved) {
+  // Màn ký chỉ đọc được bởi người ký / người tạo yêu cầu ký (= người đề nghị) / admin (RLS yeu_cau_ky_select).
+  // Người khác xem PDF + tiến trình ngay trên trang này.
+  const canOpenSignScreen =
+    user?.role === "admin" || req.nguoi_de_nghi_id === user?.id || detail.signers.some((s) => s.userId === user?.id)
+  if (!myTurn && canOpenSignScreen && req.trang_thai === "cho_ky" && req.yeu_cau_ky_id && !isApproved) {
     actions.push({ key: "kyscreen", label: "Mở màn ký", icon: <PenTool size={16} />, onClick: () => router.push(`/dashboard/ky/${req.yeu_cau_ky_id}`) })
   }
   if (detail.perms.canEdit && !isApproved) {
@@ -591,7 +612,8 @@ function PurchaseDetailInner() {
   }
   const primary = actions[0] ?? null
   const secondary = actions.slice(1)
-  const danger: SignAction[] = (detail.perms.canCancel && !isApproved)
+  // canCancel do server tính đủ (gồm admin huỷ phiếu đã duyệt mà chưa nhập kho lần nào).
+  const danger: SignAction[] = detail.perms.canCancel
     ? [{ key: "cancel", label: "Huỷ phiếu", icon: <Ban size={16} />, onClick: () => setCancelOpen(true) }]
     : []
 
@@ -634,6 +656,7 @@ function PurchaseDetailInner() {
       <InspectorCard title="Thông tin phiếu" icon={Info}>
         <MetaList>
           <MetaRow label="Ngày lập" value={fmtDate(req.ngay)} />
+          {lapBoiTen && lapBoiTen !== nguoiDeNghiTen && <MetaRow label="Người lập" value={lapBoiTen} />}
           <MetaRow label="Người đề nghị" value={nguoiDeNghiTen || "—"} />
           <MetaRow label="Bộ phận" value={req.bo_phan || "—"} />
           <MetaRow label="Số vật tư" value={detail.lines.length} />
@@ -824,7 +847,7 @@ function PurchaseDetailInner() {
           userId={user.id}
           initialGiamDocId={req.giam_doc_user_id}
           initialKeToanId={req.ke_toan_user_id}
-          takeOver={!!detail.perms.canTakeOver}
+          takeOver={!!detail.perms.claimOnSubmit}
           busy={busy}
           error={approverError}
           onClose={() => setApproverOpen(false)}

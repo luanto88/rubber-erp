@@ -38,12 +38,18 @@ export type PurchaseDetail = {
   adjustments: PurchaseAdjustmentSummary[]
   pendingAdjustmentId: string | null
   parent: { id: string; so: number; nam: number } | null
-  /** GĐ2g: phiếu lập từ biên bản bảo trì — nhập cứng vào kho tạm KT. */
+  /** GĐ2g: phiếu lập từ biên bản bảo trì. */
   maintenanceSource: PurchaseMaintenanceSource | null
   perms: {
     canEdit: boolean; canSubmit: boolean; canCancel: boolean; isAdmin: boolean
-    /** Người xem có purchase.create nhưng chưa là người đề nghị của phiếu từ biên bản: Lưu = nhận xử lý. */
+    /** Người NGOÀI nhóm phụ trách biên bản, có purchase.create, chưa là người đề nghị: Lưu = nhận xử lý. */
     canTakeOver?: boolean
+    /** Nhóm phụ trách biên bản gửi ký phiếu người khác đứng tên ⇒ qua panel, người gửi thành người đề nghị. */
+    claimOnSubmit?: boolean
+    /** Người xem là người tạo / NV phụ trách của biên bản liên kết. */
+    isRecordTeam?: boolean
+    /** Người xem đứng tên người đề nghị nhưng không có purchase.create → chờ người có quyền nhận xử lý. */
+    needsBuyer?: boolean
     canReceive: boolean; canAdjust: boolean; canClose: boolean; canEditImages: boolean
     canCompleteService?: boolean
   }

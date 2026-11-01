@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
-import { insertPurchaseLog } from "@/lib/purchase/server"
+import { insertPurchaseLog, isMaintenanceRecordTeam } from "@/lib/purchase/server"
 import { isPurchaseEditable, type PurchaseStatus } from "@/lib/purchase/types"
 
 export const dynamic = "force-dynamic"
@@ -9,8 +9,9 @@ export const dynamic = "force-dynamic"
 // PATCH { giamDocUserId, keToanUserId } — CHỈ đổi người ký (Giám đốc / Kế toán) của phiếu đang
 // Nháp / Bị trả về, dùng cho panel "Gửi ký duyệt". Khác POST lưu phiếu: không xoá/chèn lại dòng
 // vật tư (giữ ảnh dòng + bản chụp bằng chứng).
-// Phiếu lập từ biên bản bảo trì: người có purchase.create được nhận xử lý (trở thành người đề nghị),
-// cùng quy tắc với POST /api/purchase/requests.
+// Phiếu lập từ biên bản bảo trì: người trong nhóm phụ trách biên bản (người tạo + NV phụ trách, có
+// purchase.create) gửi ký thì thành người đề nghị — "người gửi ký đầu tiên chiếm quyền"; sau khi gửi,
+// chỉ người đề nghị thao tác (trừ khi phiếu bị trả về).
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -37,13 +38,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const isOwner = request.nguoi_de_nghi_id === actor.userId
-    const takeOver =
-      !isOwner &&
-      !!request.maintenance_record_id &&
-      request.loai !== "dieu_chinh" &&
-      (await isoActorHasPermission(actor, ["purchase.create"]))
+    const hasCreatePerm = await isoActorHasPermission(actor, ["purchase.create"])
+    if (!hasCreatePerm) {
+      return NextResponse.json({ error: "Bạn chưa có quyền lập đề nghị mua — nhờ người phụ trách mua hàng nhận xử lý và gửi ký" }, { status: 403 })
+    }
+    // Nhóm phụ trách biên bản gửi ký phiếu người khác đang đứng tên ⇒ người gửi thành người đề nghị.
+    // Người ngoài nhóm phải "Nhận xử lý" (lưu phiếu) trước — không chiếm phiếu thẳng ở đây.
+    const linked = !!request.maintenance_record_id && request.loai !== "dieu_chinh"
+    const takeOver = !isOwner && linked && (await isMaintenanceRecordTeam(request.maintenance_record_id, actor.userId))
     if (!isOwner && !takeOver) {
-      return NextResponse.json({ error: "Chỉ người đề nghị được chọn người ký" }, { status: 403 })
+      return NextResponse.json(
+        { error: linked ? "Bấm “Nhận xử lý” trước khi gửi ký phiếu này" : "Chỉ người đề nghị được chọn người ký" },
+        { status: 403 },
+      )
     }
 
     const { data: people, error: pErr } = await supabaseAdmin
@@ -80,7 +87,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!updated?.length) return NextResponse.json({ error: "Phiếu vừa thay đổi, tải lại trang rồi thử lại" }, { status: 409 })
 
     if (takeOver) {
-      await insertPurchaseLog({ requestId: id, factoryId: actor.factoryId, userId: actor.userId, hanhDong: "nhan_xu_ly", noiDung: "Nhận xử lý phiếu lập từ biên bản bảo trì" })
+      await insertPurchaseLog({ requestId: id, factoryId: actor.factoryId, userId: actor.userId, hanhDong: "nhan_xu_ly", noiDung: "Đảm nhận phiếu khi gửi ký (người phụ trách biên bản)" })
     }
     await insertPurchaseLog({ requestId: id, factoryId: actor.factoryId, userId: actor.userId, hanhDong: "chon_nguoi_ky", noiDung: "Chọn người ký (Giám đốc, Kế toán)" })
 

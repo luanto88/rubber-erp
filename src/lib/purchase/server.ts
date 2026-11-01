@@ -51,6 +51,36 @@ export function isPurchaseParticipant(req: Pick<PurchaseRequestRow, "nguoi_de_ng
   return [req.nguoi_de_nghi_id, req.giam_doc_user_id, req.ke_toan_user_id, req.created_by].includes(userId)
 }
 
+type RecordTeamFields = {
+  created_by: string | null
+  nguoi_tao: string | null
+  nv_phu_trach: string | null
+  phu_trach_bao_tri: string | null
+}
+
+/** Thuần — người tạo biên bản bảo trì hoặc NV phụ trách (cột tên là snapshot ⇒ so theo full_name/username). */
+export function isRecordTeamMember(rec: RecordTeamFields, userId: string, myNames: string[]): boolean {
+  if (rec.created_by === userId) return true
+  return [rec.nguoi_tao, rec.nv_phu_trach, rec.phu_trach_bao_tri].some((n) => !!n && myNames.includes(n))
+}
+
+/**
+ * "Nhóm phụ trách biên bản" của phiếu đề nghị lập từ biên bản bảo trì: người tạo + NV phụ trách.
+ * Khi phiếu còn Nháp / Bị trả về, người trong nhóm (có purchase.create) thao tác ngang người đề nghị;
+ * ai GỬI KÝ thì thành người đề nghị, sau đó chỉ người đó thao tác.
+ */
+export async function isMaintenanceRecordTeam(recordId: string | null | undefined, userId: string): Promise<boolean> {
+  if (!recordId) return false
+  const supabase = getSupabaseAdmin()
+  const [{ data: rec }, { data: me }] = await Promise.all([
+    supabase.from("maintenance_records").select("created_by, nguoi_tao, nv_phu_trach, phu_trach_bao_tri").eq("id", recordId).maybeSingle(),
+    supabase.from("profiles").select("full_name, username").eq("id", userId).maybeSingle(),
+  ])
+  if (!rec) return false
+  const myNames = [me?.full_name, me?.username].filter((v): v is string => !!v)
+  return isRecordTeamMember(rec as RecordTeamFields, userId, myNames)
+}
+
 export async function loadPurchaseSigners(yeuCauId: string | null): Promise<PurchaseSigner[]> {
   if (!yeuCauId) return []
   const supabase = getSupabaseAdmin()

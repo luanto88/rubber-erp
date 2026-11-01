@@ -61,6 +61,10 @@ export type KtRecordStatus = {
   /** Thiếu sau khi trừ phần đang đề nghị — > 0 thì cần lập (thêm) đề nghị mua. */
   needsRequest: boolean
   linkedRequests: KtLinkedRequest[]
+  /** Phiếu gốc liên kết đang NHÁP — "Lập đề nghị mua" sẽ cập nhật (chỉ tăng SL / thêm dòng) phiếu này. */
+  draftRequest: KtLinkedRequest | null
+  /** Phiếu gốc liên kết đang BỊ TRẢ VỀ — người đề nghị tự sửa SL trên phiếu, không tạo/đồng bộ. */
+  returnedRequest: KtLinkedRequest | null
 }
 
 type RecordRow = { id: string; ma_bb: string | null; bo_phan: string | null; trang_thai: string | null; created_at: string }
@@ -373,6 +377,7 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
     }
     const done = RECORD_DONE.has(rec.trang_thai || "")
     const totalShortage = done ? 0 : items.reduce((s, it) => s + it.shortage, 0)
+    const linked = linkedByRecord.get(rec.id) || []
     result.push({
       recordId: rec.id,
       maBb: rec.ma_bb,
@@ -382,7 +387,9 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
       items: done ? items.map((it) => ({ ...it, shortage: 0 })) : items,
       totalShortage,
       needsRequest: !done && items.some((it) => it.shortage > it.pendingRequested),
-      linkedRequests: linkedByRecord.get(rec.id) || [],
+      linkedRequests: linked,
+      draftRequest: linked.find((r) => r.loai === "goc" && r.trangThai === "nhap") || null,
+      returnedRequest: linked.find((r) => r.loai === "goc" && r.trangThai === "tra_ve") || null,
     })
   }
   return result

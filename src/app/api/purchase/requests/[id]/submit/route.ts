@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
-import { resolveIsoActor, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
+import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { cancelSigningRequest, createSigningRequest, type SigningFieldInput } from "@/lib/signing/requests"
 import { scheduleSigningNotify } from "@/lib/signing/notify"
 import { insertPurchaseLog } from "@/lib/purchase/server"
@@ -38,6 +38,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (request.nguoi_de_nghi_id !== actor.userId) {
       return NextResponse.json({ error: "Chỉ người đề nghị được gửi ký" }, { status: 403 })
     }
+    if (!(await isoActorHasPermission(actor, ["purchase.create"]))) {
+      return NextResponse.json({ error: "Bạn chưa có quyền lập đề nghị mua — nhờ người phụ trách mua hàng nhận xử lý và gửi ký" }, { status: 403 })
+    }
     if (!isPurchaseEditable(request.trang_thai as PurchaseStatus)) {
       return NextResponse.json({ error: "Phiếu đã được gửi ký" }, { status: 409 })
     }
@@ -50,10 +53,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     const { data: lineRows, error: lineErr } = await supabaseAdmin
       .from("purchase_request_lines")
-      .select("id, item_id, insight_snapshot")
+      .select("id, item_id, item_name, don_gia, sort_order, insight_snapshot")
       .eq("request_id", id)
+      .order("sort_order")
     if (lineErr) return NextResponse.json({ error: lineErr.message }, { status: 400 })
     if (!lineRows?.length) return NextResponse.json({ error: "Phiếu chưa có dòng vật tư" }, { status: 400 })
+    // Không trình ký phiếu còn dòng chưa có đơn giá (phiếu lập từ biên bản chép giá 0).
+    const noPrice = (lineRows as { item_name: string | null; don_gia: number | null }[])
+      .map((l, i) => (Number(l.don_gia) > 0 ? null : `Dòng ${i + 1}${l.item_name ? ` (${l.item_name})` : ""}`))
+      .filter(Boolean)
+    if (noPrice.length) {
+      return NextResponse.json({ error: `Chưa có đơn giá: ${noPrice.join(", ")} — bấm “Sửa phiếu” nhập giá trước khi gửi ký` }, { status: 400 })
+    }
     // Bằng chứng cho người duyệt phải được chụp ngay trước khi dựng PDF (bước insight-snapshot).
     const minCaptured = Date.now() - PURCHASE_SNAPSHOT_MAX_AGE_MIN * 60000
     const stale = (lineRows as { item_id: string | null; insight_snapshot: { capturedAt?: string } | null }[]).some((l) => {
