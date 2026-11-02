@@ -3,10 +3,10 @@ import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { BO_PHAN_LIST, isBoPhan } from "@/lib/bo-phan"
-import { insertPurchaseLog, isMaintenanceRecordTeam, syncPurchaseFromSigning } from "@/lib/purchase/server"
+import { insertPurchaseLog, isMaintenanceRecordTeam, loadEffectiveLines, syncPurchaseFromSigning } from "@/lib/purchase/server"
 import {
   isPriceDeviationExceeded, isPurchaseEditable, minIsoDate, normalizeIsoDate, priceDeviationPct, sanitizeImageUrls,
-  type PurchaseLineInput, type PurchaseRequestRow, type PurchaseStatus,
+  type PurchaseEffectiveLine, type PurchaseLineInput, type PurchaseRequestRow, type PurchaseStatus,
 } from "@/lib/purchase/types"
 
 export const dynamic = "force-dynamic"
@@ -120,9 +120,23 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Bước tiếp theo của phiếu ĐÃ DUYỆT theo SL HIỆU LỰC (sau phiếu điều chỉnh đã duyệt) − đã nhận.
+    const isBuying = (r: { loai: string; trang_thai: string }) =>
+      r.loai !== "dieu_chinh" && (r.trang_thai === "da_duyet" || r.trang_thai === "dang_mua")
+    const buyingIds = rows.filter(isBuying).map((r) => r.id)
+    const effByReq = new Map<string, PurchaseEffectiveLine[]>()
+    for (let i = 0; i < buyingIds.length; i += 10) {
+      const chunk = buyingIds.slice(i, i + 10)
+      const res = await Promise.all(chunk.map((id) => loadEffectiveLines(id).catch(() => null)))
+      chunk.forEach((id, k) => { if (res[k]) effByReq.set(id, res[k]!) })
+    }
+
     // Dịch vụ gia công (không nhập kho) — để biết bước tiếp theo của phiếu đã duyệt.
     const serviceIds = new Set<string>()
-    const allItemIds = [...new Set([...linesByReq.values()].flat().map((l) => l.item_id).filter((v): v is string => !!v))]
+    const allItemIds = [...new Set([
+      ...[...linesByReq.values()].flat().map((l) => l.item_id),
+      ...[...effByReq.values()].flat().map((e) => e.item_id),
+    ].filter((v): v is string => !!v))]
     for (let i = 0; i < allItemIds.length; i += 200) {
       const { data, error } = await supabaseAdmin.from("inventory_items").select("id").in("id", allItemIds.slice(i, i + 200)).eq("la_dich_vu", true)
       if (error) break
@@ -146,12 +160,15 @@ export async function GET(req: NextRequest) {
       const signers = r.yeu_cau_ky_id ? signersByYc.get(r.yeu_cau_ky_id) || [] : []
       const pending = signers.filter((s) => s.trang_thai !== "da_ky").sort((a, b) => a.thu_tu - b.thu_tu)
       const minThuTu = pending[0]?.thu_tu
-      // Bước tiếp theo của phiếu ĐÃ DUYỆT (theo bản chụp sl_da_mua): nhập kho / xác nhận gia công.
-      const reqLines = linesByReq.get(r.id) || []
-      const left = (l: ListLine) => (Number(l.so_luong) || 0) - (Number(l.sl_da_mua) || 0) > 0
-      const buying = r.loai !== "dieu_chinh" && (r.trang_thai === "da_duyet" || r.trang_thai === "dang_mua")
-      const needGoods = buying && reqLines.some((l) => left(l) && !(l.item_id && serviceIds.has(l.item_id)))
-      const needService = buying && reqLines.some((l) => left(l) && !!l.item_id && serviceIds.has(l.item_id))
+      // Bước tiếp theo của phiếu ĐÃ DUYỆT: nhập kho / xác nhận gia công. SL hiệu lực; RPC lỗi thì
+      // rơi về bản chụp sl_da_mua của dòng.
+      const eff = effByReq.get(r.id)
+      const remaining: { itemId: string | null; left: boolean }[] = eff
+        ? eff.map((e) => ({ itemId: e.item_id, left: (Number(e.so_luong) || 0) - (Number(e.received) || 0) > 0 }))
+        : (linesByReq.get(r.id) || []).map((l) => ({ itemId: l.item_id, left: (Number(l.so_luong) || 0) - (Number(l.sl_da_mua) || 0) > 0 }))
+      const buying = isBuying(r)
+      const needGoods = buying && remaining.some((x) => x.left && !(x.itemId && serviceIds.has(x.itemId)))
+      const needService = buying && remaining.some((x) => x.left && !!x.itemId && serviceIds.has(x.itemId))
       const nextStep: "nhap_kho" | "gia_cong" | "ca_hai" | null = needGoods && needService ? "ca_hai" : needGoods ? "nhap_kho" : needService ? "gia_cong" : null
       const turnUserIds = r.trang_thai === "cho_ky" ? pending.filter((s) => s.thu_tu === minThuTu).map((s) => s.user_id) : []
       return {
@@ -218,13 +235,41 @@ export async function POST(req: NextRequest) {
       const okIds = new Set(((found || []) as { id: string }[]).map((r) => r.id))
       if (itemIds.some((id) => !okIds.has(id))) errors.push("Có vật tư không thuộc danh mục của nhà máy")
     }
+    // GĐ3: biên bản của từng dòng — thuộc nhà máy, chưa duyệt/huỷ. Liên kết đã lưu sẵn trên phiếu
+    // (biên bản đã duyệt sau đó) được giữ nguyên.
+    const keptRecordIds = new Set<string>()
+    if (body.id) {
+      const { data: oldLines } = await supabaseAdmin
+        .from("purchase_request_lines")
+        .select("maintenance_record_id")
+        .eq("request_id", body.id)
+      for (const l of (oldLines || []) as { maintenance_record_id: string | null }[]) {
+        if (l.maintenance_record_id) keptRecordIds.add(l.maintenance_record_id)
+      }
+    }
+    const newRecordIds = [...new Set(lines.map((l) => l.maintenance_record_id).filter((v): v is string => !!v && !keptRecordIds.has(v)))]
+    if (newRecordIds.length) {
+      const { data: recs } = await supabaseAdmin
+        .from("maintenance_records")
+        .select("id, trang_thai")
+        .eq("factory_id", factoryId)
+        .in("id", newRecordIds)
+      const okRecs = new Set(
+        ((recs || []) as { id: string; trang_thai: string | null }[])
+          .filter((r) => r.trang_thai !== "da_duyet" && r.trang_thai !== "huy")
+          .map((r) => r.id),
+      )
+      if (newRecordIds.some((id) => !okRecs.has(id))) errors.push("Có dòng gắn biên bản không hợp lệ (khác nhà máy hoặc đã duyệt/huỷ)")
+    }
     const seen = new Set<string>()
     const today = getFactoryTodayISO()
     lines.forEach((l, i) => {
       const n = i + 1
       if (!l.item_id) errors.push(`Dòng ${n}: chưa chọn vật tư trong danh mục`)
-      if (l.item_id && seen.has(l.item_id)) errors.push(`Dòng ${n}: vật tư bị lặp — gộp số lượng vào 1 dòng`)
-      if (l.item_id) seen.add(l.item_id)
+      // Cùng vật tư được tách dòng khi mua cho các biên bản khác nhau (hoặc 1 dòng dự trữ).
+      const dupKey = l.item_id ? `${l.item_id}:${l.maintenance_record_id || ""}` : null
+      if (dupKey && seen.has(dupKey)) errors.push(`Dòng ${n}: vật tư bị lặp cho cùng biên bản — gộp số lượng vào 1 dòng`)
+      if (dupKey) seen.add(dupKey)
       if (!String(l.muc_dich || "").trim()) errors.push(`Dòng ${n}: chưa nhập mục đích sử dụng`)
       const canHang = normalizeIsoDate(l.ngay_can_hang)
       if (!canHang) errors.push(`Dòng ${n}: chưa chọn thời gian cần hàng`)
@@ -268,6 +313,8 @@ export async function POST(req: NextRequest) {
         mua_tai: String(l.mua_tai || "").trim() || null,
         ngay_co_hang: normalizeIsoDate(l.ngay_co_hang),
         ngay_can_hang: normalizeIsoDate(l.ngay_can_hang),
+        maintenance_record_id: l.maintenance_record_id || null,
+        id: l.id || null,
       }
     })
     const tongTien = lineRows.reduce((s, l) => s + l.thanh_tien, 0)
@@ -302,9 +349,11 @@ export async function POST(req: NextRequest) {
       if (!isPurchaseEditable(existing.trang_thai as PurchaseStatus)) {
         return NextResponse.json({ error: "Phiếu đã gửi ký/đã duyệt, không sửa được" }, { status: 409 })
       }
-      const { error: upErr } = await supabaseAdmin
-        .from("purchase_requests")
-        .update({
+      // Header + dòng trong 1 giao dịch (RPC purchase_save_lines): giữ dòng theo id, lỗi thì không mất gì.
+      const { error: saveErr } = await supabaseAdmin.rpc("purchase_save_lines", {
+        p_factory_id: factoryId,
+        p_request_id: requestId,
+        p_header: {
           loai_tien: loaiTien,
           giam_doc_user_id: body.giamDocUserId || null,
           ke_toan_user_id: body.keToanUserId || null,
@@ -312,16 +361,15 @@ export async function POST(req: NextRequest) {
           bo_phan: boPhan,
           ngay_can_hang: ngayCanHang,
           tong_tien: tongTien,
-          updated_at: new Date().toISOString(),
           ...(takeOver ? { nguoi_de_nghi_id: actor.userId, nguoi_de_nghi_ten: myName } : {}),
-        })
-        .eq("id", requestId)
-      if (upErr) return NextResponse.json({ error: upErr.message }, { status: 400 })
+        },
+        p_lines: lineRows,
+      })
+      if (saveErr) return NextResponse.json({ error: saveErr.message }, { status: 400 })
       if (takeOver) {
         await insertPurchaseLog({ requestId, factoryId, userId: actor.userId, hanhDong: "nhan_xu_ly", noiDung: "Nhận xử lý phiếu lập từ biên bản bảo trì" })
       }
-      const { error: delErr } = await supabaseAdmin.from("purchase_request_lines").delete().eq("request_id", requestId)
-      if (delErr) return NextResponse.json({ error: delErr.message }, { status: 400 })
+      return NextResponse.json({ id: requestId })
     } else {
       const ngay = getFactoryTodayISO()
       const nam = Number(ngay.slice(0, 4))
@@ -353,10 +401,20 @@ export async function POST(req: NextRequest) {
       await insertPurchaseLog({ requestId, factoryId, userId: actor.userId, hanhDong: "tao", noiDung: `Số ${so}/${nam}` })
     }
 
-    const { error: lineErr } = await supabaseAdmin
-      .from("purchase_request_lines")
-      .insert(lineRows.map((l) => ({ ...l, request_id: requestId })))
-    if (lineErr) return NextResponse.json({ error: lineErr.message }, { status: 400 })
+    const { error: lineErr } = await supabaseAdmin.rpc("purchase_save_lines", {
+      p_factory_id: factoryId,
+      p_request_id: requestId,
+      p_header: null,
+      p_lines: lineRows.map((l) => ({ ...l, id: null })),
+    })
+    if (lineErr) {
+      // Số phiếu đã cấp — không xoá, chỉ huỷ để không còn phiếu rỗng.
+      await supabaseAdmin
+        .from("purchase_requests")
+        .update({ trang_thai: "huy", ly_do_huy: "Lỗi lưu dòng vật tư", huy_luc: new Date().toISOString() })
+        .eq("id", requestId)
+      return NextResponse.json({ error: lineErr.message }, { status: 400 })
+    }
 
     return NextResponse.json({ id: requestId })
   } catch (err) {

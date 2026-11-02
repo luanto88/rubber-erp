@@ -39,6 +39,10 @@ type Insight = PurchaseItemInsight
 
 type DraftLine = {
   key: string
+  /** Id dòng đã lưu (sửa phiếu) — giữ dòng thay vì xoá-chèn lại. */
+  line_id: string | null
+  /** GĐ3: mua cho biên bản nào (null = dự trữ kho). */
+  maintenance_record_id: string | null
   item_id: string | null
   item_code: string | null
   item_name: string
@@ -66,6 +70,12 @@ type DraftLine = {
  */
 type Suggestion = { value: number; source: "lan_mua_truoc" | "cung_nhom" | "danh_muc"; label: string; binding: boolean }
 
+type ShortRecord = {
+  recordId: string
+  maBb: string | null
+  items: { itemId: string; shortage: number; pendingRequested: number }[]
+}
+
 let keySeq = 0
 const newKey = () => `l${Date.now()}_${keySeq++}`
 
@@ -75,7 +85,7 @@ const newKey = () => `l${Date.now()}_${keySeq++}`
  */
 function emptyLine(prev?: DraftLine): DraftLine {
   return {
-    key: newKey(), item_id: null, item_code: null, item_name: "", unit: null, category_id: null,
+    key: newKey(), line_id: null, maintenance_record_id: prev?.maintenance_record_id ?? null, item_id: null, item_code: null, item_name: "", unit: null, category_id: null,
     so_luong: "", don_gia: "", muc_dich: "", ghi_chu: "", ly_do_lech_gia: "", la_vat_tu_moi: false, image_urls: [],
     mua_tai: prev?.mua_tai || "", ngay_co_hang: prev?.ngay_co_hang || "", ngay_can_hang: prev ? (prev.ngay_can_hang || "") : getFactoryTodayISO(),
     insight: null, insightLoading: false, showInsight: false,
@@ -274,7 +284,7 @@ export function PurchaseForm({
 }: {
   factoryId: string
   userId: string
-  existing?: { request: PurchaseRequestRow; lines: PurchaseLineRow[] } | null
+  existing?: { request: PurchaseRequestRow; lines: PurchaseLineRow[]; lineRecords?: Record<string, string | null> } | null
   onSaved: (id: string, submitAfter: boolean) => void | Promise<void>
   onCancel?: () => void
 }) {
@@ -295,14 +305,39 @@ export function PurchaseForm({
     existing?.lines.length
       ? existing.lines.map((l) => ({
           ...emptyLine(),
+          line_id: l.id, maintenance_record_id: l.maintenance_record_id || null,
           item_id: l.item_id, item_code: l.item_code, item_name: l.item_name, unit: l.unit,
           so_luong: String(l.so_luong), don_gia: String(l.don_gia), muc_dich: l.muc_dich || "",
           ghi_chu: l.ghi_chu || "", ly_do_lech_gia: l.ly_do_lech_gia || "", la_vat_tu_moi: l.la_vat_tu_moi,
           image_urls: l.image_urls || [],
           mua_tai: l.mua_tai || "", ngay_co_hang: l.ngay_co_hang || "", ngay_can_hang: l.ngay_can_hang || "",
         }))
-      : [emptyLine()],
+      : [{ ...emptyLine(), maintenance_record_id: existing?.request.maintenance_record_id || null }],
   )
+  // GĐ3: biên bản bảo trì đang thiếu vật tư (để chọn "Cho biên bản" theo từng dòng).
+  const [shortRecords, setShortRecords] = useState<ShortRecord[]>([])
+  useEffect(() => {
+    let alive = true
+    authFetch("/api/maintenance/kt-shortages")
+      .then((res) => readJson<{ records: ShortRecord[] }>(res))
+      .then((r) => { if (alive) setShortRecords(r.records || []) })
+      .catch(() => { /* không có quyền / lỗi: chỉ còn biên bản đã gắn sẵn + Dự trữ kho */ })
+    return () => { alive = false }
+  }, [])
+  const recordLabels = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const [id, ma] of Object.entries(existing?.lineRecords || {})) m.set(id, ma || "(chưa có mã)")
+    for (const r of shortRecords) m.set(r.recordId, r.maBb || "(chưa có mã)")
+    return m
+  }, [existing, shortRecords])
+  /** Biên bản chọn được cho 1 dòng: biên bản của phiếu, biên bản đang gắn, biên bản đang thiếu đúng vật tư. */
+  const recordOptionsFor = (l: DraftLine): string[] => {
+    const ids = new Set<string>()
+    if (existing?.request.maintenance_record_id) ids.add(existing.request.maintenance_record_id)
+    if (l.maintenance_record_id) ids.add(l.maintenance_record_id)
+    for (const r of shortRecords) if (r.items.some((it) => it.itemId === l.item_id && it.shortage > 0)) ids.add(r.recordId)
+    return [...ids]
+  }
   const [saving, setSaving] = useState<"" | "save" | "submit">("")
   const [error, setError] = useState<string | null>(null)
 
@@ -400,7 +435,13 @@ export function PurchaseForm({
     void loadInsight(key, item.id, true)
   }
 
-  const usedIds = useMemo(() => new Set(lines.map((l) => l.item_id).filter(Boolean) as string[]), [lines])
+  // Cùng vật tư được tách dòng khi khác biên bản (hoặc 1 dòng "Dự trữ kho") — chỉ chặn trùng cùng biên bản.
+  const usedIdsFor = (line: DraftLine) =>
+    new Set(
+      lines
+        .filter((o) => o.key !== line.key && o.item_id && (o.maintenance_record_id || null) === (line.maintenance_record_id || null))
+        .map((o) => o.item_id as string),
+    )
 
   // ── Vật tư mới ──
   const similar = useMemo(
@@ -465,8 +506,12 @@ export function PurchaseForm({
     if (giamDocId && giamDocId === keToanId) errs.push("Giám đốc và Kế toán phải là 2 người khác nhau")
     if ([giamDocId, keToanId].includes(userId)) errs.push("Người đề nghị không được đồng thời là người ký duyệt")
     const payloadLines: PurchaseLineInput[] = []
+    const seenKeys = new Set<string>()
     lines.forEach((l, i) => {
       if (!l.item_id) { errs.push(`Dòng ${i + 1}: chưa chọn vật tư`); return }
+      const dupKey = `${l.item_id}:${l.maintenance_record_id || ""}`
+      if (seenKeys.has(dupKey)) errs.push(`Dòng ${i + 1}: vật tư bị lặp cho cùng biên bản — gộp số lượng vào 1 dòng`)
+      seenKeys.add(dupKey)
       const sl = Number(l.so_luong)
       const gia = Number(l.don_gia)
       if (!(sl > 0)) errs.push(`Dòng ${i + 1}: số lượng phải > 0`)
@@ -489,6 +534,8 @@ export function PurchaseForm({
         mua_tai: l.mua_tai.trim() || null,
         ngay_co_hang: l.ngay_co_hang || null,
         ngay_can_hang: l.ngay_can_hang || null,
+        maintenance_record_id: l.maintenance_record_id,
+        id: l.line_id,
       })
     })
     if (errs.length) { setError(errs.join("\n")); return }
@@ -601,7 +648,7 @@ export function PurchaseForm({
                     value={item || null}
                     onSelect={(it) => selectItem(l.key, it)}
                     onCreateNew={(name, cat) => openNewItem(l.key, name, cat)}
-                    disabledIds={new Set([...usedIds].filter((id) => id !== l.item_id))}
+                    disabledIds={usedIdsFor(l)}
                   />
                 </div>
                 <div className="md:col-span-1">
@@ -663,6 +710,35 @@ export function PurchaseForm({
                 const lateSupply = !!l.ngay_co_hang && !!l.ngay_can_hang && l.ngay_co_hang > l.ngay_can_hang
                 return (
                   <div className="mt-3 space-y-3">
+                    {(() => {
+                      // Hiện cả khi dòng chưa chọn vật tư: phải đổi được biên bản / "Dự trữ kho" TRƯỚC, vì ô chọn
+                      // vật tư khoá vật tư đã có dòng cùng biên bản.
+                      const opts = recordOptionsFor(l)
+                      if (!opts.length) return null
+                      const short = shortRecords
+                        .find((r) => r.recordId === l.maintenance_record_id)
+                        ?.items.find((it) => it.itemId === l.item_id)
+                      return (
+                        <div className="flex flex-col gap-1 md:flex-row md:items-center md:gap-3">
+                          <label className={`${labelCls} md:mb-0 md:w-32 shrink-0`}>Cho biên bản</label>
+                          <select
+                            className={`${inputCls} md:w-80`}
+                            value={l.maintenance_record_id || ""}
+                            onChange={(e) => patchLine(l.key, { maintenance_record_id: e.target.value || null })}
+                          >
+                            <option value="">Dự trữ kho (không gắn biên bản)</option>
+                            {opts.map((id) => (
+                              <option key={id} value={id}>{recordLabels.get(id) || "Biên bản"}</option>
+                            ))}
+                          </select>
+                          {short && (
+                            <span className="text-[11px] text-slate-500">
+                              Biên bản đang thiếu {short.shortage}{short.pendingRequested > 0 ? `, đang đề nghị ${short.pendingRequested}` : ""} — hàng nhập từ dòng này giữ cho biên bản trước.
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })()}
                     {/* Dòng 1: Mục đích | Mua tại | Ghi chú — 3 ô bằng nhau */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div>

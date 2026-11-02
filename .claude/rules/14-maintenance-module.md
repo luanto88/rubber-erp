@@ -1388,6 +1388,22 @@ Kế hoạch: `C:\Users\Software\.claude\plans\c-file-bug-md-x-c-quizzical-meerk
   - Trên phiếu đề nghị lập từ biên bản, người tạo + NV phụ trách là "nhóm phụ trách": cùng Sửa/Gửi ký/Huỷ khi
     Nháp/Bị trả về; người gửi ký thành người đề nghị. Chi tiết: rule 28 mục "Nhóm phụ trách biên bản".
 
+## GĐ3 — giữ chỗ công bằng + liên kết theo dòng (2026-11-02, chờ test tay)
+Migration `20261102_purchase_line_maintenance_link.sql` (**chạy tay TRƯỚC deploy**). Chi tiết phía đề nghị: rule 28 mục GĐ3.
+`computeKtStatuses` (`src/lib/maintenance-kt.ts`) viết lại:
+- Liên kết biên bản ↔ đề nghị đọc theo DÒNG (`purchase_request_lines.maintenance_record_id`): kho nhập gần nhất
+  (`resolveExternalWarehouses`, dùng chung với xuất kho), đang đề nghị, gia công đã xong, `linkedRequests` (gồm phiếu
+  có dòng gắn biên bản này). `draftRequest`/`returnedRequest` vẫn chỉ là phiếu LẬP TỪ biên bản này.
+- **Chia tồn 2 tầng** (`allocateGroup`, hàm thuần) theo từng (kho, vật tư): tầng 1 mỗi biên bản nhận trước phần hàng
+  đã nhập từ dòng gắn chính nó (≤ nhu cầu, theo thứ tự tạo, không vượt tồn); tầng 2 phần còn lại chia theo thứ tự
+  tạo biên bản. Nhu cầu tính = mua ngoài + "Trong kho" (kho chính) của mọi biên bản chưa duyệt/huỷ. Với 1 biên bản,
+  phần được chia dùng cho "Trong kho" trước, còn lại là khả dụng của mua ngoài. Hết bug "biên bản cũ chưa mua giữ
+  hàng của biên bản mới đã tự mua".
+- "Đang đề nghị" = SL hiệu lực (sau phiếu điều chỉnh đã duyệt, theo mã hiệu lực) − đã nhận; trước đây đọc SL dòng gốc.
+- `purchase-draft`: dòng tạo/cộng thêm gắn `maintenance_record_id`; đồng bộ nháp chỉ cộng vào dòng CÙNG biên bản +
+  cùng vật tư; gia công dùng chung số liệu `shortage − pendingRequested` của `computeKtStatuses`.
+- Đã kiểm `allocateGroup` bằng code thật 6/6 kịch bản (Bug 1: A cần 5 chưa mua, B mua 3 ⇒ A 0, B 3).
+
 ## Sửa: mã tạo mới là Dịch vụ gia công ⇒ dòng tự thành "Gia công ngoài" (2026-10-27)
 `applyExtMatToLine` (`records/[id]/page.tsx`) đặt `nguon` theo `la_dich_vu` của mã vừa tạo/chọn ("Dùng mã này")
 — trước đây dòng giữ nguyên "Mua ngoài".

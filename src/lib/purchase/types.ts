@@ -93,6 +93,10 @@ export type PurchaseLineInput = {
   ngay_co_hang?: string | null
   /** Ngày cần hàng YYYY-MM-DD — bắt buộc với phiếu lập từ GĐ2d. */
   ngay_can_hang?: string | null
+  /** GĐ3: dòng mua cho biên bản bảo trì nào (NULL = dự trữ kho). Hàng nhập từ dòng này giữ cho biên bản đó trước. */
+  maintenance_record_id?: string | null
+  /** Id dòng đã lưu (khi sửa phiếu) — giữ nguyên dòng thay vì xoá-chèn lại. */
+  id?: string | null
 }
 
 export type PurchaseRequestRow = {

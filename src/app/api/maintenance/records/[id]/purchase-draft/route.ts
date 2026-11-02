@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
-import { computeKtStatuses, PURCHASE_ACTIVE_FOR_KT } from "@/lib/maintenance-kt"
+import { computeKtStatuses } from "@/lib/maintenance-kt"
 import { insertPurchaseLog, isRecordTeamMember } from "@/lib/purchase/server"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { isBoPhan } from "@/lib/bo-phan"
@@ -12,9 +12,9 @@ export const dynamic = "force-dynamic"
 // mua ngoài còn thiếu ở kho mặc định của từng vật tư (đã trừ phần đang đề nghị). Người lập: người tạo
 // biên bản, NV phụ trách, người có purchase.create, hoặc admin; người không có purchase.create lập nháp
 // xong thì người có quyền bấm "Nhận xử lý" (Lưu) rồi gửi ký.
-// Đã có phiếu gốc NHÁP liên kết → đồng bộ theo biên bản (chỉ tăng SL dòng cùng vật tư / thêm dòng vật tư
-// mới, không giảm, không xoá dòng — giữ phần mua dư và dòng người mua tự thêm). Chỉ có phiếu BỊ TRẢ VỀ →
-// trả lại phiếu đó, không đụng. Không bao giờ tạo trùng.
+// Đã có phiếu gốc NHÁP liên kết → đồng bộ theo biên bản (chỉ tăng SL dòng cùng biên bản + cùng vật tư /
+// thêm dòng mới, không giảm, không xoá dòng — giữ phần mua dư và dòng người mua tự thêm). Chỉ có phiếu
+// BỊ TRẢ VỀ → trả lại phiếu đó, không đụng. Không bao giờ tạo trùng. Dòng tạo ra gắn biên bản (GĐ3).
 
 const DEFAULT_USD_RATE: Record<string, number> = { USD: 1, KHR: 4100, VND: 25000 }
 
@@ -124,53 +124,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       )
     }
 
+    // Phần còn thiếu = thiếu − đang đề nghị (theo SL hiệu lực của MỌI dòng đề nghị gắn biên bản này),
+    // áp cho cả vật tư qua kho lẫn dịch vụ gia công (dịch vụ: thiếu = cần − đã xác nhận hoàn thành).
     const [status] = await computeKtStatuses(factoryId, id)
     const needs: Need[] = (status?.items || [])
-      // Dịch vụ gia công tính riêng ở khối bên dưới (cũng có trong status.items từ 2026-10-26).
-      .filter((it) => it.kind === "vat_tu")
+      .filter((it) => it.kind === "vat_tu" || knownItems.has(it.itemId))
       .map((it) => ({
         itemId: it.itemId, itemCode: it.itemCode, name: it.name, unit: it.unit,
         donGia: it.donGia, loaiTien: it.loaiTien, qty: Math.max(0, it.shortage - it.pendingRequested),
       }))
       .filter((it) => it.qty > 0)
-
-    // Bước 3 — Gia công ngoài (dịch vụ, không qua kho): cần = tổng SL dòng gia_cong của biên bản
-    // − phần đã nằm trong phiếu đề nghị liên kết còn hiệu lực (phiếu đóng chỉ tính phần đã xong).
-    const serviceNeed = new Map<string, Need>()
-    for (const m of extRows) {
-      if (m.nguon !== "gia_cong" || !m.inventory_item_id) continue
-      const meta = knownItems.get(m.inventory_item_id)
-      if (!meta) continue
-      const cur = serviceNeed.get(m.inventory_item_id)
-      if (cur) cur.qty += Number(m.so_luong) || 0
-      else serviceNeed.set(m.inventory_item_id, {
-        itemId: m.inventory_item_id, itemCode: meta.code, name: meta.name, unit: meta.unit || m.dvt,
-        donGia: Number(m.don_gia) || 0, loaiTien: m.loai_tien || "USD", qty: Number(m.so_luong) || 0,
-      })
-    }
-    if (serviceNeed.size) {
-      const { data: linked } = await supabaseAdmin
-        .from("purchase_requests")
-        .select("id, trang_thai")
-        .eq("factory_id", factoryId)
-        .eq("maintenance_record_id", id)
-        .eq("loai", "goc")
-        .in("trang_thai", [...PURCHASE_ACTIVE_FOR_KT, "hoan_tat", "dong"])
-      const linkedRows = (linked || []) as { id: string; trang_thai: string }[]
-      if (linkedRows.length) {
-        const closed = new Set(linkedRows.filter((r) => r.trang_thai === "dong").map((r) => r.id))
-        const { data: lines } = await supabaseAdmin
-          .from("purchase_request_lines")
-          .select("request_id, item_id, so_luong, sl_da_mua")
-          .in("request_id", linkedRows.map((r) => r.id))
-          .in("item_id", Array.from(serviceNeed.keys()))
-        for (const l of (lines || []) as { request_id: string; item_id: string; so_luong: number | null; sl_da_mua: number | null }[]) {
-          const n = serviceNeed.get(l.item_id)
-          if (n) n.qty -= closed.has(l.request_id) ? Number(l.sl_da_mua) || 0 : Number(l.so_luong) || 0
-        }
-      }
-      for (const n of serviceNeed.values()) if (n.qty > 0) needs.push(n)
-    }
 
     // `needs` là phần CÒN THIẾU sau khi đã trừ mọi phiếu đang đề nghị (kể cả chính phiếu nháp) ⇒ đồng bộ
     // nháp = cộng thêm đúng phần này. Nháp đã đủ/dư thì chỉ mở lại (không bao giờ giảm SL, không xoá dòng).
@@ -218,20 +181,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         thanh_tien: Math.round(it.qty * donGia * 100) / 100,
         muc_dich: `Biên bản ${rec.ma_bb || ""}${tenTb ? ` — ${tenTb}` : ""}`.trim(),
         ngay_can_hang: today,
+        maintenance_record_id: id,
       }
     })
 
     if (draft) {
       const { data: dLines, error: dErr } = await supabaseAdmin
         .from("purchase_request_lines")
-        .select("id, item_id, so_luong, don_gia, sort_order")
+        .select("id, item_id, so_luong, don_gia, sort_order, maintenance_record_id")
         .eq("request_id", draft.id)
       if (dErr) return NextResponse.json({ error: dErr.message }, { status: 500 })
-      const existing = (dLines || []) as { id: string; item_id: string | null; so_luong: number | null; don_gia: number | null; sort_order: number | null }[]
+      const existing = (dLines || []) as {
+        id: string; item_id: string | null; so_luong: number | null; don_gia: number | null; sort_order: number | null
+        maintenance_record_id: string | null
+      }[]
       let nextSort = existing.reduce((m, l) => Math.max(m, Number(l.sort_order) || 0), -1) + 1
       const changes: string[] = []
       for (const row of lineRows) {
-        const cur = existing.find((l) => l.item_id === row.item_id)
+        // Chỉ cộng vào dòng CÙNG biên bản + cùng vật tư (dòng dự trữ / cho biên bản khác giữ nguyên).
+        const cur = existing.find((l) => l.item_id === row.item_id && l.maintenance_record_id === id)
         if (cur) {
           const soLuong = (Number(cur.so_luong) || 0) + row.so_luong
           const donGia = Number(cur.don_gia) || 0

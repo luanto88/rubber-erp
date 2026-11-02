@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
         needsRequest: s.needsRequest,
         items: s.items
           .filter((it) => it.shortage > 0)
-          .map((it) => ({ kind: it.kind, name: it.name, unit: it.unit, shortage: it.shortage, pendingRequested: it.pendingRequested })),
+          .map((it) => ({ itemId: it.itemId, kind: it.kind, name: it.name, unit: it.unit, shortage: it.shortage, pendingRequested: it.pendingRequested })),
       }))
     return NextResponse.json({ records })
   } catch (err) {

@@ -177,9 +177,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       ])
       maintenanceSource = { id: linkedRecordId, maBb: (rec?.ma_bb as string) || null, ktWarehouseId: kt?.id || null, ktCode: KT_WAREHOUSE_CODE }
     }
+    // GĐ3: mã biên bản của các dòng gắn biên bản (hiển thị "Cho biên bản …").
+    const lineRecordIds = [...new Set(lines.map((l) => l.maintenance_record_id).filter((v): v is string => !!v))]
+    const lineRecords: Record<string, string | null> = {}
+    if (lineRecordIds.length) {
+      const { data } = await supabaseAdmin
+        .from("maintenance_records")
+        .select("id, ma_bb")
+        .eq("factory_id", actor.factoryId)
+        .in("id", lineRecordIds)
+      for (const r of (data || []) as { id: string; ma_bb: string | null }[]) lineRecords[r.id] = r.ma_bb
+    }
 
     return NextResponse.json({
       maintenanceSource,
+      lineRecords,
       request,
       lines,
       signers,

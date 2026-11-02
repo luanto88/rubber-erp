@@ -40,6 +40,9 @@ export type PurchaseDetail = {
   parent: { id: string; so: number; nam: number } | null
   /** GĐ2g: phiếu lập từ biên bản bảo trì. */
   maintenanceSource: PurchaseMaintenanceSource | null
+  /** GĐ3: id biên bản → mã biên bản của các dòng gắn biên bản. */
+  lineRecords?: Record<string, string | null>
+
   perms: {
     canEdit: boolean; canSubmit: boolean; canCancel: boolean; isAdmin: boolean
     /** Người NGOÀI nhóm phụ trách biên bản, có purchase.create, chưa là người đề nghị: Lưu = nhận xử lý. */

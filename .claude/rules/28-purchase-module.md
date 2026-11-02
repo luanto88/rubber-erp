@@ -298,3 +298,30 @@ Người dùng chốt phương án A (plan `C:\Users\Software\.claude\plans\purc
     prop), trống mới dùng gợi ý. Câu "đứng tên người đề nghị" hiện theo `claimOnSubmit`.
   - Nút "Mở màn ký" chỉ hiện cho người ký / người đề nghị / admin (RLS `yeu_cau_ky_select`); người khác xem PDF +
     tiến trình ngay trên trang (người dùng chốt phương án A).
+
+## GĐ3 — liên kết biên bản THEO DÒNG + lưu phiếu 1 giao dịch (2026-11-02, chờ test tay)
+Migration `20261102_purchase_line_maintenance_link.sql` (**chạy tay TRƯỚC deploy** — `computeKtStatuses` đọc cột
+mới, thiếu cột thì khối vật tư biên bản + gửi ký biên bản lỗi).
+- `purchase_request_lines.maintenance_record_id` (NULL = dự trữ kho); backfill = biên bản của phiếu, dòng điều
+  chỉnh theo dòng gốc. Phiếu điều chỉnh chép liên kết từ dòng gốc.
+- Form: mỗi dòng có ô **"Cho biên bản"** khi có lựa chọn — biên bản của phiếu, biên bản đang gắn, biên bản đang
+  thiếu đúng mã (`GET /api/maintenance/kt-shortages`, nay trả `itemId`), hoặc "Dự trữ kho". Dòng mới lấy biên bản
+  của dòng trước. Cùng vật tư được tách dòng nếu khác biên bản (khoá trùng = vật tư + biên bản).
+- POST lưu: kiểm biên bản mới gắn thuộc nhà máy + chưa duyệt/huỷ (liên kết đã lưu giữ nguyên); ghi qua RPC
+  `purchase_save_lines` (1 giao dịch, giữ dòng theo `id` ⇒ giữ ảnh; bản chụp bằng chứng chỉ xoá ở dòng đổi
+  vật tư/SL/giá). Phiếu mới lỗi lưu dòng ⇒ huỷ phiếu vừa cấp số.
+- Danh sách: `nextStep` theo SL hiệu lực (`purchase_effective_lines`) − đã nhận.
+- Chi tiết: API trả `lineRecords`; dòng gắn biên bản khác biên bản của phiếu hiện "Cho biên bản …" (link).
+- `isMaintenanceRecordTeam` / phiếu nháp để đồng bộ vẫn theo `purchase_requests.maintenance_record_id` (biên bản
+  gốc của phiếu), không theo từng dòng.
+- ⚠️ Triển khai: chạy 20261102 → deploy → chạy NGAY `20261103_purchase_line_link_rebackfill.sql` (điền lại
+  dòng NULL của phiếu lập từ biên bản trong khoảng giữa; lỗi đã gặp ở localhost: hàng nhập không giữ cho
+  biên bản, biên bản báo thiếu sai, sinh phiếu trùng).
+- Xuất kho vật tư mua ngoài CHỈ khi biên bản ký hoàn tất — "đủ hàng / gửi ký được" chưa trừ tồn.
+- Form (sửa sau test 2026-11-02): ô "Cho biên bản" hiện cả khi dòng chưa chọn vật tư; ô chọn vật tư chỉ khoá
+  vật tư đã có dòng CÙNG biên bản ("Dự trữ kho" là 1 nhóm); Lưu kiểm trùng (vật tư + biên bản) như server.
+- Test tay GĐ3 bước 1–7 ĐẠT (2026-11-02). Còn để sửa sau: (1) khối vật tư biên bản vẫn câu cảnh báo chung khi
+  đã có đề nghị chờ nhập; (2) cảnh báo "Tồn còn nhiều" tính cả hàng đang giữ cho biên bản khác; (3) bằng chứng
+  "phiếu khác còn mở" đọc SL gốc, không theo SL hiệu lực; (4) danh sách "phiếu khác" lặp số phiếu khi phiếu có
+  nhiều dòng cùng vật tư; (5) giá vật tư mua ngoài ở biên bản nhập tự do (xem prompt GĐ4).
+- Test + bàn giao: `C:\Users\Software\.claude\plans\purchase-gd3-test-va-ban-giao-2026-11-01.md`.

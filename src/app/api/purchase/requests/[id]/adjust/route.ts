@@ -58,11 +58,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Mục đích + ảnh lấy từ dòng GỐC (parent_line_id = root_line_id) — điều chỉnh không có mục đích riêng.
     const { data: rootLines } = await supabaseAdmin
       .from("purchase_request_lines")
-      .select("id, muc_dich, image_urls, mua_tai, ngay_co_hang, ngay_can_hang")
+      .select("id, muc_dich, image_urls, mua_tai, ngay_co_hang, ngay_can_hang, maintenance_record_id")
       .eq("request_id", id)
     type RootLine = {
       id: string; muc_dich: string | null; image_urls: string[] | null
       mua_tai: string | null; ngay_co_hang: string | null; ngay_can_hang: string | null
+      maintenance_record_id: string | null
     }
     const rootById = new Map(((rootLines || []) as RootLine[]).map((r) => [r.id, r]))
     const itemIds = [...new Set(input.map((l) => l.itemId).filter(Boolean))]
@@ -109,6 +110,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         mua_tai: rootById.get(l.parentLineId)?.mua_tai ?? null,
         ngay_co_hang: rootById.get(l.parentLineId)?.ngay_co_hang ?? null,
         ngay_can_hang: rootById.get(l.parentLineId)?.ngay_can_hang ?? null,
+        maintenance_record_id: rootById.get(l.parentLineId)?.maintenance_record_id ?? null,
         ghi_chu: l.ghiChu?.trim() || null,
         gia_goi_y: eff.don_gia,
         nguon_gia_goi_y: "gia_duyet_truoc",

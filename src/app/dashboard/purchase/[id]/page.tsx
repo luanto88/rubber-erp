@@ -189,7 +189,10 @@ function PurchaseDetailInner() {
     )
   }
 
-  const existing = useMemo(() => (detail ? { request: detail.request, lines: detail.lines } : null), [detail])
+  const existing = useMemo(
+    () => (detail ? { request: detail.request, lines: detail.lines, lineRecords: detail.lineRecords } : null),
+    [detail],
+  )
 
   /** `fresh`: dữ liệu vừa tải lại (sau khi Lưu) — không đọc `detail` cũ của closure. */
   const handleSubmit = async (opts?: { skipPanel?: boolean; fresh?: PurchaseDetail }) => {
@@ -457,6 +460,11 @@ function PurchaseDetailInner() {
                         <p className="font-semibold text-slate-800">{l.item_name}</p>
                         <p className="text-xs text-slate-500 font-mono">{l.item_code} · {l.unit}</p>
                         {l.la_vat_tu_moi && <span className="inline-block mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Vật tư mới</span>}
+                        {l.maintenance_record_id && l.maintenance_record_id !== req.maintenance_record_id && (
+                          <Link href={`/dashboard/maintenance/records/${l.maintenance_record_id}`} className="block mt-0.5 text-[11px] font-semibold text-brand-700 hover:underline">
+                            Cho biên bản {detail.lineRecords?.[l.maintenance_record_id] || "(chưa có mã)"}
+                          </Link>
+                        )}
                         {req.trang_thai !== "nhap" && (
                           <button
                             type="button"
