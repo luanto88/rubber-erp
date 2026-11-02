@@ -10,7 +10,7 @@ import { convertCurrency, CURRENCIES, setCurrencyRates } from "@/lib/currency"
 import { findSimilarNames, normalizeName } from "@/lib/similar-name"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import {
-  formatMoney, formatSoPhieuFull, isPriceDeviationExceeded, priceDeviationPct,
+  formatMoney, formatSoPhieuFull, isPriceDeviationExceeded, pickReferencePrice, priceDeviationPct,
   PRICE_DEVIATION_LIMIT_PCT, purchaseUrgency,
   type PurchaseItemInsight, type PurchaseLineInput, type PurchaseLineRow, type PurchaseRequestRow,
 } from "@/lib/purchase/types"
@@ -120,20 +120,13 @@ const CATEGORY_MIN_REQUESTS = 2
  */
 function computeSuggestion(line: DraftLine, item: ItemOpt | undefined, currency: string): Suggestion | null {
   const ins = line.insight
-  const last = ins?.recentPurchases[0]
-  if (last && last.donGia > 0) {
+  // Cùng quy tắc với biên bản bảo trì (pickReferencePrice) để 2 nơi luôn ra cùng một giá.
+  const ref = pickReferencePrice(ins?.recentPurchases, item)
+  if (ref) {
     return {
-      value: roundPrice(convertCurrency(last.donGia, last.loaiTien, currency), currency),
-      source: "lan_mua_truoc",
-      label: `theo phiếu ${formatSoPhieuFull(last.so, last.nam)} (${fmtDate(last.ngay)})`,
-      binding: true,
-    }
-  }
-  if (item && Number(item.don_gia) > 0) {
-    return {
-      value: roundPrice(convertCurrency(Number(item.don_gia), item.loai_tien || "USD", currency), currency),
-      source: "danh_muc",
-      label: "giá danh mục kho",
+      value: roundPrice(convertCurrency(ref.value, ref.loaiTien, currency), currency),
+      source: ref.source,
+      label: ref.source === "lan_mua_truoc" ? `theo phiếu ${formatSoPhieuFull(ref.so, ref.nam)} (${fmtDate(ref.ngay)})` : "giá danh mục kho",
       binding: true,
     }
   }

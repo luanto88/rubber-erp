@@ -47,6 +47,22 @@ function fromUsd(usdAmount: number, currency: string): number {
   return usdAmount * rate
 }
 
+/** Bảng tỷ giá của 1 nhà máy — dùng ở SERVER (không dùng biến mutable `USD_RATE` dùng chung mọi request). */
+export function buildUsdRates(rates: { vnd?: number | null; khr?: number | null }): Record<string, number> {
+  return {
+    USD: 1,
+    VND: rates.vnd && rates.vnd > 0 ? rates.vnd : DEFAULT_USD_RATE.VND,
+    KHR: rates.khr && rates.khr > 0 ? rates.khr : DEFAULT_USD_RATE.KHR,
+  }
+}
+
+/** Quy đổi theo bảng tỷ giá truyền vào (không phụ thuộc trạng thái module). */
+export function convertWithRates(amount: number, from: string, to: string, rates: Record<string, number>): number {
+  if (from === to) return amount
+  const usd = rates[from] ? amount / rates[from] : 0
+  return rates[to] ? usd * rates[to] : usd
+}
+
 /** Quy đổi `amount` từ `from` sang `to`, đi qua USD làm trung gian. */
 export function convertCurrency(amount: number, from: string, to: string): number {
   if (from === to) return amount

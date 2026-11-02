@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase"
 import { convertCurrency, currencySymbol as sharedCurrencySymbol } from "@/lib/currency"
+import { classifyRepairByUsd } from "@/lib/maintenance-threshold"
 
 // Re-export để không phải sửa các import cũ trong module Bảo trì đang dùng currencySymbol từ đây.
 export const currencySymbol = sharedCurrencySymbol
@@ -175,10 +176,9 @@ export async function loadMaintenanceExtMaterials(factoryId: string): Promise<Ma
   return (data || []) as MaintenanceExtMaterial[]
 }
 
-// Auto-classify repair type based on cost (USD threshold = 200)
+// Tự phân loại Lớn/Nhỏ theo ngưỡng USD của nhà máy (Cài đặt → Bảo trì, mặc định 200).
 export function suggestLoaiSuaChua(chiPhi: number, loaiTien: string): "lon" | "nho" {
-  const usdEquiv = convertCurrency(chiPhi, loaiTien, "USD")
-  return usdEquiv > 200 ? "lon" : "nho"
+  return classifyRepairByUsd(convertCurrency(chiPhi, loaiTien, "USD"))
 }
 
 // Nhãn hiển thị trạng thái biên bản — dùng chung cho danh sách và trang chi tiết

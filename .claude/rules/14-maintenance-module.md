@@ -1404,6 +1404,38 @@ Migration `20261102_purchase_line_maintenance_link.sql` (**chạy tay TRƯỚC d
   cùng vật tư; gia công dùng chung số liệu `shortage − pendingRequested` của `computeKtStatuses`.
 - Đã kiểm `allocateGroup` bằng code thật 6/6 kịch bản (Bug 1: A cần 5 chưa mua, B mua 3 ⇒ A 0, B 3).
 
+## GĐ4 — giá vật tư mua ngoài / gia công khớp 2 chiều với đề nghị mua (2026-11-02, chờ test tay)
+Không migration. Người dùng chốt: đề nghị là nguồn giá; chưa có giá thì nhập tay; lấy giá phiếu GẦN NHẤT.
+- Quy tắc giá (`resolveExtPrices`, `src/lib/maintenance-ext-price.ts`, server-only) cho mỗi (biên bản, vật tư):
+  (1) dòng đề nghị gắn biên bản của phiếu tạo GẦN NHẤT — mọi trạng thái trừ Huỷ, phiếu điều chỉnh chỉ khi
+  `hoan_tat`; (2) lần mua đã duyệt gần nhất; (3) giá danh mục > 0; (4) không có ⇒ nhập tay. (2)+(3) =
+  `pickReferencePrice` (`lib/purchase/types.ts`), form đề nghị dùng chung ⇒ cùng một giá.
+- `syncMaintenanceExtPrices(factoryId, recordIds)`: CHỈ biên bản `cho_duyet` không có `yeu_cau_ky`
+  `dang_luan_chuyen|hoan_tat`; ghi `maintenance_materials.don_gia/loai_tien`, tính lại `chi_phi_dk` + Lớn/Nhỏ
+  (mirror `computeLineChiPhiFromMaterials`/`suggestLoaiSuaChua`, tỷ giá nhà máy qua `convertWithRates`).
+  Biên bản đã gửi ký / đã duyệt không bao giờ bị đụng.
+- Gọi đồng bộ: mở trang biên bản (route `POST /api/maintenance/ext-prices` `sync:true`), NGAY TRƯỚC khi dựng
+  PDF gửi ký (`maintenance-sign-modal`, lỗi ⇒ dừng), lưu phiếu đề nghị (biên bản cũ + mới của các dòng),
+  `purchase-draft`, huỷ phiếu, phiếu điều chỉnh duyệt xong (`syncPurchaseFromSigning`). Phía đề nghị lỗi chỉ log.
+- Trang biên bản: có giá ⇒ ô Đơn giá chỉ đọc + Tiền tệ khoá, dòng chú thích "Đơn giá: Theo đề nghị NN/ĐNMVT ·
+  Đã cập nhật 30 → 20 USD"; vật tư mới chọn tự hỏi giá (1 lần/mã) và tự thay trên form (lưu khi bấm Lưu).
+- `purchase-draft` lấy giá theo cùng quy tắc, chưa có thì chép giá nhập tay trên biên bản.
+- A4 (chờ test tay): mức ưu tiên (0) trước đề nghị = GIÁ THỰC TẾ — bình quân theo SL các lần nhập kho đã ghi
+  sổ (`inventory_document_lines.purchase_request_line_id`) + xác nhận gia công (`purchase_service_completions`)
+  của dòng GỐC gắn biên bản (phiếu ≠ Huỷ); khác loại tiền ⇒ quy về tiền của lần gần nhất. Đồng bộ ngay sau
+  route `receive` / `complete-service`; huỷ phiếu nhập ở module Kho thì đồng bộ ở lần mở trang / gửi ký.
+- A5 (chờ test tay): sửa giá thực tế / huỷ xác nhận gia công / điều chỉnh chỉ-đổi-giá — xem rule 28 mục
+  "GĐ4 A5"; mọi thay đổi đều đồng bộ lại biên bản chưa gửi ký.
+- A6 (chờ test tay): ngưỡng Lớn/Nhỏ = `factories.nguong_sua_chua_lon` (USD, mặc định 200, migration
+  `20261104_factories_repair_threshold.sql` **chạy tay**). Sửa ở Cài đặt → Bảo trì → thẻ "Giá trị sửa chữa lớn"
+  (`settings/_components/repair-threshold-card.tsx`, API `GET/POST /api/maintenance/repair-threshold`, admin /
+  `settings.maintenance_config` / `settings.manage_config`). Module thuần `src/lib/maintenance-threshold.ts`
+  (`setRepairThresholdUsd` lúc bootstrap như `setCurrencyRates`; `suggestLoaiSuaChua` dùng ngưỡng này).
+  Lớn/Nhỏ **KHÔNG ai chọn tay, kể cả admin**: ô trên biên bản chỉ đọc, lưu luôn tính lại; `syncMaintenanceExtPrices`
+  tính lại Lớn/Nhỏ cho MỌI dòng biên bản Sửa chữa chưa gửi ký (cả khi giá không đổi) ⇒ chạy lúc mở trang và trước
+  khi dựng PDF gửi ký. PDF in "Sửa chữa lớn >N$" theo ngưỡng (`loadRecordForSigning` nạp ngưỡng). Biên bản đã gửi
+  ký / đã duyệt giữ nguyên. Đọc `factories` bằng `select("*")` để chưa chạy migration vẫn chạy với 200.
+
 ## Sửa: mã tạo mới là Dịch vụ gia công ⇒ dòng tự thành "Gia công ngoài" (2026-10-27)
 `applyExtMatToLine` (`records/[id]/page.tsx`) đặt `nguon` theo `la_dich_vu` của mã vừa tạo/chọn ("Dùng mã này")
 — trước đây dòng giữ nguyên "Mua ngoài".

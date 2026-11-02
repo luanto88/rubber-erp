@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
@@ -58,6 +58,8 @@ const LOG_LABEL: Record<string, string> = {
   cap_nhat_tu_bao_tri: "Cập nhật theo biên bản bảo trì",
   nhan_xu_ly: "Nhận xử lý phiếu từ biên bản bảo trì",
   chon_nguoi_ky: "Chọn người ký (Giám đốc, Kế toán)",
+  sua_gia: "Sửa giá thực tế",
+  huy_hoan_thanh_dich_vu: "Huỷ xác nhận hoàn thành dịch vụ",
 }
 
 function fmtDateTime(iso: string | null | undefined) {
@@ -68,6 +70,13 @@ function fmtDateTime(iso: string | null | undefined) {
 function fmtDate(iso: string) {
   const [y, m, d] = iso.slice(0, 10).split("-")
   return `${d}/${m}/${y}`
+}
+
+function fulfillStepsOf(detail: PurchaseDetail): FulfillStep[] {
+  const steps: FulfillStep[] = []
+  if (detail.perms.canReceive) steps.push("receive")
+  if (detail.perms.canCompleteService) steps.push("service")
+  return steps
 }
 
 function PurchaseDetailInner() {
@@ -142,13 +151,27 @@ function PurchaseDetailInner() {
 
   const startFulfill = () => {
     if (!detail) return
-    const steps: FulfillStep[] = []
-    if (detail.perms.canReceive) steps.push("receive")
-    if (detail.perms.canCompleteService) steps.push("service")
+    const steps = fulfillStepsOf(detail)
     if (!steps.length) return
     setNotice(null)
     setWizard({ steps, idx: 0, msgs: [] })
   }
+
+  // Từ nút "Ghi nhận nhập kho / Xác nhận gia công" ở danh sách (?fulfill=1): tự mở trình ghi nhận 1 lần
+  // sau khi tải xong phiếu (quyền theo perms của server), rồi bỏ tham số khỏi URL để F5 không mở lại.
+  const fulfillAutoDone = useRef(false)
+  useEffect(() => {
+    if (fulfillAutoDone.current || !detail || searchParams.get("fulfill") !== "1") return
+    fulfillAutoDone.current = true
+    const steps = fulfillStepsOf(detail)
+    if (steps.length) {
+      setNotice(null)
+      setWizard({ steps, idx: 0, msgs: [] })
+    } else {
+      setActionError("Phiếu không còn phần nào để bạn ghi nhận mua / xác nhận gia công.")
+    }
+    router.replace(`/dashboard/purchase/${id}`, { scroll: false })
+  }, [detail, searchParams, router, id])
 
   /** Xong 1 bước: nạp lại phiếu, mở bước kế (nếu vẫn còn việc), hết bước thì báo kết quả. */
   const handleStepDone = async (msg: string) => {
@@ -550,7 +573,7 @@ function PurchaseDetailInner() {
           </ResponsiveTableWrapper>
           {req.ghi_chu && <p className="px-4 py-3 text-sm text-slate-600 border-t border-slate-100">Ghi chú: {req.ghi_chu}</p>}
         </div>
-        {!isAdjustment && detail.effectiveLines.length > 0 && <PurchaseFulfillmentPanel detail={detail} />}
+        {!isAdjustment && detail.effectiveLines.length > 0 && <PurchaseFulfillmentPanel detail={detail} onChanged={() => void load()} />}
     </div>
   )
 

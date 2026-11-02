@@ -10,6 +10,7 @@ import { drawSignatureImage, drawTextFit, loadSignerNameFont } from "./stamp-pdf
 import { getTodayISODate, formatDateDisplay } from "@/lib/date-utils"
 import { hasPadesRootCa, applyPadesSignatureToDoc } from "./pades"
 import { checkMaintenanceStock, issueMaintenanceStock } from "@/lib/maintenance-stock-issuance"
+import { onPurchaseAdjustmentApproved } from "@/lib/purchase/server"
 // CHỈ import type — không kéo `next/server`/nodemailer vào lõi ký. Việc GỬI thông báo do 3 route
 // handler thực hiện qua scheduleSigningNotify(), file này chỉ DỰNG kế hoạch (xem ./notify.ts).
 import type { SigningNotifyPlan } from "./notify"
@@ -597,6 +598,8 @@ export async function signField(params: {
             noi_dung: `Phiếu điều chỉnh ${String(pr.so).padStart(2, "0")}/ĐNMVT (${pr.nam}) đã duyệt — áp dụng thông số mới`,
           })
           await supabase.rpc("purchase_recompute_request", { p_request_id: pr.parent_request_id })
+          // GĐ4: áp giá điều chỉnh xuống các lần nhập / gia công + đồng bộ biên bản gắn dòng.
+          await onPurchaseAdjustmentApproved(yeuCau.factory_id as string, pr.id as string, pr.parent_request_id as string)
         }
       }
     } catch (err) {

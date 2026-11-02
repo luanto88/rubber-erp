@@ -149,6 +149,14 @@ Action dac biet tuy module:
 - Dong thoi phai check quyen o logic thao tac save / delete / import / approve
 - Khong chi an nut ma bo qua check logic
 
+## Trang /login khởi động không chờ (2026-11-02, chờ test tay)
+- 3 việc độc lập, không chặn form: tải nhà máy + phòng ban (hiện ngay từ cache `localStorage
+  login_lists_cache_v1`, tải bản mới ở nền, lỗi mạng giữ cache), kiểm tra phiên cũ chạy nền (còn hiệu lực ⇒
+  `router.replace(?next= || /dashboard)`). Đã bỏ banner "Đang tải…".
+- Ô nhà máy CHỈ hiện ở tab Đăng ký (đăng nhập lấy nhà máy theo tài khoản). Mặc định theo MÃ
+  `NEXT_PUBLIC_DEFAULT_FACTORY_CODE` (mặc định `phuochoa_kt`) → tiền tố CSR/"kampong" → nhà máy đầu. Không UUID.
+- `?next=` (chỉ đường dẫn nội bộ) và `?reason=` giữ nguyên.
+
 ## Route auth
 
 - Route dang nhap chuan: `/login`

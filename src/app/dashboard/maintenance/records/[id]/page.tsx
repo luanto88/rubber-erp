@@ -51,6 +51,8 @@ import { prepareImageForUpload, withRetry } from "@/lib/image-upload"
 import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
 import { MaintenanceSignModal, loadRecordForSigning } from "../_components/maintenance-sign-modal"
 import { authFetch } from "@/lib/auth-fetch"
+import { extPriceLabel, type ResolvedExtPrice } from "@/lib/maintenance-ext-price-shared"
+import { DEFAULT_REPAIR_THRESHOLD_USD, formatRepairThreshold, getRepairThresholdUsd, setRepairThresholdUsd } from "@/lib/maintenance-threshold"
 import type { KtRecordStatus } from "@/lib/maintenance-kt"
 import { describeKtShortage } from "@/lib/maintenance-kt-message"
 import { PURCHASE_STATUS_LABEL, type PurchaseStatus } from "@/lib/purchase/types"
@@ -177,6 +179,12 @@ function computeLineChiPhiFromMaterials(materials: DraftMaterial[], targetCurren
   }
   return convertCurrency(totalUsd, "USD", targetCurrency)
 }
+
+function fmtPriceChange(from: number, fromTien: string, to: number, toTien: string): string {
+  return `Đã cập nhật ${from.toLocaleString("vi-VN")}${fromTien !== toTien ? ` ${fromTien}` : ""} → ${to.toLocaleString("vi-VN")} ${toTien}`
+}
+
+const EXT_PRICE_NGUON = ["ben_ngoai", "gia_cong"]
 
 function emptyLine(asset?: MaintenanceAsset): DraftLine {
   return {
@@ -859,6 +867,42 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }, [])
 
+  // GĐ4 — giá vật tư mua ngoài / gia công: đề nghị gắn biên bản → lần mua gần nhất → danh mục.
+  // Có giá ⇒ ô giá chỉ đọc + chú thích nguồn; chưa có ⇒ nhập tay. Key = inventory_item_id.
+  const [extPrices, setExtPrices] = useState<Record<string, ResolvedExtPrice>>({})
+  // Ngưỡng Lớn/Nhỏ của nhà máy (Cài đặt → Bảo trì) — state để nhãn hiển thị cập nhật sau bootstrap.
+  const [repairThreshold, setRepairThreshold] = useState(DEFAULT_REPAIR_THRESHOLD_USD)
+  const [extPriceNotes, setExtPriceNotes] = useState<Record<string, string>>({})
+  const extPriceRequested = useRef<Set<string>>(new Set())
+  const fetchExtPrices = useCallback(async (body: { recordId?: string | null; itemIds?: string[]; sync?: boolean }) => {
+    try {
+      const res = await authFetch("/api/maintenance/ext-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) return null
+      const json = (await res.json()) as {
+        prices?: Record<string, ResolvedExtPrice>
+        changes?: { itemId: string; from: number; fromTien: string; to: number; toTien: string }[]
+      }
+      const prices = json.prices || {}
+      for (const itemId of Object.keys(prices)) extPriceRequested.current.add(itemId)
+      for (const itemId of body.itemIds || []) extPriceRequested.current.add(itemId)
+      setExtPrices((prev) => ({ ...prev, ...prices }))
+      if (json.changes?.length) {
+        setExtPriceNotes((prev) => {
+          const next = { ...prev }
+          for (const c of json.changes || []) next[c.itemId] = fmtPriceChange(c.from, c.fromTien, c.to, c.toTien)
+          return next
+        })
+      }
+      return json
+    } catch {
+      return null
+    }
+  }, [])
+
   const loadRecord = useCallback(async (fid: string, recordId: string) => {
     const { data: rec } = await supabase
       .from("maintenance_records")
@@ -968,14 +1012,20 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       const [a, s, factoryRates] = await Promise.all([
         loadMaintenanceAssets(fid),
         loadMaintenanceStaff(fid),
-        supabase.from("factories").select("ty_gia_usd_vnd, ty_gia_usd_khr").eq("id", fid).maybeSingle(),
+        // "*": cột nguong_sua_chua_lon có thể chưa có (migration chưa chạy) ⇒ không lỗi, ngưỡng mặc định 200.
+        supabase.from("factories").select("*").eq("id", fid).maybeSingle(),
       ])
-      setCurrencyRates({ vnd: factoryRates.data?.ty_gia_usd_vnd, khr: factoryRates.data?.ty_gia_usd_khr })
+      const factoryRow = (factoryRates.data || {}) as Record<string, unknown>
+      setCurrencyRates({ vnd: factoryRow.ty_gia_usd_vnd as number | null, khr: factoryRow.ty_gia_usd_khr as number | null })
+      setRepairThresholdUsd(factoryRow.nguong_sua_chua_lon)
+      setRepairThreshold(getRepairThresholdUsd())
       setAssets(a)
       setStaffList(s)
       await Promise.all([loadInventoryItems(fid), loadDispatchVehicles(fid)])
 
       if (!isNew) {
+        // GĐ4: đồng bộ giá theo đề nghị (chỉ biên bản Chờ duyệt chưa gửi ký) rồi mới nạp — lỗi không chặn.
+        await fetchExtPrices({ recordId: id, sync: true })
         await loadRecord(fid, id)
       } else {
         // Form trống, mặc định (Sửa chữa/ngày hôm nay/giờ hiện tại...) — chụp baseline ngay để
@@ -984,7 +1034,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       }
     }
     void bootstrap().finally(() => setLoading(false))
-  }, [id, isNew, loadRecord])
+  }, [id, isNew, loadRecord, fetchExtPrices])
 
   // Chụp snapshot NGAY SAU khi loadRecord() (hoặc nhánh form trống ở trên) đã nạp xong hoàn
   // chỉnh — làm baseline cho dirty-tracking của nút "Lưu".
@@ -1003,6 +1053,54 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     if (!factoryId || effectiveIsNew) { setKtStatus(null); return }
     void loadKtStatus(effectiveId)
   }, [factoryId, effectiveId, effectiveIsNew, loadVersion, loadKtStatus])
+
+  // GĐ4 — giá vật tư mua ngoài / gia công chỉ "sống" khi biên bản còn soạn được và CHƯA gửi ký: biên bản
+  // đã gửi ký / đã duyệt / kẹt xuất kho giữ nguyên giá đã chốt (PDF bất biến), kể cả với admin.
+  const extPriceLive = !isReadOnly && record?.trang_thai !== "da_duyet" && record?.trang_thai !== "huy" &&
+    !isSigningInProgress && !isStockStuck && (effectiveIsNew || !signBundle || signingStatusChecked)
+  const extItemIdsKey = useMemo(() => {
+    const ids = new Set<string>()
+    for (const l of lines) for (const m of l.materials) {
+      if (EXT_PRICE_NGUON.includes(m.nguon) && m.inventory_item_id) ids.add(m.inventory_item_id)
+    }
+    return Array.from(ids).sort().join(",")
+  }, [lines])
+
+  // Vật tư mới chọn chưa có giá đã xác định ⇒ hỏi server (1 lần mỗi mã).
+  useEffect(() => {
+    if (!factoryId || !extItemIdsKey) return
+    const missing = extItemIdsKey.split(",").filter((itemId) => !extPriceRequested.current.has(itemId))
+    if (!missing.length) return
+    for (const itemId of missing) extPriceRequested.current.add(itemId)
+    void fetchExtPrices({ recordId: effectiveIsNew ? null : effectiveId, itemIds: missing })
+  }, [factoryId, extItemIdsKey, effectiveIsNew, effectiveId, fetchExtPrices])
+
+  // Tự thay giá trên form theo giá đã xác định (người dùng thấy chú thích dưới ô giá; lưu khi bấm Lưu).
+  useEffect(() => {
+    if (!extPriceLive) return
+    const notes: Record<string, string> = {}
+    let changed = false
+    const next = lines.map((l) => {
+      let lineChanged = false
+      const materials = l.materials.map((m) => {
+        const p = EXT_PRICE_NGUON.includes(m.nguon) && m.inventory_item_id ? extPrices[m.inventory_item_id] : undefined
+        if (!p) return m
+        const cur = parseFloat(m.don_gia) || 0
+        if (cur === p.value && (m.loai_tien || "USD") === p.loaiTien) return m
+        if (cur > 0) notes[m.inventory_item_id] = fmtPriceChange(cur, m.loai_tien || "USD", p.value, p.loaiTien)
+        lineChanged = true
+        return { ...m, don_gia: String(p.value), loai_tien: p.loaiTien }
+      })
+      if (!lineChanged) return l
+      changed = true
+      return recomputeLineDerived(l, materials)
+    })
+    if (!changed) return
+    setLines(next)
+    if (Object.keys(notes).length) setExtPriceNotes((prev) => ({ ...prev, ...notes }))
+    // recomputeLineDerived chỉ phụ thuộc hangMuc (đã có trong deps). Lần chạy sau thấy giá đã khớp ⇒ dừng.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extPrices, extPriceLive, lines, hangMuc])
 
   const handleCreatePurchaseDraft = async () => {
     setKtDrafting(true)
@@ -1387,7 +1485,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           noi_dung: l.noi_dung || null,
           nguyen_nhan: l.nguyen_nhan || null,
           cac_khac_phuc: l.cac_khac_phuc || null,
-          loai_sua_chua: hangMuc === "Sửa chữa" ? (l.loai_sua_chua || null) : null,
+          // Lớn/Nhỏ luôn tính lại theo ngưỡng nhà máy lúc lưu (không chọn tay).
+          loai_sua_chua: hangMuc === "Sửa chữa" ? suggestLoaiSuaChua(parseFloat(l.chi_phi_dk) || 0, l.loai_tien || "USD") : null,
           chi_phi_dk: parseFloat(l.chi_phi_dk) || 0,
           loai_tien: l.loai_tien || "USD",
           cong_tho: parseFloat(l.cong_tho) || 0,
@@ -1679,7 +1778,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           : "bg-slate-100 text-slate-600 border border-slate-200"
                       }`}
                     >
-                      {line.loai_sua_chua === "lon" ? "Sửa chữa lớn (> 200$)" : "Sửa chữa nhỏ (≤ 200$)"}
+                      {line.loai_sua_chua === "lon" ? `Sửa chữa lớn (> ${formatRepairThreshold(repairThreshold)})` : `Sửa chữa nhỏ (≤ ${formatRepairThreshold(repairThreshold)})`}
                     </span>
                   )}
                   <span
@@ -2369,20 +2468,23 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     {CURRENCIES.map((c) => <option key={c} value={c}>{currencySymbol(c)} {c}</option>)}
                   </select>
                 </div>
-                {hangMuc === "Sửa chữa" && (
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại sửa chữa</label>
-                    <select
-                      value={line.loai_sua_chua}
-                      onChange={(e) => updateLine(line.id, { loai_sua_chua: e.target.value })}
-                      disabled={isReadOnly}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
-                    >
-                      <option value="nho">Nhỏ (≤ 200$)</option>
-                      <option value="lon">Lớn (&gt; 200$)</option>
-                    </select>
-                  </div>
-                )}
+                {hangMuc === "Sửa chữa" && (() => {
+                  // Lớn/Nhỏ luôn tự tính theo ngưỡng nhà máy (Cài đặt → Bảo trì), không ai chọn tay.
+                  const loai = isReadOnly ? line.loai_sua_chua : suggestLoaiSuaChua(Number(line.chi_phi_dk) || 0, line.loai_tien)
+                  const nguong = formatRepairThreshold(repairThreshold)
+                  return (
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại sửa chữa</label>
+                      <div
+                        className={`w-full px-3 py-2 border rounded-xl text-sm font-bold ${loai === "lon" ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}
+                        title="Tự tính theo chi phí — không chọn tay"
+                      >
+                        {loai === "lon" ? `Lớn (> ${nguong})` : `Nhỏ (≤ ${nguong})`}
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-400">Tự tính theo ngưỡng {nguong} (Cài đặt → Bảo trì)</p>
+                    </div>
+                  )
+                })()}
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Công thợ</label>
                   <input
@@ -2532,6 +2634,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 </div>
                 {line.materials.map((mat) => {
                   const isKho = mat.nguon === "trong_kho"
+                  // GĐ4: giá đã xác định (đề nghị / lần mua gần nhất / danh mục) ⇒ chỉ đọc; chưa có ⇒ nhập tay.
+                  const resolvedPrice = EXT_PRICE_NGUON.includes(mat.nguon) && mat.inventory_item_id ? extPrices[mat.inventory_item_id] : undefined
+                  const pricePinned = !!resolvedPrice && extPriceLive
+                  const priceShown = resolvedPrice && (parseFloat(mat.don_gia) || 0) === resolvedPrice.value &&
+                    (mat.loai_tien || "USD") === resolvedPrice.loaiTien ? resolvedPrice : null
                   const searchKey = mat.id
                   const search = matSearches[searchKey] || ""
                   const catFilter = matCategoryFilters[searchKey] || ""
@@ -2709,7 +2816,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             value={mat.don_gia}
                             onChange={(e) => updateMaterial(line.id, mat.id, { don_gia: e.target.value })}
                             disabled={isReadOnly}
-                            className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white"
+                            readOnly={pricePinned}
+                            tabIndex={pricePinned ? -1 : undefined}
+                            title={pricePinned ? "Giá lấy tự động — sửa giá trên phiếu đề nghị mua" : undefined}
+                            className={`w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white ${pricePinned ? "bg-slate-50 text-slate-600 cursor-not-allowed" : ""}`}
                           />
                         </div>
                         <div className="w-[74px]">
@@ -2717,7 +2827,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           <select
                             value={mat.loai_tien}
                             onChange={(e) => updateMaterial(line.id, mat.id, { loai_tien: e.target.value })}
-                            disabled={isReadOnly}
+                            disabled={isReadOnly || pricePinned}
                             className="w-full px-1.5 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:border-mod-600 disabled:bg-white"
                           >
                             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -2733,6 +2843,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           </button>
                         )}
                       </div>
+                      {priceShown && (
+                        <p className="mt-1 text-[10px] text-slate-500 text-right">
+                          Đơn giá: {extPriceLabel(priceShown)}
+                          {mat.inventory_item_id && extPriceNotes[mat.inventory_item_id] && (
+                            <span className="ml-1 font-semibold text-amber-700">· {extPriceNotes[mat.inventory_item_id]}</span>
+                          )}
+                        </p>
+                      )}
                     </div>
                   )
                 })}
@@ -2800,6 +2918,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     </div>
   )
 
+  const pendingSoText = (reqs: { so: number }[] | undefined) =>
+    reqs && reqs.length ? ` (phiếu ${reqs.map((r) => `${String(r.so).padStart(2, "0")}/ĐNMVT`).join(", ")})` : ""
+
   const renderKtPanel = (st: KtRecordStatus) => {
     // Bước 2: mỗi vật tư mua ngoài có kho riêng (kho nhập gần nhất → kho chính → KT).
     const goods = st.items.filter((it) => it.kind !== "dich_vu")
@@ -2842,7 +2963,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               </span>
               <span className="text-slate-500">
                 cần {it.need} · đã hoàn thành {it.available}{it.unit ? ` ${it.unit}` : ""}
-                {it.pendingRequested > 0 && <> · đang đề nghị {it.pendingRequested}</>}
+                {it.pendingRequested > 0 && <> · chờ xác nhận {it.pendingRequested}{pendingSoText(it.pendingRequests)}</>}
                 {!done && it.shortage > 0 && <b className="text-red-600"> · chưa xong {it.shortage}</b>}
               </span>
             </div>
@@ -2854,7 +2975,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               </span>
               <span className="text-slate-500">
                 cần {it.need} · khả dụng {it.available}{it.unit ? ` ${it.unit}` : ""}
-                {it.pendingRequested > 0 && <> · đang đề nghị {it.pendingRequested}</>}
+                {it.pendingRequested > 0 && <> · chờ nhập kho {it.pendingRequested}{pendingSoText(it.pendingRequests)}</>}
                 {!done && it.shortage > 0 && <b className="text-red-600"> · thiếu {it.shortage}</b>}
               </span>
             </div>
@@ -2864,9 +2985,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           <p className="mt-2 text-[11px] text-slate-500">{goods.length ? <>Biên bản đã xuất kho — vật tư mua ngoài xuất từ kho {code}.</> : "Biên bản đã duyệt."}</p>
         ) : short ? (
           <p className="mt-2 text-[11px] text-amber-800">
-            {goodsShort && <>Chưa đủ hàng ở kho mặc định của vật tư ({code}) — chưa gửi ký duyệt được. Hàng nhập kho thường không được giữ riêng cho biên bản: nếu đã nhập mà vẫn thiếu, có thể kho đã bị xuất cho việc khác. </>}
-            {servicesShort && <>Dịch vụ gia công chưa xác nhận hoàn thành — người đề nghị bấm “Ghi nhận mua &amp; hoàn thành” trên phiếu đề nghị mua. </>}
-            Lưu biên bản vẫn bình thường.
+            {/* Nói rõ phần thiếu đang chờ phiếu nào / còn phải lập thêm bao nhiêu (cùng câu chặn gửi ký). */}
+            {describeKtShortage(st.items) || (goodsShort || servicesShort ? "Chưa đủ vật tư / gia công — chưa gửi ký duyệt được." : "")}
+            {" "}Lưu biên bản vẫn bình thường.
           </p>
         ) : (
           <p className="mt-2 text-[11px] text-emerald-700">{goods.length ? <>Kho mặc định của vật tư ({code}) đủ hàng{services.length ? ", gia công đã hoàn thành" : ""} — có thể gửi ký duyệt; ký xong tự xuất kho từ kho của từng vật tư.</> : "Gia công đã hoàn thành — có thể gửi ký duyệt."}</p>

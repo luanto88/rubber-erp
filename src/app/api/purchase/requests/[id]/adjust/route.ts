@@ -14,6 +14,8 @@ export const dynamic = "force-dynamic"
 // mỗi dòng trỏ dòng gốc qua parent_line_id và chụp lại thông số "trước điều chỉnh". Ký lại đủ 3 bước
 // (gửi ký bằng route submit chung); duyệt xong mới được nhập kho theo thông số mới.
 // Không cho TĂNG số lượng — mua thêm phải lập phiếu đề nghị mới.
+// GĐ4 A5: dòng đã nhập đủ / phiếu Hoàn tất chỉ được đổi GIÁ; duyệt xong giá mới áp cho mọi lần nhập
+// / xác nhận gia công của dòng (syncPurchaseFromSigning → RPC purchase_apply_line_price).
 
 type Body = {
   lyDo: string
@@ -42,8 +44,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (parent.nguoi_de_nghi_id !== actor.userId) {
       return NextResponse.json({ error: "Chỉ người đề nghị được lập phiếu điều chỉnh" }, { status: 403 })
     }
-    if (!isPurchaseBuying(parent.trang_thai as PurchaseStatus)) {
-      return NextResponse.json({ error: "Chỉ điều chỉnh được phiếu đã duyệt / đang mua" }, { status: 409 })
+    // GĐ4 A5: phiếu Hoàn tất vẫn điều chỉnh được nhưng CHỈ đổi giá (kiểm theo từng dòng bên dưới).
+    const parentDone = parent.trang_thai === "hoan_tat"
+    if (!isPurchaseBuying(parent.trang_thai as PurchaseStatus) && !parentDone) {
+      return NextResponse.json({ error: "Chỉ điều chỉnh được phiếu đã duyệt / đang mua / hoàn tất" }, { status: 409 })
     }
     const pending = await findPendingAdjustment(id)
     if (pending) {
@@ -86,7 +90,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (!(soLuong > 0)) errors.push(`Dòng ${n}: số lượng phải > 0`)
       if (soLuong < eff.received) errors.push(`Dòng ${n}: số lượng duyệt mới (${soLuong}) không được nhỏ hơn số đã nhập (${eff.received})`)
       if (soLuong > eff.so_luong) errors.push(`Dòng ${n}: không được tăng số lượng (đang duyệt ${eff.so_luong}) — mua thêm phải lập phiếu đề nghị mới`)
-      if (eff.received >= eff.so_luong) errors.push(`Dòng ${n}: đã nhập đủ, không điều chỉnh được`)
+      // Dòng đã nhập đủ (hoặc phiếu đã hoàn tất): chỉ được đổi giá — giá mới tự áp cho mọi lần nhập khi duyệt.
+      if ((eff.received >= eff.so_luong || parentDone) && (item.id !== eff.item_id || soLuong !== eff.so_luong)) {
+        errors.push(`Dòng ${n}: đã nhập đủ — chỉ điều chỉnh được đơn giá (giữ nguyên vật tư và số lượng)`)
+      }
       if (!(donGia >= 0)) errors.push(`Dòng ${n}: đơn giá không hợp lệ`)
       if (item.id === eff.item_id && soLuong === eff.so_luong && donGia === eff.don_gia) {
         errors.push(`Dòng ${n}: không có gì thay đổi`)

@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { CheckCircle2, ExternalLink, Loader2, Lock, PackageCheck, Wrench } from "lucide-react"
+import { CheckCircle2, ExternalLink, Loader2, Lock, PackageCheck, Pencil, Wrench, XCircle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
@@ -17,7 +17,9 @@ import {
 } from "@/lib/purchase/types"
 import { ItemPicker, type ItemOpt } from "./purchase-form"
 import { ImageLightbox, PurchaseImagePicker } from "./purchase-image-picker"
-import { closePurchase, completeService, createAdjustment, receivePurchase, type PurchaseDetail } from "./purchase-client"
+import {
+  cancelServiceCompletion, closePurchase, completeService, createAdjustment, receivePurchase, updateActualPrice, type PurchaseDetail,
+} from "./purchase-client"
 
 
 function fmtDate(iso: string | null | undefined) {
@@ -36,10 +38,17 @@ const labelCls = "text-xs font-bold text-slate-600 block mb-1.5"
 
 // ── Bảng tình hình mua + lịch sử ────────────────────────────────────────────
 
-export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail }) {
+type PriceTarget = { kind: "receipt" | "service"; targetId: string; itemName: string; label: string; oldPrice: number; approvedPrice: number | null }
+
+export function PurchaseFulfillmentPanel({ detail, onChanged }: { detail: PurchaseDetail; onChanged?: () => void }) {
   const req = detail.request
   const [lightbox, setLightbox] = useState<string | null>(null)
+  const [priceTarget, setPriceTarget] = useState<PriceTarget | null>(null)
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; label: string } | null>(null)
   if (!detail.effectiveLines.length) return null
+  const canEditPrice = !!detail.perms.canEditActualPrice
+  const approvedOf = (lineId: string | null | undefined) =>
+    detail.effectiveLines.find((e) => e.root_line_id === lineId)?.don_gia ?? null
   const completions = detail.serviceCompletions || []
   const totalReceived = detail.receipts.filter((r) => !r.cancelled).reduce((s, r) => s + Number(r.tong_tien || 0), 0)
     + completions.reduce((s, c) => s + Number(c.so_luong || 0) * Number(c.don_gia || 0), 0)
@@ -123,7 +132,21 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
                 {r.lines.length > 0 && (
                   <ul className="mt-1.5 text-xs text-slate-600 space-y-0.5">
                     {r.lines.map((l, i) => (
-                      <li key={i}>• {l.item_name}: <b>{formatQty(l.quantity)}</b> {l.unit} × {formatMoney(l.don_gia, r.loai_tien || req.loai_tien)}{l.lot_no ? ` (lô ${l.lot_no})` : ""}</li>
+                      <li key={i} className="flex flex-wrap items-center gap-x-2">
+                        <span>• {l.item_name}: <b>{formatQty(l.quantity)}</b> {l.unit} × {formatMoney(l.don_gia, r.loai_tien || req.loai_tien)}{l.lot_no ? ` (lô ${l.lot_no})` : ""}</span>
+                        {canEditPrice && !r.cancelled && l.id && (
+                          <button
+                            type="button"
+                            onClick={() => setPriceTarget({
+                              kind: "receipt", targetId: l.id as string, itemName: l.item_name, label: `phiếu nhập ${r.document_code || ""}`,
+                              oldPrice: Number(l.don_gia) || 0, approvedPrice: approvedOf(l.line_id),
+                            })}
+                            className="inline-flex items-center gap-0.5 font-bold text-sky-700 hover:text-sky-800"
+                          >
+                            <Pencil size={11} /> Sửa giá
+                          </button>
+                        )}
+                      </li>
                     ))}
                   </ul>
                 )}
@@ -160,6 +183,27 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
                   {c.created_by ? `${detail.names[c.created_by] || ""} · ` : ""}{fmtDateTime(c.created_at)}
                   {c.nha_cung_cap ? ` · Đơn vị gia công: ${c.nha_cung_cap}` : ""}
                 </p>
+                {canEditPrice && (
+                  <div className="mt-1.5 flex flex-wrap gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setPriceTarget({
+                        kind: "service", targetId: c.id, itemName: c.item_name || "", label: `xác nhận gia công ngày ${fmtDate(c.ngay)}`,
+                        oldPrice: Number(c.don_gia) || 0, approvedPrice: approvedOf(c.line_id),
+                      })}
+                      className="inline-flex items-center gap-0.5 font-bold text-sky-700 hover:text-sky-800"
+                    >
+                      <Pencil size={11} /> Sửa giá
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCancelTarget({ id: c.id, label: `${c.item_name || ""} — ${formatQty(c.so_luong)} ${c.unit || ""} ngày ${fmtDate(c.ngay)}` })}
+                      className="inline-flex items-center gap-0.5 font-bold text-rose-600 hover:text-rose-700"
+                    >
+                      <XCircle size={11} /> Huỷ xác nhận
+                    </button>
+                  </div>
+                )}
                 {c.ghi_chu && <p className="mt-1 text-xs text-slate-600">Ghi chú: {c.ghi_chu}</p>}
                 {c.image_urls.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -193,7 +237,153 @@ export function PurchaseFulfillmentPanel({ detail }: { detail: PurchaseDetail })
       )}
 
       <ImageLightbox url={lightbox} onClose={() => setLightbox(null)} />
+      {priceTarget && (
+        <ActualPriceModal
+          requestId={req.id}
+          loaiTien={req.loai_tien}
+          target={priceTarget}
+          onClose={() => setPriceTarget(null)}
+          onDone={() => { setPriceTarget(null); onChanged?.() }}
+        />
+      )}
+      {cancelTarget && (
+        <CancelCompletionModal
+          requestId={req.id}
+          target={cancelTarget}
+          onClose={() => setCancelTarget(null)}
+          onDone={() => { setCancelTarget(null); onChanged?.() }}
+        />
+      )}
     </div>
+  )
+}
+
+// ── GĐ4 A5: sửa giá thực tế / huỷ xác nhận gia công ────────────────────────────
+
+function ActualPriceModal({
+  requestId, loaiTien, target, onClose, onDone,
+}: { requestId: string; loaiTien: string; target: PriceTarget; onClose: () => void; onDone: () => void }) {
+  const [donGia, setDonGia] = useState(String(target.oldPrice || ""))
+  const [lyDo, setLyDo] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const price = Number(donGia)
+  const pct = target.approvedPrice ? priceDeviationPct(price, target.approvedPrice) : null
+  const over = pct !== null && Math.abs(pct) > RECEIVE_PRICE_TOLERANCE_PCT
+  const unchanged = price === target.oldPrice
+  const blocking = !(price > 0) || unchanged || over || !lyDo.trim()
+
+  const handleSave = async () => {
+    if (blocking) return
+    setSaving(true)
+    setError(null)
+    try {
+      await updateActualPrice(requestId, { kind: target.kind, targetId: target.targetId, donGia: price, lyDo: lyDo.trim() })
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không sửa được giá")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ModalShell
+      title={`Sửa giá thực tế — ${target.itemName}`}
+      onClose={onClose}
+      maxWidth="lg"
+      closeOnBackdrop={false}
+      footer={
+        <>
+          <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Đóng</button>
+          <button onClick={handleSave} disabled={saving || blocking} className="flex items-center gap-1.5 px-5 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl disabled:opacity-60">
+            {saving && <Loader2 size={14} className="animate-spin" />} Lưu giá
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {error && <div className="whitespace-pre-line rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">{error}</div>}
+        <p className="text-sm text-slate-600">
+          Sửa giá của {target.label}. Chỉ đổi giá — số lượng và tồn kho giữ nguyên. Biên bản bảo trì gắn dòng này (chưa gửi ký) tự cập nhật theo.
+        </p>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded-xl bg-slate-50 px-3 py-2">
+            <p className="text-xs text-slate-500">Giá hiện tại</p>
+            <p className="font-bold text-slate-800">{formatMoney(target.oldPrice, loaiTien)} {loaiTien}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 px-3 py-2">
+            <p className="text-xs text-slate-500">Giá duyệt</p>
+            <p className="font-bold text-slate-800">{target.approvedPrice ? `${formatMoney(target.approvedPrice, loaiTien)} ${loaiTien}` : "—"}</p>
+          </div>
+        </div>
+        <div>
+          <label className={labelCls}>Đơn giá mới ({loaiTien}) *</label>
+          <input type="number" inputMode="decimal" min={0} value={donGia} onChange={(e) => setDonGia(e.target.value)} className={inputCls} />
+          {pct !== null && price > 0 && (
+            <p className={`mt-1 text-xs font-semibold ${over ? "text-red-600" : "text-slate-500"}`}>
+              Lệch {pct.toFixed(1)}% so với giá duyệt
+              {over ? ` — vượt ${RECEIVE_PRICE_TOLERANCE_PCT}%: dùng "Lập phiếu điều chỉnh" để đổi giá duyệt (duyệt xong giá tự áp cho mọi lần nhập).` : ""}
+            </p>
+          )}
+        </div>
+        <div>
+          <label className={labelCls}>Lý do sửa giá *</label>
+          <textarea value={lyDo} onChange={(e) => setLyDo(e.target.value)} rows={3} placeholder="VD: Nhập nhầm giá; hoá đơn thực tế khác…" className={inputCls} />
+        </div>
+      </div>
+    </ModalShell>
+  )
+}
+
+function CancelCompletionModal({
+  requestId, target, onClose, onDone,
+}: { requestId: string; target: { id: string; label: string }; onClose: () => void; onDone: () => void }) {
+  const [lyDo, setLyDo] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSave = async () => {
+    if (!lyDo.trim()) return
+    setSaving(true)
+    setError(null)
+    try {
+      await cancelServiceCompletion(requestId, target.id, lyDo.trim())
+      onDone()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không huỷ được xác nhận")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ModalShell
+      title="Huỷ xác nhận hoàn thành gia công"
+      onClose={onClose}
+      maxWidth="lg"
+      closeOnBackdrop={false}
+      footer={
+        <>
+          <button onClick={onClose} className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl">Đóng</button>
+          <button onClick={handleSave} disabled={saving || !lyDo.trim()} className="flex items-center gap-1.5 px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl disabled:opacity-60">
+            {saving && <Loader2 size={14} className="animate-spin" />} Huỷ xác nhận
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {error && <div className="whitespace-pre-line rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-sm font-semibold text-red-700">{error}</div>}
+        <p className="text-sm text-slate-600">
+          Huỷ lần xác nhận <b>{target.label}</b>. Phiếu tính lại số đã hoàn thành; biên bản bảo trì gắn dòng sẽ báo lại &ldquo;chờ xác nhận gia công&rdquo;.
+          Không huỷ được nếu biên bản đó đã gửi ký / đã duyệt.
+        </p>
+        <div>
+          <label className={labelCls}>Lý do huỷ *</label>
+          <textarea value={lyDo} onChange={(e) => setLyDo(e.target.value)} rows={3} className={inputCls} />
+        </div>
+      </div>
+    </ModalShell>
   )
 }
 
@@ -544,7 +734,9 @@ export function AdjustModal({
   detail, factoryId, onClose, onCreated,
 }: { detail: PurchaseDetail; factoryId: string; onClose: () => void; onCreated: (adjId: string) => Promise<void> }) {
   const req = detail.request
-  const lines = useMemo(() => detail.effectiveLines.filter((e) => remainingQty(e) > 0), [detail.effectiveLines])
+  // GĐ4 A5: mọi dòng đều điều chỉnh được; dòng đã nhập đủ (hoặc phiếu Hoàn tất) chỉ được đổi GIÁ.
+  const lines = detail.effectiveLines
+  const priceOnly = (e: PurchaseEffectiveLine) => req.trang_thai === "hoan_tat" || remainingQty(e) <= 0
   const [items, setItems] = useState<ItemOpt[]>([])
   const [lyDo, setLyDo] = useState("")
   const [draft, setDraft] = useState<Record<string, AdjustDraftLine>>(() =>
@@ -589,6 +781,7 @@ export function AdjustModal({
       if (!(price >= 0) || d.donGia.trim() === "") errs.push("Đơn giá không hợp lệ")
       if (item && item.id !== e.item_id && e.received > 0) errs.push("Đã nhập theo mã cũ — không đổi mã được")
       if (item && item.id === e.item_id && qty === e.so_luong && price === e.don_gia) errs.push("Chưa thay đổi gì")
+      if (priceOnly(e) && ((item && item.id !== e.item_id) || qty !== e.so_luong)) errs.push("Đã nhập đủ — chỉ đổi được đơn giá")
     }
     return { e, d, item, qty, price, errs }
   })
@@ -643,6 +836,7 @@ export function AdjustModal({
                   <span className="ml-1.5 text-xs font-mono text-slate-500">{e.item_code}</span>
                   <span className="block text-xs text-slate-500">
                     Đang duyệt {formatQty(e.so_luong)} {e.unit} × {formatMoney(e.don_gia, req.loai_tien)} · đã nhập {formatQty(e.received)}
+                    {priceOnly(e) && <b className="ml-1 text-sky-700">· Đã nhập đủ — chỉ đổi giá, duyệt xong áp cho mọi lần nhập</b>}
                   </span>
                 </span>
               </label>
@@ -650,16 +844,20 @@ export function AdjustModal({
                 <div className="mt-2 grid grid-cols-1 md:grid-cols-4 gap-2">
                   <div className="md:col-span-2">
                     <label className="text-[11px] font-bold text-slate-500">Vật tư sau điều chỉnh</label>
-                    <ItemPicker
-                      items={items}
-                      value={item}
-                      onSelect={(it) => patch(e.root_line_id, { item: it })}
-                      disabledIds={new Set()}
-                    />
+                    {priceOnly(e) ? (
+                      <p className={`${inputCls} bg-slate-50 text-slate-600`}>{e.item_code} — {e.item_name}</p>
+                    ) : (
+                      <ItemPicker
+                        items={items}
+                        value={item}
+                        onSelect={(it) => patch(e.root_line_id, { item: it })}
+                        disabledIds={new Set()}
+                      />
+                    )}
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-slate-500">Tổng SL duyệt mới</label>
-                    <input type="number" inputMode="decimal" min={e.received} max={e.so_luong} value={d.soLuong} onChange={(ev) => patch(e.root_line_id, { soLuong: ev.target.value })} className={inputCls} />
+                    <input type="number" inputMode="decimal" min={e.received} max={e.so_luong} value={d.soLuong} readOnly={priceOnly(e)} onChange={(ev) => patch(e.root_line_id, { soLuong: ev.target.value })} className={`${inputCls} ${priceOnly(e) ? "bg-slate-50 text-slate-600" : ""}`} />
                   </div>
                   <div>
                     <label className="text-[11px] font-bold text-slate-500">Đơn giá mới ({req.loai_tien})</label>

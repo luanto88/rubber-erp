@@ -124,16 +124,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       const [docRes, lineRes, whRes] = await Promise.all([
         docIds.length ? supabaseAdmin.from("inventory_documents").select("id, status").in("id", docIds) : Promise.resolve({ data: [] }),
         docIds.length
-          ? supabaseAdmin.from("inventory_document_lines").select("document_id, item_name, unit, quantity, don_gia, lot_no").in("document_id", docIds)
+          ? supabaseAdmin.from("inventory_document_lines").select("id, purchase_request_line_id, document_id, item_name, unit, quantity, don_gia, lot_no").in("document_id", docIds)
           : Promise.resolve({ data: [] }),
         whIds.length ? supabaseAdmin.from("inventory_warehouses").select("id, code, name").in("id", whIds) : Promise.resolve({ data: [] }),
       ])
       const docStatus = new Map(((docRes.data || []) as { id: string; status: string }[]).map((d) => [d.id, d.status]))
       const whLabel = new Map(((whRes.data || []) as { id: string; code: string; name: string }[]).map((w) => [w.id, `${w.code} — ${w.name}`]))
       const linesByDoc = new Map<string, PurchaseReceiptRow["lines"]>()
-      for (const l of (lineRes.data || []) as (PurchaseReceiptRow["lines"][number] & { document_id: string })[]) {
+      for (const l of (lineRes.data || []) as (PurchaseReceiptRow["lines"][number] & { document_id: string; purchase_request_line_id: string | null })[]) {
         const arr = linesByDoc.get(l.document_id) || []
-        arr.push({ item_name: l.item_name, unit: l.unit, quantity: Number(l.quantity), don_gia: l.don_gia === null ? null : Number(l.don_gia), lot_no: l.lot_no })
+        arr.push({
+          id: l.id, line_id: l.purchase_request_line_id,
+          item_name: l.item_name, unit: l.unit, quantity: Number(l.quantity), don_gia: l.don_gia === null ? null : Number(l.don_gia), lot_no: l.lot_no,
+        })
         linesByDoc.set(l.document_id, arr)
       }
       receipts = recRows.map((r) => ({
@@ -229,7 +232,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         canReceive: buying && hasRemaining && (isOwner || actor.isAdmin),
         // "Xác nhận hoàn thành" dịch vụ gia công: cùng quy tắc với Ghi nhận mua.
         canCompleteService: buying && hasServiceRemaining && (isOwner || actor.isAdmin),
-        canAdjust: buying && hasAdjustable && isOwner && !pendingAdjustmentId,
+        // GĐ4 A5: phiếu Hoàn tất vẫn lập được điều chỉnh CHỈ ĐỔI GIÁ (dòng đã nhập đủ).
+        canAdjust: ((buying && hasAdjustable) || (!isAdjustment && status === "hoan_tat" && effectiveLines.length > 0)) && isOwner && !pendingAdjustmentId,
+        // Sửa giá thực tế (≤ 10%) từng lần nhập / gia công, huỷ xác nhận gia công: người đề nghị + admin.
+        canEditActualPrice: !isAdjustment && status !== "huy" && (isOwner || actor.isAdmin),
         canClose: !isAdjustment && status === "dang_mua" && (isOwner || actor.isAdmin) && !pendingAdjustmentId,
         // Ảnh theo dòng: người đề nghị + admin, kể cả sau khi ký (ảnh không in lên PDF), trừ phiếu đã huỷ.
         canEditImages: (isOwner || actor.isAdmin) && status !== "huy",

@@ -79,6 +79,42 @@ const COMMITMENTS = [
   { icon: TrendingUp, titleKey: "commitGrowthTitle", subtitleKey: "commitGrowthSubtitle" },
 ] as const
 
+// Nhà máy chọn sẵn ở tab Đăng ký — theo MÃ (không UUID), đổi được qua biến môi trường.
+const DEFAULT_FACTORY_CODE = (process.env.NEXT_PUBLIC_DEFAULT_FACTORY_CODE || "phuochoa_kt").trim()
+
+function pickDefaultFactory(list: FactoryOption[]): FactoryOption | null {
+  return (
+    list.find((f) => f.code === DEFAULT_FACTORY_CODE) ??
+    list.find((f) => f.prefix === "CSR" || f.name.toLowerCase().includes("kampong")) ??
+    list[0] ??
+    null
+  )
+}
+
+// Danh sách nhà máy / phòng ban lần trước — hiện ngay khi mở trang, tải bản mới ở nền. Chỉ là
+// danh mục công khai (không phải dữ liệu nghiệp vụ). Bọc try/catch: WebView Telegram/Zalo chặn storage.
+const LOGIN_LISTS_CACHE_KEY = "login_lists_cache_v1"
+
+function readLoginListsCache(): { factories: FactoryOption[]; departments: DepartmentOption[] } | null {
+  try {
+    const raw = window.localStorage.getItem(LOGIN_LISTS_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { factories?: FactoryOption[]; departments?: DepartmentOption[] }
+    if (!Array.isArray(parsed.factories) || !Array.isArray(parsed.departments)) return null
+    return { factories: parsed.factories, departments: parsed.departments }
+  } catch {
+    return null
+  }
+}
+
+function writeLoginListsCache(factories: FactoryOption[], departments: DepartmentOption[]) {
+  try {
+    window.localStorage.setItem(LOGIN_LISTS_CACHE_KEY, JSON.stringify({ factories, departments }))
+  } catch {
+    /* storage bị chặn — bỏ qua */
+  }
+}
+
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string) {
   return Promise.race<T>([
     promise,
@@ -178,82 +214,85 @@ function LoginPageContent() {
     [factories],
   )
 
+  // Khởi động: 3 việc ĐỘC LẬP, không việc nào chặn form đăng nhập (trước đây banner "Đang tải…"
+  // chờ cả 3, kể cả kiểm tra phiên tới 15s). Danh sách lần trước hiện ngay từ cache.
   useEffect(() => {
     let alive = true
     setBooting(true)
 
-    const bootstrap = async () => {
+    const applyFactories = (list: FactoryOption[]) => {
+      setFactories(list)
+      setFactoryId((prev) => (prev && list.some((f) => f.id === prev) ? prev : pickDefaultFactory(list)?.id || ""))
+    }
+
+    const cached = readLoginListsCache()
+    if (cached) {
+      if (cached.factories.length) applyFactories(cached.factories)
+      if (cached.departments.length) setDepartments(cached.departments)
+    }
+
+    const loadLists = async () => {
+      const [factoryResult, deptResult] = await Promise.allSettled([
+        withTimeout(
+          Promise.resolve(supabase.from("factories").select("id, code, name, prefix").order("name")),
+          LOGIN_BOOT_TIMEOUT_MS,
+          "load factories",
+        ),
+        withTimeout(
+          Promise.resolve(
+            supabase
+              .from("departments")
+              .select("id, code, name, sort_order")
+              .eq("is_active", true)
+              .order("sort_order"),
+          ),
+          LOGIN_BOOT_TIMEOUT_MS,
+          "load departments",
+        ),
+      ])
+      if (!alive) return
+      const nextFactories =
+        factoryResult.status === "fulfilled" && !factoryResult.value.error
+          ? ((factoryResult.value.data || []) as FactoryOption[])
+          : null
+      const nextDepartments =
+        deptResult.status === "fulfilled" && !deptResult.value.error
+          ? ((deptResult.value.data || []) as DepartmentOption[])
+          : null
+      // Lỗi mạng: giữ danh sách cache đang hiện (nếu có), không xoá trắng.
+      if (nextFactories) applyFactories(nextFactories)
+      else if (!cached?.factories.length) setFactories([])
+      if (nextDepartments) setDepartments(nextDepartments)
+      else if (!cached?.departments.length) setDepartments([])
+      if (nextFactories?.length && nextDepartments) writeLoginListsCache(nextFactories, nextDepartments)
+      setBooting(false)
+    }
+
+    // Phiên cũ còn hiệu lực ⇒ tự chuyển vào `?next=` / dashboard (chạy nền, form vẫn dùng được).
+    const checkSession = async () => {
       try {
-        const [factoryResult, deptResult, sessionResult] = await Promise.allSettled([
-          withTimeout(
-            Promise.resolve(supabase.from("factories").select("id, code, name, prefix").order("name")),
-            LOGIN_BOOT_TIMEOUT_MS,
-            "load factories",
-          ),
-          withTimeout(
-            Promise.resolve(
-              supabase
-                .from("departments")
-                .select("id, code, name, sort_order")
-                .eq("is_active", true)
-                .order("sort_order"),
-            ),
-            LOGIN_BOOT_TIMEOUT_MS,
-            "load departments",
-          ),
-          withTimeout(hydrateActiveSession(), LOGIN_BOOT_TIMEOUT_MS, "hydrate session"),
-        ])
-
+        const { user } = await withTimeout(hydrateActiveSession(), LOGIN_BOOT_TIMEOUT_MS, "hydrate session")
         if (!alive) return
-
-        if (factoryResult.status === "fulfilled") {
-          const nextFactories = ((factoryResult.value.data || []) as FactoryOption[]) || []
-          setFactories(nextFactories)
-          if (nextFactories.length && !factoryId) {
-            const preferred =
-              nextFactories.find((f) => f.prefix === "CSR" || f.name.toLowerCase().includes("kampong")) ??
-              nextFactories[0]
-            setFactoryId(preferred.id)
-          }
-        } else {
-          setFactories([])
+        const blockReason = authBlockReason(user)
+        // Có `?reason=` = vừa bị đưa ra khỏi app (chờ duyệt / bị khoá…) ⇒ đứng yên hiện thông báo,
+        // không tự chuyển vào trong (tránh nuốt thông báo / vòng lặp chuyển trang).
+        if (user && !blockReason && !reason) {
+          router.replace(afterLoginPath)
+          return
         }
-
-        if (deptResult.status === "fulfilled") {
-          setDepartments(((deptResult.value.data || []) as DepartmentOption[]) || [])
-        } else {
-          setDepartments([])
-        }
-
-        if (sessionResult.status === "fulfilled") {
-          const { user } = sessionResult.value
-          const blockReason = authBlockReason(user)
-
-          if (user && !blockReason) {
-            router.replace(afterLoginPath)
-            return
-          }
-
-          if (blockReason && blockReason !== "missing") {
-            await signOutEverywhere()
-            if (alive) setNotice({ kind: "reason", reason: blockReason })
-          }
-        } else {
-          clearLegacySession()
+        if (blockReason && blockReason !== "missing") {
+          await signOutEverywhere()
+          if (alive) setNotice({ kind: "reason", reason: blockReason })
         }
       } catch {
-        if (alive) {
-          setFactories([])
-          setDepartments([])
-          clearLegacySession()
-          setNotice({ kind: "key", key: "errorCannotLoadSession" })
-        }
-      } finally {
-        if (alive) setBooting(false)
+        if (alive) clearLegacySession()
       }
     }
 
-    void bootstrap()
+    void loadLists().catch(() => {
+      if (alive) setBooting(false)
+    })
+    if (bootAttempt === 0) void checkSession()
 
     return () => {
       alive = false
@@ -682,12 +721,6 @@ function LoginPageContent() {
             <div className="h-px flex-1 bg-slate-100" />
           </div>
 
-          {booting && (
-            <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
-              <span>{t("bootingMessage")}</span>
-            </div>
-          )}
 
           <div className="mb-6 flex gap-2">
             {(["login", "register"] as const).map((item) => (
@@ -709,6 +742,8 @@ function LoginPageContent() {
           </div>
 
           <div className="space-y-4">
+            {/* Nhà máy chỉ dùng khi Đăng ký — đăng nhập lấy nhà máy theo tài khoản nên ẩn ở tab Đăng nhập. */}
+            {tab === "register" && (
             <div className="relative">
               <Building2 size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <select
@@ -716,7 +751,7 @@ function LoginPageContent() {
                 onChange={(e) => setFactoryId(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none focus:border-emerald-500"
               >
-                {factoryOptions.length === 0 && <option value="">{t("selectFactoryPlaceholder")}</option>}
+                {factoryOptions.length === 0 && <option value="">{booting ? t("bootingMessage") : t("selectFactoryPlaceholder")}</option>}
                 {factoryOptions.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.label}
@@ -724,8 +759,9 @@ function LoginPageContent() {
                 ))}
               </select>
             </div>
+            )}
 
-            {!booting && factoryOptions.length === 0 && (
+            {tab === "register" && !booting && factoryOptions.length === 0 && (
               <div className="flex items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-2.5 text-xs text-amber-700">
                 <span>{t("factoriesLoadFailedHint")}</span>
                 <button

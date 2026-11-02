@@ -13,7 +13,23 @@ type ShortageRecord = {
   maBb: string | null
   boPhan: string | null
   needsRequest: boolean
-  items: { kind?: "vat_tu" | "dich_vu"; name: string; unit: string | null; shortage: number; pendingRequested: number }[]
+  items: {
+    kind?: "vat_tu" | "dich_vu"; name: string; unit: string | null; shortage: number; pendingRequested: number
+    pendingRequests?: { so: number; nam: number; qty: number }[]
+  }[]
+}
+
+/** "thiếu 2 cái — chờ nhập kho theo phiếu 79/ĐNMVT" (nói rõ phiếu đang chờ, phần còn phải lập thêm). */
+function itemText(it: ShortageRecord["items"][number]): string {
+  const u = it.unit ? ` ${it.unit}` : ""
+  const base = `${it.name}: ${it.kind === "dich_vu" ? "chưa hoàn thành" : "thiếu"} ${it.shortage}${u}`
+  const reqs = it.pendingRequests || []
+  if (!(it.pendingRequested > 0)) return base
+  const so = reqs.length ? ` theo phiếu ${reqs.map((r) => `${String(r.so).padStart(2, "0")}/ĐNMVT`).join(", ")}` : ""
+  const verb = it.kind === "dich_vu" ? "chờ xác nhận" : "chờ nhập kho"
+  return it.pendingRequested >= it.shortage
+    ? `${base} — ${verb}${so}`
+    : `${base} — ${verb}${so} ${it.pendingRequested}${u}, cần lập thêm ${it.shortage - it.pendingRequested}${u}`
 }
 
 export function KtShortageBanner() {
@@ -60,7 +76,7 @@ export function KtShortageBanner() {
                 {r.needsRequest ? "Chưa lập đề nghị" : r.items.every((it) => it.kind === "dich_vu") ? "Chờ xác nhận gia công" : "Chờ nhập kho / gia công"}
               </span>
               <span className="text-amber-800">
-                {" "}— {r.items.map((it) => `${it.name}: ${it.kind === "dich_vu" ? "chưa hoàn thành" : "thiếu"} ${it.shortage}${it.unit ? ` ${it.unit}` : ""}`).join("; ")}
+                {" "}— {r.items.map(itemText).join("; ")}
               </span>
             </li>
           ))}

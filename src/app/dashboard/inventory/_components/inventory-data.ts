@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId } from "@/lib/auth"
+import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { buildEffectiveStockBalances } from "./inventory-stock"
 
 export type InventoryWarehouseOption = {
@@ -418,14 +419,22 @@ export async function loadInventoryMovementData() {
     }
   }
 
-  const movementResult = await supabase
-    .from("inventory_stock_movements")
-    .select(
-      "id, document_id, document_line_id, movement_type, warehouse_id, item_id, quantity_in, quantity_out, balance_after, lot_no, expiry_date, movement_date, created_at",
-    )
-    .eq("factory_id", snapshotData.factoryId)
-    .order("movement_date", { ascending: false })
-    .order("created_at", { ascending: false })
+  // Phân trang: PostgREST cắt im lặng ở 1000 dòng. Thứ tự ổn định ngày → giờ tạo → id.
+  const factoryId = snapshotData.factoryId
+  const movementResult = await fetchAllPaginated<InventoryStockMovementRow>((from, to) =>
+    supabase
+      .from("inventory_stock_movements")
+      .select(
+        "id, document_id, document_line_id, movement_type, warehouse_id, item_id, quantity_in, quantity_out, balance_after, lot_no, expiry_date, movement_date, created_at",
+      )
+      .eq("factory_id", factoryId)
+      .order("movement_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to),
+  )
+    .then((data) => ({ data, error: null as unknown }))
+    .catch((error: unknown) => ({ data: null as InventoryStockMovementRow[] | null, error }))
 
   if (movementResult.error) {
     return {
@@ -458,6 +467,80 @@ export async function loadInventoryMovementData() {
     warning: null,
     movements,
   }
+}
+
+// ── Thông tin chứng từ cho từng dòng phát sinh (Sổ chi tiết, In thẻ kho) ──
+
+export type MovementDocumentInfo = {
+  documentCode: string
+  requesterName: string
+  approved: boolean
+  notes: string
+}
+
+const IN_CHUNK = 200
+
+/**
+ * Ghi chú dòng + thông tin phiếu (mã, ghi chú, người đề nghị, đã duyệt) cho các dòng phát sinh.
+ * Chia lô 200 id: một `.in()` vài trăm id làm URL quá dài ⇒ Bad Request (lỗi cũ: ghi chú luôn rỗng).
+ * Lỗi ⇒ ném ra để trang báo rõ, không âm thầm để trống.
+ */
+export async function loadMovementDocumentInfo(
+  factoryId: string,
+  movements: Pick<InventoryStockMovementRow, "document_id" | "document_line_id">[],
+): Promise<{ lineNotes: Record<string, string>; documents: Record<string, MovementDocumentInfo> }> {
+  const lineIds = Array.from(new Set(movements.map((m) => m.document_line_id).filter(Boolean)))
+  const docIds = Array.from(new Set(movements.map((m) => m.document_id).filter(Boolean)))
+  const lineNotes: Record<string, string> = {}
+  const documents: Record<string, MovementDocumentInfo> = {}
+
+  for (let i = 0; i < lineIds.length; i += IN_CHUNK) {
+    const { data, error } = await supabase
+      .from("inventory_document_lines")
+      .select("id, line_notes")
+      .eq("factory_id", factoryId)
+      .in("id", lineIds.slice(i, i + IN_CHUNK))
+    if (error) throw new Error(`Không tải được ghi chú dòng chứng từ: ${error.message}`)
+    for (const row of (data || []) as { id: string; line_notes: string | null }[]) lineNotes[row.id] = (row.line_notes || "").trim()
+  }
+
+  for (let i = 0; i < docIds.length; i += IN_CHUNK) {
+    const { data, error } = await supabase
+      .from("inventory_documents")
+      .select("id, document_code, requester_name, approved_by_name, notes")
+      .eq("factory_id", factoryId)
+      .in("id", docIds.slice(i, i + IN_CHUNK))
+    if (error) throw new Error(`Không tải được thông tin phiếu: ${error.message}`)
+    for (const row of (data || []) as { id: string; document_code: string | null; requester_name: string | null; approved_by_name: string | null; notes: string | null }[]) {
+      documents[row.id] = {
+        documentCode: row.document_code || "",
+        requesterName: row.requester_name || "",
+        approved: !!row.approved_by_name,
+        notes: (row.notes || "").trim(),
+      }
+    }
+  }
+
+  return { lineNotes, documents }
+}
+
+export const MOVEMENT_TYPE_LABEL: Record<InventoryStockMovementRow["movement_type"], string> = {
+  import: "Nhập kho",
+  export: "Xuất kho",
+  transfer_in: "Chuyển đến",
+  transfer_out: "Chuyển đi",
+}
+
+/** Ghi chú hiển thị: ghi chú dòng → ghi chú phiếu → "<loại phiếu> <mã phiếu>". */
+export function movementNoteText(
+  movement: Pick<InventoryStockMovementRow, "document_id" | "document_line_id" | "movement_type">,
+  info: { lineNotes: Record<string, string>; documents: Record<string, MovementDocumentInfo> },
+): string {
+  const lineNote = info.lineNotes[movement.document_line_id]
+  if (lineNote) return lineNote
+  const doc = info.documents[movement.document_id]
+  if (doc?.notes) return doc.notes
+  return [MOVEMENT_TYPE_LABEL[movement.movement_type], doc?.documentCode].filter(Boolean).join(" ")
 }
 
 // ── Alert threshold types ─────────────────────────────────────

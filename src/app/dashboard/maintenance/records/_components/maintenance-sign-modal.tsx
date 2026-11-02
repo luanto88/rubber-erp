@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { CheckCircle2, Loader2, XCircle } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { authFetch } from "@/lib/auth-fetch"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import {
   buildMaintenanceSuCoNhoPdfForSigning, buildMaintenanceBaoDuongPdfForSigning,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/maintenance-pdf"
 import { jsPdfBoxToPt } from "@/lib/signing/coords"
 import { buildMaintenanceDocLabel } from "@/lib/signing/labels"
+import { setRepairThresholdUsd } from "@/lib/maintenance-threshold"
 
 type ResolvedSigner = {
   roleId: MaintenanceSignRoleId
@@ -80,12 +82,15 @@ function buildMaintenanceMaHoSo(record: RecordData): string {
 // và tự gom nhóm ở client — mirror đúng pattern `matsMap` đã dùng ở `loadRecord()` trong
 // `records/[id]/page.tsx`.
 export async function loadRecordForSigning(recordId: string, factoryId: string): Promise<{ record: RecordData; staffMap: Map<string, string> } | null> {
-  const [{ data: rec }, { data: rawLines }, { data: staffData }] = await Promise.all([
+  const [{ data: rec }, { data: rawLines }, { data: staffData }, { data: factoryRow }] = await Promise.all([
     supabase.from("maintenance_records").select("*").eq("id", recordId).eq("factory_id", factoryId).single(),
     supabase.from("maintenance_record_lines").select("*").eq("record_id", recordId).order("sort_order"),
     supabase.from("maintenance_staff").select("ten, chuc_vu").eq("factory_id", factoryId).eq("active", true),
+    // "*": cột nguong_sua_chua_lon có thể chưa có ⇒ mặc định 200. PDF in nhãn "Sửa chữa lớn >N$" theo ngưỡng này.
+    supabase.from("factories").select("*").eq("id", factoryId).maybeSingle(),
   ])
   if (!rec) return null
+  setRepairThresholdUsd((factoryRow as Record<string, unknown> | null)?.nguong_sua_chua_lon)
 
   const lineIds = (rawLines || []).map((ln) => ln.id as string)
   const { data: matsData } = lineIds.length > 0
@@ -158,6 +163,17 @@ export function MaintenanceSignModal({
     setSubmitting(true)
     setError("")
     try {
+      // GĐ4: chốt giá vật tư mua ngoài / gia công theo đề nghị mua TRƯỚC khi dựng PDF — sau khi ký PDF bất biến.
+      const syncRes = await authFetch("/api/maintenance/ext-prices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordId, sync: true }),
+      })
+      if (!syncRes.ok) {
+        const j = (await syncRes.json().catch(() => ({}))) as { error?: string }
+        setError(j.error || "Không đồng bộ được giá vật tư mua ngoài — thử lại")
+        return
+      }
       const loaded = await loadRecordForSigning(recordId, factoryId)
       if (!loaded) {
         setError("Không tải được dữ liệu biên bản")

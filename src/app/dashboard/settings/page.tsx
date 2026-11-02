@@ -26,6 +26,7 @@ import { ModalShell } from "../_components/modal-shell"
 import { ExtMaterialModal, emptyExtMaterialForm, type ExtMaterialFormValues } from "../maintenance/_components/ext-material-modal"
 import { CategoryNameClashWarning, findCategoryNameClashes, isClashConfirmed } from "../_components/category-name-clash"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
+import { RepairThresholdCard } from "./_components/repair-threshold-card"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import { ShiftNamesTab } from "./_components/shift-names-tab"
 import { OpeningStockTab } from "./_components/opening-stock-tab"
@@ -375,6 +376,7 @@ type InvItemRow = {
   default_warehouse_ids: string[] | null
   manages_lot: boolean
   manages_expiry: boolean
+  uses_shared_oil_stock: boolean
   min_stock: number
   max_stock: number
   is_active: boolean
@@ -390,6 +392,8 @@ type InvItemForm = {
   category_id: string; code: string; name: string; unit: string; specification: string
   selected_warehouse_ids: string[]; location_codes: Record<string, string>
   manages_lot: boolean; manages_expiry: boolean
+  // Dầu dùng chung bồn: tồn theo bồn của từng kho (inventory_oil_stock_pools), không theo mã.
+  uses_shared_oil_stock: boolean
   min_stock: string; max_stock: string; is_active: boolean
   don_gia: string; loai_tien: string
 }
@@ -926,7 +930,11 @@ export default function SettingsPage() {
   const [invCategoryForm, setInvCategoryForm] = useState<InvCategoryForm>({ code: "", name: "", sort_order: "0", is_active: true })
   // Tên nhóm đã xác nhận dù trùng tên vật tư (chỉ khi tạo mới; đổi tên phải xác nhận lại).
   const [categoryClashConfirmedName, setCategoryClashConfirmedName] = useState("")
-  const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true, don_gia: "", loai_tien: "USD" })
+  const [invItemForm, setInvItemForm] = useState<InvItemForm>({ category_id: "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, uses_shared_oil_stock: false, min_stock: "0", max_stock: "0", is_active: true, don_gia: "", loai_tien: "USD" })
+  // Tồn bồn dầu theo kho (inventory_oil_stock_pools) — chỉ để hiển thị gợi ý trong form vật tư.
+  const [invOilPools, setInvOilPools] = useState<Record<string, number>>({})
+  // Mã vật tư đang sửa đã có phát sinh kho ⇒ không cho đổi cờ dùng chung bồn (trigger DB cũng chặn).
+  const [invItemHasMovements, setInvItemHasMovements] = useState(false)
   const [deliveryPointForm, setDeliveryPointForm] = useState<DispatchDeliveryPointForm>(emptyDeliveryPointForm())
   const [dispatchDriverForm, setDispatchDriverForm] = useState<DispatchDriverForm>(emptyDispatchDriverForm())
   const [dispatchVehicleForm, setDispatchVehicleForm] = useState<DispatchVehicleForm>(emptyDispatchVehicleForm())
@@ -1151,7 +1159,7 @@ export default function SettingsPage() {
       const [wRes, cRes, iItemsRes, iCatCountRes, dRes] = await Promise.all([
         supabase.from("inventory_warehouses").select("id, factory_id, code, name, keeper_name, warehouse_type, is_active").eq("factory_id", fid).order("code"),
         supabase.from("inventory_item_categories").select("id, factory_id, code, name, sort_order, is_active").eq("factory_id", fid).order("sort_order").order("code"),
-        supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, min_stock, max_stock, is_active, don_gia, loai_tien").eq("factory_id", fid).order("code"),
+        supabase.from("inventory_items").select("id, factory_id, category_id, code, name, unit, specification, default_warehouse_ids, manages_lot, manages_expiry, uses_shared_oil_stock, min_stock, max_stock, is_active, don_gia, loai_tien").eq("factory_id", fid).order("code"),
         supabase.from("inventory_items").select("category_id").eq("factory_id", fid),
         supabase.from("dispatch_delivery_points").select("*").eq("factory_id", fid).order("sort_order").order("ma_lo"),
       ])
@@ -1167,6 +1175,7 @@ export default function SettingsPage() {
       const categoryNameMap = new Map(nextCategories.map((c) => [c.id, c.name]))
       const nextItems = ((iItemsRes.data || []) as Omit<InvItemRow, "categoryName" | "warehouseCodes">[]).map((row) => ({
         ...row,
+        uses_shared_oil_stock: !!row.uses_shared_oil_stock,
         categoryName: categoryNameMap.get(row.category_id || "") || "Chưa phân loại",
         warehouseCodes: (row.default_warehouse_ids || []).map((id) => warehouseCodeMap.get(id) || id),
       }))
@@ -1181,6 +1190,8 @@ export default function SettingsPage() {
         .order("ten")
 
       setInvWarehouses(nextWarehouses)
+      const { data: poolRows } = await supabase.from("inventory_oil_stock_pools").select("warehouse_id, on_hand").eq("factory_id", fid)
+      setInvOilPools(Object.fromEntries(((poolRows || []) as { warehouse_id: string; on_hand: number | null }[]).map((p) => [p.warehouse_id, Number(p.on_hand) || 0])))
       setInvCategories(nextCategories)
       setInvItems(nextItems)
       setDeliveryPoints(nextDeliveryPoints)
@@ -1659,14 +1670,26 @@ export default function SettingsPage() {
     if (!invItemForm.unit.trim()) { setConfigError("Đơn vị tính không được để trống"); return }
     if (invItemForm.selected_warehouse_ids.length === 0) { setConfigError("Phải chọn ít nhất 1 kho chứa"); return }
     if (!(Number(invItemForm.don_gia) > 0)) { setConfigError("Vui lòng nhập Đơn giá (bắt buộc, dùng để tự điền khi chọn vật tư trong biên bản Bảo trì)"); return }
+    const editingItem = configEditId ? invItems.find((it) => it.id === configEditId) : null
+    const oilFlagChanged = !!editingItem && editingItem.uses_shared_oil_stock !== invItemForm.uses_shared_oil_stock
     setConfigSaving(true)
     setConfigError("")
     try {
-      const payload = { factory_id: factoryId, category_id: invItemForm.category_id, code: invItemForm.code.trim().toUpperCase(), name: invItemForm.name.trim(), unit: invItemForm.unit.trim(), specification: invItemForm.specification.trim() || null, default_warehouse_ids: invItemForm.selected_warehouse_ids, manages_lot: invItemForm.manages_lot, manages_expiry: invItemForm.manages_expiry, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, is_active: invItemForm.is_active, don_gia: Number(invItemForm.don_gia) || 0, loai_tien: invItemForm.loai_tien || "USD" }
+      if (oilFlagChanged) {
+        // Đổi cờ khi đã có nhập/xuất ⇒ tồn cũ nằm sai chỗ, huỷ phiếu cũ trừ nhầm bồn. Trigger DB cũng chặn.
+        const { count, error: mvErr } = await supabase.from("inventory_stock_movements").select("id", { count: "exact", head: true }).eq("item_id", configEditId as string).eq("factory_id", factoryId)
+        if (mvErr) { setConfigError(mvErr.message); return }
+        if ((count || 0) > 0) { setConfigError(`Mã đã có ${count} phát sinh kho — không thể đổi "Dùng chung bồn dầu". Hãy tạo mã mới nếu cần.`); return }
+      }
+      const payload = { factory_id: factoryId, category_id: invItemForm.category_id, code: invItemForm.code.trim().toUpperCase(), name: invItemForm.name.trim(), unit: invItemForm.unit.trim(), specification: invItemForm.specification.trim() || null, default_warehouse_ids: invItemForm.selected_warehouse_ids, manages_lot: invItemForm.manages_lot, manages_expiry: invItemForm.manages_expiry, uses_shared_oil_stock: invItemForm.uses_shared_oil_stock, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, is_active: invItemForm.is_active, don_gia: Number(invItemForm.don_gia) || 0, loai_tien: invItemForm.loai_tien || "USD" }
       const result = configEditId
         ? await supabase.from("inventory_items").update(payload).eq("id", configEditId).eq("factory_id", factoryId).select("id").single()
         : await supabase.from("inventory_items").insert(payload).select("id").single()
-      if (result.error || !result.data?.id) { setConfigError(result.error?.message || "Không lưu được vật tư"); return }
+      if (result.error || !result.data?.id) {
+        const msg = result.error?.message || "Không lưu được vật tư"
+        setConfigError(/INV_SHARED_OIL_LOCKED/.test(msg) ? `Mã đã có phát sinh kho — không thể đổi "Dùng chung bồn dầu".` : msg)
+        return
+      }
       const itemId = result.data.id as string
       await supabase.from("inventory_item_warehouse_rules").delete().eq("item_id", itemId).eq("factory_id", factoryId)
       const rulesPayload = invItemForm.selected_warehouse_ids.map((wId, idx) => ({ factory_id: factoryId, item_id: itemId, warehouse_id: wId, min_stock: Number(invItemForm.min_stock) || 0, max_stock: Number(invItemForm.max_stock) || 0, reorder_point: Number(invItemForm.min_stock) || 0, safety_stock: Number(invItemForm.min_stock) || 0, is_primary: idx === 0, location_code: (invItemForm.location_codes[wId] || "").trim() || null }))
@@ -2073,8 +2096,12 @@ export default function SettingsPage() {
             .select("id")
             .single()
           if (itemErr || !itemData?.id) { errors.push(`Dòng ${rowNum} (${code}): ${itemErr?.message || "lỗi lưu vật tư"}`); continue }
+          // File Excel không có cột Vị trí kho ⇒ giữ nguyên vị trí đã lưu của từng kho (trước đây bị xoá trắng).
+          const { data: oldRules, error: oldRulesErr } = await supabase.from("inventory_item_warehouse_rules").select("warehouse_id, location_code").eq("item_id", itemData.id).eq("factory_id", factoryId)
+          if (oldRulesErr) { errors.push(`Dòng ${rowNum} (${code}): không đọc được vị trí kho cũ — ${oldRulesErr.message}`); continue }
+          const oldLocation = new Map(((oldRules || []) as { warehouse_id: string; location_code: string | null }[]).map((r) => [r.warehouse_id, r.location_code]))
           await supabase.from("inventory_item_warehouse_rules").delete().eq("item_id", itemData.id).eq("factory_id", factoryId)
-          const rulesPayload = whs.map((w, idx) => ({ factory_id: factoryId, item_id: itemData.id, warehouse_id: w.id, min_stock: Number(min_stock_str) || 0, max_stock: Number(max_stock_str) || 0, reorder_point: Number(min_stock_str) || 0, safety_stock: Number(min_stock_str) || 0, is_primary: idx === 0 }))
+          const rulesPayload = whs.map((w, idx) => ({ factory_id: factoryId, item_id: itemData.id, warehouse_id: w.id, min_stock: Number(min_stock_str) || 0, max_stock: Number(max_stock_str) || 0, reorder_point: Number(min_stock_str) || 0, safety_stock: Number(min_stock_str) || 0, is_primary: idx === 0, location_code: oldLocation.get(w.id) || null }))
           const { error: rErr } = await supabase.from("inventory_item_warehouse_rules").insert(rulesPayload)
           if (rErr) { errors.push(`Dòng ${rowNum} (${code}): lỗi kho — ${rErr.message}`); continue }
           success++
@@ -3863,7 +3890,7 @@ export default function SettingsPage() {
                         setConfigModal("category")
                       } else if (configTab === "items") {
                         setConfigEditId(null)
-                        setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, min_stock: "0", max_stock: "0", is_active: true, don_gia: "", loai_tien: "USD" })
+                        setInvItemHasMovements(false); setInvItemForm({ category_id: invCategories[0]?.id || "", code: "", name: "", unit: "", specification: "", selected_warehouse_ids: [], location_codes: {}, manages_lot: false, manages_expiry: false, uses_shared_oil_stock: false, min_stock: "0", max_stock: "0", is_active: true, don_gia: "", loai_tien: "USD" })
                         setConfigModal("item")
                       } else if (configTab === "delivery-points") {
                         setConfigEditId(null)
@@ -4051,7 +4078,8 @@ export default function SettingsPage() {
                           <div className="flex gap-1">
                             {row.manages_lot && <span className="px-1.5 py-0.5 bg-blue-100 rounded-full text-xs font-bold text-blue-700">Lô</span>}
                             {row.manages_expiry && <span className="px-1.5 py-0.5 bg-violet-100 rounded-full text-xs font-bold text-violet-700">Hạn</span>}
-                            {!row.manages_lot && !row.manages_expiry && <span className="px-1.5 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-500">Thường</span>}
+                            {row.uses_shared_oil_stock && <span className="px-1.5 py-0.5 bg-amber-100 rounded-full text-xs font-bold text-amber-700 whitespace-nowrap">Bồn dầu</span>}
+                            {!row.manages_lot && !row.manages_expiry && !row.uses_shared_oil_stock && <span className="px-1.5 py-0.5 bg-slate-100 rounded-full text-xs font-bold text-slate-500">Thường</span>}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-slate-600 text-xs">{row.min_stock.toLocaleString("vi-VN")} – {row.max_stock.toLocaleString("vi-VN")}</td>
@@ -4061,7 +4089,7 @@ export default function SettingsPage() {
                         <td className="px-4 py-3">
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
-                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvItemForm({ category_id: row.category_id || "", code: row.code, name: row.name, unit: row.unit, specification: row.specification || "", selected_warehouse_ids: row.default_warehouse_ids || [], location_codes: {}, manages_lot: row.manages_lot, manages_expiry: row.manages_expiry, min_stock: String(row.min_stock), max_stock: String(row.max_stock), is_active: row.is_active, don_gia: row.don_gia ? String(row.don_gia) : "", loai_tien: row.loai_tien || "USD" }); setConfigModal("item"); if (factoryId) { void supabase.from("inventory_item_warehouse_rules").select("warehouse_id, location_code").eq("item_id", row.id).eq("factory_id", factoryId).then(({ data }) => { if (data) setInvItemForm((prev) => ({ ...prev, location_codes: Object.fromEntries(data.filter((r) => r.location_code).map((r) => [r.warehouse_id as string, (r.location_code as string) || ""])) })) }) } }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
+                              <button onClick={() => { setConfigError(""); setConfigEditId(row.id); setInvItemForm({ category_id: row.category_id || "", code: row.code, name: row.name, unit: row.unit, specification: row.specification || "", selected_warehouse_ids: row.default_warehouse_ids || [], location_codes: {}, manages_lot: row.manages_lot, manages_expiry: row.manages_expiry, uses_shared_oil_stock: row.uses_shared_oil_stock, min_stock: String(row.min_stock), max_stock: String(row.max_stock), is_active: row.is_active, don_gia: row.don_gia ? String(row.don_gia) : "", loai_tien: row.loai_tien || "USD" }); setInvItemHasMovements(false); setConfigModal("item"); if (factoryId) { void supabase.from("inventory_stock_movements").select("id", { count: "exact", head: true }).eq("item_id", row.id).eq("factory_id", factoryId).then(({ count }) => setInvItemHasMovements((count || 0) > 0)); void supabase.from("inventory_item_warehouse_rules").select("warehouse_id, location_code").eq("item_id", row.id).eq("factory_id", factoryId).then(({ data }) => { if (data) setInvItemForm((prev) => ({ ...prev, location_codes: Object.fromEntries(data.filter((r) => r.location_code).map((r) => [r.warehouse_id as string, (r.location_code as string) || ""])) })) }) } }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setConfigDelConfirm({ type: "item", id: row.id, label: row.name })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
                             </div>
                           )}
@@ -5029,6 +5057,7 @@ export default function SettingsPage() {
               )}
             </div>
           </div>
+          <RepairThresholdCard />
         </div>
       )}
 
@@ -5949,6 +5978,50 @@ export default function SettingsPage() {
                     <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={invItemForm.manages_expiry} onChange={(e) => setInvItemForm((p) => ({ ...p, manages_expiry: e.target.checked }))} /> Quản lý hạn</label>
                     <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={invItemForm.is_active} onChange={(e) => setInvItemForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang dùng</label>
                   </div>
+                  {(() => {
+                    const lockedOil = !!configEditId && invItemHasMovements
+                    return (
+                      <div className={`rounded-xl border p-3 ${invItemForm.uses_shared_oil_stock ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+                        <label className={`flex items-center gap-2 text-sm font-bold ${lockedOil ? "text-slate-400" : "text-slate-700"}`}>
+                          <input
+                            type="checkbox"
+                            checked={invItemForm.uses_shared_oil_stock}
+                            disabled={lockedOil}
+                            onChange={(e) => setInvItemForm((p) => ({ ...p, uses_shared_oil_stock: e.target.checked }))}
+                          />
+                          Dùng chung bồn dầu
+                        </label>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Tồn tính theo <b>bồn của từng kho</b> đã chọn ở trên (mọi mã dầu cùng kho dùng chung 1 số tồn), không theo mã. Chứng từ vẫn ghi đúng mã.
+                        </p>
+                        {lockedOil && (
+                          <p className="mt-1 text-xs font-semibold text-rose-600">Mã đã có phát sinh kho — không đổi được tuỳ chọn này.</p>
+                        )}
+                        {invItemForm.uses_shared_oil_stock && (
+                          invItemForm.selected_warehouse_ids.length === 0 ? (
+                            <p className="mt-2 text-xs font-semibold text-amber-700">Chọn kho bồn dầu ở mục &ldquo;Kho chứa&rdquo; phía trên.</p>
+                          ) : (
+                            <ul className="mt-2 space-y-1 text-xs">
+                              {invItemForm.selected_warehouse_ids.map((wId) => {
+                                const wh = invWarehouses.find((w) => w.id === wId)
+                                const sharers = invItems.filter((it) => it.uses_shared_oil_stock && it.id !== configEditId && (it.default_warehouse_ids || []).includes(wId)).map((it) => it.code)
+                                const tank = invOilPools[wId]
+                                return (
+                                  <li key={wId} className="text-slate-700">
+                                    <b className="font-mono">{wh?.code || wId}</b>
+                                    {" — bồn "}<b className="tabular-nums">{(tank ?? 0).toLocaleString("vi-VN")}</b>
+                                    {sharers.length > 0
+                                      ? <span className="text-slate-500">, dùng chung với {sharers.join(", ")}</span>
+                                      : <span className="text-amber-700">, chưa có mã dầu nào dùng bồn này</span>}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          )
+                        )}
+                      </div>
+                    )
+                  })()}
                 </>
               )}
               {configModal === "driver" && (

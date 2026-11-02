@@ -55,6 +55,7 @@ export type PurchaseDetail = {
     needsBuyer?: boolean
     canReceive: boolean; canAdjust: boolean; canClose: boolean; canEditImages: boolean
     canCompleteService?: boolean
+    canEditActualPrice?: boolean
   }
 }
 
@@ -103,6 +104,24 @@ export async function createAdjustment(requestId: string, payload: AdjustPayload
     body: JSON.stringify(payload),
   }))
   return json.id
+}
+
+/** GĐ4 A5 — sửa giá thực tế 1 dòng nhập kho / 1 lần xác nhận gia công (lệch ≤ 10% giá duyệt). */
+export async function updateActualPrice(requestId: string, payload: { kind: "receipt" | "service"; targetId: string; donGia: number; lyDo: string }) {
+  return readJson<{ ok: boolean }>(await authFetch(`/api/purchase/requests/${requestId}/actual-price`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }))
+}
+
+/** GĐ4 A5 — huỷ 1 lần "Xác nhận hoàn thành" dịch vụ gia công. */
+export async function cancelServiceCompletion(requestId: string, completionId: string, lyDo: string) {
+  return readJson<{ ok: boolean }>(await authFetch(`/api/purchase/requests/${requestId}/service-completions/${completionId}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lyDo }),
+  }))
 }
 
 export async function closePurchase(requestId: string, lyDo: string) {

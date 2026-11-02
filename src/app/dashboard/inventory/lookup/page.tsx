@@ -9,6 +9,9 @@ import { getFreshAuthSession, hydrateActiveSession, type SessionUser } from "@/l
 import { InventoryPageShell, InventoryPlaceholderSection } from "../_components/inventory-shell"
 import {
   loadInventoryMovementData,
+  loadMovementDocumentInfo,
+  movementNoteText,
+  type MovementDocumentInfo,
   type InventoryItemOption,
   type InventoryStockMovementRow,
   type InventoryWarehouseOption,
@@ -84,9 +87,8 @@ export default function InventoryLookupPage() {
   const [items, setItems] = useState<InventoryItemOption[]>([])
   const [movements, setMovements] = useState<InventoryStockMovementRow[]>([])
   const [lineNotesById, setLineNotesById] = useState<Record<string, string>>({})
-  const [documentInfoById, setDocumentInfoById] = useState<
-    Record<string, { requesterName: string; approved: boolean }>
-  >({})
+  const [documentInfoById, setDocumentInfoById] = useState<Record<string, MovementDocumentInfo>>({})
+  const [docInfoError, setDocInfoError] = useState<string | null>(null)
   const [selectedWarehouseIds, setSelectedWarehouseIds] = useState<string[]>([])
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
@@ -123,43 +125,16 @@ export default function InventoryLookupPage() {
         }
 
         if (inventoryData.factoryId && !inventoryData.warning && inventoryData.movements.length > 0) {
-          const lineIds = Array.from(
-            new Set(inventoryData.movements.map((movement) => movement.document_line_id).filter(Boolean)),
-          )
-          const { data } = await supabase
-            .from("inventory_document_lines")
-            .select("id, line_notes")
-            .eq("factory_id", inventoryData.factoryId)
-            .in("id", lineIds)
-
-          if (data) {
-            const nextNotes = Object.fromEntries(
-              data.map((row) => [row.id as string, (row.line_notes as string | null) || ""]),
-            )
-            setLineNotesById(nextNotes)
-          }
-
           // Mỗi dòng phát sinh chỉ có trong bảng này khi phiếu đã Ghi sổ (đã xác nhận:
           // inventory_cancel_document XÓA HẲN dòng phát sinh khi hủy phiếu) — nên "Trạng thái" ở
           // đây chỉ có 2 giá trị thật sự xảy ra: Chờ phê duyệt / Đã phê duyệt.
-          const documentIds = Array.from(new Set(inventoryData.movements.map((movement) => movement.document_id)))
-          const { data: docData } = await supabase
-            .from("inventory_documents")
-            .select("id, requester_name, approved_by_name")
-            .eq("factory_id", inventoryData.factoryId)
-            .in("id", documentIds)
-
-          if (docData) {
-            const nextDocInfo = Object.fromEntries(
-              docData.map((row) => [
-                row.id as string,
-                {
-                  requesterName: (row.requester_name as string | null) || "",
-                  approved: !!row.approved_by_name,
-                },
-              ]),
-            )
-            setDocumentInfoById(nextDocInfo)
+          // Chia lô id (helper dùng chung) — trước đây 1 `.in()` vài trăm id ⇒ Bad Request, ghi chú/trạng thái rỗng.
+          try {
+            const info = await loadMovementDocumentInfo(inventoryData.factoryId, inventoryData.movements)
+            setLineNotesById(info.lineNotes)
+            setDocumentInfoById(info.documents)
+          } catch (err) {
+            setDocInfoError(err instanceof Error ? err.message : "Không tải được thông tin chứng từ")
           }
         }
       } finally {
@@ -318,9 +293,8 @@ export default function InventoryLookupPage() {
       name: movement.item.name,
       unit: movement.item.unit,
       quantity: getReportQuantity(movement.quantity),
-      note: [getMovementLabel(movement.movement_type), lineNotesById[movement.document_line_id] || ""]
-        .filter(Boolean)
-        .join(" | "),
+      // Ghi chú dòng → ghi chú phiếu → "<loại phiếu> <mã phiếu>" (người dùng chốt 2026-11-02).
+      note: movementNoteText(movement, { lineNotes: lineNotesById, documents: documentInfoById }),
     }))
 
     const summaryRows = Object.values(
@@ -436,7 +410,12 @@ export default function InventoryLookupPage() {
       if (error) throw error
       setDocumentInfoById((prev) => ({
         ...prev,
-        [documentId]: { requesterName: prev[documentId]?.requesterName || "", approved: true },
+        [documentId]: {
+          documentCode: prev[documentId]?.documentCode || "",
+          requesterName: prev[documentId]?.requesterName || "",
+          notes: prev[documentId]?.notes || "",
+          approved: true,
+        },
       }))
     } catch (error) {
       setApproveError(error instanceof Error ? error.message : "Không thể phê duyệt phiếu.")
@@ -466,6 +445,12 @@ export default function InventoryLookupPage() {
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <div className="font-bold">Đang dùng dữ liệu mẫu</div>
           <div className="mt-1 leading-6">{warning}</div>
+        </div>
+      ) : null}
+      {docInfoError ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="font-bold">Thiếu ghi chú / trạng thái phiếu</div>
+          <div className="mt-1 leading-6">{docInfoError} — tải lại trang để thử lại. Excel xuất lúc này sẽ thiếu ghi chú.</div>
         </div>
       ) : null}
 

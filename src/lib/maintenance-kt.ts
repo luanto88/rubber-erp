@@ -46,6 +46,8 @@ export type KtItemStatus = {
   available: number
   shortage: number
   pendingRequested: number
+  /** Phiếu đề nghị (gốc, còn hiệu lực) đang chờ nhập kho / chờ xác nhận gia công cho vật tư này + SL còn chờ. */
+  pendingRequests: { id: string; so: number; nam: number; qty: number }[]
   /** Đơn giá + loại tiền lấy từ dòng vật tư biên bản (gợi ý khi lập đề nghị). */
   donGia: number
   loaiTien: string
@@ -284,6 +286,23 @@ async function loadEffectiveByLine(requestIds: string[]) {
  * biên bản khác giữ). Không có → mọi biên bản chưa xuất kho có vật tư mua ngoài / gia công.
  */
 export async function computeKtStatuses(factoryId: string, recordId?: string): Promise<KtRecordStatus[]> {
+  return computeKtCore(factoryId, recordId)
+}
+
+/** Hàng trong kho đang chia cho các biên bản chưa duyệt — key `${warehouseId}:${itemId}`. */
+export type ReservedStock = Map<string, { total: number; records: { recordId: string; maBb: string | null; qty: number }[] }>
+
+/**
+ * Phần tồn kho đang GIỮ cho biên bản bảo trì chưa duyệt (mua ngoài + "Trong kho"), theo đúng cách chia
+ * 2 tầng của computeKtStatuses. Dùng cho bằng chứng Đề nghị mua: "Tồn còn nhiều" tính trên tồn TRỐNG.
+ */
+export async function computeReservedStock(factoryId: string): Promise<ReservedStock> {
+  const out: ReservedStock = new Map()
+  await computeKtCore(factoryId, undefined, out)
+  return out
+}
+
+async function computeKtCore(factoryId: string, recordId?: string, reservedOut?: ReservedStock): Promise<KtRecordStatus[]> {
   const sb = getSupabaseAdmin()
   const kt = await findKtWarehouse(factoryId)
 
@@ -331,7 +350,7 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
   const target = recordId
     ? records.filter((r) => r.id === recordId)
     : active.filter((r) => extRecordIds.has(r.id))
-  if (!target.length) return []
+  if (!target.length && !reservedOut) return []
 
   // 3. Dòng đề nghị gắn biên bản + hàng đã nhập từ các dòng đó.
   const linkedLines = await loadLinkedLines(factoryId, scopeIds)
@@ -425,6 +444,20 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
     allocTotal.set(g, sum)
   }
 
+  if (reservedOut) {
+    const maBbById = new Map(records.map((r) => [r.id, r.ma_bb]))
+    for (const [k, qty] of allocByKey) {
+      if (qty <= 0) continue
+      const [rec, wh, item] = k.split(":")
+      const g = `${wh}:${item}`
+      const entry = reservedOut.get(g) || { total: 0, records: [] }
+      entry.total += qty
+      entry.records.push({ recordId: rec, maBb: maBbById.get(rec) || null, qty })
+      reservedOut.set(g, entry)
+    }
+    return []
+  }
+
   // 8. Phiếu đề nghị liên kết: đang đề nghị (SL hiệu lực − đã nhận), gia công đã xong.
   const reqIds = Array.from(new Set(linkedLines.map((l) => l.request_id)))
   const ownReqIds: string[] = []
@@ -454,12 +487,23 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
   )
   const effective = await loadEffectiveByLine(activeReqIds)
   const pendingByKey = new Map<string, number>() // `${rec}:${item hiệu lực}`
+  const pendingReqByKey = new Map<string, Map<string, number>>() // key → request_id → SL còn chờ
   for (const l of rootLines) {
     const eff = effective.get(l.id)
     if (!eff?.itemId) continue
     const key = `${l.maintenance_record_id}:${eff.itemId}`
-    pendingByKey.set(key, (pendingByKey.get(key) || 0) + Math.max(0, eff.soLuong - eff.received))
+    const rest = Math.max(0, eff.soLuong - eff.received)
+    pendingByKey.set(key, (pendingByKey.get(key) || 0) + rest)
+    if (rest > 0) {
+      const m = pendingReqByKey.get(key) || new Map<string, number>()
+      m.set(l.request_id, (m.get(l.request_id) || 0) + rest)
+      pendingReqByKey.set(key, m)
+    }
   }
+  const pendingReqsOf = (key: string) =>
+    Array.from(pendingReqByKey.get(key)?.entries() || [])
+      .map(([id, qty]) => ({ id, so: requests.get(id)?.so || 0, nam: requests.get(id)?.nam || 0, qty }))
+      .sort((a, b) => a.nam - b.nam || a.so - b.so)
   const completedByKey = new Map<string, number>() // `${rec}:${item}` — dịch vụ đã xác nhận hoàn thành
   const rootIds = rootLines.map((l) => l.id)
   const recByRootLine = new Map(rootLines.map((l) => [l.id, l.maintenance_record_id]))
@@ -506,6 +550,7 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
         need: qty, onHand: completed, reservedByOthers: 0, available: completed,
         shortage: Math.max(0, qty - completed),
         pendingRequested: pendingByKey.get(key) || 0,
+        pendingRequests: pendingReqsOf(key),
         donGia: Number(mat?.don_gia) || 0, loaiTien: mat?.loai_tien || "USD",
       })
     }
@@ -533,6 +578,7 @@ export async function computeKtStatuses(factoryId: string, recordId?: string): P
         need: qty, onHand: stock, reservedByOthers: reserved, available,
         shortage: Math.max(0, qty - available),
         pendingRequested: pendingByKey.get(key) || 0,
+        pendingRequests: pendingReqsOf(key),
         donGia: Number(mat?.don_gia) || 0, loaiTien: mat?.loai_tien || "USD",
       })
     }

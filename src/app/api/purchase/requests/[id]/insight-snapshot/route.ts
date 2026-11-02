@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { loadPurchaseItemInsight } from "@/lib/purchase/server"
+import { computeReservedStock } from "@/lib/maintenance-kt"
 import { insightDaysLeft, isPurchaseEditable, type PurchaseInsightSnapshot, type PurchaseStatus } from "@/lib/purchase/types"
 
 export const dynamic = "force-dynamic"
@@ -38,10 +39,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const capturedAt = new Date().toISOString()
     const snapshots: Record<string, PurchaseInsightSnapshot> = {}
+    // Phần tồn giữ cho biên bản: tính 1 lần cho cả phiếu (quét mọi biên bản chưa duyệt — tốn kém).
+    const reserved = await computeReservedStock(actor.factoryId)
     for (const line of (lines || []) as { id: string; item_id: string | null }[]) {
       if (!line.item_id) continue
       const ins = await loadPurchaseItemInsight(actor.factoryId, {
-        itemId: line.item_id, excludeRequestId: id, includeCategorySamples: false,
+        itemId: line.item_id, excludeRequestId: id, includeCategorySamples: false, reserved,
       })
       if (!ins) continue
       // Bỏ `item` (chi tiết danh mục) và giá mẫu cùng nhóm — không phải bằng chứng cho người duyệt.

@@ -5,7 +5,7 @@ import dynamic from "next/dynamic"
 import { createPortal } from "react-dom"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { AlertTriangle, Bell, ClipboardList, Clock, PenTool, Plus, QrCode, Search, ShoppingCart, X } from "lucide-react"
+import { AlertTriangle, Bell, ClipboardList, Clock, PackageCheck, PenTool, Plus, QrCode, Search, ShoppingCart, Wrench, X } from "lucide-react"
 import { hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
 import { getFactoryTodayISO } from "@/lib/date-utils"
@@ -41,6 +41,7 @@ const PURCHASE_ID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 import { readJson } from "./_components/purchase-client"
 import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
 import { ServiceCompletionsView } from "./_components/service-completions-view"
+import { PurchaseGuide } from "./_components/purchase-guide"
 
 /** Dòng vật tư rút gọn do GET /api/purchase/requests trả kèm (cho dòng xổ). */
 type ListLine = {
@@ -69,12 +70,18 @@ type ListRow = PurchaseRequestRow & {
   lines?: ListLine[]
 }
 
-type Tab = "todo" | "mine" | "all" | "gia_cong"
+type Tab = "todo" | "mine" | "all" | "gia_cong" | "huong_dan"
 
 const NEXT_STEP_LABEL: Record<"nhap_kho" | "gia_cong" | "ca_hai", string> = {
   nhap_kho: "Chờ nhập kho",
   gia_cong: "Chờ xác nhận gia công",
   ca_hai: "Chờ nhập kho + gia công",
+}
+
+const FULFILL_ACTION_LABEL: Record<"nhap_kho" | "gia_cong" | "ca_hai", string> = {
+  nhap_kho: "Ghi nhận nhập kho",
+  gia_cong: "Xác nhận gia công",
+  ca_hai: "Ghi nhận mua",
 }
 
 const COLS = 9
@@ -127,7 +134,7 @@ function PurchaseListInner() {
   }, [])
 
   const load = useCallback(async () => {
-    if (tab === "gia_cong") return // tab thống kê gia công tự tải dữ liệu
+    if (tab === "gia_cong" || tab === "huong_dan") return // tab gia công tự tải; hướng dẫn không cần dữ liệu
     setLoading(true)
     setError(null)
     try {
@@ -173,6 +180,7 @@ function PurchaseListInner() {
     { key: "mine", label: "Của tôi" },
     ...(canAll ? [{ key: "all" as Tab, label: "Tất cả" }] : []),
     { key: "gia_cong" as Tab, label: "Gia công ngoài" },
+    { key: "huong_dan" as Tab, label: "Hướng dẫn" },
   ]
 
   const stats = useMemo(() => {
@@ -252,7 +260,9 @@ function PurchaseListInner() {
         ariaLabel="Phạm vi phiếu đề nghị mua"
       />
 
-      {tab === "gia_cong" ? (
+      {tab === "huong_dan" ? (
+        <PurchaseGuide />
+      ) : tab === "gia_cong" ? (
         <ServiceCompletionsView defaultFrom={from} defaultTo={to} />
       ) : (<>
       <StatGrid cols={4}>
@@ -404,6 +414,16 @@ function PurchaseListInner() {
                           className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-brand-600 bg-brand-600 px-3 text-[12.5px] font-bold text-white transition-colors hover:bg-brand-700"
                         >
                           <PenTool size={14} /> Ký ngay
+                        </Link>
+                      )}
+                      {r.myFulfillTurn && r.nextStep && (
+                        // Mở trang phiếu + tự mở trình ghi nhận (?fulfill=1); quyền kiểm lại ở trang chi tiết + server.
+                        <Link
+                          href={`/dashboard/purchase/${r.id}?fulfill=1`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-brand-600 bg-brand-600 px-3 text-[12.5px] font-bold text-white transition-colors hover:bg-brand-700"
+                        >
+                          {r.nextStep === "gia_cong" ? <Wrench size={14} /> : <PackageCheck size={14} />} {FULFILL_ACTION_LABEL[r.nextStep]}
                         </Link>
                       )}
                       <RowAction kind="view" label="Xem chi tiết phiếu" onClick={openDetail} />

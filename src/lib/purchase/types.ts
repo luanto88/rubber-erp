@@ -58,6 +58,34 @@ export function priceDeviationPct(price: number, suggested: number | null | unde
   return ((price - suggested) / suggested) * 100
 }
 
+/**
+ * Giá tham chiếu của 1 vật tư (GĐ4) — MỘT quy tắc cho form đề nghị mua, biên bản bảo trì và phiếu lập
+ * từ biên bản: lần mua đã duyệt gần nhất của CHÍNH vật tư → giá danh mục (>0) → null (nhập tay).
+ * Giá giữ nguyên loại tiền gốc; nơi gọi tự quy đổi.
+ */
+export type ReferencePrice = {
+  value: number
+  loaiTien: string
+  source: "lan_mua_truoc" | "danh_muc"
+  so?: number
+  nam?: number
+  ngay?: string
+}
+
+export function pickReferencePrice(
+  recentPurchases: { ngay: string; so: number; nam: number; donGia: number; loaiTien: string }[] | null | undefined,
+  item: { don_gia?: number | null; loai_tien?: string | null } | null | undefined,
+): ReferencePrice | null {
+  const last = (recentPurchases || []).find((p) => Number(p.donGia) > 0)
+  if (last) {
+    return { value: Number(last.donGia), loaiTien: last.loaiTien || "USD", source: "lan_mua_truoc", so: last.so, nam: last.nam, ngay: last.ngay }
+  }
+  if (item && Number(item.don_gia) > 0) {
+    return { value: Number(item.don_gia), loaiTien: item.loai_tien || "USD", source: "danh_muc" }
+  }
+  return null
+}
+
 export function isPriceDeviationExceeded(pct: number | null): boolean {
   return pct !== null && Math.abs(pct) > PRICE_DEVIATION_LIMIT_PCT
 }
@@ -199,7 +227,8 @@ export type PurchaseReceiptRow = {
   loai_tien: string | null
   created_by: string | null
   created_at: string
-  lines: { item_name: string; unit: string | null; quantity: number; don_gia: number | null; lot_no: string | null }[]
+  /** `id` = inventory_document_lines.id (sửa giá thực tế), `line_id` = dòng đề nghị gốc. */
+  lines: { id?: string; line_id?: string | null; item_name: string; unit: string | null; quantity: number; don_gia: number | null; lot_no: string | null }[]
   cancelled: boolean
 }
 
@@ -335,6 +364,14 @@ export type PurchaseItemInsight = {
   recentExports?: { ngay: string; soLuong: number }[]
   export90: number
   categorySamples?: { donGia: number; loaiTien: string; requestId?: string }[]
+  /** Phần tồn đang giữ cho biên bản bảo trì chưa duyệt (GĐ3) — bản chụp cũ không có ⇒ coi như 0. */
+  reservedStock?: number
+  reservedRecords?: { maBb: string | null; qty: number }[]
+}
+
+/** Tồn TRỐNG = tồn thực tế − phần đang giữ cho biên bản (không âm). */
+export function insightFreeStock(insight: Pick<PurchaseItemInsight, "totalStock" | "reservedStock">): number {
+  return Math.max(0, insight.totalStock - (insight.reservedStock || 0))
 }
 
 /** Bản chụp lưu vào purchase_request_lines.insight_snapshot lúc gửi ký. */
@@ -346,18 +383,18 @@ export type PurchaseInsightSnapshot = PurchaseItemInsight & {
 /** Tồn còn đủ dùng hơn ngần này ngày → cảnh báo "Tồn còn nhiều" cho người duyệt. */
 export const PURCHASE_STOCK_PLENTY_DAYS = 60
 
-/** Số ngày tồn hiện tại còn đủ dùng theo tốc độ xuất dùng 90 ngày; null nếu 90 ngày không xuất. */
-export function insightDaysLeft(insight: Pick<PurchaseItemInsight, "export90" | "totalStock">): number | null {
+/** Số ngày tồn TRỐNG còn đủ dùng theo tốc độ xuất dùng 90 ngày; null nếu 90 ngày không xuất. */
+export function insightDaysLeft(insight: Pick<PurchaseItemInsight, "export90" | "totalStock" | "reservedStock">): number | null {
   const perDay = insight.export90 > 0 ? insight.export90 / 90 : 0
-  return perDay > 0 ? Math.floor(insight.totalStock / perDay) : null
+  return perDay > 0 ? Math.floor(insightFreeStock(insight) / perDay) : null
 }
 
-/** Cảnh báo cho người duyệt: tồn còn nhiều / vật tư đang có trong phiếu khác chưa hoàn tất. */
+/** Cảnh báo cho người duyệt: tồn (trống) còn nhiều / vật tư đang có trong phiếu khác chưa hoàn tất. */
 export function insightWarnings(insight: PurchaseItemInsight): string[] {
   const out: string[] = []
   const days = insightDaysLeft(insight)
   if (days !== null && days > PURCHASE_STOCK_PLENTY_DAYS) out.push(`Tồn còn nhiều (đủ dùng > ${PURCHASE_STOCK_PLENTY_DAYS} ngày)`)
-  else if (days === null && insight.totalStock > 0) out.push("Tồn còn nhiều (90 ngày không xuất dùng)")
+  else if (days === null && insightFreeStock(insight) > 0) out.push("Tồn còn nhiều (90 ngày không xuất dùng)")
   if (insight.openRequests.length > 0) {
     out.push(`Đang có trong phiếu khác chưa hoàn tất: ${insight.openRequests.map((r) => formatSoPhieuFull(r.so, r.nam)).join(", ")}`)
   }

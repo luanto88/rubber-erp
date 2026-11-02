@@ -320,8 +320,46 @@ mới, thiếu cột thì khối vật tư biên bản + gửi ký biên bản l
 - Xuất kho vật tư mua ngoài CHỈ khi biên bản ký hoàn tất — "đủ hàng / gửi ký được" chưa trừ tồn.
 - Form (sửa sau test 2026-11-02): ô "Cho biên bản" hiện cả khi dòng chưa chọn vật tư; ô chọn vật tư chỉ khoá
   vật tư đã có dòng CÙNG biên bản ("Dự trữ kho" là 1 nhóm); Lưu kiểm trùng (vật tư + biên bản) như server.
-- Test tay GĐ3 bước 1–7 ĐẠT (2026-11-02). Còn để sửa sau: (1) khối vật tư biên bản vẫn câu cảnh báo chung khi
-  đã có đề nghị chờ nhập; (2) cảnh báo "Tồn còn nhiều" tính cả hàng đang giữ cho biên bản khác; (3) bằng chứng
-  "phiếu khác còn mở" đọc SL gốc, không theo SL hiệu lực; (4) danh sách "phiếu khác" lặp số phiếu khi phiếu có
-  nhiều dòng cùng vật tư; (5) giá vật tư mua ngoài ở biên bản nhập tự do (xem prompt GĐ4).
+- Test tay GĐ3 bước 1–7 ĐẠT (2026-11-02). 4 lỗi nhỏ còn lại đã sửa (2026-11-02, chờ test tay):
+  (1) `KtItemStatus.pendingRequests` (phiếu + SL còn chờ) ⇒ câu chặn gửi ký / khối biên bản / banner nói "chờ nhập
+  kho theo đề nghị NN/ĐNMVT" hoặc "cần lập thêm đề nghị cho N" (`describeKtShortage`);
+  (2) bằng chứng có `reservedStock`/`reservedRecords` (= phần chia cho biên bản chưa duyệt, `computeReservedStock`
+  trong maintenance-kt, tính 1 lần cho cả phiếu khi chụp) ⇒ "Tồn còn nhiều" + "đủ dùng N ngày" theo TỒN TRỐNG
+  (`insightFreeStock`); bản chụp cũ không có trường ⇒ như trước;
+  (3)+(4) "phiếu khác còn mở" gom theo phiếu gốc, SL = hiệu lực − đã nhận (`purchase_effective_lines`), phiếu đã nhận
+  đủ vật tư thì không còn liệt kê. Giá biên bản (5) đã làm ở GĐ4.
 - Test + bàn giao: `C:\Users\Software\.claude\plans\purchase-gd3-test-va-ban-giao-2026-11-01.md`.
+
+## GĐ4 A1–A3 — giá biên bản ↔ đề nghị (2026-11-02, chờ test tay)
+Giá trên dòng đề nghị gắn biên bản là nguồn giá của biên bản (phiếu gần nhất, trừ Huỷ). Lưu / huỷ phiếu,
+lập nháp từ biên bản, duyệt phiếu điều chỉnh ⇒ đồng bộ giá về biên bản chưa gửi ký. Gợi ý giá form dùng
+`pickReferencePrice` chung với biên bản. Chi tiết: rule 14 mục "GĐ4 — giá vật tư mua ngoài".
+
+## Tab "Hướng dẫn" (2026-11-02)
+`_components/purchase-guide.tsx` — luồng Biên bản ↔ Đề nghị ↔ Kho, 3 nguồn vật tư, lập từ biên bản / nhóm phụ trách,
+ghi nhận mua, giữ hàng 2 tầng, thứ tự giá, sửa giá / điều chỉnh, ngưỡng Lớn/Nhỏ, tình huống thường gặp. Mô tả đúng code
+hiện tại — đổi logic ở rule 14/28 thì cập nhật cả trang này.
+
+## Nút ghi nhận trên danh sách + Enter ở màn ký (2026-11-02, chờ test tay)
+- Cột Thao tác danh sách: `myFulfillTurn` ⇒ nút "Ghi nhận nhập kho" / "Xác nhận gia công" / "Ghi nhận mua" (theo
+  `nextStep`, cạnh "Ký ngay") → `/dashboard/purchase/{id}?fulfill=1`; trang chi tiết tự mở wizard 1 lần theo
+  `perms.canReceive/canCompleteService` rồi bỏ tham số khỏi URL.
+- Màn ký chung `/dashboard/ky/[id]`: ô PIN Enter = Xác nhận ký (khi có PIN, không đang ký), Esc = Để sau.
+
+## GĐ4 A5 — sửa giá sau khi nhập kho (2026-11-02, chờ test tay)
+Migration `20261103_purchase_actual_price.sql` (**chạy tay TRƯỚC deploy**).
+- RPC `purchase_update_actual_price` (service_role): sửa `inventory_document_lines.don_gia` (phiếu nhập đã ghi
+  sổ, tính lại `purchase_receipts.tong_tien`) hoặc `purchase_service_completions.don_gia`; lệch ≤10% giá duyệt
+  hiệu lực. Route `POST /api/purchase/requests/[id]/actual-price` `{kind: receipt|service, targetId, donGia,
+  lyDo}` — người đề nghị/admin, lý do bắt buộc, log `sua_gia`. Không đổi SL/tồn (movement không lưu giá).
+- Lệch >10%: phiếu điều chỉnh. Nay mở cho phiếu `hoan_tat` + dòng đã nhập đủ khi CHỈ đổi giá (route `adjust` +
+  `AdjustModal` khoá vật tư/SL). Duyệt xong ⇒ `onPurchaseAdjustmentApproved` (áp giá qua RPC
+  `purchase_apply_line_price` cho mọi lần nhập + gia công của dòng gốc, log `sua_gia`, rồi đồng bộ biên bản).
+  ⚠️ Gọi trong `signField` (`lib/signing/requests.ts`, nhánh purchase) — chính nó chuyển phiếu sang hoàn tất khi
+  ký bước cuối, nên `syncPurchaseFromSigning` (gọi sau ở route) luôn thoát sớm. Việc "sau khi duyệt" phải đặt ở
+  `signField`, không chỉ ở `syncPurchaseFromSigning` (lỗi đã gặp khi test 2026-11-02, phiếu 81 bù tay bằng script).
+- Huỷ xác nhận gia công: `POST …/service-completions/[cid]/cancel` `{lyDo}`; chặn khi biên bản gắn dòng đã
+  duyệt hoặc có `yeu_cau_ky` đang luân chuyển/hoàn tất; xoá bản ghi → `purchase_recompute_request`, log
+  `huy_hoan_thanh_dich_vu`.
+- UI: nút "Sửa giá" trên từng dòng lịch sử nhập + lần gia công, "Huỷ xác nhận" trên lần gia công
+  (`perms.canEditActualPrice`); `canAdjust` thêm nhánh phiếu Hoàn tất.

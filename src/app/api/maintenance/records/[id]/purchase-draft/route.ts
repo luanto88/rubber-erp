@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { computeKtStatuses } from "@/lib/maintenance-kt"
+import { resolveExtPrices, syncMaintenanceExtPricesSafe } from "@/lib/maintenance-ext-price"
 import { insertPurchaseLog, isRecordTeamMember } from "@/lib/purchase/server"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { isBoPhan } from "@/lib/bo-phan"
@@ -127,13 +128,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Phần còn thiếu = thiếu − đang đề nghị (theo SL hiệu lực của MỌI dòng đề nghị gắn biên bản này),
     // áp cho cả vật tư qua kho lẫn dịch vụ gia công (dịch vụ: thiếu = cần − đã xác nhận hoàn thành).
     const [status] = await computeKtStatuses(factoryId, id)
-    const needs: Need[] = (status?.items || [])
+    const rawNeeds = (status?.items || [])
       .filter((it) => it.kind === "vat_tu" || knownItems.has(it.itemId))
-      .map((it) => ({
-        itemId: it.itemId, itemCode: it.itemCode, name: it.name, unit: it.unit,
-        donGia: it.donGia, loaiTien: it.loaiTien, qty: Math.max(0, it.shortage - it.pendingRequested),
-      }))
+      .map((it) => ({ ...it, qty: Math.max(0, it.shortage - it.pendingRequested) }))
       .filter((it) => it.qty > 0)
+    // Giá (GĐ4): cùng quy tắc với biên bản — đề nghị gần nhất gắn biên bản → lần mua gần nhất → danh mục;
+    // chưa có giá nào thì dùng giá nhập tay trên biên bản.
+    const prices = await resolveExtPrices(factoryId, id, rawNeeds.map((it) => it.itemId))
+    const needs: Need[] = rawNeeds.map((it) => {
+      const p = prices.get(it.itemId)
+      return {
+        itemId: it.itemId, itemCode: it.itemCode, name: it.name, unit: it.unit,
+        donGia: p ? p.value : it.donGia, loaiTien: p ? p.loaiTien : it.loaiTien, qty: it.qty,
+      }
+    })
 
     // `needs` là phần CÒN THIẾU sau khi đã trừ mọi phiếu đang đề nghị (kể cả chính phiếu nháp) ⇒ đồng bộ
     // nháp = cộng thêm đúng phần này. Nháp đã đủ/dư thì chỉ mở lại (không bao giờ giảm SL, không xoá dòng).
@@ -232,6 +240,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         requestId: draft.id, factoryId, userId: actor.userId, hanhDong: "cap_nhat_tu_bao_tri",
         noiDung: `Cập nhật theo biên bản ${rec.ma_bb || ""}: ${changes.join("; ")}`,
       })
+      await syncMaintenanceExtPricesSafe(factoryId, [id])
       return NextResponse.json({ id: draft.id, existed: true, updated: true })
     }
 
@@ -274,6 +283,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       requestId, factoryId, userId: actor.userId, hanhDong: "tao_tu_bao_tri",
       noiDung: `Lập từ biên bản ${rec.ma_bb || ""} — số ${so}/${nam}`,
     })
+    await syncMaintenanceExtPricesSafe(factoryId, [id])
     return NextResponse.json({ id: requestId, existed: false })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: isoAuthErrorStatus(err) })

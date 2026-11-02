@@ -2,6 +2,7 @@ import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import { ensurePdfFont, addQrImage, safeName, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
 import { convertCurrency } from "@/lib/currency"
+import { formatRepairThreshold } from "@/lib/maintenance-threshold"
 import { fetchImageForPdf, isPdfImageFailure, type PdfImage, type PdfImageResult } from "@/lib/image-format"
 
 // ─── Types (mirror DB shape dùng bởi maintenance/print/page.tsx) ────────────
@@ -1085,7 +1086,8 @@ async function drawF10(doc: jsPDF, record: RecordData, qrUrl: string, forSigning
 
   record.lines.forEach((line) => {
     const prefix = record.lines.length > 1 ? `${line.ten_tb}: ` : ""
-    const suffix = line.loai_sua_chua ? ` (${line.loai_sua_chua === "lon" ? "Sửa chữa lớn >200$" : "Sửa chữa nhỏ ≤200$"})` : ""
+    const nguong = formatRepairThreshold()
+    const suffix = line.loai_sua_chua ? ` (${line.loai_sua_chua === "lon" ? `Sửa chữa lớn >${nguong}` : `Sửa chữa nhỏ ≤${nguong}`})` : ""
     y = drawLabelContent(doc, MARGIN, y, CONTENT_W, `${prefix}Chi phí ước tính: `, `${pdfMoney(line.chi_phi_dk, line.loai_tien)}${suffix}`)
   })
 

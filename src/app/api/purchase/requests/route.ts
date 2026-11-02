@@ -4,6 +4,7 @@ import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/ap
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { BO_PHAN_LIST, isBoPhan } from "@/lib/bo-phan"
 import { insertPurchaseLog, isMaintenanceRecordTeam, loadEffectiveLines, syncPurchaseFromSigning } from "@/lib/purchase/server"
+import { syncMaintenanceExtPricesSafe } from "@/lib/maintenance-ext-price"
 import {
   isPriceDeviationExceeded, isPurchaseEditable, minIsoDate, normalizeIsoDate, priceDeviationPct, sanitizeImageUrls,
   type PurchaseEffectiveLine, type PurchaseLineInput, type PurchaseRequestRow, type PurchaseStatus,
@@ -349,6 +350,12 @@ export async function POST(req: NextRequest) {
       if (!isPurchaseEditable(existing.trang_thai as PurchaseStatus)) {
         return NextResponse.json({ error: "Phiếu đã gửi ký/đã duyệt, không sửa được" }, { status: 409 })
       }
+      // Biên bản đang gắn TRƯỚC khi lưu (dòng bị bỏ/đổi biên bản ⇒ biên bản cũ rơi về giá tham chiếu).
+      const { data: oldLinks } = await supabaseAdmin
+        .from("purchase_request_lines")
+        .select("maintenance_record_id")
+        .eq("request_id", requestId)
+        .not("maintenance_record_id", "is", null)
       // Header + dòng trong 1 giao dịch (RPC purchase_save_lines): giữ dòng theo id, lỗi thì không mất gì.
       const { error: saveErr } = await supabaseAdmin.rpc("purchase_save_lines", {
         p_factory_id: factoryId,
@@ -369,6 +376,11 @@ export async function POST(req: NextRequest) {
       if (takeOver) {
         await insertPurchaseLog({ requestId, factoryId, userId: actor.userId, hanhDong: "nhan_xu_ly", noiDung: "Nhận xử lý phiếu lập từ biên bản bảo trì" })
       }
+      // GĐ4: giá trên đề nghị là nguồn giá của biên bản gắn dòng ⇒ đồng bộ ngay (biên bản chưa gửi ký).
+      await syncMaintenanceExtPricesSafe(factoryId, [
+        ...((oldLinks || []) as { maintenance_record_id: string | null }[]).map((l) => l.maintenance_record_id),
+        ...lineRows.map((l) => l.maintenance_record_id),
+      ])
       return NextResponse.json({ id: requestId })
     } else {
       const ngay = getFactoryTodayISO()
@@ -416,6 +428,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: lineErr.message }, { status: 400 })
     }
 
+    await syncMaintenanceExtPricesSafe(factoryId, lineRows.map((l) => l.maintenance_record_id))
     return NextResponse.json({ id: requestId })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: isoAuthErrorStatus(err) })

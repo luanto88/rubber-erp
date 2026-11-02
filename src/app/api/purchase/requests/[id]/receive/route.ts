@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { scheduleModuleBroadcast } from "@/lib/signing/notify"
 import { getFactoryTodayISO } from "@/lib/date-utils"
-import { insertPurchaseLog } from "@/lib/purchase/server"
+import { insertPurchaseLog, syncMaintenanceExtPricesForRequest } from "@/lib/purchase/server"
 import { formatMoney, formatSoPhieuFull, PURCHASE_STATUS_LABEL, type PurchaseStatus } from "@/lib/purchase/types"
 
 export const dynamic = "force-dynamic"
@@ -92,6 +92,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       requestId: id, factoryId: actor.factoryId, userId: actor.userId, hanhDong: "nhap_kho",
       noiDung: `Phiếu nhập ${row.out_document_code} — ${lines.length} dòng, ${formatMoney(total, request.loai_tien)} ${request.loai_tien}`,
     })
+    // GĐ4 A4: giá thực tế nhập kho là giá của biên bản gắn dòng (biên bản chưa gửi ký).
+    await syncMaintenanceExtPricesForRequest(actor.factoryId, id)
 
     scheduleModuleBroadcast({
       modun: "purchase",

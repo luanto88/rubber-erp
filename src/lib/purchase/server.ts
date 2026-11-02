@@ -1,5 +1,7 @@
 // Helper SERVER-ONLY cho module Đề nghị mua vật tư (service role). Không import vào client.
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { syncMaintenanceExtPricesSafe } from "@/lib/maintenance-ext-price"
+import { computeReservedStock, type ReservedStock } from "@/lib/maintenance-kt"
 import type {
   PurchaseEffectiveLine, PurchaseItemInsight, PurchaseLineRow, PurchaseRequestRow, PurchaseSigner, PurchaseStatus,
 } from "./types"
@@ -175,10 +177,61 @@ export async function syncPurchaseFromSigning(yeuCauId: string): Promise<void> {
         const { error } = await supabase.rpc("purchase_recompute_request", { p_request_id: req.parent_request_id })
         if (error) console.warn("[purchase] Không tính lại được phiếu gốc:", error.message)
       }
+      await onPurchaseAdjustmentApproved(yc.factory_id as string, req.id, (req.parent_request_id as string) || null)
     }
   } catch (err) {
     console.error("[purchase] Lỗi đồng bộ trạng thái:", err)
   }
+}
+
+/**
+ * GĐ4: việc cần làm khi 1 phiếu điều chỉnh vừa duyệt xong — áp giá mới xuống các lần nhập / gia công, rồi
+ * đồng bộ giá về biên bản gắn dòng. Gọi ở CẢ signField (requests.ts — nơi thật sự chuyển phiếu sang hoàn tất
+ * khi ký bước cuối) lẫn syncPurchaseFromSigning (dự phòng). Idempotent: chạy lại không đổi gì thêm.
+ */
+export async function onPurchaseAdjustmentApproved(factoryId: string, adjustmentId: string, parentId: string | null): Promise<void> {
+  try {
+    if (parentId) await applyAdjustedPricesToActuals(factoryId, adjustmentId, parentId)
+    await syncMaintenanceExtPricesForRequest(factoryId, adjustmentId)
+  } catch (err) {
+    console.warn("[purchase] Lỗi xử lý sau khi duyệt phiếu điều chỉnh:", err instanceof Error ? err.message : err)
+  }
+}
+
+/**
+ * GĐ4 A5: phiếu điều chỉnh vừa duyệt xong — dòng nào đổi đơn giá thì áp giá mới cho MỌI lần nhập kho
+ * (đã ghi sổ) + xác nhận gia công của dòng gốc (RPC purchase_apply_line_price, không kiểm 10%).
+ */
+async function applyAdjustedPricesToActuals(factoryId: string, adjustmentId: string, parentId: string): Promise<void> {
+  const supabase = getSupabaseAdmin()
+  const { data } = await supabase
+    .from("purchase_request_lines")
+    .select("parent_line_id, item_name, don_gia, truoc_don_gia")
+    .eq("request_id", adjustmentId)
+  for (const l of (data || []) as { parent_line_id: string | null; item_name: string; don_gia: number | null; truoc_don_gia: number | null }[]) {
+    const price = Number(l.don_gia)
+    if (!l.parent_line_id || !(price > 0) || price === Number(l.truoc_don_gia)) continue
+    const { data: n, error } = await supabase.rpc("purchase_apply_line_price", {
+      p_factory_id: factoryId, p_request_id: parentId, p_line_id: l.parent_line_id, p_price: price,
+    })
+    if (error) { console.warn("[purchase] Không áp được giá điều chỉnh:", error.message); continue }
+    if (Number(n) > 0) {
+      await insertPurchaseLog({
+        requestId: parentId, factoryId, userId: null, hanhDong: "sua_gia",
+        noiDung: `${l.item_name}: áp giá điều chỉnh ${price} cho ${n} lần nhập / gia công đã ghi nhận`,
+      })
+    }
+  }
+}
+
+/** Đồng bộ giá vào các biên bản có dòng của phiếu `requestId` (lỗi chỉ log). */
+export async function syncMaintenanceExtPricesForRequest(factoryId: string, requestId: string): Promise<void> {
+  const { data } = await getSupabaseAdmin()
+    .from("purchase_request_lines")
+    .select("maintenance_record_id")
+    .eq("request_id", requestId)
+    .not("maintenance_record_id", "is", null)
+  await syncMaintenanceExtPricesSafe(factoryId, ((data || []) as { maintenance_record_id: string | null }[]).map((l) => l.maintenance_record_id))
 }
 
 // ── Thông tin hỗ trợ chọn vật tư / bằng chứng cho người duyệt ────────────────
@@ -193,7 +246,7 @@ type InsightLineJoin = {
   so_luong: number
   don_gia: number
   request_id: string
-  purchase_requests: { id: string; ngay: string; so: number; nam: number; loai_tien: string; trang_thai: string; factory_id: string } | null
+  purchase_requests: { id: string; ngay: string; so: number; nam: number; loai_tien: string; trang_thai: string; factory_id: string; loai: string | null } | null
 }
 
 export type PurchaseItemInsightResult = PurchaseItemInsight & { item: Record<string, unknown> | null }
@@ -205,7 +258,7 @@ export type PurchaseItemInsightResult = PurchaseItemInsight & { item: Record<str
  */
 export async function loadPurchaseItemInsight(
   factoryId: string,
-  opts: { itemId?: string | null; categoryId?: string | null; excludeRequestId?: string | null; includeCategorySamples?: boolean },
+  opts: { itemId?: string | null; categoryId?: string | null; excludeRequestId?: string | null; includeCategorySamples?: boolean; reserved?: ReservedStock },
 ): Promise<PurchaseItemInsightResult | null> {
   const supabase = getSupabaseAdmin()
   const itemId = opts.itemId || null
@@ -256,27 +309,67 @@ export async function loadPurchaseItemInsight(
     }
   }
 
+  // ── Phần tồn đang giữ cho biên bản bảo trì chưa duyệt (GĐ3) ⇒ "Tồn còn nhiều" tính trên tồn TRỐNG ──
+  // Dầu dùng chung bồn bỏ qua (tồn theo bồn, không theo mã). `opts.reserved` truyền sẵn khi chụp nhiều dòng.
+  let reservedStock = 0
+  const reservedRecords: { maBb: string | null; qty: number }[] = []
+  if (item && itemId && !item.uses_shared_oil_stock && stock.length) {
+    const reserved = opts.reserved ?? (await computeReservedStock(factoryId))
+    const byRecord = new Map<string, { maBb: string | null; qty: number }>()
+    for (const s of stock) {
+      const entry = reserved.get(`${s.warehouseId}:${itemId}`)
+      if (!entry) continue
+      reservedStock += Math.min(Math.max(0, s.onHand), entry.total)
+      for (const r of entry.records) {
+        const cur = byRecord.get(r.recordId) || { maBb: r.maBb, qty: 0 }
+        cur.qty += r.qty
+        byRecord.set(r.recordId, cur)
+      }
+    }
+    reservedRecords.push(...Array.from(byRecord.values()).sort((a, b) => (a.maBb || "").localeCompare(b.maBb || "")))
+  }
+
   // ── Lịch sử đề nghị đã duyệt + phiếu còn mở ──
   const recentPurchases: PurchaseItemInsight["recentPurchases"] = []
   const openRequests: PurchaseItemInsight["openRequests"] = []
   if (itemId) {
     const { data: lines } = await supabase
       .from("purchase_request_lines")
-      .select("item_id, so_luong, don_gia, request_id, purchase_requests!inner(id, ngay, so, nam, loai_tien, trang_thai, factory_id)")
+      .select("item_id, so_luong, don_gia, request_id, purchase_requests!inner(id, ngay, so, nam, loai_tien, trang_thai, factory_id, loai)")
       .eq("factory_id", factoryId)
       .eq("item_id", itemId)
       .order("created_at", { ascending: false })
       .limit(60)
+    const openCandidates = new Map<string, { so: number; nam: number; trangThai: string }>()
     for (const l of (lines || []) as unknown as InsightLineJoin[]) {
       const r = l.purchase_requests
       if (!r) continue
       if (INSIGHT_APPROVED.includes(r.trang_thai)) {
         recentPurchases.push({ ngay: r.ngay, so: r.so, nam: r.nam, soLuong: Number(l.so_luong), donGia: Number(l.don_gia), loaiTien: r.loai_tien })
       }
-      if (INSIGHT_OPEN.includes(r.trang_thai) && r.id !== excludeRequestId) {
-        openRequests.push({ id: r.id, so: r.so, nam: r.nam, trangThai: r.trang_thai, soLuong: Number(l.so_luong) })
+      // Phiếu điều chỉnh không tính riêng — đã phản ánh vào SL hiệu lực của phiếu gốc.
+      if (INSIGHT_OPEN.includes(r.trang_thai) && r.id !== excludeRequestId && (r.loai || "goc") === "goc") {
+        openCandidates.set(r.id, { so: r.so, nam: r.nam, trangThai: r.trang_thai })
       }
     }
+    // Gom THEO PHIẾU (phiếu nhiều dòng cùng vật tư chỉ hiện 1 lần), SL = SL hiệu lực − đã nhận;
+    // phiếu đã nhận đủ vật tư này thì không còn "đang có trong phiếu khác".
+    const candidateIds = Array.from(openCandidates.keys())
+    for (let i = 0; i < candidateIds.length; i += 10) {
+      const batch = candidateIds.slice(i, i + 10)
+      const results = await Promise.all(batch.map((id) => supabase.rpc("purchase_effective_lines", { p_request_id: id })))
+      results.forEach(({ data, error }, idx) => {
+        if (error) throw new Error(error.message)
+        const rest = ((data || []) as { item_id: string | null; so_luong: number; received: number }[])
+          .filter((e) => e.item_id === itemId)
+          .reduce((s, e) => s + Math.max(0, (Number(e.so_luong) || 0) - (Number(e.received) || 0)), 0)
+        if (rest <= 0) return
+        const id = batch[idx]
+        const c = openCandidates.get(id)!
+        openRequests.push({ id, so: c.so, nam: c.nam, trangThai: c.trangThai, soLuong: rest })
+      })
+    }
+    openRequests.sort((a, b) => a.nam - b.nam || a.so - b.so)
     recentPurchases.sort((a, b) => b.ngay.localeCompare(a.ngay))
     recentPurchases.splice(5)
   }
@@ -336,5 +429,7 @@ export async function loadPurchaseItemInsight(
     recentExports,
     export90,
     categorySamples,
+    reservedStock,
+    reservedRecords,
   }
 }

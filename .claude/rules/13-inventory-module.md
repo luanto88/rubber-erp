@@ -177,6 +177,18 @@ src/app/dashboard/inventory/
 - Một mã Dầu dùng chung bồn có thể gắn nhiều kho; tại mỗi kho hệ thống dùng pool tồn riêng của chính kho đó
 - Các kho dầu chỉ có `1 mã Dầu` vẫn dùng cùng logic này để thống nhất vận hành và mở rộng sau này
 
+### Bật/tắt cờ trên giao diện (2026-11-02, chờ test tay)
+- Bồn = 1 dòng `inventory_oil_stock_pools` theo **kho**; "gắn mã vào bồn" = bật `uses_shared_oil_stock` + chọn kho bồn
+  trong `default_warehouse_ids`. Không có bảng gắn riêng.
+- Cài đặt → Cấu hình nhà máy → Vật tư/Hóa chất (`settings/page.tsx`): ô "Dùng chung bồn dầu" (hiện tồn bồn + các mã
+  dùng chung theo từng kho đã chọn), nhãn "Bồn dầu" ở danh sách. Trước đây form này KHÔNG có ô ⇒ mã dầu mới (vd DOVS,
+  30/10) luôn tạo với cờ tắt ⇒ tồn = 0.
+- Đổi cờ khi mã đã có `inventory_stock_movements` bị chặn ở form + trigger `trg_inventory_items_guard_shared_oil_flag`
+  (migration `20261105_inventory_shared_oil_flag_guard.sql`, **chạy tay**, lỗi chứa `INV_SHARED_OIL_LOCKED`).
+- Nhập Excel vật tư KHÔNG có cột cờ: `upsert` không gửi cột ⇒ mã cũ giữ nguyên cờ, mã mới = tắt.
+- Nhập Excel vật tư cũng không có cột Vị trí kho: trước khi xoá/tạo lại `inventory_item_warehouse_rules`, đọc
+  `location_code` cũ theo kho và chép lại (trước đây bị xoá trắng mỗi lần import). Kho mới thêm ⇒ trống.
+
 ### Mapping đã chốt (2026-05-11)
 
 - `KDDX`: `DOX`, `DOSXN`, `DON`, `DOXU12`, `DOFORD`, `DOFAT`, `DOCZNB`, `DOCZVC`, `DOXU3`
@@ -412,6 +424,14 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
   DPH, PM (= MUBEZ + MCH gộp sắt mỏng), ĐG, ĐN (người dùng tự tạo), PMB5, PMB4, PG. Hình thức xuất theo
   `export_pallet_types` (rule 08). Kiện rời kho khi tổng bành gán đơn ≥ bành SX; đơn hoàn tất kiện quyết định hình thức.
   Trang cũ `/dashboard/product/pallet` đã XOÁ; banner Thành phẩm không còn link (gỡ 2026-10-27).
+
+## Ghi chú Excel Sổ chi tiết + in thẻ kho (2026-11-02, chờ test tay)
+- Lỗi cũ: Sổ chi tiết đọc `line_notes` / thông tin phiếu bằng 1 `.in()` vài trăm id ⇒ Bad Request, không kiểm lỗi
+  ⇒ Excel cột Ghi chú chỉ còn "Xuất kho"/"Nhập kho", trạng thái duyệt có thể sai.
+- Helper `loadMovementDocumentInfo` (`inventory-data.ts`, chia lô 200, lỗi thì ném ⇒ banner đỏ) +
+  `movementNoteText`: **ghi chú dòng → ghi chú phiếu → "<loại phiếu> <mã phiếu>"** (người dùng chốt). Dùng ở Excel
+  Sổ chi tiết và bản in thẻ kho (`print-report?kind=cards`, thêm cột Số phiếu + Ghi chú).
+- `loadInventoryMovementData` nay phân trang (`fetchAllPaginated`, ngày → giờ tạo → id).
 
 ## U10 — Thẻ kho / Sổ chi tiết / Tổng quan theo rule 29 (2026-10-28, test pass)
 - `InventoryPageShell` bọc `moduleThemeClass("amber")` (mọi trang kho); 2 hàng tab (nhóm + thẻ con) →

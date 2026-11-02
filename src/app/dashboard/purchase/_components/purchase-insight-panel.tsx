@@ -2,7 +2,7 @@
 
 import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Boxes, History, Loader2, TrendingDown } from "lucide-react"
 import {
-  formatMoney, formatQty, formatSoPhieuFull, insightDaysLeft, insightWarnings, PURCHASE_STATUS_LABEL,
+  formatMoney, formatQty, formatSoPhieuFull, insightDaysLeft, insightFreeStock, insightWarnings, PURCHASE_STATUS_LABEL,
   type PurchaseItemInsight,
 } from "@/lib/purchase/types"
 
@@ -90,6 +90,15 @@ export function PurchaseInsightPanel({
               ))}
             </div>
           )}
+          {(ins.reservedStock || 0) > 0 && (
+            <p className="mt-1.5 text-[11px] text-slate-600">
+              Đang giữ cho biên bản{" "}
+              <span className="font-semibold">
+                {(ins.reservedRecords || []).map((r) => `${r.maBb || "(chưa có mã)"} (${formatQty(r.qty)})`).join(", ")}
+              </span>
+              {" · "}trống <span className="font-bold text-emerald-700">{formatQty(insightFreeStock(ins))}</span> {unit}
+            </p>
+          )}
         </div>
         <div className="rounded-lg bg-white border border-slate-200 border-l-4 border-l-sky-500 p-2.5 shadow-sm">
           <p className="flex items-center gap-1.5 font-bold text-sky-700 mb-1"><ArrowDownToLine size={13} /> Nhập kho (3 lần gần nhất)</p>
@@ -131,13 +140,13 @@ export function PurchaseInsightPanel({
         <p className="flex items-start gap-1.5 text-amber-700 font-semibold">
           <AlertTriangle size={13} className="shrink-0 mt-0.5" />
           Vật tư này đang có trong phiếu đề nghị khác chưa hoàn tất:{" "}
-          {ins.openRequests.map((r) => `${formatSoPhieuFull(r.so, r.nam)} (${PURCHASE_STATUS_LABEL[r.trangThai as keyof typeof PURCHASE_STATUS_LABEL] || r.trangThai}, SL ${formatQty(r.soLuong)})`).join("; ")}
+          {ins.openRequests.map((r) => `${formatSoPhieuFull(r.so, r.nam)} (${PURCHASE_STATUS_LABEL[r.trangThai as keyof typeof PURCHASE_STATUS_LABEL] || r.trangThai}, còn chờ ${formatQty(r.soLuong)})`).join("; ")}
         </p>
       )}
       {capturedAt && ins.openRequests.length > 0 && (
         <p className="text-slate-600">
           Phiếu khác còn mở lúc gửi ký:{" "}
-          {ins.openRequests.map((r) => `${formatSoPhieuFull(r.so, r.nam)} (${PURCHASE_STATUS_LABEL[r.trangThai as keyof typeof PURCHASE_STATUS_LABEL] || r.trangThai}, SL ${formatQty(r.soLuong)})`).join("; ")}
+          {ins.openRequests.map((r) => `${formatSoPhieuFull(r.so, r.nam)} (${PURCHASE_STATUS_LABEL[r.trangThai as keyof typeof PURCHASE_STATUS_LABEL] || r.trangThai}, ${ins.reservedRecords ? "còn chờ" : "SL"} ${formatQty(r.soLuong)})`).join("; ")}
         </p>
       )}
     </div>

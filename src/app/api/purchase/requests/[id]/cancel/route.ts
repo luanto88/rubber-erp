@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { cancelSigningRequest } from "@/lib/signing/requests"
 import { scheduleModuleBroadcast } from "@/lib/signing/notify"
-import { insertPurchaseLog, isMaintenanceRecordTeam } from "@/lib/purchase/server"
+import { insertPurchaseLog, isMaintenanceRecordTeam, syncMaintenanceExtPricesForRequest } from "@/lib/purchase/server"
 import { formatSoPhieuFull, type PurchaseStatus } from "@/lib/purchase/types"
 
 export const dynamic = "force-dynamic"
@@ -88,6 +88,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 400 })
 
     await insertPurchaseLog({ requestId: id, factoryId: actor.factoryId, userId: actor.userId, hanhDong: "huy", noiDung: reason })
+    // GĐ4: phiếu huỷ không còn là nguồn giá ⇒ biên bản gắn dòng quay về phiếu khác / giá tham chiếu.
+    await syncMaintenanceExtPricesForRequest(actor.factoryId, id)
 
     if (status !== "nhap") {
       scheduleModuleBroadcast({

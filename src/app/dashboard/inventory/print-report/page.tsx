@@ -7,6 +7,9 @@ import { ArrowLeft, Printer } from "lucide-react"
 import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
 import {
   loadInventoryMovementData,
+  loadMovementDocumentInfo,
+  movementNoteText,
+  type MovementDocumentInfo,
   type InventoryItemOption,
   type InventoryLotBalanceRow,
   type InventoryStockBalanceRow,
@@ -83,6 +86,9 @@ export default function InventoryPrintReportPage() {
   const [stockBalances, setStockBalances] = useState<InventoryStockBalanceRow[]>([])
   const [lotBalances, setLotBalances] = useState<InventoryLotBalanceRow[]>([])
   const [movements, setMovements] = useState<InventoryStockMovementRow[]>([])
+  // Số phiếu + ghi chú cho bản in thẻ kho (cùng quy tắc với Excel ở Sổ chi tiết).
+  const [docInfo, setDocInfo] = useState<{ lineNotes: Record<string, string>; documents: Record<string, MovementDocumentInfo> }>({ lineNotes: {}, documents: {} })
+  const [docInfoError, setDocInfoError] = useState<string | null>(null)
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -113,13 +119,20 @@ export default function InventoryPrintReportPage() {
         setStockBalances(inventoryData.stockBalances)
         setLotBalances(inventoryData.lotBalances)
         setMovements(inventoryData.movements)
+        if (kind === "cards" && inventoryData.factoryId && !inventoryData.warning && inventoryData.movements.length > 0) {
+          try {
+            setDocInfo(await loadMovementDocumentInfo(inventoryData.factoryId, inventoryData.movements))
+          } catch (err) {
+            setDocInfoError(err instanceof Error ? err.message : "Không tải được thông tin chứng từ")
+          }
+        }
       } finally {
         setLoading(false)
       }
     }
 
     void bootstrap()
-  }, [])
+  }, [kind])
 
   const warehouseMap = useMemo(
     () => new Map(warehouses.map((warehouse) => [warehouse.id, warehouse])),
@@ -380,6 +393,7 @@ export default function InventoryPrintReportPage() {
                 ) : null}
               </div>
               {warning ? <div className="mt-3 text-sm text-amber-700">Lưu ý: {warning}</div> : null}
+              {docInfoError ? <div className="mt-3 text-sm text-red-700 print:hidden">Thiếu số phiếu / ghi chú: {docInfoError} — tải lại trang để thử lại.</div> : null}
             </div>
 
             {kind === "on-hand" ? (
@@ -445,7 +459,7 @@ export default function InventoryPrintReportPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
-                      {["Ngày", "Kho", "Phân loại", "Mã vật tư", "Tên vật tư", "Loại giao dịch", "Số lô", "Hạn sử dụng", "Số lượng", "Tồn sau"].map((head) => (
+                      {["Ngày", "Kho", "Phân loại", "Mã vật tư", "Tên vật tư", "Loại giao dịch", "Số phiếu", "Số lô", "Hạn sử dụng", "Số lượng", "Tồn sau", "Ghi chú"].map((head) => (
                         <th key={head} className="px-4 py-3 text-left font-bold">
                           {head}
                         </th>
@@ -461,12 +475,14 @@ export default function InventoryPrintReportPage() {
                         <td className="px-4 py-3 font-bold text-slate-700">{row.item.code}</td>
                         <td className="px-4 py-3 text-slate-700">{row.item.name}</td>
                         <td className="px-4 py-3 text-slate-700">{getMovementLabel(row.movement_type)}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-600 whitespace-nowrap">{docInfo.documents[row.document_id]?.documentCode || ""}</td>
                         <td className="px-4 py-3 text-slate-600">{row.lot_no || ""}</td>
                         <td className="px-4 py-3 text-slate-500">{formatDate(row.expiry_date)}</td>
                         <td className="px-4 py-3 font-semibold text-slate-800">{row.quantity.toLocaleString("vi-VN")}</td>
                         <td className="px-4 py-3 text-slate-600">
                           {row.balance_after === null ? "" : Number(row.balance_after).toLocaleString("vi-VN")}
                         </td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{movementNoteText(row, docInfo)}</td>
                       </tr>
                     ))}
                   </tbody>

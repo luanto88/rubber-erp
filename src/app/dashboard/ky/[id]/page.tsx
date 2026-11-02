@@ -1073,6 +1073,18 @@ export default function SignScreenPage() {
                 maxLength={6}
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+                // Enter = "Xác nhận ký" (cả phím Đi/Enter bàn phím số mobile), Esc = "Để sau".
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    if (!signing && pin.length > 0) void handleConfirmSign()
+                  } else if (e.key === "Escape") {
+                    e.preventDefault()
+                    if (!signing) setConfirmOpen(false)
+                  }
+                }}
+                enterKeyHint="done"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold tracking-widest outline-none focus:border-emerald-500"
                 placeholder="••••"
                 autoFocus
