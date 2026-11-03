@@ -69,7 +69,7 @@ export function DetailPageHeader({
   )
 }
 
-/** Nút hành động phụ trong header (nền trắng viền slate, hoặc tone brand). */
+/** Nút hành động trong header: nền trắng viền slate (mặc định), "brand" = nút chính duy nhất, "danger" = huỷ/xoá. */
 export function HeaderButton({
   icon,
   label,
@@ -87,12 +87,14 @@ export function HeaderButton({
   target?: string
   disabled?: boolean
   title?: string
-  tone?: "neutral" | "brand"
+  tone?: "neutral" | "brand" | "danger"
 }) {
   const cls = `inline-flex h-9 w-full items-center justify-center gap-1.5 sm:w-auto rounded-xl border px-3 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
     tone === "brand"
       ? "border-brand-600 bg-brand-600 text-white hover:bg-brand-700"
-      : "border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800"
+      : tone === "danger"
+        ? "border-red-200 bg-white text-red-600 hover:border-red-300 hover:bg-red-50"
+        : "border-slate-200 bg-white text-slate-700 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-800"
   }`
   if (href && !disabled) {
     return (

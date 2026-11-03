@@ -275,8 +275,20 @@ function actionClassName(tone: InventoryActionTone, size: "md" | "sm" | "icon", 
     "inline-flex min-w-0 shrink-0 items-center justify-center rounded-full border font-bold transition-colors " +
     "disabled:pointer-events-none disabled:opacity-45 " +
     ACTION_TONE_CLASS[tone]
-  const sizing = size === "icon" ? "h-8 w-8" : size === "sm" ? "h-8 gap-1 px-3 text-xs" : "h-9 gap-1.5 px-4 text-sm"
+  // "md": nút đầu trang — trên mobile chữ được xuống dòng trong nút (nút tự cao lên), từ md giữ 1 dòng.
+  const sizing =
+    size === "icon"
+      ? "h-8 w-8"
+      : size === "sm"
+        ? "h-8 gap-1 px-3 text-xs"
+        : "min-h-9 gap-1.5 px-4 py-1.5 text-sm"
   return `${base} ${sizing}${className ? ` ${className}` : ""}`
+}
+
+// Không bao giờ cắt chữ ("…") trên nút: nút "sm" (trong bảng có cuộn ngang) giữ 1 dòng,
+// nút "md" cho xuống dòng trên mobile.
+function actionLabelClassName(size: "md" | "sm") {
+  return size === "sm" ? "whitespace-nowrap" : "text-center leading-tight md:whitespace-nowrap"
 }
 
 export function InventoryActionButton({
@@ -300,7 +312,7 @@ export function InventoryActionButton({
       className={actionClassName(tone, size, className)}
     >
       <Icon size={size === "md" ? 16 : size === "sm" ? 13 : 15} strokeWidth={2.4} />
-      {size === "icon" ? null : <span className="min-w-0 truncate">{label}</span>}
+      {size === "icon" ? null : <span className={actionLabelClassName(size)}>{label}</span>}
     </button>
   )
 }
@@ -324,20 +336,19 @@ export function InventoryActionLink({
       className={actionClassName(tone, size, className)}
     >
       <Icon size={size === "md" ? 16 : size === "sm" ? 13 : 15} strokeWidth={2.4} />
-      {size === "icon" ? null : <span className="min-w-0 truncate">{label}</span>}
+      {size === "icon" ? null : <span className={actionLabelClassName(size)}>{label}</span>}
     </Link>
   )
 }
 
 /**
- * Cụm nút hành động cân đối trên mọi màn hình — mọi nút trong cụm luôn RỘNG BẰNG NHAU và không xuống dòng:
- * - Mobile: lưới 2 cột, mỗi nút chiếm trọn ô; số nút lẻ thì nút cuối trải 2 cột.
- * - Từ md: 1 hàng duy nhất, các cột bằng nhau (rộng theo nút dài nhất), canh phải.
- * Chữ quá dài bị cắt "…" (tooltip vẫn đủ nội dung) thay vì đẩy nút xuống dòng.
+ * Cụm nút hành động cân đối trên mọi màn hình — KHÔNG BAO GIỜ cắt chữ trên nút:
+ * - Mobile: lưới 2 cột, mỗi nút chiếm trọn ô; số nút lẻ thì nút cuối trải 2 cột; chữ dài xuống dòng trong nút.
+ * - Từ md: các nút xếp hàng ngang canh phải, rộng theo chữ; không đủ chỗ thì tự xuống hàng sau.
  */
 export const INVENTORY_ACTION_BAR_CLASS =
   "grid w-full grid-cols-2 gap-2 [&>*]:w-full [&>*:last-child:nth-child(odd)]:col-span-2 " +
-  "md:w-auto md:grid-flow-col md:auto-cols-fr md:grid-cols-none md:[&>*:last-child:nth-child(odd)]:col-span-1"
+  "md:flex md:w-auto md:flex-wrap md:items-center md:justify-end md:[&>*]:w-auto"
 
 export function InventoryActionBar({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={`${INVENTORY_ACTION_BAR_CLASS}${className ? ` ${className}` : ""}`}>{children}</div>

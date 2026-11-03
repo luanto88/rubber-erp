@@ -376,7 +376,7 @@ dùng chung bồn (`uses_shared_oil_stock`) gộp **1 nhãn/kho** (không phải
 
 Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng chung bộ lọc giữa 2 thẻ Báo cáo qua URL; `inventory/settings/page.tsx` (không có link nào trỏ tới) vẫn GIỮ — chỉ xóa khi người dùng xác nhận.
 
-**Cụm nút cân đối (2026-10-03, tiếp)** — mọi cụm nút đặt trong `InventoryActionBar` (hoặc class `INVENTORY_ACTION_BAR_CLASS`): mobile lưới 2 cột (số nút lẻ thì nút cuối trải 2 cột), từ `md` 1 hàng các cột bằng nhau; chữ dài bị cắt "…" chứ không xuống dòng. `InventoryPageShell` tự bọc `action` bằng cụm này. Giữ nhãn nút ngắn (≤ ~14 ký tự): "Lưu", "Ghi sổ", "Ghi sổ N kho", "In nhãn (N)".
+**Cụm nút cân đối (cập nhật 2026-11-03)** — mọi cụm nút đặt trong `InventoryActionBar` (hoặc class `INVENTORY_ACTION_BAR_CLASS`): mobile lưới 2 cột (số nút lẻ thì nút cuối trải 2 cột, chữ dài xuống dòng trong nút); từ `md` các nút xếp ngang canh phải, rộng theo chữ, thiếu chỗ thì tự xuống hàng. **Không bao giờ cắt chữ "…"** trên `InventoryActionButton`/`InventoryActionLink` (nút `sm` trong bảng giữ 1 dòng, bảng cuộn ngang). `InventoryPageShell` tự bọc `action` bằng cụm này. Vẫn nên giữ nhãn nút ngắn: "Lưu", "Ghi sổ", "Ghi sổ N kho", "In nhãn (N)".
 
 ## Chuẩn hoá danh sách phiếu theo rule 29 (2026-10-17, chờ test tay)
 `_components/inventory-document-list.tsx` (dùng chung Nhập/Xuất/Chuyển):
@@ -445,3 +445,26 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
   thành "Không có giao dịch").
 - Thẻ kho (`cards`): `ListState` cho tải/rỗng; lưới thẻ chọn nhãn giữ nguyên.
 - Không đổi truy vấn, quyền, Excel/in, điều kiện nút.
+
+## Sửa / mở / thoát phiếu Nhập – Xuất – Chuyển (2026-11-03, chờ test tay)
+- Quyền (người dùng chốt) — helper dùng chung `_components/inventory-edit-access.ts`:
+  tạo mới = admin hoặc `inventory.create`; sửa/Lưu/Ghi sổ phiếu NHÁP = **chỉ người lập (`created_by`) hoặc admin**
+  (phiếu cũ không có `created_by` ⇒ chỉ admin). Loader `fetchInventoryDocumentByReference` trả thêm `created_by`.
+- Phiếu đã ghi sổ / đã hủy KHÔNG mở form nữa: `?documentId=` / `?code=` tự `router.replace` sang trang chi tiết
+  (QR/link cũ vẫn chạy). Trang chi tiết đã bỏ nút "Mở phiếu (form)", "Sửa phiếu nháp" chỉ hiện cho người được sửa.
+- Form khoá chỉ xem (`<fieldset disabled>` + banner lý do) khi không đủ quyền / phiếu không tìm thấy / vừa ghi sổ.
+- "Danh sách" → **"Quay lại"** (phiếu đã lưu ⇒ trang chi tiết, mới ⇒ danh sách; hỏi nếu còn thay đổi chưa lưu).
+  "Làm mới" của phiếu đã lưu → **"Hoàn tác"** = nạp lại bản đã lưu (không còn xoá trắng). Sau Ghi sổ: "Chi tiết phiếu" + "Phiếu mới".
+- Lỗi đã sửa: Ghi sổ phiếu nháp đã có nay LUÔN lưu trước (trước ghi sổ theo bản lưu cũ, mất sửa đổi); đổi kho/ngày
+  giữ `documentId` (trước tạo phiếu trùng); update chỉ khi `status = draft` (0 dòng ⇒ báo lỗi), không ghi đè
+  `created_by`/`requester_name`; Lưu nháp phiếu mới đưa `?documentId=` lên URL (ref `loadedDocIdRef` chặn nạp lại);
+  effect đồng bộ dòng KHÔNG lọc theo bộ lọc Phân loại nữa (trước chọn phân loại là mất dòng đã nhập);
+  ngày mặc định theo giờ nhà máy (`getFactoryTodayISO`); trang bọc `Suspense`.
+- Chỉ chặn ở tầng app (RLS `inventory_documents` không đổi).
+- Header form (2026-11-03, sau test): 3 form dùng `InventoryFormHeader` (`_components/inventory-form-header.tsx`, dựng trên
+  `DetailPageHeader`): mũi tên quay lại + tiêu đề + mã + `StatusBadge domain="inventory"` + mốc ghi sổ/phê duyệt. Nút =
+  `HeaderButton` chuẩn chung (trắng viền xám; MỘT nút chính `tone="brand"`: Ghi sổ khi nháp, Duyệt khi chờ duyệt;
+  Hủy phiếu `tone="danger"` — thêm mới cho `HeaderButton`). KHÔNG dùng `InventoryActionButton` nhiều màu cho header form.
+- Ghi sổ luôn qua hộp nổi `PostConfirmDialog` (`_components/post-confirm-dialog.tsx`, portal; desktop giữa màn hình, mobile tấm trượt từ đáy): nêu tồn kho sẽ cộng/trừ ở kho nào, sau ghi
+  sổ không sửa/xoá được (chỉ Hủy phiếu), chờ phê duyệt (Nhập/Xuất), số cảnh báo còn lại. Enter = xác nhận, Esc = để sau.
+  Xuất nhiều kho: banner nêu số phiếu sẽ tạo + mã các kho.

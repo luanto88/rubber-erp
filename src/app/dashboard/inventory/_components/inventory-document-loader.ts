@@ -13,6 +13,7 @@ type InventoryDocumentHeader = {
   source_name: string | null
   recipient_name: string | null
   requester_name: string | null
+  created_by: string | null
   status: "draft" | "posted" | "cancelled"
   notes: string | null
   posted_by: string | null
@@ -63,11 +64,11 @@ export async function fetchInventoryDocumentByReference(
   }
 
   const FULL_FIELDS =
-    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason, approved_by, approved_by_name, approved_at, batch_id"
+    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, created_by, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason, approved_by, approved_by_name, approved_at, batch_id"
   const AUDIT_FIELDS =
-    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason"
+    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, created_by, status, notes, posted_by, posted_at, cancelled_by, cancelled_at, cancel_reason"
   const BASIC_FIELDS =
-    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, notes"
+    "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, created_by, status, notes"
 
   const fullResult = await buildDocQuery(FULL_FIELDS).maybeSingle()
 

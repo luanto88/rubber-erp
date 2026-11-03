@@ -1,8 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useParams } from "next/navigation"
-import { Ban, Check, ClipboardList, Download, FileText, Package, Pencil, Printer, RotateCcw, Warehouse } from "lucide-react"
+import { useParams, useRouter } from "next/navigation"
+import { Ban, Check, Download, FileText, Package, Pencil, Printer, RotateCcw, Warehouse } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay } from "@/lib/date-utils"
@@ -29,11 +29,13 @@ import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { fetchInventoryDocumentByReference } from "../../../_components/inventory-document-loader"
 import { resolveCanApproveInventory } from "../../../_components/inventory-approval"
 import { InventoryActionButton } from "../../../_components/inventory-ui"
+import { canEditInventoryDraft } from "../../../_components/inventory-edit-access"
 
 /**
  * Trang chi tiết phiếu Nhập / Xuất / Chuyển kho (rule 29 mục C, 2026-10-17).
  * Cột trái nhúng PDF phiếu dựng ngay trong trình duyệt (DocViewer loadBytes) — cùng nội dung trang in.
- * Sửa phiếu nháp vẫn ở form cũ (`<route>?documentId=`); Duyệt / Hủy phiếu làm được ngay tại đây.
+ * Sửa phiếu nháp ở form (`<route>?documentId=`) — chỉ người lập hoặc admin; Duyệt / Hủy phiếu làm được ngay tại đây.
+ * Phiếu đã ghi sổ / đã hủy không mở form nữa (form tự chuyển về trang này).
  */
 
 type LoadedDoc = NonNullable<Awaited<ReturnType<typeof fetchInventoryDocumentByReference>>>
@@ -62,6 +64,7 @@ export default function InventoryDocumentDetailPage() {
   const docId = typeof params?.id === "string" ? params.id : ""
   const docType: InventoryDocumentPdfType | null = isDocType(rawType) ? rawType : null
   const isDesktop = useIsDesktop()
+  const router = useRouter()
 
   const [user, setUser] = useState<SessionUser | null>(null)
   const [factoryId, setFactoryId] = useState<string | null>(null)
@@ -213,9 +216,7 @@ export default function InventoryDocumentDetailPage() {
   const statusKey = supportsApproval && doc.status === "posted" && !doc.approved_at ? "cho_duyet" : doc.status
   const showApprove = supportsApproval && canApprove && doc.status === "posted" && !doc.approved_at
   const canCancel = hasPermission(user, "inventory.cancel") && doc.status === "posted"
-  const canEdit =
-    doc.status === "draft" &&
-    (hasPermission(user, "inventory.create") || hasPermission(user, "inventory.edit") || user?.role === "admin")
+  const canEdit = canEditInventoryDraft(user, doc)
   const openFormHref = `${route}?documentId=${encodeURIComponent(doc.id)}`
   const printHref = `/dashboard/inventory/print?type=${docType}&documentId=${encodeURIComponent(doc.id)}`
   const srcWh = doc.source_warehouse_id ? warehouses[doc.source_warehouse_id] : null
@@ -285,9 +286,9 @@ export default function InventoryDocumentDetailPage() {
   const secondary: SignAction[] = [
     { key: "pdf", label: "Tải PDF phiếu", icon: <Download size={14} />, onClick: () => void downloadPdf() },
     { key: "print", label: "In phiếu", icon: <Printer size={14} />, onClick: () => window.open(printHref, "_blank") },
-    canEdit
-      ? { key: "edit", label: "Sửa phiếu nháp", icon: <Pencil size={14} />, onClick: () => window.location.assign(openFormHref) }
-      : { key: "form", label: "Mở phiếu (form)", icon: <ClipboardList size={14} />, onClick: () => window.location.assign(openFormHref) },
+    ...(canEdit
+      ? [{ key: "edit", label: "Sửa phiếu nháp", icon: <Pencil size={14} />, onClick: () => router.push(openFormHref) }]
+      : []),
   ]
   const danger: SignAction[] = canCancel
     ? [{ key: "cancel", label: "Hủy phiếu", icon: <Ban size={14} />, onClick: () => setModal("cancel") }]

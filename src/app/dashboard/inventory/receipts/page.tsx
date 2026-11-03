@@ -1,14 +1,18 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
-import { AlertTriangle, ArrowLeft, Ban, BookCheck, Check, CheckCircle2, CopyPlus, Printer, RotateCcw, Save, Trash2 } from "lucide-react"
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { AlertTriangle, Ban, BookCheck, Check, CheckCircle2, CopyPlus, Eye, FilePlus2, Lock, Printer, RotateCcw, Save, Trash2, Undo2 } from "lucide-react"
 import { getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { InventoryPageShell } from "../_components/inventory-shell"
-import { InventoryDocumentList } from "../_components/inventory-document-list"
-import { INVENTORY_ACTION_BAR_CLASS, InventoryActionButton, InventoryActionLink } from "../_components/inventory-ui"
+import { InventoryDocumentList, inventoryDocumentDetailHref } from "../_components/inventory-document-list"
+import { PostConfirmDialog } from "../_components/post-confirm-dialog"
+import { InventoryFormHeader } from "../_components/inventory-form-header"
+import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
+import { resolveInventoryFormLock } from "../_components/inventory-edit-access"
+import { getFactoryTodayISO } from "@/lib/date-utils"
 import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
 import { InventoryQrCard } from "../_components/inventory-qr-card"
@@ -106,7 +110,8 @@ const INPUT_CLASS =
   "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10)
+  // Ngày theo giờ nhà máy (toISOString là UTC, lệch 1 ngày từ 00:00 đến 06:59).
+  return getFactoryTodayISO()
 }
 
 function makeLine(itemId = ""): ReceiptLineDraft {
@@ -118,6 +123,35 @@ function makeLine(itemId = ""): ReceiptLineDraft {
     expiryDate: "",
     note: "",
     imageUrls: [],
+  }
+}
+
+type LoadedReceipt = NonNullable<Awaited<ReturnType<typeof fetchInventoryDocumentByReference>>>
+
+function draftFromLoaded(loaded: LoadedReceipt, warehouses: InventoryWarehouseOption[]): DraftState {
+  const fallbackWarehouseId = warehouses[0]?.id || ""
+  const nextWarehouseId =
+    loaded.document.target_warehouse_id &&
+    warehouses.some((warehouse) => warehouse.id === loaded.document.target_warehouse_id)
+      ? loaded.document.target_warehouse_id
+      : fallbackWarehouseId
+  return {
+    documentId: loaded.document.id,
+    documentCode: loaded.document.document_code,
+    warehouseId: nextWarehouseId,
+    sourceName: loaded.document.source_name || "",
+    documentDate: loaded.document.document_date,
+    note: loaded.document.notes || "",
+    selectedItemIds: Array.from(new Set(loaded.lines.map((line) => line.item_id))),
+    lines: loaded.lines.map((line) => ({
+      id: line.id,
+      itemId: line.item_id,
+      quantity: String(Number(line.quantity || 0)),
+      lotNo: line.lot_no || "",
+      expiryDate: line.expiry_date || "",
+      note: line.line_notes || "",
+      imageUrls: line.image_urls || [],
+    })),
   }
 }
 
@@ -274,12 +308,15 @@ function AlertPill({ children, tone = "amber" }: { children: React.ReactNode; to
 }
 
 function InventoryReceiptsPageForm() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const requestedDocumentId = searchParams.get("documentId")
   const requestedCode = searchParams.get("code")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [posting, setPosting] = useState(false)
+  // Banner xác nhận trước khi Ghi sổ (Enter = xác nhận, Esc = để sau).
+  const [confirmPost, setConfirmPost] = useState(false)
   const [warning, setWarning] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveErrorTitle, setSaveErrorTitle] = useState("Có lỗi xảy ra")
@@ -314,8 +351,16 @@ function InventoryReceiptsPageForm() {
     emptyQuickCategoryForm(),
   )
   const [quickItemForm, setQuickItemForm] = useState<QuickItemForm>(() => emptyQuickItemForm())
+  // Người lập phiếu đang mở (quyết định ai được sửa) + bản chụp lần nạp/lưu gần nhất (phát hiện thay đổi chưa lưu).
+  const [docOwner, setDocOwner] = useState<{ createdBy: string | null; requesterName: string | null }>({ createdBy: null, requesterName: null })
+  const [savedSnapshot, setSavedSnapshot] = useState("")
+  const [notFound, setNotFound] = useState(false)
+  const [redirecting, setRedirecting] = useState(false)
+  // id phiếu vừa tạo ở chính form này — đổi URL sang ?documentId= không được nạp lại từ đầu.
+  const loadedDocIdRef = useRef<string | null>(null)
 
   useEffect(() => {
+    if (requestedDocumentId && requestedDocumentId === loadedDocIdRef.current) return
     const bootstrap = async () => {
       setLoading(true)
       try {
@@ -368,44 +413,28 @@ function InventoryReceiptsPageForm() {
           })
 
           if (!loaded) {
-            return false
+            setNotFound(true)
+            setDraft({ ...defaultDraft(), warehouseId: fallbackWarehouseId })
+            setDocumentStatus(null)
+            return true
           }
 
-          const nextWarehouseId =
-            loaded.document.target_warehouse_id &&
-            inventoryData.warehouses.some((warehouse) => warehouse.id === loaded.document.target_warehouse_id)
-              ? loaded.document.target_warehouse_id
-              : fallbackWarehouseId
-
-          const selectedItemIds = Array.from(new Set(loaded.lines.map((line) => line.item_id)))
-          setDraft({
-            documentId: loaded.document.id,
-            documentCode: loaded.document.document_code,
-            warehouseId: nextWarehouseId,
-            sourceName: loaded.document.source_name || "",
-            documentDate: loaded.document.document_date,
-            note: loaded.document.notes || "",
-            selectedItemIds,
-            lines: loaded.lines.map((line) => ({
-              id: line.id,
-              itemId: line.item_id,
-              quantity: String(Number(line.quantity || 0)),
-              lotNo: line.lot_no || "",
-              expiryDate: line.expiry_date || "",
-              note: line.line_notes || "",
-              imageUrls: line.image_urls || [],
-            })),
-          })
-          setDocumentStatus(
-            loaded.document.status === "posted" ? "posted"
-            : loaded.document.status === "cancelled" ? "cancelled"
-            : "draft"
-          )
-          if (loaded.document.approved_by_name && loaded.document.approved_at) {
-            setApprovedInfo({ at: loaded.document.approved_at, byName: loaded.document.approved_by_name })
-          } else {
-            setApprovedInfo(null)
+          // Phiếu đã ghi sổ / đã hủy không sửa được nữa — mở trang chi tiết thay cho form.
+          if (loaded.document.status !== "draft") {
+            setRedirecting(true)
+            router.replace(inventoryDocumentDetailHref("import", loaded.document.id))
+            return true
           }
+
+          const loadedDraft = draftFromLoaded(loaded, inventoryData.warehouses)
+          loadedDocIdRef.current = loaded.document.id
+          setNotFound(false)
+          setDraft(loadedDraft)
+          setSavedSnapshot(JSON.stringify(loadedDraft))
+          setDocOwner({ createdBy: loaded.document.created_by, requesterName: loaded.document.requester_name })
+          setDocumentStatus("draft")
+          setApprovedInfo(null)
+          setPostedInfo(null)
           return true
         }
 
@@ -413,50 +442,40 @@ function InventoryReceiptsPageForm() {
           return
         }
 
-        const stored = window.localStorage.getItem(DRAFT_STORAGE_KEY)
-        if (stored) {
-          try {
-            const parsed = normalizeDraftState(JSON.parse(stored))
-            if (parsed.documentId) {
-              // Phiếu này đã có mã (đã Lưu nháp/Ghi sổ trước đó) — không tự nạp lại qua đường vào
-              // trang trần (không có ?documentId=), tránh hiện "phiếu ma" với trạng thái sai. Muốn
-              // tiếp tục phiếu cũ phải mở đúng qua ?documentId=.
-              setDraft({
-                ...defaultDraft(),
-                warehouseId: fallbackWarehouseId,
-              })
-              setDocumentStatus(null)
-            } else {
-              const nextWarehouseId = inventoryData.warehouses.some((warehouse) => warehouse.id === parsed.warehouseId)
+        // Phiếu mới: khôi phục bản đang gõ dở (chưa từng lưu) trong trình duyệt nếu có.
+        const emptyDraft: DraftState = { ...defaultDraft(), warehouseId: fallbackWarehouseId }
+        let initialDraft = emptyDraft
+        try {
+          const stored = window.localStorage.getItem(DRAFT_STORAGE_KEY)
+          const parsed = stored ? normalizeDraftState(JSON.parse(stored)) : null
+          // Bản đã có mã (đã Lưu nháp/Ghi sổ trước đó) không tự nạp lại qua đường vào phiếu mới, tránh
+          // hiện "phiếu ma". Muốn tiếp tục phiếu cũ phải mở đúng qua ?documentId=.
+          if (parsed && !parsed.documentId) {
+            initialDraft = {
+              ...parsed,
+              warehouseId: inventoryData.warehouses.some((warehouse) => warehouse.id === parsed.warehouseId)
                 ? parsed.warehouseId
-                : fallbackWarehouseId
-              setDraft({
-                ...parsed,
-                warehouseId: nextWarehouseId,
-              })
-              setDocumentStatus(null)
+                : fallbackWarehouseId,
             }
-          } catch {
-            setDraft({
-              ...defaultDraft(),
-              warehouseId: fallbackWarehouseId,
-            })
-            setDocumentStatus(null)
           }
-        } else {
-          setDraft({
-            ...defaultDraft(),
-            warehouseId: fallbackWarehouseId,
-          })
-          setDocumentStatus(null)
+        } catch {
+          initialDraft = emptyDraft
         }
+        loadedDocIdRef.current = null
+        setNotFound(false)
+        setDraft(initialDraft)
+        setSavedSnapshot(JSON.stringify(emptyDraft))
+        setDocOwner({ createdBy: null, requesterName: null })
+        setDocumentStatus(null)
+        setApprovedInfo(null)
+        setPostedInfo(null)
       } finally {
         setLoading(false)
       }
     }
 
     void bootstrap()
-  }, [requestedCode, requestedDocumentId])
+  }, [requestedCode, requestedDocumentId, router])
 
   useEffect(() => {
     if (loading) return
@@ -542,7 +561,8 @@ function InventoryReceiptsPageForm() {
   useEffect(() => {
     if (loading) return
 
-    const allowedIds = new Set(warehouseScopedItems.map((item) => item.id))
+    // Chỉ bỏ vật tư không còn trong danh mục — KHÔNG lọc theo bộ lọc Phân loại (trước đây chọn phân loại là mất dòng đã nhập).
+    const allowedIds = new Set(items.map((item) => item.id))
     const nextSelected = draft.selectedItemIds.filter((itemId) => allowedIds.has(itemId))
     const selectedChanged = nextSelected.join("|") !== draft.selectedItemIds.join("|")
 
@@ -566,7 +586,7 @@ function InventoryReceiptsPageForm() {
       selectedItemIds: nextSelected,
       lines: nextLines,
     }))
-  }, [draft.lines, draft.selectedItemIds, loading, warehouseScopedItems])
+  }, [draft.lines, draft.selectedItemIds, items, loading])
 
   const lineDetails = useMemo<LineDetail[]>(() => {
     return draft.lines.map((line) => {
@@ -955,12 +975,51 @@ function InventoryReceiptsPageForm() {
     })
   }
 
-  const resetDraft = () => {
+  const isDirty = !loading && JSON.stringify(draft) !== savedSnapshot
+  const lockReason = loading || redirecting
+    ? null
+    : notFound
+      ? "Không tìm thấy phiếu nhập này (đã bị xoá hoặc thuộc nhà máy khác)."
+      : resolveInventoryFormLock(currentUser, {
+          documentId: draft.documentId,
+          status: documentStatus,
+          createdBy: docOwner.createdBy,
+          requesterName: docOwner.requesterName,
+        })
+  const isLocked = loading || redirecting || !!lockReason
+
+  // "Làm mới": phiếu mới → xoá trống; phiếu đã lưu → "Hoàn tác" nạp lại bản đã lưu (không bao giờ xoá trắng phiếu đã lưu).
+  const resetDraft = async () => {
+    if (draft.documentId) {
+      if (isDirty && !window.confirm("Bỏ mọi thay đổi chưa lưu và nạp lại phiếu đã lưu?")) return
+      if (!factoryId) return
+      setSaveError(null)
+      setSaveSuccess(null)
+      const loaded = await fetchInventoryDocumentByReference(factoryId, "import", { documentId: draft.documentId })
+      if (!loaded) {
+        setSaveErrorTitle("Không nạp lại được phiếu")
+        setSaveError("Không tìm thấy phiếu nhập này nữa.")
+        return
+      }
+      if (loaded.document.status !== "draft") {
+        setRedirecting(true)
+        router.replace(inventoryDocumentDetailHref("import", loaded.document.id))
+        return
+      }
+      const loadedDraft = draftFromLoaded(loaded, warehouses)
+      setDraft(loadedDraft)
+      setSavedSnapshot(JSON.stringify(loadedDraft))
+      setSelectedCategoryIds([])
+      setSaveSuccess("Đã hoàn tác về bản đã lưu.")
+      return
+    }
+    if (draft.lines.length > 0 && !window.confirm("Xoá toàn bộ nội dung phiếu đang nhập?")) return
     const nextDraft = {
       ...defaultDraft(),
       warehouseId: warehouses[0]?.id || "",
     }
     setDraft(nextDraft)
+    setSavedSnapshot(JSON.stringify(nextDraft))
     setDocumentStatus(null)
     setApprovedInfo(null)
     setSaveError(null)
@@ -968,9 +1027,31 @@ function InventoryReceiptsPageForm() {
     window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
   }
 
+  // Quay lại: phiếu đã lưu → trang chi tiết phiếu; phiếu mới → danh sách. Hỏi trước nếu còn thay đổi chưa lưu.
+  const goBack = () => {
+    if (!isLocked && isDirty && !window.confirm("Phiếu còn thay đổi chưa lưu. Vẫn rời trang?")) return
+    router.push(draft.documentId ? inventoryDocumentDetailHref("import", draft.documentId) : "/dashboard/inventory/receipts")
+  }
+
+  // Sau khi ghi sổ: mở phiếu mới tinh trên cùng form.
+  const startNewDocument = () => {
+    const nextDraft = { ...defaultDraft(), warehouseId: warehouses[0]?.id || "" }
+    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
+    setKpiPrompt(null)
+    setSaveSuccess(null)
+    setSaveError(null)
+    router.push("/dashboard/inventory/receipts?mode=new")
+  }
+
   const saveReceiptDraft = async () => {
     setSaveError(null)
     setSaveSuccess(null)
+
+    if (lockReason) {
+      setSaveErrorTitle("Không lưu được phiếu nhập")
+      setSaveError(lockReason)
+      return null
+    }
 
     if (!factoryId) {
       setSaveError("Chưa xác định được nhà máy đang thao tác.")
@@ -1040,13 +1121,22 @@ function InventoryReceiptsPageForm() {
       let documentId = draft.documentId
 
       if (documentId) {
+        // Không đổi người lập khi sửa; chỉ cập nhật khi phiếu CÒN là nháp (tab khác có thể đã ghi sổ).
+        const updatePayload: Record<string, unknown> = { ...documentPayload }
+        delete updatePayload.created_by
+        delete updatePayload.requester_name
         const updateResult = await supabase
           .from("inventory_documents")
-          .update(documentPayload)
+          .update(updatePayload)
           .eq("id", documentId)
           .eq("factory_id", factoryId)
+          .eq("status", "draft")
+          .select("id")
 
         if (updateResult.error) throw updateResult.error
+        if (!updateResult.data?.length) {
+          throw new Error("Phiếu không còn ở trạng thái nháp (đã ghi sổ hoặc hủy ở nơi khác). Tải lại trang để xem.")
+        }
       } else {
         const insertResult = await supabase
           .from("inventory_documents")
@@ -1089,12 +1179,20 @@ function InventoryReceiptsPageForm() {
       const insertLinesResult = await supabase.from("inventory_document_lines").insert(linesPayload)
       if (insertLinesResult.error) throw insertLinesResult.error
 
+      const isNewDocument = !draft.documentId
       setDraft((prev) => ({
         ...prev,
         documentId,
         documentCode: nextDocumentCode,
       }))
+      setSavedSnapshot(JSON.stringify({ ...draft, documentId, documentCode: nextDocumentCode }))
       setDocumentStatus("draft")
+      if (isNewDocument) {
+        setDocOwner({ createdBy: session.user.id, requesterName: documentPayload.requester_name })
+        // Đưa id lên URL để F5 / Quay lại / Hoàn tác đúng phiếu (effect bỏ qua nhờ loadedDocIdRef).
+        loadedDocIdRef.current = documentId
+        router.replace(`/dashboard/inventory/receipts?documentId=${encodeURIComponent(documentId)}`)
+      }
       setSaveSuccess(`Đã lưu phiếu nhập ${nextDocumentCode} ở trạng thái nháp.`)
       return { documentId, documentCode: nextDocumentCode }
     } catch (error) {
@@ -1140,16 +1238,12 @@ function InventoryReceiptsPageForm() {
       return
     }
 
-    let targetDocumentId = draft.documentId
-    let targetDocumentCode = draft.documentCode || documentCode
-
-    if (!targetDocumentId) {
-      const saved = await saveReceiptDraft()
-      if (!saved?.documentId) return
-      targetDocumentId = saved.documentId
-      targetDocumentCode = saved.documentCode
-      setSaveSuccess(null)
-    }
+    // Luôn lưu bản đang sửa trước khi ghi sổ — trước đây phiếu đã có id bị ghi sổ theo bản lưu CŨ, mất sửa đổi.
+    const saved = await saveReceiptDraft()
+    if (!saved?.documentId) return
+    const targetDocumentId = saved.documentId
+    const targetDocumentCode = saved.documentCode
+    setSaveSuccess(null)
 
     const session = await getFreshAuthSession()
     if (!session?.user) {
@@ -1280,6 +1374,14 @@ function InventoryReceiptsPageForm() {
 
   const canSave = !!draft.warehouseId && draft.lines.length > 0
 
+  if (redirecting) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
+        Phiếu đã ghi sổ / đã hủy — đang mở trang chi tiết phiếu...
+      </div>
+    )
+  }
+
   return (
     <>
     <InventoryPageShell
@@ -1287,6 +1389,90 @@ function InventoryReceiptsPageForm() {
       title="Phiếu nhập kho"
       description="Chọn kho, chọn nhiều vật tư theo kho và hoàn thiện số lượng, lô, hạn dùng ngay trên từng dòng nhập."
     >
+      <InventoryFormHeader
+        onBack={goBack}
+        eyebrow="Nhập kho"
+        title="Phiếu nhập kho"
+        code={documentCode}
+        documentStatus={documentStatus}
+        hasDocument={!!draft.documentId}
+        postedInfo={postedInfo}
+        approvedInfo={approvedInfo}
+        actions={
+          <>
+            {draft.documentId && documentStatus !== "draft" ? (
+              <HeaderButton
+                icon={<Eye size={15} />}
+                label="Chi tiết phiếu"
+                onClick={() => router.push(inventoryDocumentDetailHref("import", draft.documentId as string))}
+              />
+            ) : null}
+            {draft.documentId ? (
+              <HeaderButton
+                icon={<Printer size={15} />}
+                label="In phiếu"
+                href={`/dashboard/inventory/print?type=import&documentId=${encodeURIComponent(draft.documentId)}`}
+              />
+            ) : null}
+            {documentStatus === "posted" || documentStatus === "cancelled" ? (
+              <HeaderButton icon={<FilePlus2 size={15} />} label="Phiếu mới" onClick={startNewDocument} />
+            ) : null}
+            {!isLocked ? (
+              <>
+                <HeaderButton
+                  icon={draft.documentId ? <Undo2 size={15} /> : <RotateCcw size={15} />}
+                  label={draft.documentId ? "Hoàn tác" : "Làm mới"}
+                  title={draft.documentId ? "Bỏ thay đổi chưa lưu, nạp lại bản đã lưu" : "Xoá trống phiếu đang nhập"}
+                  onClick={() => void resetDraft()}
+                  disabled={saving || posting || confirmPost}
+                />
+                <HeaderButton
+                  icon={<Save size={15} />}
+                  label={saving ? "Đang lưu..." : draft.documentId ? "Lưu" : "Lưu nháp"}
+                  onClick={() => void saveReceiptDraft()}
+                  disabled={!canSave || saving || posting || loading || confirmPost}
+                />
+                <HeaderButton
+                  tone="brand"
+                  icon={<BookCheck size={15} />}
+                  label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
+                  onClick={() => {
+                    setSaveError(null)
+                    setSaveSuccess(null)
+                    setConfirmPost(true)
+                  }}
+                  disabled={!canSave || saving || posting || loading || confirmPost}
+                />
+              </>
+            ) : null}
+            {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
+              <HeaderButton tone="danger" icon={<Ban size={15} />} label="Hủy phiếu" onClick={() => setCancelModal(true)} />
+            ) : null}
+            {documentStatus === "posted" && canApprove && !approvedInfo ? (
+              <HeaderButton tone="brand" icon={<Check size={15} />} label="Duyệt" onClick={() => setApproveModal(true)} />
+            ) : null}
+          </>
+        }
+      />
+
+      {confirmPost && !isLocked ? (
+        <PostConfirmDialog
+          title={`Phiếu nhập ${documentCode} (${draft.lines.length} dòng, tổng ${summary.totalQty.toLocaleString("vi-VN")})`}
+          points={[
+            <>Hệ thống lưu nội dung đang sửa rồi <strong>cộng vào tồn kho {selectedWarehouse?.code || ""}</strong> ngay.</>,
+            <>Sau khi ghi sổ <strong>không sửa hay xoá phiếu được nữa</strong>. Muốn điều chỉnh phải nhờ người có quyền Hủy phiếu (tồn kho được hoàn lại) rồi lập phiếu mới.</>,
+            <>Phiếu chuyển sang chờ phê duyệt.</>,
+          ]}
+          warning={summary.warningCount > 0 ? `Phiếu còn ${summary.warningCount} cảnh báo — kiểm tra trước khi ghi sổ.` : undefined}
+          posting={posting}
+          onConfirm={async () => {
+            await postReceiptDraft()
+            setConfirmPost(false)
+          }}
+          onCancel={() => setConfirmPost(false)}
+        />
+      ) : null}
+
       {kpiPrompt && (
         <KpiLinkPrompt
           factoryId={factoryId}
@@ -1318,6 +1504,20 @@ function InventoryReceiptsPageForm() {
         </div>
       ) : null}
 
+      {lockReason ? (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <Lock size={16} className="mt-0.5 shrink-0" />
+          <div className="leading-6">
+            <span className="font-bold">Chỉ xem. </span>
+            {lockReason}
+          </div>
+        </div>
+      ) : isDirty && draft.documentId ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-700">
+          Có thay đổi chưa lưu — bấm Lưu (hoặc Ghi sổ) để lưu, Hoàn tác để bỏ.
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
         <SummaryBox label="Tổng số dòng" value={String(draft.lines.length)} />
         <SummaryBox label="Tổng số lượng nhập" value={summary.totalQty.toLocaleString("vi-VN")} tone="text-emerald-700" />
@@ -1330,83 +1530,23 @@ function InventoryReceiptsPageForm() {
       </div>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Thông tin phiếu</div>
-            <h2 className="mt-1 break-all text-lg font-bold text-slate-800 sm:text-xl">{documentCode}</h2>
             <p className="mt-1 text-sm text-slate-500">
               Chọn kho trước, sau đó chọn nhiều vật tư. Các dòng nhập sẽ tự sinh ngay bên dưới.
             </p>
           </div>
-          <div className="flex flex-col gap-3 lg:items-end">
-            <div className={INVENTORY_ACTION_BAR_CLASS}>
-              <InventoryActionLink href="/dashboard/inventory/receipts" icon={ArrowLeft} label="Danh sách" tone="slate" />
-              {draft.documentId ? (
-                <InventoryActionLink
-                  href={`/dashboard/inventory/print?type=import&documentId=${encodeURIComponent(draft.documentId)}`}
-                  icon={Printer}
-                  label="In phiếu"
-                  tone="slate"
-                />
-              ) : null}
-              <InventoryActionButton icon={RotateCcw} label="Làm mới" tone="slate" onClick={resetDraft} />
-              {documentStatus !== "posted" && documentStatus !== "cancelled" ? (
-                <>
-                  <InventoryActionButton
-                    icon={Save}
-                    label={saving ? "Đang lưu..." : draft.documentId ? "Lưu" : "Lưu nháp"}
-                    tone="sky"
-                    onClick={() => void saveReceiptDraft()}
-                    disabled={!canSave || saving || posting || loading}
-                  />
-                  <InventoryActionButton
-                    icon={BookCheck}
-                    label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
-                    tone="emerald"
-                    onClick={() => void postReceiptDraft()}
-                    disabled={saving || posting || loading}
-                  />
-                </>
-              ) : null}
-              {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
-                <InventoryActionButton icon={Ban} label="Hủy phiếu" tone="rose" onClick={() => setCancelModal(true)} />
-              ) : null}
-              {documentStatus === "posted" && canApprove && !approvedInfo ? (
-                <InventoryActionButton icon={Check} label="Duyệt" tone="emerald" onClick={() => setApproveModal(true)} />
-              ) : null}
-            </div>
-            {postedInfo ? (
-              <div className="flex items-center gap-1.5 text-xs text-emerald-700">
-                <Check size={13} className="shrink-0" />
-                <span>
-                  Đã ghi sổ lúc {new Date(postedInfo.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
-                  {" "}ngày {new Date(postedInfo.at).toLocaleDateString("vi-VN")}
-                  {postedInfo.byName ? ` bởi ${postedInfo.byName}` : ""}
-                </span>
-              </div>
-            ) : null}
-            {approvedInfo ? (
-              <div className="flex items-center gap-1.5 text-xs text-indigo-700">
-                <CheckCircle2 size={13} className="shrink-0" />
-                <span>
-                  Đã phê duyệt lúc {new Date(approvedInfo.at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}
-                  {" "}ngày {new Date(approvedInfo.at).toLocaleDateString("vi-VN")}
-                  {approvedInfo.byName ? ` bởi ${approvedInfo.byName}` : ""}
-                </span>
-              </div>
-            ) : documentStatus === "posted" ? (
-              <div className="text-xs font-semibold text-amber-600">Chưa phê duyệt</div>
-            ) : null}
-            <InventoryQrCard
-              title="QR phiếu nhập"
-              caption="Quét để mở nhanh phiếu nhập theo mã."
-              hrefPath={documentQrPath}
-              valueText={documentCode}
-              compact
-            />
-          </div>
+          <InventoryQrCard
+            title="QR phiếu nhập"
+            caption="Quét để mở nhanh phiếu nhập theo mã."
+            hrefPath={documentQrPath}
+            valueText={documentCode}
+            compact
+          />
         </div>
 
+        <fieldset disabled={isLocked} className="m-0 min-w-0 border-0 p-0">
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
           <div>
             <label className="mb-1.5 block text-xs font-bold text-slate-600">Kho nhập *</label>
@@ -1416,7 +1556,7 @@ function InventoryReceiptsPageForm() {
                 setDraft((prev) => ({
                   ...prev,
                   warehouseId: e.target.value,
-                  documentId: null,
+                  // Giữ documentId: đang sửa phiếu đã lưu thì Lưu cập nhật CHÍNH phiếu đó (trước đây tạo phiếu trùng).
                   documentCode: "",
                   selectedItemIds: [],
                   lines: [],
@@ -1443,7 +1583,6 @@ function InventoryReceiptsPageForm() {
                 setDraft((prev) => ({
                   ...prev,
                   documentDate: e.target.value,
-                  documentId: null,
                   documentCode: "",
                 }))
               }
@@ -1557,6 +1696,7 @@ function InventoryReceiptsPageForm() {
             />
           </div>
         </div>
+        </fieldset>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1565,6 +1705,7 @@ function InventoryReceiptsPageForm() {
           <h2 className="mt-1 text-lg font-bold text-slate-800">Danh sách vật tư nhập</h2>
         </div>
 
+        <fieldset disabled={isLocked} className="m-0 min-w-0 border-0 p-0">
         {draft.lines.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
             Chọn vật tư ở phần trên để tự sinh các dòng nhập kho.
@@ -1685,6 +1826,7 @@ function InventoryReceiptsPageForm() {
             ))}
           </div>
         )}
+        </fieldset>
       </section>
     </InventoryPageShell>
 
@@ -2003,8 +2145,16 @@ function InventoryReceiptsPageForm() {
 
 // Không có ?documentId / ?code / ?mode=new → hiện DANH SÁCH phiếu; ngược lại mở form như cũ.
 // Giữ nguyên dạng link ?documentId= vì QR in trên phiếu, Sổ chi tiết và chuông thông báo đang dùng.
-export default function InventoryReceiptsPage() {
+function InventoryReceiptsPageInner() {
   const searchParams = useSearchParams()
   const showForm = !!(searchParams.get("documentId") || searchParams.get("code") || searchParams.get("mode") === "new")
   return showForm ? <InventoryReceiptsPageForm /> : <InventoryDocumentList kind="import" />
+}
+
+export default function InventoryReceiptsPage() {
+  return (
+    <Suspense fallback={null}>
+      <InventoryReceiptsPageInner />
+    </Suspense>
+  )
 }
