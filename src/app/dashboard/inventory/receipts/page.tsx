@@ -10,6 +10,7 @@ import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryDocumentList, inventoryDocumentDetailHref } from "../_components/inventory-document-list"
 import { PostConfirmDialog } from "../_components/post-confirm-dialog"
 import { InventoryFormHeader } from "../_components/inventory-form-header"
+import { fetchNextInventoryDocSeq, savedCodeFor } from "../_components/inventory-doc-code"
 import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { resolveInventoryFormLock } from "../_components/inventory-edit-access"
 import { getFactoryTodayISO } from "@/lib/date-utils"
@@ -1090,16 +1091,13 @@ function InventoryReceiptsPageForm() {
       let nextDocumentCode = draft.documentCode
 
       if (!nextDocumentCode) {
-        const countResult = await supabase
-          .from("inventory_documents")
-          .select("id", { count: "exact", head: true })
-          .eq("factory_id", factoryId)
-          .eq("document_type", "import")
-          .eq("target_warehouse_id", draft.warehouseId)
-          .eq("document_date", draft.documentDate)
-
-        if (countResult.error) throw countResult.error
-        nextDocumentCode = formatDocCode(warehouse.code, draft.documentDate, (countResult.count || 0) + 1)
+        const seq = await fetchNextInventoryDocSeq({
+          factoryId,
+          documentType: "import",
+          codePrefix: formatDocCode(warehouse.code, draft.documentDate).split("/")[0],
+          excludeId: draft.documentId,
+        })
+        nextDocumentCode = formatDocCode(warehouse.code, draft.documentDate, seq)
       }
 
       const documentPayload = {
@@ -1386,7 +1384,7 @@ function InventoryReceiptsPageForm() {
     <>
     <InventoryPageShell
       eyebrow="Nhập xuất tồn"
-      title="Phiếu nhập kho"
+      title="Nhập kho"
       description="Chọn kho, chọn nhiều vật tư theo kho và hoàn thiện số lượng, lô, hạn dùng ngay trên từng dòng nhập."
     >
       <InventoryFormHeader
@@ -1557,7 +1555,8 @@ function InventoryReceiptsPageForm() {
                   ...prev,
                   warehouseId: e.target.value,
                   // Giữ documentId: đang sửa phiếu đã lưu thì Lưu cập nhật CHÍNH phiếu đó (trước đây tạo phiếu trùng).
-                  documentCode: "",
+                  // Đổi về đúng kho + ngày đã lưu ⇒ giữ mã gốc.
+                  documentCode: savedCodeFor(savedSnapshot, prev.documentId, e.target.value, prev.documentDate, "warehouseId"),
                   selectedItemIds: [],
                   lines: [],
                 }))
@@ -1583,7 +1582,7 @@ function InventoryReceiptsPageForm() {
                 setDraft((prev) => ({
                   ...prev,
                   documentDate: e.target.value,
-                  documentCode: "",
+                  documentCode: savedCodeFor(savedSnapshot, prev.documentId, prev.warehouseId, e.target.value, "warehouseId"),
                 }))
               }
               className={INPUT_CLASS}

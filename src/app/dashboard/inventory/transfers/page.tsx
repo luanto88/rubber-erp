@@ -11,6 +11,7 @@ import { resolveInventoryFormLock } from "../_components/inventory-edit-access"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { PostConfirmDialog } from "../_components/post-confirm-dialog"
 import { InventoryFormHeader } from "../_components/inventory-form-header"
+import { fetchNextInventoryDocSeq, savedCodeFor } from "../_components/inventory-doc-code"
 import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
@@ -670,7 +671,8 @@ function InventoryTransfersPageForm() {
       sourceWarehouseId: prev.targetWarehouseId,
       targetWarehouseId: prev.sourceWarehouseId,
       // Giữ documentId: đang sửa phiếu đã lưu thì Lưu cập nhật CHÍNH phiếu đó (trước đây tạo phiếu trùng).
-      documentCode: "",
+      // Mã theo kho đi + ngày: đổi về đúng bản đã lưu ⇒ giữ mã gốc.
+      documentCode: savedCodeFor(savedSnapshot, prev.documentId, prev.targetWarehouseId, prev.documentDate, "sourceWarehouseId"),
       selectedItemIds: [],
       lines: [],
     }))
@@ -823,16 +825,13 @@ function InventoryTransfersPageForm() {
       let nextDocumentCode = draft.documentCode
 
       if (!nextDocumentCode) {
-        const countResult = await supabase
-          .from("inventory_documents")
-          .select("id", { count: "exact", head: true })
-          .eq("factory_id", factoryId)
-          .eq("document_type", "transfer")
-          .eq("source_warehouse_id", draft.sourceWarehouseId)
-          .eq("document_date", draft.documentDate)
-
-        if (countResult.error) throw countResult.error
-        nextDocumentCode = formatDocCode(sourceWarehouseRow.code, draft.documentDate, (countResult.count || 0) + 1)
+        const seq = await fetchNextInventoryDocSeq({
+          factoryId,
+          documentType: "transfer",
+          codePrefix: formatDocCode(sourceWarehouseRow.code, draft.documentDate).split("/")[0],
+          excludeId: draft.documentId,
+        })
+        nextDocumentCode = formatDocCode(sourceWarehouseRow.code, draft.documentDate, seq)
       }
 
       const documentPayload = {
@@ -1093,7 +1092,7 @@ function InventoryTransfersPageForm() {
     <>
     <InventoryPageShell
       eyebrow="Nhập xuất tồn"
-      title="Phiếu chuyển kho"
+      title="Chuyển kho"
       description="Chọn kho nguồn, kho đích và nhiều vật tư cùng lúc. Mỗi dòng được hoàn thiện theo số lô và hạn dùng còn tồn ở kho nguồn."
     >
       <InventoryFormHeader
@@ -1260,7 +1259,7 @@ function InventoryTransfersPageForm() {
                 setDraft((prev) => ({
                   ...prev,
                   sourceWarehouseId: e.target.value,
-                  documentCode: "",
+                  documentCode: savedCodeFor(savedSnapshot, prev.documentId, e.target.value, prev.documentDate, "sourceWarehouseId"),
                   selectedItemIds: [],
                   lines: [],
                 }))
@@ -1286,7 +1285,8 @@ function InventoryTransfersPageForm() {
                   setDraft((prev) => ({
                     ...prev,
                     targetWarehouseId: e.target.value,
-                    documentCode: "",
+                    // Kho đến không nằm trong mã — chỉ giữ mã khi kho đi + ngày còn trùng bản đã lưu.
+                    documentCode: savedCodeFor(savedSnapshot, prev.documentId, prev.sourceWarehouseId, prev.documentDate, "sourceWarehouseId"),
                   }))
                 }
                 className={`min-w-0 flex-1 ${INPUT_CLASS}`}
@@ -1316,7 +1316,7 @@ function InventoryTransfersPageForm() {
                 setDraft((prev) => ({
                   ...prev,
                   documentDate: e.target.value,
-                  documentCode: "",
+                  documentCode: savedCodeFor(savedSnapshot, prev.documentId, prev.sourceWarehouseId, e.target.value, "sourceWarehouseId"),
                 }))
               }
               className={INPUT_CLASS}

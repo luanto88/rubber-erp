@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { ArrowLeft, Check, CheckCheck, Droplet, Printer, Tag, X } from "lucide-react"
-import { InventoryActionBar, InventoryActionButton, InventoryActionLink } from "../_components/inventory-ui"
+import { InventoryActionBar } from "../_components/inventory-ui"
+import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { loadInventoryAdminData, type InventoryItemOption, type InventoryWarehouseOption, type InventoryWarehouseRule } from "../_components/inventory-data"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -216,7 +217,7 @@ export default function InventoryCardsPage() {
       eyebrow="Nhập xuất tồn"
       title="Thẻ kho"
       description="In nhãn QR dán tại vị trí lưu vật tư — quét lại ngoài hiện trường để mở Thẻ kho điện tử."
-      action={<InventoryActionLink icon={ArrowLeft} label="Tồn kho" tone="slate" href="/dashboard/inventory/on-hand" />}
+      action={<HeaderButton icon={<ArrowLeft size={15} />} label="Tồn kho" href="/dashboard/inventory/on-hand" />}
     >
       {warning ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -237,11 +238,11 @@ export default function InventoryCardsPage() {
           Đã chọn: <b className="text-slate-700">{selectedKeys.size}</b> / {entries.length} nhãn
         </span>
         <InventoryActionBar>
-          <InventoryActionButton icon={CheckCheck} label="Chọn tất cả" tone="slate" onClick={selectAll} />
-          <InventoryActionButton icon={X} label="Bỏ chọn" tone="slate" onClick={clearAll} disabled={selectedKeys.size === 0} />
-          <InventoryActionButton
-            icon={Printer}
-            tone="violet"
+          <HeaderButton icon={<CheckCheck size={15} />} label="Chọn tất cả" onClick={selectAll} />
+          <HeaderButton icon={<X size={15} />} label="Bỏ chọn" onClick={clearAll} disabled={selectedKeys.size === 0} />
+          <HeaderButton
+            tone="brand"
+            icon={<Printer size={15} />}
             onClick={() => void handlePrint()}
             disabled={selectedKeys.size === 0 || printing}
             label={printing ? "Đang tạo file..." : `In nhãn (${selectedKeys.size})`}

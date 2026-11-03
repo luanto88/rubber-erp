@@ -37,7 +37,8 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
-import { InventoryActionButton, InventoryActionLink, MultiSelectField } from "../_components/inventory-ui"
+import { MultiSelectField } from "../_components/inventory-ui"
+import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 
 const INPUT_CLASS =
@@ -732,10 +733,10 @@ export default function InventoryOnHandPage() {
       description="Theo dõi tồn hiện tại theo kho, vật tư, số lô và hạn sử dụng để phục vụ xuất kho, chuyển kho và cảnh báo tồn an toàn."
       action={
         <>
-          <InventoryActionButton
-            icon={FileSpreadsheet}
+          <HeaderButton
+            tone="brand"
+            icon={<FileSpreadsheet size={15} />}
             label="Xuất file kiểm tồn"
-            tone="emerald"
             title="Xuất Excel kiểm tồn theo bộ lọc hiện tại (có cột Tồn thực tế + Chênh lệch)"
             disabled={
               loading ||
@@ -745,28 +746,20 @@ export default function InventoryOnHandPage() {
             }
             onClick={exportStockCount}
           />
-          {hasSelection ? (
-            <InventoryActionLink
-              icon={QrCode}
-              label="In nhãn QR"
-              tone="violet"
-              title="In nhãn QR dán tại vị trí lưu vật tư (Thẻ kho) cho các vật tư đã chọn"
-              href={`/dashboard/inventory/cards?warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}`}
-            />
-          ) : (
-            <InventoryActionButton icon={QrCode} label="In nhãn QR" tone="violet" disabled title={needSelectionHint} />
-          )}
-          {hasSelection ? (
-            <InventoryActionLink
-              icon={Printer}
-              label="In tồn kho"
-              tone="slate"
-              title="In tồn kho các vật tư đã chọn"
-              href={`/dashboard/inventory/print-report?kind=on-hand&warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&categories=${encodeURIComponent(selectedCategoryIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}&search=${encodeURIComponent(search)}`}
-            />
-          ) : (
-            <InventoryActionButton icon={Printer} label="In tồn kho" tone="slate" disabled title={needSelectionHint} />
-          )}
+          <HeaderButton
+            icon={<QrCode size={15} />}
+            label="In nhãn QR"
+            title={hasSelection ? "In nhãn QR dán tại vị trí lưu vật tư (Thẻ kho) cho các vật tư đã chọn" : needSelectionHint}
+            disabled={!hasSelection}
+            href={`/dashboard/inventory/cards?warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}`}
+          />
+          <HeaderButton
+            icon={<Printer size={15} />}
+            label="In tồn kho"
+            title={hasSelection ? "In tồn kho các vật tư đã chọn" : needSelectionHint}
+            disabled={!hasSelection}
+            href={`/dashboard/inventory/print-report?kind=on-hand&warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&categories=${encodeURIComponent(selectedCategoryIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}&search=${encodeURIComponent(search)}`}
+          />
         </>
       }
     >

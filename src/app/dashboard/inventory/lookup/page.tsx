@@ -16,7 +16,8 @@ import {
   type InventoryStockMovementRow,
   type InventoryWarehouseOption,
 } from "../_components/inventory-data"
-import { InventoryActionButton, InventoryActionLink, MultiSelectField } from "../_components/inventory-ui"
+import { MultiSelectField } from "../_components/inventory-ui"
+import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { resolveCanApproveInventory } from "../_components/inventory-approval"
 import { inventoryDocumentDetailHref } from "../_components/inventory-document-list"
 import { useScrollReveal } from "@/lib/useScrollReveal"
@@ -431,11 +432,10 @@ export default function InventoryLookupPage() {
       description="Sổ chi tiết nhập, xuất, chuyển theo kho, phân loại, mã vật tư và khoảng ngày — xuất Excel / in thẻ kho theo đúng bộ lọc đang chọn."
       action={
         <>
-          <InventoryActionButton icon={FileSpreadsheet} label="Xuất Excel" tone="emerald" onClick={exportExcel} />
-          <InventoryActionLink
-            icon={Printer}
+          <HeaderButton tone="brand" icon={<FileSpreadsheet size={15} />} label="Xuất Excel" onClick={exportExcel} />
+          <HeaderButton
+            icon={<Printer size={15} />}
             label="In thẻ kho"
-            tone="slate"
             href={`/dashboard/inventory/print-report?kind=cards&warehouses=${encodeURIComponent(selectedWarehouseIds.join(","))}&categories=${encodeURIComponent(selectedCategoryIds.join(","))}&items=${encodeURIComponent(selectedItemIds.join(","))}&types=${encodeURIComponent(selectedDocumentTypes.join(","))}&from=${encodeURIComponent(fromDate)}&to=${encodeURIComponent(toDate)}`}
           />
         </>

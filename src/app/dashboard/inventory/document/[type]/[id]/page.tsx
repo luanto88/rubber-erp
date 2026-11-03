@@ -28,7 +28,6 @@ import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { fetchInventoryDocumentByReference } from "../../../_components/inventory-document-loader"
 import { resolveCanApproveInventory } from "../../../_components/inventory-approval"
-import { InventoryActionButton } from "../../../_components/inventory-ui"
 import { canEditInventoryDraft } from "../../../_components/inventory-edit-access"
 
 /**
@@ -428,8 +427,8 @@ export default function InventoryDocumentDetailPage() {
           maxWidth="md"
           footer={
             <>
-              <InventoryActionButton icon={RotateCcw} label="Đóng" tone="slate" onClick={() => setModal(null)} disabled={busy} />
-              <InventoryActionButton icon={Check} label={busy ? "Đang duyệt..." : "Duyệt"} tone="emerald" onClick={() => void handleApprove()} disabled={busy} />
+              <HeaderButton icon={<RotateCcw size={15} />} label="Đóng" onClick={() => setModal(null)} disabled={busy} />
+              <HeaderButton tone="brand" icon={<Check size={15} />} label={busy ? "Đang duyệt..." : "Duyệt"} onClick={() => void handleApprove()} disabled={busy} />
             </>
           }
         >
@@ -446,11 +445,11 @@ export default function InventoryDocumentDetailPage() {
           maxWidth="md"
           footer={
             <>
-              <InventoryActionButton icon={RotateCcw} label="Đóng" tone="slate" onClick={() => setModal(null)} disabled={busy} />
-              <InventoryActionButton
-                icon={Ban}
+              <HeaderButton icon={<RotateCcw size={15} />} label="Đóng" onClick={() => setModal(null)} disabled={busy} />
+              <HeaderButton
+                tone="danger"
+                icon={<Ban size={15} />}
                 label={busy ? "Đang hủy..." : "Hủy phiếu"}
-                tone="rose"
                 onClick={() => void handleCancel()}
                 disabled={busy || !cancelReason.trim()}
               />

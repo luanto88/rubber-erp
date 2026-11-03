@@ -29,6 +29,7 @@ import { resolveInventoryFormLock } from "../_components/inventory-edit-access"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { PostConfirmDialog } from "../_components/post-confirm-dialog"
 import { InventoryFormHeader } from "../_components/inventory-form-header"
+import { fetchNextInventoryDocSeq, savedCodeFor } from "../_components/inventory-doc-code"
 import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
@@ -754,7 +755,8 @@ function InventoryIssuesPageForm() {
       ...prev,
       warehouseIds: values,
       documentId: editingId,
-      documentCode: "",
+      // Đổi về đúng kho + ngày đã lưu ⇒ giữ mã gốc (trước đây Lưu cấp số mới, nhảy +1).
+      documentCode: values.length === 1 ? savedCodeFor(savedSnapshot, editingId, values[0], prev.documentDate, "warehouseIds") : "",
       selectedItemIds: [],
       lines: [],
     }))
@@ -910,16 +912,13 @@ function InventoryIssuesPageForm() {
       let nextDocumentCode = draft.documentCode
 
       if (!nextDocumentCode) {
-        const countResult = await supabase
-          .from("inventory_documents")
-          .select("id", { count: "exact", head: true })
-          .eq("factory_id", factoryId)
-          .eq("document_type", "export")
-          .eq("source_warehouse_id", warehouseId)
-          .eq("document_date", draft.documentDate)
-
-        if (countResult.error) throw countResult.error
-        nextDocumentCode = formatDocCode(warehouse.code, draft.documentDate, (countResult.count || 0) + 1)
+        const seq = await fetchNextInventoryDocSeq({
+          factoryId,
+          documentType: "export",
+          codePrefix: formatDocCode(warehouse.code, draft.documentDate).split("/")[0],
+          excludeId: draft.documentId,
+        })
+        nextDocumentCode = formatDocCode(warehouse.code, draft.documentDate, seq)
       }
 
       const documentPayload = {
@@ -1205,16 +1204,12 @@ function InventoryIssuesPageForm() {
       if (!warehouse) continue
 
       try {
-        const countResult = await supabase
-          .from("inventory_documents")
-          .select("id", { count: "exact", head: true })
-          .eq("factory_id", factoryId)
-          .eq("document_type", "export")
-          .eq("source_warehouse_id", warehouseId)
-          .eq("document_date", draft.documentDate)
-        if (countResult.error) throw countResult.error
-
-        const documentCodeForWarehouse = formatDocCode(warehouse.code, draft.documentDate, (countResult.count || 0) + 1)
+        const seq = await fetchNextInventoryDocSeq({
+          factoryId,
+          documentType: "export",
+          codePrefix: formatDocCode(warehouse.code, draft.documentDate).split("/")[0],
+        })
+        const documentCodeForWarehouse = formatDocCode(warehouse.code, draft.documentDate, seq)
 
         const documentInsert = await supabase
           .from("inventory_documents")
@@ -1408,7 +1403,7 @@ function InventoryIssuesPageForm() {
     <>
     <InventoryPageShell
       eyebrow="Nhập xuất tồn"
-      title="Phiếu xuất kho"
+      title="Xuất kho"
       description="Chọn 1 hoặc nhiều kho, chọn nhiều vật tư theo kho và hoàn thiện từng dòng theo cặp số lô - hạn sử dụng còn tồn."
     >
       <InventoryFormHeader
@@ -1499,6 +1494,14 @@ function InventoryIssuesPageForm() {
           )
         }
       />
+
+      {isMultiWarehouseMode && !multiResults ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Phiên xuất {draft.warehouseIds.length} kho <strong>chưa lưu lên hệ thống</strong> — chỉ giữ tạm trên máy này. Bấm
+          Ghi sổ sẽ tạo {draft.warehouseIds.length} phiếu xuất riêng (mỗi kho một phiếu). Muốn lưu nháp để sửa sau hoặc để người
+          khác xem: chọn từng kho một.
+        </div>
+      ) : null}
 
       {confirmPost && !isLocked ? (
         isMultiWarehouseMode ? (
@@ -1699,7 +1702,10 @@ function InventoryIssuesPageForm() {
                 setDraft((prev) => ({
                   ...prev,
                   documentDate: e.target.value,
-                  documentCode: "",
+                  documentCode:
+                    prev.warehouseIds.length === 1
+                      ? savedCodeFor(savedSnapshot, prev.documentId, prev.warehouseIds[0], e.target.value, "warehouseIds")
+                      : "",
                 }))
               }
               className={INPUT_CLASS}

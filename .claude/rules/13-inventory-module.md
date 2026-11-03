@@ -372,7 +372,7 @@ dùng chung bồn (`uses_shared_oil_stock`) gộp **1 nhãn/kho** (không phải
 
 **Báo cáo**: `analytics` đổi tên hiển thị "Tổng quan kho", `lookup` thành "Sổ chi tiết" (xuất Excel / in thẻ kho theo bộ lọc). Nút "Duyệt" ở Sổ chi tiết vẫn giữ (trùng với danh sách Nhập/Xuất, vô hại).
 
-**Kiểu action thống nhất** — `InventoryActionButton` / `InventoryActionLink` trong `inventory-ui.tsx`: viên thuốc `rounded-full`, nền nhạt + viền cùng tông, chữ đậm. `size`: `md` (header) · `sm` (nút có chữ trong dòng bảng) · `icon`. Quy ước màu: emerald = ghi sổ/duyệt/Excel/thêm nhập · amber = thêm xuất · sky = thêm chuyển/lưu/xem · violet = nhãn QR · rose = hủy · slate = in/làm mới/quay lại. Code mới trong module kho dùng 2 component này, không tự viết class nút riêng.
+**Kiểu nút (cập nhật 2026-11-03, thay quy ước viên thuốc nhiều màu)** — mọi nút của module kho dùng `HeaderButton` (`_components/doc-ui/detail-page-header.tsx`): trắng viền xám; mỗi cụm tối đa MỘT nút `tone="brand"` (hành động chính: Ghi sổ / Duyệt / Xuất Excel / In nhãn / Thêm phiếu); `tone="danger"` cho Hủy phiếu; link dùng `href` (render `<a>`). `InventoryActionButton`/`InventoryActionLink` trong `inventory-ui.tsx` không còn call site nào (giữ lại, chưa xoá) — code mới không dùng.
 
 Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng chung bộ lọc giữa 2 thẻ Báo cáo qua URL; `inventory/settings/page.tsx` (không có link nào trỏ tới) vẫn GIỮ — chỉ xóa khi người dùng xác nhận.
 
@@ -468,3 +468,15 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
 - Ghi sổ luôn qua hộp nổi `PostConfirmDialog` (`_components/post-confirm-dialog.tsx`, portal; desktop giữa màn hình, mobile tấm trượt từ đáy): nêu tồn kho sẽ cộng/trừ ở kho nào, sau ghi
   sổ không sửa/xoá được (chỉ Hủy phiếu), chờ phê duyệt (Nhập/Xuất), số cảnh báo còn lại. Enter = xác nhận, Esc = để sau.
   Xuất nhiều kho: banner nêu số phiếu sẽ tạo + mã các kho.
+
+
+## Việc treo sau 2116fb9 (2026-11-03, chờ test tay)
+- Xuất nhiều kho KHÔNG có "Lưu" — đúng thiết kế (1 phiếu = 1 kho; Ghi sổ mới tạo N phiếu chung `batch_id`; phiên chỉ giữ
+  tạm `localStorage` máy đó). Form hiện banner vàng giải thích.
+- Banner shell của form = tên thẻ ("Nhập kho" / "Xuất kho" / "Chuyển kho"), header form mới ghi "Phiếu … kho" + mã.
+- Mã phiếu: `fetchNextInventoryDocSeq` (`_components/inventory-doc-code.ts`) = số LỚN NHẤT cùng tiền tố + 1, bỏ qua chính
+  phiếu đang sửa (trước: đếm + 1 ⇒ đổi kho rồi đổi lại nhảy +1, dãy có lỗ thì trùng). Đổi kho/ngày về đúng bản đã lưu ⇒
+  `savedCodeFor` trả lại mã gốc. Dùng ở 3 form + nhánh xuất nhiều kho.
+- RLS `20261106_inventory_documents_rls.sql` (**chạy tay**): 3 bảng phiếu bỏ "Allow all", theo nhà máy + authenticated;
+  phiếu NHÁP (và dòng/đính kèm của nó) chỉ người lập/admin sửa/xoá; phiếu đã ghi sổ vẫn duyệt/huỷ được. 11 bảng
+  `inventory_*` còn lại vẫn "Allow all".

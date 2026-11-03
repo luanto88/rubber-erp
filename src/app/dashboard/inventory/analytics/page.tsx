@@ -14,7 +14,7 @@ import {
   ShieldAlert,
 } from "lucide-react"
 import { InventoryPageShell, InventoryPlaceholderSection, ScrollRevealSection } from "../_components/inventory-shell"
-import { InventoryActionButton } from "../_components/inventory-ui"
+import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
@@ -529,9 +529,9 @@ export default function InventoryAnalyticsPage() {
       title="Tổng quan kho"
       description="Theo dõi cảnh báo, nhịp nhập xuất tồn và xuất file kiểm tra để phục vụ quản lý nội bộ."
       action={
-        <InventoryActionButton
-          icon={FileSpreadsheet}
-          tone="emerald"
+        <HeaderButton
+          tone="brand"
+          icon={<FileSpreadsheet size={15} />}
           onClick={() => void handleExportCheckFile()}
           disabled={downloading}
           label={downloading ? "Đang xuất file..." : "Xuất file kiểm tra"}

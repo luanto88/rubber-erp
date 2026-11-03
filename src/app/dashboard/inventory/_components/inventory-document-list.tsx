@@ -34,7 +34,8 @@ import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { ExpandableRow, ExpandAllToggle, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { InventoryPageShell } from "./inventory-shell"
-import { InventoryActionButton, InventoryActionLink, MultiSelectField, type InventoryActionTone } from "./inventory-ui"
+import { MultiSelectField } from "./inventory-ui"
+import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import {
   loadInventoryAdminData,
   type InventoryCategoryOption,
@@ -76,7 +77,6 @@ type KindConfig = {
   description: string
   addLabel: string
   addIcon: LucideIcon
-  addTone: InventoryActionTone
   partyLabel: string
   supportsApproval: boolean
 }
@@ -88,7 +88,6 @@ const KIND_CONFIG: Record<InventoryDocumentKind, KindConfig> = {
     description: "Danh sách phiếu nhập kho — lọc theo ngày, kho, vật tư và trạng thái.",
     addLabel: "Thêm phiếu nhập",
     addIcon: PackagePlus,
-    addTone: "emerald",
     partyLabel: "Nguồn nhập",
     supportsApproval: true,
   },
@@ -98,7 +97,6 @@ const KIND_CONFIG: Record<InventoryDocumentKind, KindConfig> = {
     description: "Danh sách phiếu xuất kho — phê duyệt nhanh ngay trên từng dòng.",
     addLabel: "Thêm phiếu xuất",
     addIcon: PackageMinus,
-    addTone: "amber",
     partyLabel: "Người nhận",
     supportsApproval: true,
   },
@@ -108,7 +106,6 @@ const KIND_CONFIG: Record<InventoryDocumentKind, KindConfig> = {
     description: "Danh sách phiếu chuyển kho — kho đi, kho đến và trạng thái ghi sổ.",
     addLabel: "Thêm phiếu chuyển",
     addIcon: ArrowRightLeft,
-    addTone: "sky",
     partyLabel: "Người đề nghị",
     supportsApproval: false,
   },
@@ -492,11 +489,11 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
       description={config.description}
       action={
         canCreate ? (
-          <InventoryActionLink
+          <HeaderButton
+            tone="brand"
             href={`${config.route}?mode=new`}
-            icon={config.addIcon}
+            icon={<config.addIcon size={15} />}
             label={config.addLabel}
-            tone={config.addTone}
           />
         ) : null
       }
@@ -621,14 +618,14 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
               />
             ) : (
               <div className="flex items-end">
-                <InventoryActionButton icon={RotateCcw} label="Xóa lọc" tone="slate" onClick={resetFilters} className="w-full" />
+                <HeaderButton icon={<RotateCcw size={15} />} label="Xóa lọc" onClick={resetFilters} />
               </div>
             )}
           </div>
         </FilterBar>
         {config.supportsApproval ? (
           <div className="mt-3 flex justify-end">
-            <InventoryActionButton icon={RotateCcw} label="Xóa lọc" tone="slate" onClick={resetFilters} />
+            <HeaderButton icon={<RotateCcw size={15} />} label="Xóa lọc" onClick={resetFilters} />
           </div>
         ) : null}
       </div>
@@ -786,8 +783,8 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
           maxWidth="md"
           footer={
             <>
-              <InventoryActionButton icon={RotateCcw} label="Đóng" tone="slate" onClick={() => setApproveTarget(null)} disabled={busy} />
-              <InventoryActionButton icon={Check} label={busy ? "Đang duyệt..." : "Duyệt"} tone="emerald" onClick={() => void handleApprove()} disabled={busy} />
+              <HeaderButton icon={<RotateCcw size={15} />} label="Đóng" onClick={() => setApproveTarget(null)} disabled={busy} />
+              <HeaderButton tone="brand" icon={<Check size={15} />} label={busy ? "Đang duyệt..." : "Duyệt"} onClick={() => void handleApprove()} disabled={busy} />
             </>
           }
         >
@@ -804,11 +801,11 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
           maxWidth="md"
           footer={
             <>
-              <InventoryActionButton icon={RotateCcw} label="Đóng" tone="slate" onClick={() => setCancelTarget(null)} disabled={busy} />
-              <InventoryActionButton
-                icon={Ban}
+              <HeaderButton icon={<RotateCcw size={15} />} label="Đóng" onClick={() => setCancelTarget(null)} disabled={busy} />
+              <HeaderButton
+                tone="danger"
+                icon={<Ban size={15} />}
                 label={busy ? "Đang hủy..." : "Hủy phiếu"}
-                tone="rose"
                 onClick={() => void handleCancel()}
                 disabled={busy || !cancelReason.trim()}
               />
