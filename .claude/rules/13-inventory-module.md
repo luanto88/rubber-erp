@@ -480,3 +480,21 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
 - RLS `20261106_inventory_documents_rls.sql` (**chạy tay**): 3 bảng phiếu bỏ "Allow all", theo nhà máy + authenticated;
   phiếu NHÁP (và dòng/đính kèm của nó) chỉ người lập/admin sửa/xoá; phiếu đã ghi sổ vẫn duyệt/huỷ được. 11 bảng
   `inventory_*` còn lại vẫn "Allow all".
+
+## Thẻ chọn vật tư sau test xuất nhiều kho (2026-11-04, chờ test tay)
+- `CompactItemSelectorCard` gọn lại (cao tối thiểu 76px, chữ cắt 1 dòng), hover nổi + viền xanh, prop mới `warehouseText`
+  = mã kho hiện góc phải dưới thẻ. Lưới 3 form: `grid-cols-2 sm:grid-cols-4 xl:grid-cols-6` (≈ ½ bề rộng cũ).
+- **Thay quy tắc 2026-05-09**: thẻ KHÔNG còn lọc theo "Mã vật tư" đã chọn — luôn hiện đủ thẻ theo kho + phân loại,
+  thẻ đã chọn chỉ được tick (trước: chọn 1 mã là ẩn hết thẻ khác, phải chọn tiếp ở dropdown).
+- Xuất: `itemWarehouseCodes` = các kho ĐANG CHỌN có chứa vật tư (`default_warehouse_ids`), hiện trên thẻ; chọn ≥2 kho thì
+  dropdown "Mã vật tư" ghi thêm "· Kho KA, KBHLD" (tìm được theo mã kho). Nhập / Chuyển hiện mã kho nhập / kho đi.
+
+## RLS 13 bảng kho còn lại — GĐ A (2026-11-04, đã chạy + test)
+- `20261107_inventory_rls_factory_scope.sql` (**đã chạy tay**): bỏ "Allow all" trên warehouses, item_categories, items,
+  item_warehouse_rules, stock_balances, lot_balances, stock_movements, oil_stock_pools, alert_thresholds và 4 bảng `*norm*`;
+  mỗi bảng 4 policy TO authenticated theo `current_profile_factory_id()`. Chặn: chưa đăng nhập + chéo nhà máy.
+- RPC ghi sổ / huỷ vẫn SECURITY INVOKER (qua RLS vì factory_id đúng). Test bằng tài khoản thật 43/43 PASS: anon 0 dòng,
+  đọc đủ số dòng, nhập / chuyển / xuất / huỷ / xuất vượt tồn, dầu bồn, thêm nhanh vật tư + rule, ngưỡng cảnh báo, admin.
+- CHƯA làm GĐ B (`.claude/plans/inventory-rls-con-lai-2026-11-03.md`): người đã đăng nhập vẫn ghi thẳng được tồn / phát sinh
+  của nhà máy mình. Lưu ý GĐ B: biên bản Bảo trì gọi `inventory_cancel_document` từ trình duyệt.
+- Mọi insert danh mục từ trình duyệt PHẢI gửi `factory_id` (không có thì bị RLS từ chối).

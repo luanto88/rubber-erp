@@ -543,10 +543,8 @@ function InventoryReceiptsPageForm() {
     return scoped
   }, [draft.warehouseId, items, selectedCategoryIds])
 
-  const visibleItemCards = useMemo(() => {
-    if (draft.selectedItemIds.length === 0) return warehouseScopedItems
-    return warehouseScopedItems.filter((item) => draft.selectedItemIds.includes(item.id))
-  }, [draft.selectedItemIds, warehouseScopedItems])
+  // Luôn hiện đủ thẻ theo kho + phân loại; thẻ đã chọn chỉ được tick (trước đây chọn 1 mã là ẩn hết thẻ khác).
+  const visibleItemCards = warehouseScopedItems
 
   const warehouseScopedCategories = useMemo(() => {
     const base = (() => {
@@ -1650,7 +1648,7 @@ function InventoryReceiptsPageForm() {
                 Vui lòng chọn kho trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
                 {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const totalStock = draft.warehouseId
@@ -1676,6 +1674,7 @@ function InventoryReceiptsPageForm() {
                       name={item.name}
                       stockText={`${getStockContextLabel(item, selectedWarehouse?.code)}: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
                       breakdownText={breakdownText}
+                      warehouseText={selectedWarehouse?.code}
                       selected={selected}
                     />
                   )

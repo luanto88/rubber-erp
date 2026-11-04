@@ -568,10 +568,22 @@ function InventoryIssuesPageForm() {
     return scoped
   }, [draft.warehouseIds, items, selectedCategoryIds])
 
-  const visibleItemCards = useMemo(() => {
-    if (draft.selectedItemIds.length === 0) return availableItems
-    return availableItems.filter((item) => draft.selectedItemIds.includes(item.id))
-  }, [availableItems, draft.selectedItemIds])
+  // Luôn hiện đủ thẻ theo kho + phân loại; thẻ đã chọn chỉ được tick (trước đây chọn 1 mã là ẩn hết thẻ khác).
+  const visibleItemCards = availableItems
+
+  // Mã các kho ĐANG CHỌN có chứa vật tư — hiện trên thẻ và dropdown (xuất nhiều kho khó phân biệt nếu thiếu).
+  const itemWarehouseCodes = useMemo(() => {
+    const selectedWarehouses = warehouses.filter((warehouse) => draft.warehouseIds.includes(warehouse.id))
+    return new Map(
+      availableItems.map((item) => [
+        item.id,
+        selectedWarehouses
+          .filter((warehouse) => item.default_warehouse_ids.includes(warehouse.id))
+          .map((warehouse) => warehouse.code)
+          .join(", "),
+      ]),
+    )
+  }, [availableItems, draft.warehouseIds, warehouses])
 
   const warehouseScopedCategories = useMemo(() => {
     const base = (() => {
@@ -1742,11 +1754,10 @@ function InventoryIssuesPageForm() {
               <div>
                 <MultiSelectField
                   label="Mã vật tư"
-                  options={availableItems.map((item) => ({
-                    value: item.id,
-                    label: item.code,
-                    meta: item.name,
-                  }))}
+                  options={availableItems.map((item) => {
+                    const codes = isMultiWarehouseMode ? itemWarehouseCodes.get(item.id) : ""
+                    return { value: item.id, label: item.code, meta: codes ? `${item.name} · Kho ${codes}` : item.name }
+                  })}
                   selectedValues={draft.selectedItemIds}
                   onChange={(values) => setDraft((prev) => ({ ...prev, selectedItemIds: values }))}
                   placeholder="Chọn nhiều mã vật tư"
@@ -1763,7 +1774,7 @@ function InventoryIssuesPageForm() {
                 Vui lòng chọn kho trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
                 {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const relevantWarehouses = warehouses.filter((w) => draft.warehouseIds.includes(w.id))
@@ -1786,6 +1797,7 @@ function InventoryIssuesPageForm() {
                       name={item.name}
                       stockText={`${getStockContextLabel(item, selectedWarehouse?.code)}: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
                       breakdownText={breakdownText}
+                      warehouseText={itemWarehouseCodes.get(item.id) || selectedWarehouse?.code}
                       selected={selected}
                     />
                   )

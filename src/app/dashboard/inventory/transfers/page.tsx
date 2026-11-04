@@ -504,10 +504,8 @@ function InventoryTransfersPageForm() {
     return scoped
   }, [draft.sourceWarehouseId, items, selectedCategoryIds])
 
-  const visibleItemCards = useMemo(() => {
-    if (draft.selectedItemIds.length === 0) return sourceScopedItems
-    return sourceScopedItems.filter((item) => draft.selectedItemIds.includes(item.id))
-  }, [draft.selectedItemIds, sourceScopedItems])
+  // Luôn hiện đủ thẻ theo kho đi + phân loại; thẻ đã chọn chỉ được tick (trước đây chọn 1 mã là ẩn hết thẻ khác).
+  const visibleItemCards = sourceScopedItems
 
   const warehouseScopedCategories = useMemo(() => {
     const base = (() => {
@@ -1364,7 +1362,7 @@ function InventoryTransfersPageForm() {
                 Vui lòng chọn kho nguồn trước khi chọn vật tư.
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-6">
                 {visibleItemCards.map((item) => {
                   const selected = draft.selectedItemIds.includes(item.id)
                   const totalStock = draft.sourceWarehouseId
@@ -1391,6 +1389,7 @@ function InventoryTransfersPageForm() {
                       name={item.name}
                       stockText={`${getStockContextLabel(item, sourceWarehouse?.code)}: ${totalStock.toLocaleString("vi-VN")} ${item.unit}`}
                       breakdownText={breakdownText}
+                      warehouseText={sourceWarehouse?.code}
                       selected={selected}
                     />
                   )

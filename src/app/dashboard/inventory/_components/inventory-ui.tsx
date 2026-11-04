@@ -24,6 +24,8 @@ type CompactItemSelectorCardProps = {
   name: string
   stockText: string
   breakdownText?: string | null
+  /** Mã kho chứa vật tư (trong các kho đang chọn) — hiện góc phải dưới thẻ. */
+  warehouseText?: string | null
   selected: boolean
   onToggle: () => void
 }
@@ -192,6 +194,7 @@ export function CompactItemSelectorCard({
   name,
   stockText,
   breakdownText,
+  warehouseText,
   selected,
   onToggle,
 }: CompactItemSelectorCardProps) {
@@ -199,25 +202,35 @@ export function CompactItemSelectorCard({
     <button
       type="button"
       onClick={onToggle}
-      className={`relative min-h-[96px] rounded-xl border p-2.5 text-left transition-all ${
+      title={`${code} — ${name}${warehouseText ? ` (${warehouseText})` : ""}`}
+      className={`relative flex min-h-[76px] min-w-0 flex-col rounded-xl border p-2 text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md ${
         selected
           ? "border-emerald-500 bg-emerald-50 shadow-sm"
-          : "border-slate-200 bg-white hover:border-slate-300"
+          : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/40"
       }`}
     >
       <div
-        className={`absolute right-2 top-2 rounded-full p-1 ${
+        className={`absolute right-1.5 top-1.5 rounded-full p-0.5 ${
           selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"
         }`}
       >
-        <Check size={11} />
+        <Check size={10} />
       </div>
 
-      <div className="pr-8">
+      <div className="min-w-0 pr-5">
         <div className="truncate text-xs font-bold text-slate-800">{code}</div>
-        <div className="mt-1 line-clamp-1 text-[11px] text-slate-600">{name}</div>
-        <div className="mt-1.5 text-[10px] font-semibold text-slate-500">{stockText}</div>
-        {breakdownText ? <div className="mt-0.5 text-[10px] text-slate-400">{breakdownText}</div> : null}
+        <div className="mt-0.5 truncate text-[11px] text-slate-600">{name}</div>
+      </div>
+      <div className="mt-auto flex min-w-0 items-end justify-between gap-1 pt-1">
+        <div className="min-w-0">
+          <div className="truncate text-[10px] font-semibold text-slate-500">{stockText}</div>
+          {breakdownText ? <div className="truncate text-[10px] text-slate-400">{breakdownText}</div> : null}
+        </div>
+        {warehouseText ? (
+          <span className="max-w-[55%] shrink-0 truncate rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
+            {warehouseText}
+          </span>
+        ) : null}
       </div>
     </button>
   )
