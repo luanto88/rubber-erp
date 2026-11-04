@@ -33,6 +33,7 @@ import {
 } from "../_components/inventory-data"
 import { supabase } from "@/lib/supabase"
 import { hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getErrorMessage } from "@/lib/error-message"
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-mod-600"
@@ -249,7 +250,7 @@ export default function InventoryAnalyticsPage() {
         setRecentTx(rows)
       } catch (err) {
         setRecentTx([])
-        setTxError(err instanceof Error ? err.message : "Không tải được giao dịch gần đây.")
+        setTxError(getErrorMessage(err, "Không tải được giao dịch gần đây."))
       } finally {
         setLoadingTx(false)
       }

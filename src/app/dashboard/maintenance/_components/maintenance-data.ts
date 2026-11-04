@@ -111,6 +111,9 @@ export type MaintenanceRecord = {
   inventory_issue_doc_id: string | null
   inventory_issue_doc_ids?: string[] | null
   ly_do_tu_choi?: string | null
+  // Migration 20261109 — lý do + người/lúc huỷ biên bản
+  ly_do_huy?: string | null
+  huy_luc?: string | null
   ghi_chu: string | null
   created_at: string
   updated_at: string

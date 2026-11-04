@@ -10,6 +10,7 @@ import { loadInventoryAdminData, type InventoryItemOption, type InventoryWarehou
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { downloadInventoryCardLabelsPdf, type InventoryCardEntry } from "@/lib/inventory-card-pdf"
+import { getErrorMessage } from "@/lib/error-message"
 
 function buildQrUrl(params: { code?: string; warehouseId: string }) {
   const origin = typeof window !== "undefined" ? window.location.origin : ""
@@ -206,7 +207,7 @@ export default function InventoryCardsPage() {
     try {
       await downloadInventoryCardLabelsPdf(selected)
     } catch (err) {
-      setPrintError(err instanceof Error ? err.message : "Không tạo được file in.")
+      setPrintError(getErrorMessage(err, "Không tạo được file in."))
     } finally {
       setPrinting(false)
     }

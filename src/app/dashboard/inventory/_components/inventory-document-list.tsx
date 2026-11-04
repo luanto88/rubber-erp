@@ -43,6 +43,7 @@ import {
   type InventoryWarehouseOption,
 } from "./inventory-data"
 import { resolveCanApproveInventory } from "./inventory-approval"
+import { getErrorMessage } from "@/lib/error-message"
 
 export type InventoryDocumentKind = "import" | "export" | "transfer"
 
@@ -273,7 +274,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
       setDocuments(docs)
       setLines(docLines)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Không tải được danh sách phiếu.")
+      setError(getErrorMessage(err, "Không tải được danh sách phiếu."))
     } finally {
       setLoading(false)
     }
@@ -409,7 +410,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
       setApproveTarget(null)
       void loadDocuments()
     } catch (err) {
-      setToast({ tone: "error", text: err instanceof Error ? err.message : "Không thể phê duyệt phiếu." })
+      setToast({ tone: "error", text: getErrorMessage(err, "Không thể phê duyệt phiếu.") })
     } finally {
       setBusy(false)
     }
@@ -433,7 +434,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
       setCancelReason("")
       void loadDocuments()
     } catch (err) {
-      setToast({ tone: "error", text: err instanceof Error ? err.message : "Không thể hủy phiếu." })
+      setToast({ tone: "error", text: getErrorMessage(err, "Không thể hủy phiếu.") })
     } finally {
       setBusy(false)
     }

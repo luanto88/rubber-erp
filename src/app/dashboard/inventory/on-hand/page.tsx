@@ -40,6 +40,7 @@ import {
 import { MultiSelectField } from "../_components/inventory-ui"
 import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
+import { getErrorMessage } from "@/lib/error-message"
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500"
@@ -211,7 +212,7 @@ export default function InventoryOnHandPage() {
       } catch (err) {
         if (alive) {
           setPeriodMovements([])
-          setPeriodError(err instanceof Error ? err.message : "Không tải được phát sinh kho")
+          setPeriodError(getErrorMessage(err, "Không tải được phát sinh kho"))
         }
       } finally {
         if (alive) setPeriodLoading(false)
@@ -462,7 +463,7 @@ export default function InventoryOnHandPage() {
         const result = await loadPalletFlow(factoryId, session?.access_token || null, palletPeriodFrom, palletPeriodTo)
         if (alive) setPalletFlow(result)
       } catch (err) {
-        if (alive) setPalletFlow({ success: false, error: err instanceof Error ? err.message : "Lỗi tính pallet" })
+        if (alive) setPalletFlow({ success: false, error: getErrorMessage(err, "Lỗi tính pallet") })
       } finally {
         if (alive) setPalletLoading(false)
       }

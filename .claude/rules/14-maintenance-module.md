@@ -1439,3 +1439,24 @@ Không migration. Người dùng chốt: đề nghị là nguồn giá; chưa c�
 ## Sửa: mã tạo mới là Dịch vụ gia công ⇒ dòng tự thành "Gia công ngoài" (2026-10-27)
 `applyExtMatToLine` (`records/[id]/page.tsx`) đặt `nguon` theo `la_dich_vu` của mã vừa tạo/chọn ("Dùng mã này")
 — trước đây dòng giữ nguyên "Mua ngoài".
+
+## Hộp xác nhận có lý do cho Hủy / Hủy sau hoàn tất / Xóa biên bản (2026-11-04, chờ test tay)
+- 3 nút không còn `window.confirm`: mở `ReasonConfirmDialog` (`src/app/dashboard/_components/reason-confirm-dialog.tsx`,
+  portal; desktop giữa màn hình, mobile tấm trượt đáy; Enter = xác nhận, Shift+Enter xuống dòng, Esc = thôi). Lý do bắt buộc.
+- **Hủy biên bản** (`doCancel`): biên bản → `huy` vĩnh viễn (không gửi ký lại); biên bản đã duyệt thì huỷ các phiếu xuất
+  `X-BT-…` (hoàn tồn). Lưu `ly_do_huy`, `huy_boi`, `huy_luc` (migration `20261109_inventory_cancel_negative_guard.sql`,
+  **chạy tay TRƯỚC deploy**); trang biên bản hiện khung "Biên bản đã hủy · Lý do".
+- **Hủy sau khi hoàn tất** (route `reverse-approval`, nay bắt buộc `lyDo`): biên bản về `cho_duyet`, yêu cầu ký cũ `huy`,
+  phiếu xuất bị huỷ (hoàn tồn) ⇒ sửa rồi gửi ký lại. Lý do ghi vào `cancel_reason` phiếu kho + `nhat_ky_ky.chi_tiet.ly_do`.
+- **Xóa biên bản**: lý do chỉ ghi vào `cancel_reason` của phiếu xuất bị huỷ (biên bản bị xoá hẳn).
+- Hộp thoại đóng cả khi lỗi để thông báo lỗi của trang hiện ra.
+
+## BGĐ ≠ Giám đốc, bố cục form, NV phụ trách gửi ký (2026-11-04, chờ test tay)
+- BGĐ phụ trách và Giám đốc không được trùng người (có người nằm trong cả 2 danh sách vì chức vụ ở 2 cột): mỗi dropdown bỏ
+  người đang chọn ở ô kia, `handleSave` chặn, và gộp vào lý do khoá nút gửi ký (`sameApproverReason` → `ktBlockedReason`).
+- Chip "Người thực hiện" đã chọn: nền `mod-600` chữ trắng + icon Check.
+- Form tạo/sửa: cột trái = Thông tin chung → Thiết bị → Ghi chú; cột phải = Phê duyệt & Nhân sự → Ký duyệt → Chi phí
+  (bỏ hàng riêng cuối trang gây khoảng trống lớn).
+- Gửi ký: người tạo, admin HOẶC NV phụ trách (`nv_phu_trach`/`phu_trach_bao_tri` trùng `full_name`/`username`) — client
+  `canCreateSign`, server `create-request` dùng `isMaintenanceRecordTeam` (`src/lib/purchase/server.ts`). Vẫn cần
+  `maintenance.create`.

@@ -18,9 +18,13 @@ export const dynamic = "force-dynamic"
 export async function POST(req: NextRequest) {
   try {
     const authUser = await requireAuthUser(req)
-    const { recordId, factoryId } = (await req.json()) as { recordId?: string; factoryId?: string }
+    const { recordId, factoryId, lyDo } = (await req.json()) as { recordId?: string; factoryId?: string; lyDo?: string }
     if (!recordId || !factoryId) {
       return NextResponse.json({ error: "Thiếu recordId hoặc factoryId" }, { status: 400 })
+    }
+    const reason = (lyDo || "").trim()
+    if (!reason) {
+      return NextResponse.json({ error: "Vui lòng nhập lý do hủy sau khi hoàn tất." }, { status: 400 })
     }
 
     const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", authUser.id).single()
@@ -77,7 +81,7 @@ export async function POST(req: NextRequest) {
         factoryId,
         issueDocIds,
         cancelledByUserId: authUser.id,
-        reason: `Hủy sau khi hoàn tất ký duyệt biên bản ${record.ma_bb || ""}`,
+        reason: `Hủy sau khi hoàn tất ký duyệt biên bản ${record.ma_bb || ""}: ${reason}`,
       })
     }
 
@@ -101,7 +105,7 @@ export async function POST(req: NextRequest) {
         yeu_cau_id: yeuCau.id,
         hanh_dong: "huy_sau_hoan_tat",
         user_id: authUser.id,
-        chi_tiet: { ma_bb: record.ma_bb, issue_doc_ids: issueDocIds, ...(stuck ? { bien_ban_ket_xuat_kho: true } : {}) },
+        chi_tiet: { ma_bb: record.ma_bb, issue_doc_ids: issueDocIds, ly_do: reason, ...(stuck ? { bien_ban_ket_xuat_kho: true } : {}) },
       })
     }
 

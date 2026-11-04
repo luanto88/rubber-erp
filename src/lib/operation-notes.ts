@@ -6,19 +6,8 @@ import { prepareImageForUploadOrThrow } from "@/lib/image-upload"
 
 export const OPERATION_NOTE_MAX_IMAGES = 10
 
-// Supabase JS (PostgREST/Storage) ném lỗi dạng plain object { message, code, details, hint... },
-// KHÔNG phải instance của `Error` — nên `err instanceof Error ? err.message : fallback` luôn
-// rơi vào nhánh fallback và nuốt mất lý do thật (vd bảng chưa tồn tại vì chưa chạy migration,
-// vi phạm RLS...). Dùng hàm này ở mọi catch block liên quan tới operation-notes để luôn thấy
-// đúng lỗi thật khi debug.
-export function getErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error) return err.message
-  if (err && typeof err === "object" && "message" in err) {
-    const msg = (err as { message?: unknown }).message
-    if (typeof msg === "string" && msg) return msg
-  }
-  return fallback
-}
+// Lỗi Supabase là plain object, không phải `Error` — xem `@/lib/error-message`.
+export { getErrorMessage } from "@/lib/error-message"
 
 export type OperationNote = {
   id: string

@@ -682,6 +682,7 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "export.delete_order": "xóa đơn xuất hàng",
   "export.quick_add_customer": "thêm nhanh khách hàng",
   "export.view_own": "xem đơn được cấp",
+  "inventory.cancel": "hủy phiếu đã ghi sổ (hoàn tồn)",
   "settings.manage_config": "quản trị cấu hình hệ thống",
   "settings.master_data": "quản lý danh mục",
   "settings.maintenance_config": "cấu hình bảo trì",

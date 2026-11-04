@@ -12,7 +12,7 @@ import { PostConfirmDialog } from "../_components/post-confirm-dialog"
 import { InventoryFormHeader } from "../_components/inventory-form-header"
 import { fetchNextInventoryDocSeq, savedCodeFor } from "../_components/inventory-doc-code"
 import { HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
-import { resolveInventoryFormLock } from "../_components/inventory-edit-access"
+import { canPostInventoryDocument, INVENTORY_POST_DENIED_HINT, resolveInventoryFormLock } from "../_components/inventory-edit-access"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { InventoryMultiImageUpload } from "../_components/inventory-image-upload"
 import { fetchInventoryDocumentByReference } from "../_components/inventory-document-loader"
@@ -37,6 +37,7 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
+import { getErrorMessage } from "@/lib/error-message"
 
 type ReceiptLineDraft = {
   id: string
@@ -986,6 +987,10 @@ function InventoryReceiptsPageForm() {
           requesterName: docOwner.requesterName,
         })
   const isLocked = loading || redirecting || !!lockReason
+  // Ghi sổ cần admin | inventory.post (migration 20261110 — RPC cũng chặn).
+  const canPost = canPostInventoryDocument(currentUser)
+  // Thêm nhanh phân loại / vật tư: khớp RLS danh mục (20261110) — inventory.create | settings.manage_config | admin.
+  const canQuickAdd = hasPermission(currentUser, "inventory.create") || hasPermission(currentUser, "settings.manage_config")
 
   // "Làm mới": phiếu mới → xoá trống; phiếu đã lưu → "Hoàn tác" nạp lại bản đã lưu (không bao giờ xoá trắng phiếu đã lưu).
   const resetDraft = async () => {
@@ -1193,7 +1198,7 @@ function InventoryReceiptsPageForm() {
       return { documentId, documentCode: nextDocumentCode }
     } catch (error) {
       setSaveErrorTitle("Không lưu được phiếu nhập")
-      setSaveError(error instanceof Error ? error.message : "Không lưu được phiếu nhập.")
+      setSaveError(getErrorMessage(error, "Không lưu được phiếu nhập."))
       return null
     } finally {
       setSaving(false)
@@ -1231,6 +1236,10 @@ function InventoryReceiptsPageForm() {
     }
     if (documentStatus === "posted") {
       setSaveError("Phiếu nhập này đã được ghi sổ.")
+      return
+    }
+    if (!canPost) {
+      setSaveError(INVENTORY_POST_DENIED_HINT)
       return
     }
 
@@ -1336,9 +1345,11 @@ function InventoryReceiptsPageForm() {
       setDocumentStatus("cancelled")
       setCancelModal(false)
       setCancelReason("")
+      setSaveError(null)
       setSaveSuccess(`Phiếu nhập ${draft.documentCode} đã được hủy. Tồn kho đã được hoàn nguyên.`)
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Không thể hủy phiếu.")
+      setSaveErrorTitle("Không hủy được phiếu nhập")
+      setSaveError(getErrorMessage(error, "Không thể hủy phiếu."))
     } finally {
       setCancelling(false)
     }
@@ -1360,9 +1371,11 @@ function InventoryReceiptsPageForm() {
       if (error) throw error
       setApprovedInfo({ at: nowIso, byName })
       setApproveModal(false)
+      setSaveError(null)
       setSaveSuccess(`Phiếu nhập ${draft.documentCode} đã được phê duyệt.`)
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Không thể phê duyệt phiếu.")
+      setSaveErrorTitle("Không phê duyệt được phiếu nhập")
+      setSaveError(getErrorMessage(error, "Không thể phê duyệt phiếu."))
     } finally {
       setApproving(false)
     }
@@ -1428,17 +1441,19 @@ function InventoryReceiptsPageForm() {
                   onClick={() => void saveReceiptDraft()}
                   disabled={!canSave || saving || posting || loading || confirmPost}
                 />
-                <HeaderButton
-                  tone="brand"
-                  icon={<BookCheck size={15} />}
-                  label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
-                  onClick={() => {
-                    setSaveError(null)
-                    setSaveSuccess(null)
-                    setConfirmPost(true)
-                  }}
-                  disabled={!canSave || saving || posting || loading || confirmPost}
-                />
+                {canPost ? (
+                  <HeaderButton
+                    tone="brand"
+                    icon={<BookCheck size={15} />}
+                    label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
+                    onClick={() => {
+                      setSaveError(null)
+                      setSaveSuccess(null)
+                      setConfirmPost(true)
+                    }}
+                    disabled={!canSave || saving || posting || loading || confirmPost}
+                  />
+                ) : null}
               </>
             ) : null}
             {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
@@ -1511,6 +1526,11 @@ function InventoryReceiptsPageForm() {
       ) : isDirty && draft.documentId ? (
         <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-700">
           Có thay đổi chưa lưu — bấm Lưu (hoặc Ghi sổ) để lưu, Hoàn tác để bỏ.
+        </div>
+      ) : null}
+      {!isLocked && !canPost ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-600">
+          {INVENTORY_POST_DENIED_HINT}
         </div>
       ) : null}
 
@@ -1620,7 +1640,7 @@ function InventoryReceiptsPageForm() {
                   disabled={!draft.warehouseId}
                 />
                 </div>
-                <AddItemButton disabled={!factoryId} onClick={() => void createCategory()} />
+                {canQuickAdd ? <AddItemButton disabled={!factoryId} onClick={() => void createCategory()} /> : null}
               </div>
 
               <div className="flex items-end gap-3">
@@ -1638,7 +1658,7 @@ function InventoryReceiptsPageForm() {
                   disabled={!draft.warehouseId}
                 />
                 </div>
-                <AddItemButton disabled={!factoryId || !draft.warehouseId} onClick={() => void createItem()} />
+                {canQuickAdd ? <AddItemButton disabled={!factoryId || !draft.warehouseId} onClick={() => void createItem()} /> : null}
               </div>
             </div>
 

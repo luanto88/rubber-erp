@@ -20,11 +20,12 @@ import {
   Warehouse,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession } from "@/lib/auth"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { getErrorMessage } from "@/lib/error-message"
 
 type SettingsTab = "warehouses" | "categories" | "items" | "norms"
 type ModalType = "warehouse" | "category" | "item" | null
@@ -335,6 +336,14 @@ export default function InventorySettingsPage() {
     setDataWarning(null)
 
     try {
+      // Trang cũ (không có link) — chỉ admin | settings.manage_config, khớp RLS danh mục (20261110).
+      if (!fidOverride) {
+        const { user: sessionUser } = await hydrateActiveSession()
+        if (!sessionUser || !hasPermission(sessionUser, "settings.manage_config")) {
+          window.location.replace("/dashboard/inventory")
+          return
+        }
+      }
       const fid = fidOverride || (await getActiveFactoryId())
       if (!fid) {
         setDataWarning("Không xác định được nhà máy đang đăng nhập.")
@@ -573,7 +582,7 @@ export default function InventorySettingsPage() {
       closeModal()
       void loadData(factoryId)
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Lỗi không xác định")
+      setFormError(getErrorMessage(err, "Lỗi không xác định"))
     } finally {
       setSaving(false)
     }
@@ -602,7 +611,7 @@ export default function InventorySettingsPage() {
       closeModal()
       void loadData(factoryId)
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Lỗi không xác định")
+      setFormError(getErrorMessage(err, "Lỗi không xác định"))
     } finally {
       setSaving(false)
     }
@@ -665,7 +674,7 @@ export default function InventorySettingsPage() {
       closeModal()
       void loadData(factoryId)
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Lỗi không xác định")
+      setFormError(getErrorMessage(err, "Lỗi không xác định"))
     } finally {
       setSaving(false)
     }

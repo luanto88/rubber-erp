@@ -25,7 +25,7 @@ import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSe
 import { supabase } from "@/lib/supabase"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryDocumentList, inventoryDocumentDetailHref } from "../_components/inventory-document-list"
-import { resolveInventoryFormLock } from "../_components/inventory-edit-access"
+import { canPostInventoryDocument, INVENTORY_POST_DENIED_HINT, resolveInventoryFormLock } from "../_components/inventory-edit-access"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { PostConfirmDialog } from "../_components/post-confirm-dialog"
 import { InventoryFormHeader } from "../_components/inventory-form-header"
@@ -53,6 +53,7 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
+import { getErrorMessage } from "@/lib/error-message"
 
 type IssueLineDraft = {
   id: string
@@ -791,6 +792,8 @@ function InventoryIssuesPageForm() {
           requesterName: docOwner.requesterName,
         })
   const isLocked = loading || redirecting || !!lockReason
+  // Ghi sổ cần admin | inventory.post (migration 20261110 — RPC cũng chặn).
+  const canPost = canPostInventoryDocument(currentUser)
 
   // "Làm mới": phiếu mới → xoá trống; phiếu đã lưu → "Hoàn tác" nạp lại bản đã lưu (không bao giờ xoá trắng phiếu đã lưu).
   const resetDraft = async () => {
@@ -1028,7 +1031,7 @@ function InventoryIssuesPageForm() {
       return { documentId, documentCode: nextDocumentCode }
     } catch (error) {
       setSaveErrorTitle("Không lưu được phiếu xuất")
-      setSaveError(error instanceof Error ? error.message : "Không lưu được phiếu xuất.")
+      setSaveError(getErrorMessage(error, "Không lưu được phiếu xuất."))
       return null
     } finally {
       setSaving(false)
@@ -1045,6 +1048,10 @@ function InventoryIssuesPageForm() {
     }
     if (documentStatus === "posted") {
       setSaveError("Phiếu xuất này đã được ghi sổ.")
+      return
+    }
+    if (!canPost) {
+      setSaveError(INVENTORY_POST_DENIED_HINT)
       return
     }
 
@@ -1156,6 +1163,11 @@ function InventoryIssuesPageForm() {
     if (lockReason) {
       setSaveErrorTitle("Không ghi sổ được phiếu xuất")
       setSaveError(lockReason)
+      return
+    }
+    if (!canPost) {
+      setSaveErrorTitle("Không ghi sổ được phiếu xuất")
+      setSaveError(INVENTORY_POST_DENIED_HINT)
       return
     }
 
@@ -1289,7 +1301,7 @@ function InventoryIssuesPageForm() {
           warehouseId,
           warehouseCode: warehouse.code,
           status: "error",
-          message: error instanceof Error ? error.message : "Không tạo/ghi sổ được phiếu xuất.",
+          message: getErrorMessage(error, "Không tạo/ghi sổ được phiếu xuất."),
         })
       }
     }
@@ -1357,9 +1369,11 @@ function InventoryIssuesPageForm() {
       setDocumentStatus("cancelled")
       setCancelModal(false)
       setCancelReason("")
+      setSaveError(null)
       setSaveSuccess(`Phiếu xuất ${draft.documentCode} đã được hủy. Tồn kho đã được hoàn nguyên.`)
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Không thể hủy phiếu.")
+      setSaveErrorTitle("Không hủy được phiếu xuất")
+      setSaveError(getErrorMessage(error, "Không thể hủy phiếu."))
     } finally {
       setCancelling(false)
     }
@@ -1381,9 +1395,11 @@ function InventoryIssuesPageForm() {
       if (error) throw error
       setApprovedInfo({ at: nowIso, byName })
       setApproveModal(false)
+      setSaveError(null)
       setSaveSuccess(`Phiếu xuất ${draft.documentCode} đã được phê duyệt.`)
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Không thể phê duyệt phiếu.")
+      setSaveErrorTitle("Không phê duyệt được phiếu xuất")
+      setSaveError(getErrorMessage(error, "Không thể phê duyệt phiếu."))
     } finally {
       setApproving(false)
     }
@@ -1437,17 +1453,19 @@ function InventoryIssuesPageForm() {
               onClick={() => void resetDraft()}
               disabled={saving || confirmPost}
             />
-            <HeaderButton
-              tone="brand"
-              icon={<BookCheck size={15} />}
-              label={saving ? "Đang ghi sổ..." : `Ghi sổ ${draft.warehouseIds.length} kho`}
-              onClick={() => {
-                setSaveError(null)
-                setSaveSuccess(null)
-                setConfirmPost(true)
-              }}
-              disabled={!canSubmitMulti || isLocked || confirmPost}
-            />
+            {canPost ? (
+              <HeaderButton
+                tone="brand"
+                icon={<BookCheck size={15} />}
+                label={saving ? "Đang ghi sổ..." : `Ghi sổ ${draft.warehouseIds.length} kho`}
+                onClick={() => {
+                  setSaveError(null)
+                  setSaveSuccess(null)
+                  setConfirmPost(true)
+                }}
+                disabled={!canSubmitMulti || isLocked || confirmPost}
+              />
+            ) : null}
           </>
           ) : (
           <>
@@ -1483,17 +1501,19 @@ function InventoryIssuesPageForm() {
                   onClick={() => void saveIssueDraft()}
                   disabled={!canSave || saving || posting || loading || confirmPost}
                 />
-                <HeaderButton
-                  tone="brand"
-                  icon={<BookCheck size={15} />}
-                  label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
-                  onClick={() => {
-                    setSaveError(null)
-                    setSaveSuccess(null)
-                    setConfirmPost(true)
-                  }}
-                  disabled={!canSave || saving || posting || loading || confirmPost}
-                />
+                {canPost ? (
+                  <HeaderButton
+                    tone="brand"
+                    icon={<BookCheck size={15} />}
+                    label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
+                    onClick={() => {
+                      setSaveError(null)
+                      setSaveSuccess(null)
+                      setConfirmPost(true)
+                    }}
+                    disabled={!canSave || saving || posting || loading || confirmPost}
+                  />
+                ) : null}
               </>
             ) : null}
             {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
@@ -1637,6 +1657,13 @@ function InventoryIssuesPageForm() {
       ) : isDirty && draft.documentId ? (
         <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-700">
           Có thay đổi chưa lưu — bấm Lưu (hoặc Ghi sổ) để lưu, Hoàn tác để bỏ.
+        </div>
+      ) : null}
+      {!isLocked && !canPost ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-600">
+          {isMultiWarehouseMode
+            ? "Bạn chưa có quyền ghi sổ (Kho vật tư · ghi sổ) — xuất nhiều kho tạo và ghi sổ cùng lúc nên không làm được. Chọn 1 kho để Lưu nháp từng phiếu."
+            : INVENTORY_POST_DENIED_HINT}
         </div>
       ) : null}
 

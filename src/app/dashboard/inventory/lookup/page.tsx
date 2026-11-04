@@ -30,6 +30,7 @@ import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
 import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { supabase } from "@/lib/supabase"
+import { getErrorMessage } from "@/lib/error-message"
 
 const INPUT_CLASS =
   "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-colors focus:border-mod-600"
@@ -135,7 +136,7 @@ export default function InventoryLookupPage() {
             setLineNotesById(info.lineNotes)
             setDocumentInfoById(info.documents)
           } catch (err) {
-            setDocInfoError(err instanceof Error ? err.message : "Không tải được thông tin chứng từ")
+            setDocInfoError(getErrorMessage(err, "Không tải được thông tin chứng từ"))
           }
         }
       } finally {
@@ -419,7 +420,7 @@ export default function InventoryLookupPage() {
         },
       }))
     } catch (error) {
-      setApproveError(error instanceof Error ? error.message : "Không thể phê duyệt phiếu.")
+      setApproveError(getErrorMessage(error, "Không thể phê duyệt phiếu."))
     } finally {
       setApprovingDocumentId(null)
     }

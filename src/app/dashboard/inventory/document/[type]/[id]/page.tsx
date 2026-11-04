@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { Ban, Check, Download, FileText, Package, Pencil, Printer, RotateCcw, Warehouse } from "lucide-react"
+import { Ban, BookCheck, Check, Download, FileText, Package, Pencil, Printer, RotateCcw, Warehouse } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { formatDateDisplay } from "@/lib/date-utils"
@@ -28,7 +28,9 @@ import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { fetchInventoryDocumentByReference } from "../../../_components/inventory-document-loader"
 import { resolveCanApproveInventory } from "../../../_components/inventory-approval"
-import { canEditInventoryDraft } from "../../../_components/inventory-edit-access"
+import { canEditInventoryDraft, canPostInventoryDocument } from "../../../_components/inventory-edit-access"
+import { PostConfirmDialog } from "../../../_components/post-confirm-dialog"
+import { getErrorMessage } from "@/lib/error-message"
 
 /**
  * Trang chi tiết phiếu Nhập / Xuất / Chuyển kho (rule 29 mục C, 2026-10-17).
@@ -43,6 +45,12 @@ const ROUTE_BY_TYPE: Record<InventoryDocumentPdfType, string> = {
   import: "/dashboard/inventory/receipts",
   export: "/dashboard/inventory/issues",
   transfer: "/dashboard/inventory/transfers",
+}
+
+const POST_RPC_BY_TYPE: Record<InventoryDocumentPdfType, string> = {
+  import: "inventory_post_import_document",
+  export: "inventory_post_export_document",
+  transfer: "inventory_post_transfer_document",
 }
 
 const isDocType = (v: string): v is InventoryDocumentPdfType => v === "import" || v === "export" || v === "transfer"
@@ -75,7 +83,7 @@ export default function InventoryDocumentDetailPage() {
   const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
   const [docTab, setDocTab] = useState<"file" | "content">("file")
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
-  const [modal, setModal] = useState<"approve" | "cancel" | null>(null)
+  const [modal, setModal] = useState<"approve" | "cancel" | "post" | null>(null)
   const [cancelReason, setCancelReason] = useState("")
   const [busy, setBusy] = useState(false)
   const [origin, setOrigin] = useState("")
@@ -136,7 +144,7 @@ export default function InventoryDocumentDetailPage() {
         setCanApprove(allowed)
       }
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Không tải được phiếu kho.")
+      setLoadError(getErrorMessage(err, "Không tải được phiếu kho."))
     } finally {
       setLoading(false)
     }
@@ -216,6 +224,9 @@ export default function InventoryDocumentDetailPage() {
   const showApprove = supportsApproval && canApprove && doc.status === "posted" && !doc.approved_at
   const canCancel = hasPermission(user, "inventory.cancel") && doc.status === "posted"
   const canEdit = canEditInventoryDraft(user, doc)
+  // Ghi sổ phiếu NHÁP ngay tại đây (kể cả phiếu người khác lập) — cần admin | inventory.post (RPC kiểm lại).
+  const canPostDraft = doc.status === "draft" && canPostInventoryDocument(user)
+  const postRpc = POST_RPC_BY_TYPE[docType]
   const openFormHref = `${route}?documentId=${encodeURIComponent(doc.id)}`
   const printHref = `/dashboard/inventory/print?type=${docType}&documentId=${encodeURIComponent(doc.id)}`
   const srcWh = doc.source_warehouse_id ? warehouses[doc.source_warehouse_id] : null
@@ -249,7 +260,7 @@ export default function InventoryDocumentDetailPage() {
       showToast(`Đã phê duyệt phiếu ${doc.document_code}.`)
       void loadDoc()
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Không thể phê duyệt phiếu.", false)
+      showToast(getErrorMessage(err, "Không thể phê duyệt phiếu."), false)
     } finally {
       setBusy(false)
     }
@@ -273,7 +284,30 @@ export default function InventoryDocumentDetailPage() {
       showToast(`Đã hủy phiếu ${doc.document_code}. Tồn kho đã được hoàn nguyên.`)
       void loadDoc()
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Không thể hủy phiếu.", false)
+      showToast(getErrorMessage(err, "Không thể hủy phiếu."), false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handlePost = async () => {
+    if (!factoryId) return
+    setBusy(true)
+    try {
+      const session = await getFreshAuthSession()
+      if (!session?.user) throw new Error("Phiên đăng nhập đã hết hạn.")
+      const { error } = await supabase.rpc(postRpc, {
+        p_factory_id: factoryId,
+        p_document_id: doc.id,
+        p_posted_by: session.user.id,
+      })
+      if (error) throw error
+      setModal(null)
+      showToast(`Đã ghi sổ phiếu ${doc.document_code}.`)
+      void loadDoc()
+    } catch (err) {
+      setModal(null)
+      showToast(getErrorMessage(err, "Không ghi sổ được phiếu."), false)
     } finally {
       setBusy(false)
     }
@@ -281,7 +315,9 @@ export default function InventoryDocumentDetailPage() {
 
   const primary: SignAction | null = showApprove
     ? { key: "approve", label: "Phê duyệt phiếu", icon: <Check size={16} />, onClick: () => setModal("approve") }
-    : null
+    : canPostDraft
+      ? { key: "post", label: "Ghi sổ", icon: <BookCheck size={16} />, onClick: () => setModal("post") }
+      : null
   const secondary: SignAction[] = [
     { key: "pdf", label: "Tải PDF phiếu", icon: <Download size={14} />, onClick: () => void downloadPdf() },
     { key: "print", label: "In phiếu", icon: <Printer size={14} />, onClick: () => window.open(printHref, "_blank") },
@@ -419,6 +455,24 @@ export default function InventoryDocumentDetailPage() {
           </>
         }
       />
+
+      {modal === "post" ? (
+        <PostConfirmDialog
+          title={`${title} ${doc.document_code} (${lines.length} dòng)${doc.requester_name ? ` — lập bởi ${doc.requester_name}` : ""}`}
+          points={[
+            docType === "import"
+              ? <>Ghi sổ theo đúng nội dung phiếu nháp đang lưu, <strong>cộng vào tồn kho {tgtWh?.code || ""}</strong> ngay.</>
+              : docType === "export"
+                ? <>Ghi sổ theo đúng nội dung phiếu nháp đang lưu, <strong>trừ tồn kho {srcWh?.code || ""}</strong> ngay; vượt tồn sẽ bị từ chối.</>
+                : <>Ghi sổ theo đúng nội dung phiếu nháp đang lưu, <strong>trừ kho {srcWh?.code || ""} và cộng kho {tgtWh?.code || ""}</strong> ngay; vượt tồn sẽ bị từ chối.</>,
+            <>Sau khi ghi sổ <strong>không sửa hay xoá phiếu được nữa</strong> — chỉ người có quyền Hủy phiếu mới hủy được (tồn được hoàn lại).</>,
+            ...(supportsApproval ? [<>Phiếu chuyển sang chờ phê duyệt.</>] : []),
+          ]}
+          posting={busy}
+          onConfirm={() => void handlePost()}
+          onCancel={() => setModal(null)}
+        />
+      ) : null}
 
       {modal === "approve" ? (
         <ModalShell

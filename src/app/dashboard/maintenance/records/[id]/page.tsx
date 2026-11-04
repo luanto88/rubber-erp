@@ -4,7 +4,7 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
-  AlertCircle, AlertTriangle, ArrowLeft, Ban, CheckCircle2, ChevronDown, ChevronUp, Coins, Download, Eye, ExternalLink, FileSignature, FileText, GitBranch, ImagePlus, Loader2, Pencil, PenTool, Plus,
+  AlertCircle, AlertTriangle, ArrowLeft, Ban, Check, CheckCircle2, ChevronDown, ChevronUp, Coins, Download, Eye, ExternalLink, FileSignature, FileText, GitBranch, ImagePlus, Loader2, Pencil, PenTool, Plus,
   Printer, QrCode, RefreshCw, RotateCcw, Save, Send, ShoppingCart, Trash2, Users, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
@@ -50,6 +50,7 @@ import { KpiLinkPrompt } from "@/app/dashboard/_components/kpi-link-prompt"
 import { prepareImageForUpload, withRetry } from "@/lib/image-upload"
 import { CURRENCIES, convertCurrency, setCurrencyRates } from "@/lib/currency"
 import { MaintenanceSignModal, loadRecordForSigning } from "../_components/maintenance-sign-modal"
+import { ReasonConfirmDialog } from "@/app/dashboard/_components/reason-confirm-dialog"
 import { authFetch } from "@/lib/auth-fetch"
 import { extPriceLabel, type ResolvedExtPrice } from "@/lib/maintenance-ext-price-shared"
 import { DEFAULT_REPAIR_THRESHOLD_USD, formatRepairThreshold, getRepairThresholdUsd, setRepairThresholdUsd } from "@/lib/maintenance-threshold"
@@ -248,6 +249,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [dangerDialog, setDangerDialog] = useState<"cancel" | "reverse" | "delete" | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
   const [record, setRecord] = useState<MaintenanceRecord | null>(null)
@@ -713,7 +715,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       if (eligibleStaff.some((s) => s.ten === target)) setNvPhuTrach(target)
     }
     if (!bgdPhuTrach && bgdPhuTrachStaff.some((s) => s.ten === "Chau Chók")) setBgdPhuTrach("Chau Chók")
-    if (!giamDoc && giamDocStaff.some((s) => s.ten === "Tô Thành Luân")) setGiamDoc("Tô Thành Luân")
+    if (!giamDoc && bgdPhuTrach !== "Tô Thành Luân" && giamDocStaff.some((s) => s.ten === "Tô Thành Luân")) setGiamDoc("Tô Thành Luân")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, staffList, boPhan])
 
@@ -1151,29 +1153,30 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     return () => clearTimeout(t)
   }, [saveSuccess])
 
-  const handleCancel = async () => {
+  // Huỷ / Huỷ sau hoàn tất / Xoá đều mở hộp xác nhận (`dangerDialog`) — không dùng window.confirm.
+  const handleCancel = () => {
     if (!factoryId || !id || id === "new") return
-    const isApprovedRecord = record?.trang_thai === "da_duyet"
-    if (isApprovedRecord && !isAdmin) {
+    if (record?.trang_thai === "da_duyet" && !isAdmin) {
       setSaveError("Chỉ tài khoản admin mới được hủy biên bản đã phê duyệt.")
       return
     }
-    const confirmMessage = isApprovedRecord
-      ? "Hủy biên bản đã phê duyệt? Toàn bộ phiếu xuất kho liên quan sẽ bị hủy và vật tư sẽ được hoàn trả về kho."
-      : "Hủy biên bản này? Thao tác không thể hoàn tác."
-    if (!window.confirm(confirmMessage)) return
+    setDangerDialog("cancel")
+  }
+
+  const doCancel = async (reason: string) => {
+    if (!factoryId || !id || id === "new") return
+    const isApprovedRecord = record?.trang_thai === "da_duyet"
     setSaving(true); setSaveError(null)
     try {
+      const session = await getFreshAuthSession()
+      if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
       if (isApprovedRecord) {
-        const session = await getFreshAuthSession()
-        if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
-
         for (const documentId of issueDocIds) {
           const { error: cancelErr } = await supabase.rpc("inventory_cancel_document", {
             p_factory_id: factoryId,
             p_document_id: documentId,
             p_cancelled_by: session.user.id,
-            p_cancel_reason: `Hủy biên bản đã phê duyệt ${record?.ma_bb || ""}`,
+            p_cancel_reason: `Hủy biên bản đã phê duyệt ${record?.ma_bb || ""}: ${reason}`,
           })
           if (cancelErr) { setSaveError(`Lỗi hủy phiếu xuất kho: ${cancelErr.message}`); return }
         }
@@ -1185,6 +1188,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           trang_thai: "huy",
           inventory_issue_doc_id: null,
           inventory_issue_doc_ids: null,
+          ly_do_huy: reason,
+          huy_boi: session.user.id,
+          huy_luc: new Date().toISOString(),
         })
         .eq("id", id)
         .eq("factory_id", factoryId)
@@ -1197,15 +1203,21 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       void loadRecord(factoryId, id)
     } finally {
       setSaving(false)
+      // Đóng hộp thoại cả khi lỗi — thông báo lỗi hiện ở toast của trang (hộp thoại che toast).
+      setDangerDialog(null)
     }
   }
 
   // "Hủy sau khi hoàn tất" — gọi API server-side mới (đảo ngược xuất kho + đưa biên bản về
   // chờ ký + đánh dấu yêu cầu ký cũ là 'huy'), thay thế handleUnApprove cũ (từng tự thao tác
   // trực tiếp bằng client). Xem src/app/api/maintenance/reverse-approval/route.ts.
-  const handleReverseApproval = async () => {
+  const handleReverseApproval = () => {
     if (!factoryId || !id || id === "new") return
-    if (!window.confirm("Hủy sau khi hoàn tất ký duyệt? Biên bản sẽ về trạng thái Chờ ký, phiếu xuất kho sẽ bị hủy (vật tư hoàn về kho), và có thể \"Gửi ký duyệt\" lại từ đầu.")) return
+    setDangerDialog("reverse")
+  }
+
+  const doReverseApproval = async (reason: string) => {
+    if (!factoryId || !id || id === "new") return
     setSaving(true); setSaveError(null)
     try {
       const session = await getFreshAuthSession()
@@ -1213,7 +1225,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       const res = await fetch("/api/maintenance/reverse-approval", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ recordId: id, factoryId }),
+        body: JSON.stringify({ recordId: id, factoryId, lyDo: reason }),
       })
       const data = await res.json()
       if (!res.ok) { setSaveError(data.error || "Lỗi hủy sau khi hoàn tất"); return }
@@ -1223,6 +1235,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setSaveError(err instanceof Error ? err.message : "Lỗi hủy sau khi hoàn tất")
     } finally {
       setSaving(false)
+      setDangerDialog(null)
     }
   }
 
@@ -1266,9 +1279,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     }
   }
 
-  const handleDeleteRecord = async () => {
+  const handleDeleteRecord = () => {
     if (!factoryId || !id || id === "new" || !record) return
-    if (!window.confirm(`Xóa hẳn biên bản ${record.ma_bb || ""}? Hành động này không thể hoàn tác.`)) return
+    setDangerDialog("delete")
+  }
+
+  const doDeleteRecord = async (reason: string) => {
+    if (!factoryId || !id || id === "new" || !record) return
     setSaving(true); setSaveError(null)
     try {
       if (record.trang_thai === "da_duyet" && issueDocIds.length > 0) {
@@ -1280,7 +1297,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             p_factory_id: factoryId,
             p_document_id: documentId,
             p_cancelled_by: session.user.id,
-            p_cancel_reason: `Xóa biên bản bảo trì ${record.ma_bb || ""}`,
+            p_cancel_reason: `Xóa biên bản bảo trì ${record.ma_bb || ""}: ${reason}`,
           })
           if (cancelErr) { setSaveError(`Lỗi hủy phiếu xuất kho: ${cancelErr.message}`); return }
         }
@@ -1295,12 +1312,17 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       router.push("/dashboard/maintenance/records")
     } finally {
       setSaving(false)
+      setDangerDialog(null)
     }
   }
 
   const handleSave = async () => {
     if (!factoryId || lines.length === 0) {
       setSaveError("Vui lòng chọn ít nhất một thiết bị")
+      return
+    }
+    if (bgdPhuTrach && giamDoc && bgdPhuTrach === giamDoc) {
+      setSaveError("BGĐ phụ trách và Giám đốc phải là 2 người khác nhau.")
       return
     }
     // Validate tồn kho trước khi lưu — refresh số tồn tươi ngay trước khi so sánh
@@ -1615,10 +1637,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const statusBadge = <StatusBadge domain="maintenance" status={record?.trang_thai || "cho_duyet"} />
 
   // ── Ký duyệt điện tử: dữ liệu dùng chung cho thẻ ký (chế độ sửa) và hộp hành động (chế độ xem) ──
-  const canCreateSign = !!user && hasPermission(user, "maintenance.create") && (isAdmin || isCreator)
-  const ktBlockedReason = ktStatus && ktStatus.totalShortage > 0
-    ? describeKtShortage(ktStatus.items)
+  // NV phụ trách (người được chọn ở ô "Nhân viên phụ trách") gửi ký được như người tạo — khớp server
+  // create-request (isMaintenanceRecordTeam). So theo tên hiển thị, như isRecordTeamMember.
+  const myNames = [user?.full_name, user?.username].filter((v): v is string => !!v)
+  const isNvPhuTrach = !!record && [record.nv_phu_trach, record.phu_trach_bao_tri].some((n) => !!n && myNames.includes(n))
+  const canCreateSign = !!user && hasPermission(user, "maintenance.create") && (isAdmin || isCreator || isNvPhuTrach)
+  // BGĐ phụ trách và Giám đốc phải là 2 người khác nhau (2 bước ký khác nhau).
+  const sameApproverReason = bgdPhuTrach && giamDoc && bgdPhuTrach === giamDoc
+    ? "BGĐ phụ trách và Giám đốc phải là 2 người khác nhau."
     : null
+  const ktBlockedReason = sameApproverReason || (ktStatus && ktStatus.totalShortage > 0
+    ? describeKtShortage(ktStatus.items)
+    : null)
   const reloadSigningStatus = () => {
     setSigningStatus(undefined)
     setSigningStatusChecked(false)
@@ -3285,7 +3315,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   )
 
   const renderPersonnelCard = () => (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 h-full flex flex-col justify-between">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-6 flex flex-col gap-4">
       <div>
         <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
           <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
@@ -3312,12 +3342,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                         if (isReadOnly) return
                         setSelectedStaff((prev) => sel ? prev.filter((n) => n !== s.ten) : [...prev, s.ten])
                       }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                      aria-pressed={sel}
+                      className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                         sel
-                          ? "bg-mod-50 border-mod-200 text-mod-800 shadow-2xs"
-                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                          ? "bg-mod-600 border-mod-600 text-white shadow-sm"
+                          : "bg-white border-slate-300 text-slate-700 hover:border-mod-400 hover:bg-mod-50"
                       }`}
                     >
+                      {sel ? <Check size={13} className="shrink-0" /> : null}
                       {s.ten}{s.chuc_vu && ` (${s.chuc_vu})`}
                     </button>
                   )
@@ -3348,7 +3380,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 bg-white"
                 >
                   <option value="">— Chọn —</option>
-                  {bgdPhuTrachStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
+                  {bgdPhuTrachStaff
+                    .filter((s) => s.ten === bgdPhuTrach || s.ten !== giamDoc)
+                    .map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
                 </select>
               </div>
 
@@ -3361,9 +3395,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50 bg-white"
                 >
                   <option value="">— Chọn —</option>
-                  {giamDocStaff.map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
+                  {giamDocStaff
+                    .filter((s) => s.ten === giamDoc || s.ten !== bgdPhuTrach)
+                    .map((s) => <option key={s.id} value={s.ten}>{s.ten}</option>)}
                 </select>
               </div>
+              {sameApproverReason ? (
+                <p className="text-xs font-semibold text-red-600">{sameApproverReason}</p>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -3740,6 +3779,14 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         </div>
       )}
 
+      {record?.trang_thai === "huy" && record.ly_do_huy ? (
+        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+          <span className="font-bold">Biên bản đã hủy</span>
+          {record.huy_luc ? <span className="text-slate-500"> · {new Date(record.huy_luc).toLocaleString("vi-VN")}</span> : null}
+          <span className="block mt-1 whitespace-pre-wrap">Lý do: {record.ly_do_huy}</span>
+        </div>
+      ) : null}
+
       {!inEditMode && record ? renderViewMode() : (
         <>
       {/* Top Header / Sticky Bar */}
@@ -3824,22 +3871,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         <div className="lg:col-span-8 space-y-5">
           {inEditMode ? renderEditGeneralInfo() : renderReadOnlyGeneralInfo()}
           {inEditMode ? renderEditLines() : renderReadOnlyLines()}
-        </div>
-
-        {/* Right Column (4 cols ~ 33%) */}
-        <div className="lg:col-span-4 space-y-5">
-          {renderSigningCard()}
-          {renderCostSummaryCard()}
-        </div>
-      </div>
-
-      {/* Bottom Grid Row: Ghi chú & Chi tiết (Trái) + Thông tin Phê duyệt & Nhân sự (Phải) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch mt-5">
-        <div className="lg:col-span-8">
           {renderBottomLeftCard()}
         </div>
-        <div className="lg:col-span-4">
+
+        {/* Right Column (4 cols ~ 33%) — Nhân sự đặt ngay đầu cột phải để không còn khoảng trống
+            dưới cột phải khi cột trái dài (trước đây Nhân sự nằm ở hàng riêng cuối trang). */}
+        <div className="lg:col-span-4 space-y-5">
           {renderPersonnelCard()}
+          {renderSigningCard()}
+          {renderCostSummaryCard()}
         </div>
       </div>
 
@@ -3907,6 +3947,68 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           recordId={effectiveId}
           maBb={record?.ma_bb ?? null}
           bundle={signBundle}
+        />
+      )}
+
+      {dangerDialog === "cancel" && (
+        <ReasonConfirmDialog
+          title={record?.trang_thai === "da_duyet" ? "Hủy biên bản đã phê duyệt" : "Hủy biên bản"}
+          subtitle={record?.ma_bb || undefined}
+          points={
+            record?.trang_thai === "da_duyet"
+              ? [
+                  "Biên bản chuyển trạng thái Đã hủy và dừng hẳn — không gửi ký lại được.",
+                  issueDocIds.length > 0
+                    ? `${issueDocIds.length} phiếu xuất kho của biên bản sẽ bị hủy, vật tư hoàn trả về kho.`
+                    : "Biên bản không có phiếu xuất kho nào.",
+                  "Muốn sửa rồi ký lại thì dùng \"Hủy sau khi hoàn tất\" thay vì Hủy biên bản.",
+                ]
+              : ["Biên bản chuyển trạng thái Đã hủy và dừng hẳn.", "Thao tác không thể hoàn tác."]
+          }
+          reasonLabel="Lý do hủy"
+          reasonPlaceholder="VD: lập trùng, sai thiết bị, sự cố không xảy ra..."
+          confirmLabel="Hủy biên bản"
+          busyLabel="Đang hủy..."
+          busy={saving}
+          onConfirm={(reason) => void doCancel(reason)}
+          onCancel={() => setDangerDialog(null)}
+        />
+      )}
+      {dangerDialog === "reverse" && (
+        <ReasonConfirmDialog
+          title="Hủy sau khi hoàn tất ký duyệt"
+          subtitle={record?.ma_bb || undefined}
+          points={[
+            "Biên bản quay về Chờ ký — sửa xong có thể \"Gửi ký duyệt\" lại từ đầu.",
+            "Phiếu xuất kho đã tạo sẽ bị hủy, vật tư hoàn trả về kho.",
+            "Chữ ký cũ vẫn lưu trong nhật ký ký số, không bị xóa.",
+          ]}
+          reasonLabel="Lý do hủy sau hoàn tất"
+          reasonPlaceholder="VD: ghi sai số lượng vật tư, cần ký lại..."
+          confirmLabel="Hủy sau hoàn tất"
+          busyLabel="Đang hủy..."
+          busy={saving}
+          onConfirm={(reason) => void doReverseApproval(reason)}
+          onCancel={() => setDangerDialog(null)}
+        />
+      )}
+      {dangerDialog === "delete" && (
+        <ReasonConfirmDialog
+          title="Xóa hẳn biên bản"
+          subtitle={record?.ma_bb || undefined}
+          points={[
+            "Biên bản bị xóa khỏi hệ thống, không thể hoàn tác.",
+            ...(record?.trang_thai === "da_duyet" && issueDocIds.length > 0
+              ? [`${issueDocIds.length} phiếu xuất kho của biên bản sẽ bị hủy, vật tư hoàn trả về kho.`]
+              : []),
+          ]}
+          reasonLabel="Lý do xóa"
+          reasonPlaceholder="VD: tạo nhầm..."
+          confirmLabel="Xóa biên bản"
+          busyLabel="Đang xóa..."
+          busy={saving}
+          onConfirm={(reason) => void doDeleteRecord(reason)}
+          onCancel={() => setDangerDialog(null)}
         />
       )}
 

@@ -495,6 +495,52 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
   mỗi bảng 4 policy TO authenticated theo `current_profile_factory_id()`. Chặn: chưa đăng nhập + chéo nhà máy.
 - RPC ghi sổ / huỷ vẫn SECURITY INVOKER (qua RLS vì factory_id đúng). Test bằng tài khoản thật 43/43 PASS: anon 0 dòng,
   đọc đủ số dòng, nhập / chuyển / xuất / huỷ / xuất vượt tồn, dầu bồn, thêm nhanh vật tư + rule, ngưỡng cảnh báo, admin.
-- CHƯA làm GĐ B (`.claude/plans/inventory-rls-con-lai-2026-11-03.md`): người đã đăng nhập vẫn ghi thẳng được tồn / phát sinh
-  của nhà máy mình. Lưu ý GĐ B: biên bản Bảo trì gọi `inventory_cancel_document` từ trình duyệt.
 - Mọi insert danh mục từ trình duyệt PHẢI gửi `factory_id` (không có thì bị RLS từ chối).
+
+## RLS GĐ B — khoá ghi thẳng tồn / phát sinh (2026-11-04, đã chạy + test 63/63)
+- `20261108_inventory_rls_stock_lock.sql` (**đã chạy tay**): `stock_balances`, `lot_balances`, `stock_movements`,
+  `oil_stock_pools` chỉ còn policy SELECT ⇒ trình duyệt không ghi thẳng được nữa, chỉ qua 4 RPC.
+- 4 hàm thật trên production đã được ĐỔI TÊN thành `inventory_post_import/export/transfer_document_core`,
+  `inventory_cancel_document_core` (logic giữ nguyên, INVOKER, không role ứng dụng nào gọi trực tiếp được). Hàm cùng tên cũ
+  giờ là VỎ `SECURITY DEFINER` (cùng chữ ký, cùng kiểu trả về — app không đổi): kiểm quyền rồi gọi `*_core`.
+  ⚠️ Sửa logic ghi sổ/huỷ về sau ⇒ `CREATE OR REPLACE` hàm `*_core`, KHÔNG phải hàm vỏ.
+- Kiểm trong vỏ (`inventory_assert_can_post`, `inventory_rpc_is_trusted_caller`): service role / kết nối DB trực tiếp ⇒ cho
+  qua (Bảo trì ký biên bản, `purchase_receive`). Người dùng: đăng nhập; `p_factory_id` = nhà máy của mình;
+  `p_posted_by`/`p_cancelled_by` = chính `auth.uid()` (khác ⇒ lỗi, không tự thay); phiếu đúng nhà máy + đúng loại.
+  Ghi sổ: phiếu NHÁP của chính mình hoặc admin. Huỷ: admin | `inventory.cancel` | phiếu `X-BT-%` + `maintenance.approve`.
+  Gọi khi chưa đăng nhập ⇒ `permission denied`.
+- Ghi danh mục (items/warehouses/categories/rules/thresholds) vẫn mở theo nhà máy — chưa quyết khoá.
+- Test: `node --env-file=.env.local scripts/test-inventory-rls.mjs` (khối 9 = GĐ B; tự dọn dòng tồn `on_hand = 0` do Chuyển kho tạo).
+
+## Huỷ phiếu không được làm tồn âm + quyền "hủy phiếu" (2026-11-04, chờ chạy migration + test)
+- Lỗi thật: nhập 10 → xuất 1 → admin huỷ phiếu nhập ⇒ tồn -1. `*_core` huỷ chỉ cộng/trừ ngược theo phát sinh rồi xoá
+  phát sinh; trigger chống âm chỉ bắt INSERT phát sinh nên không chặn được.
+- `20261109_inventory_cancel_negative_guard.sql` (**chạy tay**): hàm vỏ `inventory_cancel_document` gọi
+  `inventory_assert_cancel_keeps_stock` TRƯỚC core — khoá dòng tồn liên quan, tính phần bị trừ cho tồn thường (kho + vật tư),
+  bồn dầu (kho) và tồn lô; sau huỷ < 0 ⇒ lỗi "Không thể huỷ phiếu …: vật tư … tại kho … hiện chỉ còn …, huỷ phiếu sẽ trừ …
+  ⇒ tồn âm …". Áp cho MỌI người gọi kể cả service role. Huỷ phiếu xuất (cộng lại tồn) không bao giờ bị chặn. Muốn huỷ phiếu
+  nhập/chuyển đã bị dùng ⇒ huỷ các phiếu xuất/chuyển sau nó trước.
+- Quyền `inventory.cancel` trước đây KHÔNG có trong bảng `permissions` (Cài đặt → Phân quyền không có ô tick, chỉ admin huỷ
+  được). Migration seed quyền + cấp admin; nhãn "hủy phiếu đã ghi sổ (hoàn tồn)", có trong `DEFAULT_PERMISSION_CODES`.
+  Nút Huỷ phiếu (danh sách, form, trang chi tiết) đã gate `hasPermission(…, "inventory.cancel")` ⇒ người không có quyền không thấy nút.
+- Dữ liệu đã âm trước bản vá: câu SQL kiểm ở cuối file migration; sửa bằng cách huỷ phiếu xuất gây âm (cộng lại) hoặc nhập bù.
+
+## Quyền ghi sổ + khoá danh mục + thông báo hủy nêu phiếu giữ hàng (2026-11-04, chờ chạy `20261110` + test)
+- Nguyên nhân "Không thể hủy phiếu" mù mờ: lỗi Supabase là `PostgrestError` (không phải `Error`) ⇒ mẫu
+  `err instanceof Error ? err.message : "…"` luôn ra câu chung. Đã thay 29 chỗ trong module Kho bằng `getErrorMessage`
+  (`src/lib/error-message.ts`, dùng chung; `operation-notes.ts`/`export-order-grants.ts` re-export). Code mới PHẢI dùng hàm này.
+- Hủy bị chặn vì tồn âm: thông báo nêu tối đa 5 phiếu đang ghi sổ có phát sinh xuất/chuyển đi của cùng kho + vật tư / bồn /
+  lô (`inventory_holding_docs_text`). Ví dụ thật N-KA-041126/003 bị chặn đúng vì X-KA-041126/005 còn ghi sổ.
+- `20261110_inventory_post_perm_catalog_lock.sql` (**chạy tay TRƯỚC deploy**):
+  - Ghi sổ cần admin | `inventory.post` (trước đây quyền này không được kiểm). Người có quyền ghi sổ ghi sổ được phiếu nháp
+    của BẤT KỲ ai trong nhà máy; người chỉ có `inventory.create` chỉ lưu nháp. Service role vẫn cho qua.
+  - UI: nút Ghi sổ (form Nhập / Xuất 1 kho + "Ghi sổ N kho" / Chuyển) ẩn khi thiếu quyền, hiện dòng nhắc
+    `INVENTORY_POST_DENIED_HINT`; `canPostInventoryDocument` ở `_components/inventory-edit-access.ts`. Trang chi tiết phiếu
+    có nút chính "Ghi sổ" cho phiếu nháp (gọi RPC trực tiếp, không lưu lại) — đường cho thủ kho ghi sổ phiếu người khác lập.
+  - Ghi danh mục (RLS, vẫn theo nhà máy): kho = `settings.manage_config`; phân loại / vật tư / rule kho: INSERT =
+    `settings.manage_config` | `inventory.create` (thêm nhanh trên phiếu nhập), UPDATE/DELETE = `settings.manage_config`;
+    ngưỡng cảnh báo = `inventory.settings` | `settings.manage_config`. Nút "+" thêm nhanh ở phiếu nhập gate cùng điều kiện;
+    trang cũ `inventory/settings` (không link) chỉ admin | `settings.manage_config`.
+  - Câu SQL đầu kỳ (cuối file migration) liệt kê người có quyền tạo mà thiếu quyền ghi sổ — admin tick trước khi chạy.
+- Test: khối 11 trong `scripts/test-inventory-rls.mjs`; các lượt ghi sổ trong test dùng `poster` (htho nếu có
+  `inventory.post`, ngược lại admin).

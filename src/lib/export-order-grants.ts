@@ -3,14 +3,7 @@
 import { supabase } from "@/lib/supabase"
 import { forceRefreshAuthSession, getFreshAuthSession } from "@/lib/auth"
 
-export function getErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error) return err.message
-  if (err && typeof err === "object" && "message" in err) {
-    const msg = (err as { message?: unknown }).message
-    if (typeof msg === "string" && msg) return msg
-  }
-  return fallback
-}
+export { getErrorMessage } from "@/lib/error-message"
 
 export type GrantCandidate = { id: string; name: string }
 

@@ -17,6 +17,7 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
+import { getErrorMessage } from "@/lib/error-message"
 
 type ReportKind = "on-hand" | "cards"
 type MovementDocumentType = "import" | "export" | "transfer"
@@ -123,7 +124,7 @@ export default function InventoryPrintReportPage() {
           try {
             setDocInfo(await loadMovementDocumentInfo(inventoryData.factoryId, inventoryData.movements))
           } catch (err) {
-            setDocInfoError(err instanceof Error ? err.message : "Không tải được thông tin chứng từ")
+            setDocInfoError(getErrorMessage(err, "Không tải được thông tin chứng từ"))
           }
         }
       } finally {

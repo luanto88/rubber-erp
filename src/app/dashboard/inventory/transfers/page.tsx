@@ -7,7 +7,7 @@ import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSe
 import { supabase } from "@/lib/supabase"
 import { InventoryPageShell } from "../_components/inventory-shell"
 import { InventoryDocumentList, inventoryDocumentDetailHref } from "../_components/inventory-document-list"
-import { resolveInventoryFormLock } from "../_components/inventory-edit-access"
+import { canPostInventoryDocument, INVENTORY_POST_DENIED_HINT, resolveInventoryFormLock } from "../_components/inventory-edit-access"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { PostConfirmDialog } from "../_components/post-confirm-dialog"
 import { InventoryFormHeader } from "../_components/inventory-form-header"
@@ -34,6 +34,7 @@ import {
   type InventoryWarehouseOption,
   type InventoryWarehouseRule,
 } from "../_components/inventory-data"
+import { getErrorMessage } from "@/lib/error-message"
 
 type TransferLineDraft = {
   id: string
@@ -688,6 +689,8 @@ function InventoryTransfersPageForm() {
           requesterName: docOwner.requesterName,
         })
   const isLocked = loading || redirecting || !!lockReason
+  // Ghi sổ cần admin | inventory.post (migration 20261110 — RPC cũng chặn).
+  const canPost = canPostInventoryDocument(currentUser)
 
   const emptyTransferDraft = (): TransferDraftState => ({
     ...defaultDraft(),
@@ -926,7 +929,7 @@ function InventoryTransfersPageForm() {
       setSaveSuccess(`Đã lưu phiếu chuyển ${nextDocumentCode} ở trạng thái nháp.`)
       return { documentId, documentCode: nextDocumentCode }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Không lưu được phiếu chuyển kho.")
+      setSaveError(getErrorMessage(error, "Không lưu được phiếu chuyển kho."))
       return null
     } finally {
       setSaving(false)
@@ -943,6 +946,10 @@ function InventoryTransfersPageForm() {
     }
     if (documentStatus === "posted") {
       setSaveError("Phiếu chuyển này đã được ghi sổ.")
+      return
+    }
+    if (!canPost) {
+      setSaveError(INVENTORY_POST_DENIED_HINT)
       return
     }
 
@@ -1046,7 +1053,7 @@ function InventoryTransfersPageForm() {
         })
       }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Không ghi sổ được phiếu chuyển kho.")
+      setSaveError(getErrorMessage(error, "Không ghi sổ được phiếu chuyển kho."))
     } finally {
       setPosting(false)
     }
@@ -1068,9 +1075,10 @@ function InventoryTransfersPageForm() {
       setDocumentStatus("cancelled")
       setCancelModal(false)
       setCancelReason("")
+      setSaveError(null)
       setSaveSuccess(`Phiếu chuyển ${draft.documentCode} đã được hủy. Tồn kho đã được hoàn nguyên.`)
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Không thể hủy phiếu.")
+      setSaveError(getErrorMessage(error, "Không thể hủy phiếu."))
     } finally {
       setCancelling(false)
     }
@@ -1137,17 +1145,19 @@ function InventoryTransfersPageForm() {
                   onClick={() => void saveTransferDraft()}
                   disabled={!canSave || saving || posting || loading || confirmPost}
                 />
-                <HeaderButton
-                  tone="brand"
-                  icon={<BookCheck size={15} />}
-                  label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
-                  onClick={() => {
-                    setSaveError(null)
-                    setSaveSuccess(null)
-                    setConfirmPost(true)
-                  }}
-                  disabled={!canSave || saving || posting || loading || confirmPost}
-                />
+                {canPost ? (
+                  <HeaderButton
+                    tone="brand"
+                    icon={<BookCheck size={15} />}
+                    label={posting ? "Đang ghi sổ..." : "Ghi sổ"}
+                    onClick={() => {
+                      setSaveError(null)
+                      setSaveSuccess(null)
+                      setConfirmPost(true)
+                    }}
+                    disabled={!canSave || saving || posting || loading || confirmPost}
+                  />
+                ) : null}
               </>
             ) : null}
             {documentStatus === "posted" && hasPermission(currentUser, "inventory.cancel") ? (
@@ -1193,7 +1203,7 @@ function InventoryTransfersPageForm() {
 
       {saveError ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <div className="font-bold">Không lưu được phiếu chuyển kho</div>
+          <div className="font-bold">Không thực hiện được thao tác</div>
           <div className="mt-1 leading-6">{saveError}</div>
         </div>
       ) : null}
@@ -1216,6 +1226,11 @@ function InventoryTransfersPageForm() {
       ) : isDirty && draft.documentId ? (
         <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-700">
           Có thay đổi chưa lưu — bấm Lưu (hoặc Ghi sổ) để lưu, Hoàn tác để bỏ.
+        </div>
+      ) : null}
+      {!isLocked && !canPost ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-600">
+          {INVENTORY_POST_DENIED_HINT}
         </div>
       ) : null}
 

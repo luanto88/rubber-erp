@@ -6,6 +6,7 @@ import { computeRecordFingerprint } from "@/lib/signing/data-fingerprint"
 import { computeKtStatuses } from "@/lib/maintenance-kt"
 import { describeKtShortage } from "@/lib/maintenance-kt-message"
 import { checkMaintenanceStock } from "@/lib/maintenance-stock-issuance"
+import { isMaintenanceRecordTeam } from "@/lib/purchase/server"
 
 export const dynamic = "force-dynamic"
 
@@ -79,12 +80,13 @@ export async function POST(req: NextRequest) {
         }
         const { data: rec } = await supabaseAdmin
           .from("maintenance_records")
-          .select("created_by")
+          .select("id")
           .eq("id", body.banGhiId)
           .eq("factory_id", body.factoryId)
           .maybeSingle()
-        if (!rec || rec.created_by !== authUser.id) {
-          return NextResponse.json({ error: "Bạn không có quyền gửi ký duyệt biên bản này" }, { status: 403 })
+        // Người tạo HOẶC NV phụ trách (nv_phu_trach / phu_trach_bao_tri, so theo tên profile) — 2026-11-04.
+        if (!rec || !(await isMaintenanceRecordTeam(body.banGhiId, authUser.id))) {
+          return NextResponse.json({ error: "Chỉ người tạo hoặc nhân viên phụ trách biên bản mới gửi ký được" }, { status: 403 })
         }
       } else {
         return NextResponse.json({ error: "Module không được hỗ trợ để tạo yêu cầu ký" }, { status: 400 })

@@ -5,6 +5,7 @@ import { useRef, useState } from "react"
 import { ImagePlus, Loader2, X, ZoomIn } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { prepareImageForUpload } from "@/lib/image-upload"
+import { getErrorMessage } from "@/lib/error-message"
 
 type UploadedImagePayload = {
   publicUrl: string
@@ -181,7 +182,7 @@ export function InventoryMultiImageUpload({
         setError(`Chỉ tải được thêm ${picked.length} ảnh (tối đa ${maxImages} ảnh/dòng).`)
       }
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Không tải được ảnh.")
+      setError(getErrorMessage(uploadError, "Không tải được ảnh."))
     } finally {
       setUploading(false)
     }
@@ -302,7 +303,7 @@ export function InventoryImageUpload({
       onChange(publicUrl)
       onUploadComplete?.({ publicUrl, fileName: file.name })
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Không tải được ảnh.")
+      setError(getErrorMessage(uploadError, "Không tải được ảnh."))
     } finally {
       setUploading(false)
       event.target.value = ""
@@ -450,7 +451,7 @@ export function InventoryImageUploadGroup({
       onChange(next)
       onUploadComplete?.(payloads)
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Không tải được ảnh.")
+      setError(getErrorMessage(uploadError, "Không tải được ảnh."))
     } finally {
       setUploading(false)
     }
