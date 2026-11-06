@@ -1,10 +1,9 @@
 import type { Metadata } from "next"
 import { headers } from "next/headers"
 import { notFound } from "next/navigation"
-import { CalendarCheck, Cog, Wrench } from "lucide-react"
-import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
+import { CalendarCheck, Cog } from "lucide-react"
 import { ModuleThemeScope } from "@/app/dashboard/_components/doc-ui/module-theme"
-import { EquipmentHistoryPanel } from "@/app/dashboard/maintenance/_components/equipment-history-panel"
+import { EquipmentHistoryPanel, EquipmentQrBanner } from "@/app/dashboard/maintenance/_components/equipment-history-panel"
 import { checkPublicRateLimit } from "@/lib/public-rate-limit"
 import { loadPublicEquipment, resolveEquipmentToken } from "@/lib/equipment-lookup"
 import { isEquipmentQrToken } from "@/lib/equipment-qr"
@@ -53,7 +52,7 @@ export default async function EquipmentQrPage({ params }: { params: Promise<{ to
       <meta httpEquiv="Cache-Control" content="no-store, must-revalidate" />
       <div className="min-h-screen bg-slate-100 px-4 py-4 pb-28 sm:px-6 sm:py-6">
         <ModuleThemeScope theme="slate" className="mx-auto max-w-2xl space-y-4">
-          <PageHeaderBanner theme="slate" icon={Wrench} title="Tra cứu thiết bị" subtitle="Quét QR trên thiết bị để xem thông tin bảo trì" />
+          <EquipmentQrBanner />
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h1 className="text-xl font-extrabold leading-tight text-slate-900">{info.ten_tb}</h1>

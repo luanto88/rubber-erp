@@ -1479,3 +1479,7 @@ Kế hoạch đầy đủ: `docs/qr-equipment-plan.md`. GĐ1 chỉ MÁY MÓC (`m
 - Cài đặt → Bảo trì → Thiết bị: nút QR từng dòng (`EquipmentQrModal`, `POST /api/equipment/qr-token` lấy/tạo
   token; quyền `maintenance.view` | `settings.maintenance_config` | `settings.manage_config`), tải PNG có mã dưới QR.
 - Lưu ý dữ liệu: nhiều biên bản 2024 vẫn `cho_duyet` (dữ liệu cũ) ⇒ hiện badge "Chờ duyệt" trong lịch sử.
+- 🐛 Lỗi production lần đầu (2026-11-06): `/tb/[token]/page.tsx` (Server Component) truyền `icon={Wrench}` vào
+  `PageHeaderBanner` ("use client") ⇒ "An error occurred in the Server Components render" (dev chỉ cảnh báo).
+  Sửa: banner bọc trong client `EquipmentQrBanner`. Quy tắc: trang server KHÔNG truyền hàm/component (icon,
+  onClick…) làm prop cho client component — bọc trong 1 client component nhỏ.

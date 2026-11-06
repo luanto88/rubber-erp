@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ChevronDown, ExternalLink, History, LogIn, QrCode } from "lucide-react"
+import { ChevronDown, ExternalLink, History, LogIn, QrCode, Wrench } from "lucide-react"
+import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { getFreshAuthSession } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
 import { currencySymbol } from "@/lib/currency"
@@ -130,6 +131,19 @@ function RecordCard({ rec, canSeeCost }: { rec: EquipmentHistoryRecord; canSeeCo
         </div>
       )}
     </li>
+  )
+}
+
+/** Banner trang `/tb` — PHẢI là client: page.tsx là Server Component, không được truyền `icon`
+ *  (hàm/component) sang PageHeaderBanner (client) ⇒ production lỗi "Server Components render". */
+export function EquipmentQrBanner() {
+  return (
+    <PageHeaderBanner
+      theme="slate"
+      icon={Wrench}
+      title="Tra cứu thiết bị"
+      subtitle="Quét QR trên thiết bị để xem thông tin bảo trì"
+    />
   )
 }
 
