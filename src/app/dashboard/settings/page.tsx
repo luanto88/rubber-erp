@@ -32,6 +32,10 @@ import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import { ShiftNamesTab } from "./_components/shift-names-tab"
 import { OpeningStockTab } from "./_components/opening-stock-tab"
 import { ExportPalletTypesTab } from "./_components/export-pallet-types-tab"
+import { ListSearch, noSearchMatchText } from "./_components/list-search"
+import { matchesSearchQuery } from "@/lib/text-normalize"
+import { getErrorMessage } from "@/lib/error-message"
+import { authFetch } from "@/lib/auth-fetch"
 import { Kpi5sLocationsTab } from "./_components/kpi-5s-locations-tab"
 import { Kpi5sZonesTab } from "./_components/kpi-5s-zones-tab"
 import { KpiCriteriaTab } from "./_components/kpi-criteria-tab"
@@ -53,6 +57,7 @@ import {
 import {
   Plus,
   QrCode,
+  Printer,
   Edit2,
   Trash2,
   X,
@@ -227,6 +232,9 @@ type VanBanDocumentTypeRow = {
 type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments" | "opening-stock" | "export-pallet-types"
 
 type MaintenanceTab = "assets" | "staff" | "vehicles" | "ext-materials"
+type ListSearchKey =
+  | "users" | "staff" | "categories" | "items" | "delivery-points" | "forest-plots"
+  | "customers" | "required-notes" | "assets" | "vehicles" | "drivers" | "ext-materials"
 
 type MaintenanceAssetRow = {
   id: string
@@ -653,6 +661,8 @@ const PERMISSION_ACTION_LABELS: Record<string, string> = {
   predict_manage: "quản lý dự đoán số lô",
   predict_view: "xem dự đoán số lô",
   print: "in",
+  qr_lookup: "tra cứu QR",
+  view_cost: "xem giá",
   quick_add: "thêm nhanh",
   quick_add_customer: "thêm nhanh khách hàng",
   settings: "cấu hình",
@@ -685,6 +695,8 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "export.quick_add_customer": "thêm nhanh khách hàng",
   "export.view_own": "xem đơn được cấp",
   "inventory.cancel": "hủy phiếu đã ghi sổ (hoàn tồn)",
+  "maintenance.qr_lookup": "tra cứu lý lịch thiết bị bằng QR",
+  "maintenance.view_cost": "xem giá / chi phí khi tra cứu QR thiết bị",
   "settings.manage_config": "quản trị cấu hình hệ thống",
   "settings.master_data": "quản lý danh mục",
   "settings.maintenance_config": "cấu hình bảo trì",
@@ -972,6 +984,11 @@ export default function SettingsPage() {
   const [maintError, setMaintError] = useState("")
   const [maintDelConfirm, setMaintDelConfirm] = useState<{ type: "asset" | "staff" | "staff-group" | "ext-mat"; id: string; label: string } | null>(null)
   const [assetQr, setAssetQr] = useState<EquipmentQrTarget | null>(null)
+  // GĐ3 — in tem QR hàng loạt
+  const [assetBoPhanFilter, setAssetBoPhanFilter] = useState("")
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(() => new Set())
+  const [assetLabelPrinting, setAssetLabelPrinting] = useState(false)
+  const [assetLabelError, setAssetLabelError] = useState<string | null>(null)
   const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
 
@@ -2387,6 +2404,108 @@ export default function SettingsPage() {
     return maintStaff
   }, [maintStaff, staffViewFilter])
 
+  // ── Ô tìm nhanh các danh sách (lọc client, bỏ dấu — list-search.tsx) ──────────────
+  const [listSearch, setListSearch] = useState<Partial<Record<ListSearchKey, string>>>({})
+  const searchOf = (key: ListSearchKey) => listSearch[key] || ""
+  const setSearchOf = (key: ListSearchKey) => (value: string) => setListSearch((prev) => ({ ...prev, [key]: value }))
+  // Đổi tab/sub-tab ⇒ xoá từ khoá; riêng "staff" giữ (Hệ thống → Nhân sự và Bảo trì → Nhân sự dùng chung).
+  useEffect(() => {
+    setListSearch((prev) => (prev.staff ? { staff: prev.staff } : {}))
+  }, [tab, systemTab, configTab, masterDataTab, maintTab])
+
+  const searchedMaintStaff = useMemo(() => {
+    const q = listSearch.staff || ""
+    return filteredMaintStaff.filter((s) => matchesSearchQuery(q, [
+      s.ten, s.phong_ban, s.chuc_vu, s.chuc_vu_chinh_quyen, s.chuc_vu_kim_nhiem, s.group_names.join(" "),
+      s.profile_id ? profiles.find((p) => p.id === s.profile_id)?.username : null,
+    ]))
+  }, [filteredMaintStaff, listSearch.staff, profiles])
+  const searchedInvCategories = useMemo(
+    () => invCategories.filter((r) => matchesSearchQuery(listSearch.categories || "", [r.code, r.name])),
+    [invCategories, listSearch.categories],
+  )
+  const searchedInvItems = useMemo(
+    () => invItems.filter((r) => matchesSearchQuery(listSearch.items || "", [r.code, r.name, r.specification, r.categoryName, r.unit, r.warehouseCodes.join(" ")])),
+    [invItems, listSearch.items],
+  )
+  const searchedDeliveryPoints = useMemo(
+    () => deliveryPoints.filter((r) => matchesSearchQuery(listSearch["delivery-points"] || "", [r.ma_lo, `doi ${r.doi}`, r.doi_nho])),
+    [deliveryPoints, listSearch],
+  )
+  const searchedForestPlots = useMemo(
+    () => forestPlots.filter((r) => matchesSearchQuery(listSearch["forest-plots"] || "", [r.ten, r.ma_lo_full, r.nong_truong, r.doi != null ? `doi ${r.doi}` : null])),
+    [forestPlots, listSearch],
+  )
+  const assetBoPhanOptions = useMemo(
+    () => [...new Set(maintAssets.map((a) => a.bo_phan).filter(Boolean))].sort((a, b) => a.localeCompare(b, "vi")),
+    [maintAssets],
+  )
+  const searchedMaintAssets = useMemo(
+    () => maintAssets.filter((r) =>
+      (!assetBoPhanFilter || r.bo_phan === assetBoPhanFilter)
+      && matchesSearchQuery(listSearch.assets || "", [r.ma_tb, r.ten_tb, r.bo_phan, r.nam_sd, r.bien_so])),
+    [maintAssets, listSearch.assets, assetBoPhanFilter],
+  )
+  const allShownAssetsSelected = searchedMaintAssets.length > 0 && searchedMaintAssets.every((a) => selectedAssetIds.has(a.id))
+  const toggleAssetSelected = (id: string) => setSelectedAssetIds((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+  const toggleAllShownAssets = () => setSelectedAssetIds((prev) => {
+    const next = new Set(prev)
+    if (allShownAssetsSelected) searchedMaintAssets.forEach((a) => next.delete(a.id))
+    else searchedMaintAssets.forEach((a) => next.add(a.id))
+    return next
+  })
+  const printAssetLabels = async () => {
+    if (selectedAssetIds.size === 0 || assetLabelPrinting) return
+    setAssetLabelPrinting(true)
+    setAssetLabelError(null)
+    try {
+      // Giữ thứ tự theo bảng (bộ phận / mã) để tem in ra dễ dán.
+      const ordered = maintAssets.filter((a) => selectedAssetIds.has(a.id)).map((a) => a.id)
+      const res = await authFetch("/api/equipment/qr-token/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetIds: ordered }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { labels?: { ma_tb: string; ten_tb: string; token: string }[]; error?: string }
+      if (!res.ok || !json.labels) throw new Error(json.error || "Không lấy được QR thiết bị")
+      if (json.labels.length === 0) throw new Error("Không có thiết bị hợp lệ để in")
+      const { downloadEquipmentQrLabelsPdf } = await import("@/lib/equipment-qr-pdf")
+      await downloadEquipmentQrLabelsPdf(json.labels)
+      if (json.labels.length < ordered.length) {
+        setAssetLabelError(`Đã in ${json.labels.length}/${ordered.length} tem — một số thiết bị không còn tồn tại.`)
+      }
+    } catch (err) {
+      setAssetLabelError(getErrorMessage(err, "Không in được tem QR"))
+    } finally {
+      setAssetLabelPrinting(false)
+    }
+  }
+  const searchedDispatchVehicles = useMemo(
+    () => dispatchVehicles.filter((r) => matchesSearchQuery(listSearch.vehicles || "", [r.code, r.name, r.vehicle_type, r.plate_number, r.current_driver_name])),
+    [dispatchVehicles, listSearch.vehicles],
+  )
+  const searchedDispatchDrivers = useMemo(
+    () => dispatchDrivers.filter((r) => matchesSearchQuery(listSearch.drivers || "", [r.code, r.name, r.phone, r.license_class])),
+    [dispatchDrivers, listSearch.drivers],
+  )
+  const searchedMaintExtMats = useMemo(
+    () => maintExtMats.filter((r) => matchesSearchQuery(listSearch["ext-materials"] || "", [r.code, r.ten_vat_tu, r.specification, r.dvt])),
+    [maintExtMats, listSearch],
+  )
+  const searchedCustomers = useMemo(
+    () => customers.filter((r) => matchesSearchQuery(listSearch.customers || "", [r.ma_kh, r.ten_kh_en, r.email, r.dia_chi, r.quoc_gia, r.nguoi_lien_he])),
+    [customers, listSearch.customers],
+  )
+  const searchedRequiredNotes = useMemo(
+    () => requiredNotes.filter((r) => matchesSearchQuery(listSearch["required-notes"] || "", [r.content, r.mo_ta])),
+    [requiredNotes, listSearch],
+  )
+
   const openNewStaffModal = useCallback((profile?: ProfileRow) => {
     setMaintEditId(null)
     setMaintError("")
@@ -3178,6 +3297,11 @@ export default function SettingsPage() {
   const pendingUsers = profiles.filter((item) => item.status === "pending")
   const activeUsers = profiles.filter((item) => item.status === "active")
   const disabledUsers = profiles.filter((item) => item.status === "disabled")
+  const userSearch = listSearch.users || ""
+  const userMatches = (p: ProfileRow) => matchesSearchQuery(userSearch, [p.username, p.full_name, p.department, p.role])
+  const shownPendingUsers = pendingUsers.filter(userMatches)
+  const shownActiveUsers = activeUsers.filter(userMatches)
+  const shownDisabledUsers = disabledUsers.filter(userMatches)
 
   const tabs = [
     { key: "system" as const, label: "Hệ thống", icon: ShieldCheck, show: canViewUsers || canEditPermissions },
@@ -3296,6 +3420,14 @@ export default function SettingsPage() {
               ))}
             </div>
 
+            <ListSearch
+              value={searchOf("users")}
+              onChange={setSearchOf("users")}
+              placeholder="Tìm username, họ tên, phòng ban, role..."
+              shown={shownPendingUsers.length + shownActiveUsers.length + shownDisabledUsers.length}
+              total={pendingUsers.length + activeUsers.length + disabledUsers.length}
+            />
+
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <UserCheck size={15} className="text-amber-600" />
@@ -3313,14 +3445,14 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {pendingUsers.length === 0 ? (
+                    {shownPendingUsers.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
-                          Không có tài khoản chờ duyệt
+                          {userSearch.trim() && pendingUsers.length > 0 ? noSearchMatchText(userSearch) : "Không có tài khoản chờ duyệt"}
                         </td>
                       </tr>
                     ) : (
-                      pendingUsers.map((profile) => (
+                      shownPendingUsers.map((profile) => (
                         <tr key={profile.id} className="row-hover">
                           <td className="px-4 py-3 font-mono text-slate-700">{profile.username}</td>
                           <td className="px-4 py-3 font-semibold text-slate-800">{profile.full_name}</td>
@@ -3367,7 +3499,10 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {activeUsers.map((profile) => (
+                    {userSearch.trim() && shownActiveUsers.length === 0 && (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">{noSearchMatchText(userSearch)}</td></tr>
+                    )}
+                    {shownActiveUsers.map((profile) => (
                       <tr key={profile.id} className="row-hover">
                         <td className="px-4 py-3 font-mono text-slate-700">{profile.username}</td>
                         <td className="px-4 py-3 font-semibold text-slate-800">{profile.full_name}</td>
@@ -3463,14 +3598,14 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {disabledUsers.length === 0 ? (
+                    {shownDisabledUsers.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
-                          Không có tài khoản bị khóa
+                          {userSearch.trim() && disabledUsers.length > 0 ? noSearchMatchText(userSearch) : "Không có tài khoản bị khóa"}
                         </td>
                       </tr>
                     ) : (
-                      disabledUsers.map((profile) => (
+                      shownDisabledUsers.map((profile) => (
                         <tr key={profile.id} className="row-hover">
                           <td className="px-4 py-3 font-mono text-slate-700">{profile.username}</td>
                           <td className="px-4 py-3 font-semibold text-slate-800">{profile.full_name}</td>
@@ -3669,6 +3804,14 @@ export default function SettingsPage() {
                     {filter.label}
                   </button>
                 ))}
+                <ListSearch
+                  className="w-full sm:ml-auto sm:w-auto"
+                  value={searchOf("staff")}
+                  onChange={setSearchOf("staff")}
+                  placeholder="Tìm tên, tài khoản, phòng ban, chức vụ..."
+                  shown={searchedMaintStaff.length}
+                  total={filteredMaintStaff.length}
+                />
               </div>
 
               <ResponsiveTableWrapper>
@@ -3681,9 +3824,9 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredMaintStaff.length === 0 ? (
-                      <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự phù hợp</td></tr>
-                    ) : filteredMaintStaff.map((s) => (
+                    {searchedMaintStaff.length === 0 ? (
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">{searchOf("staff").trim() && filteredMaintStaff.length > 0 ? noSearchMatchText(searchOf("staff")) : "Chưa có nhân sự phù hợp"}</td></tr>
+                    ) : searchedMaintStaff.map((s) => (
                       <tr key={`sys-${s.id}`} className="row-hover">
                         <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
                         <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
@@ -3976,6 +4119,19 @@ export default function SettingsPage() {
                 </div>
               )}
 
+              {!configLoading && configTab === "categories" && (
+                <ListSearch className="mb-3" value={searchOf("categories")} onChange={setSearchOf("categories")} placeholder="Tìm mã, tên nhóm..." shown={searchedInvCategories.length} total={invCategories.length} />
+              )}
+              {!configLoading && configTab === "items" && (
+                <ListSearch className="mb-3" value={searchOf("items")} onChange={setSearchOf("items")} placeholder="Tìm mã, tên, quy cách, nhóm, kho..." shown={searchedInvItems.length} total={invItems.length} />
+              )}
+              {!configLoading && configTab === "delivery-points" && (
+                <ListSearch className="mb-3" value={searchOf("delivery-points")} onChange={setSearchOf("delivery-points")} placeholder="Tìm mã điểm, đội lớn, đội nhỏ..." shown={searchedDeliveryPoints.length} total={deliveryPoints.length} />
+              )}
+              {!configLoading && configTab === "forest-plots" && (
+                <ListSearch className="mb-3" value={searchOf("forest-plots")} onChange={setSearchOf("forest-plots")} placeholder="Tìm mã ngắn, mã đầy đủ, nông trường, đội..." shown={searchedForestPlots.length} total={forestPlots.length} />
+              )}
+
               {configLoading ? (
                 <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
               ) : configTab === "warehouses" ? (
@@ -4026,9 +4182,9 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {invCategories.length === 0 ? (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">Chưa có nhóm nào</td></tr>
-                    ) : invCategories.map((row) => (
+                    {searchedInvCategories.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">{invCategories.length > 0 ? noSearchMatchText(searchOf("categories")) : "Chưa có nhóm nào"}</td></tr>
+                    ) : searchedInvCategories.map((row) => (
                       <tr key={row.id} className="row-hover">
                         <td className="px-4 py-3 font-mono font-bold text-amber-700">{row.code}</td>
                         <td className="px-4 py-3 font-semibold text-slate-800">{row.name}</td>
@@ -4063,9 +4219,9 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {invItems.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
-                    ) : invItems.map((row) => (
+                    {searchedInvItems.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">{invItems.length > 0 ? noSearchMatchText(searchOf("items")) : "Chưa có vật tư nào"}</td></tr>
+                    ) : searchedInvItems.map((row) => (
                       <tr key={row.id} className="row-hover">
                         <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.code}</td>
                         <td className="px-4 py-3">
@@ -4114,9 +4270,9 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {deliveryPoints.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">Chưa có điểm giao nhận nào</td></tr>
-                    ) : deliveryPoints.map((row) => (
+                    {searchedDeliveryPoints.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">{deliveryPoints.length > 0 ? noSearchMatchText(searchOf("delivery-points")) : "Chưa có điểm giao nhận nào"}</td></tr>
+                    ) : searchedDeliveryPoints.map((row) => (
                       <tr key={row.id} className="row-hover">
                         <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.ma_lo}</td>
                         <td className="px-4 py-3 text-slate-700 font-semibold">Đội {row.doi}</td>
@@ -4186,9 +4342,9 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {forestPlots.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có lô vườn nào. Import GeoJSON hoặc thêm mới.</td></tr>
-                    ) : forestPlots.map((row) => (
+                    {searchedForestPlots.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">{forestPlots.length > 0 ? noSearchMatchText(searchOf("forest-plots")) : "Chưa có lô vườn nào. Import GeoJSON hoặc thêm mới."}</td></tr>
+                    ) : searchedForestPlots.map((row) => (
                       <tr key={row.id} className="row-hover">
                         <td className="px-4 py-3 font-mono font-bold text-emerald-700">{row.ten}</td>
                         <td className="px-4 py-3 text-xs text-slate-500">{row.ma_lo_full || "—"}</td>
@@ -4498,6 +4654,9 @@ export default function SettingsPage() {
             </div>
 
             <div className="overflow-hidden">
+              {!customerLoading && customers.length > 0 && (
+                <ListSearch className="px-4 pt-4 pb-3" value={searchOf("customers")} onChange={setSearchOf("customers")} placeholder="Tìm mã KH, tên, email, địa chỉ..." shown={searchedCustomers.length} total={customers.length} />
+              )}
               {customerLoading ? (
                 <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
               ) : customers.length === 0 ? (
@@ -4516,7 +4675,10 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {customers.map((c) => (
+                    {searchedCustomers.length === 0 && (
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">{noSearchMatchText(searchOf("customers"))}</td></tr>
+                    )}
+                    {searchedCustomers.map((c) => (
                       <React.Fragment key={c.id}>
                         <tr
                           className={"row-hover cursor-pointer " + (expandedCustomerId === c.id ? "bg-blue-50" : "")}
@@ -4599,6 +4761,9 @@ export default function SettingsPage() {
             </div>
 
             <div className="p-4">
+              {!requiredNotesLoading && requiredNotes.length > 0 && (
+                <ListSearch className="mb-3" value={searchOf("required-notes")} onChange={setSearchOf("required-notes")} placeholder="Tìm mã ký hiệu, mô tả..." shown={searchedRequiredNotes.length} total={requiredNotes.length} />
+              )}
               {requiredNotesLoading ? (
                 <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
               ) : requiredNotes.length === 0 ? (
@@ -4619,7 +4784,10 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {requiredNotes.map((item) => (
+                    {searchedRequiredNotes.length === 0 && (
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">{noSearchMatchText(searchOf("required-notes"))}</td></tr>
+                    )}
+                    {searchedRequiredNotes.map((item) => (
                       <tr key={item.id} className="row-hover">
                         <td className="px-4 py-3 font-medium">
                           <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold font-mono text-xs">
@@ -4815,20 +4983,73 @@ export default function SettingsPage() {
               {maintLoading ? (
                 <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
               ) : maintTab === "assets" ? (
+                <>
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                  <ListSearch value={searchOf("assets")} onChange={setSearchOf("assets")} placeholder="Tìm mã, tên thiết bị, năm SD..." shown={searchedMaintAssets.length} total={maintAssets.length} />
+                  <select
+                    value={assetBoPhanFilter}
+                    onChange={(e) => setAssetBoPhanFilter(e.target.value)}
+                    aria-label="Lọc theo bộ phận"
+                    className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-slate-400 sm:w-48"
+                  >
+                    <option value="">Tất cả bộ phận</option>
+                    {assetBoPhanOptions.map((bp) => <option key={bp} value={bp}>{bp}</option>)}
+                  </select>
+                  <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                    {selectedAssetIds.size > 0 && (
+                      <>
+                        <span className="text-xs font-bold text-slate-600">Đã chọn {selectedAssetIds.size}</span>
+                        <button type="button" onClick={() => setSelectedAssetIds(new Set())} className="text-xs font-bold text-slate-500 hover:underline">Bỏ chọn</button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void printAssetLabels()}
+                      disabled={selectedAssetIds.size === 0 || assetLabelPrinting}
+                      title={selectedAssetIds.size === 0 ? "Tick chọn thiết bị cần in tem" : "Tải PDF tem QR (A4, 20 tem/trang)"}
+                      className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Printer size={13} /> {assetLabelPrinting ? "Đang tạo PDF..." : `In tem QR (${selectedAssetIds.size})`}
+                    </button>
+                  </div>
+                </div>
+                {assetLabelError && (
+                  <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">{assetLabelError}</p>
+                )}
                 <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
+                      <th className="w-10 px-4 py-3 text-left">
+                        <input
+                          type="checkbox"
+                          checked={allShownAssetsSelected}
+                          onChange={toggleAllShownAssets}
+                          disabled={searchedMaintAssets.length === 0}
+                          aria-label="Chọn tất cả thiết bị đang hiện"
+                          title="Chọn/bỏ chọn tất cả thiết bị đang hiện"
+                          className="h-4 w-4 accent-brand-600"
+                        />
+                      </th>
                       {["Mã TB", "Tên thiết bị", "Bộ phận", "Loại", "Năm SD", "Trạng thái", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {maintAssets.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có thiết bị nào</td></tr>
-                    ) : maintAssets.map((a) => (
-                      <tr key={a.id} className="row-hover">
+                    {searchedMaintAssets.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">{maintAssets.length > 0 ? (searchOf("assets").trim() ? noSearchMatchText(searchOf("assets")) : "Không có thiết bị thuộc bộ phận này") : "Chưa có thiết bị nào"}</td></tr>
+                    ) : searchedMaintAssets.map((a) => (
+                      <tr key={a.id} className={"row-hover " + (selectedAssetIds.has(a.id) ? "bg-brand-50" : "")}>
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedAssetIds.has(a.id)}
+                            onChange={() => toggleAssetSelected(a.id)}
+                            aria-label={`Chọn ${a.ma_tb}`}
+                            className="h-4 w-4 accent-brand-600"
+                          />
+                        </td>
                         <td className="px-4 py-3 font-mono text-xs font-bold text-slate-700">{a.ma_tb}</td>
                         <td className="px-4 py-3 font-medium text-slate-700">{a.ten_tb}</td>
                         <td className="px-4 py-3 text-slate-500">{a.bo_phan}</td>
@@ -4853,8 +5074,10 @@ export default function SettingsPage() {
                   </tbody>
                 </table>
                 </ResponsiveTableWrapper>
+                </>
               ) : maintTab === "vehicles" ? (
                 <>
+                <ListSearch className="mb-3" value={searchOf("vehicles")} onChange={setSearchOf("vehicles")} placeholder="Tìm mã xe, tên, biển số, tài xế..." shown={searchedDispatchVehicles.length} total={dispatchVehicles.length} />
                 <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
@@ -4865,9 +5088,9 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {dispatchVehicles.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">Chưa có xe nào</td></tr>
-                    ) : dispatchVehicles.map((v) => (
+                    {searchedDispatchVehicles.length === 0 ? (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">{dispatchVehicles.length > 0 ? noSearchMatchText(searchOf("vehicles")) : "Chưa có xe nào"}</td></tr>
+                    ) : searchedDispatchVehicles.map((v) => (
                       <tr key={v.id} className="row-hover">
                         <td className="px-4 py-3 font-mono font-bold text-orange-700">{v.code}</td>
                         <td className="px-4 py-3 font-medium text-slate-700">{v.name}</td>
@@ -4907,9 +5130,10 @@ export default function SettingsPage() {
                 </table>
                 </ResponsiveTableWrapper>
                 <div className="border-t border-slate-200 mt-2 pt-4">
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
                     <h3 className="text-sm font-extrabold text-slate-700">Danh sách tài xế</h3>
                     <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{dispatchDrivers.length} tài xế</span>
+                    <ListSearch className="w-full sm:ml-auto sm:w-auto" value={searchOf("drivers")} onChange={setSearchOf("drivers")} placeholder="Tìm mã, tên, điện thoại, hạng bằng..." shown={searchedDispatchDrivers.length} total={dispatchDrivers.length} />
                   </div>
                   <ResponsiveTableWrapper>
                   <table className="w-full text-sm">
@@ -4921,9 +5145,9 @@ export default function SettingsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {dispatchDrivers.length === 0 ? (
-                        <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">Chưa có tài xế nào</td></tr>
-                      ) : dispatchDrivers.map((d) => (
+                      {searchedDispatchDrivers.length === 0 ? (
+                        <tr><td colSpan={7} className="px-4 py-6 text-center text-slate-400">{dispatchDrivers.length > 0 ? noSearchMatchText(searchOf("drivers")) : "Chưa có tài xế nào"}</td></tr>
+                      ) : searchedDispatchDrivers.map((d) => (
                         <tr key={d.id} className="row-hover">
                           <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{d.code || "—"}</td>
                           <td className="px-4 py-2.5 font-medium text-slate-700">{d.name}</td>
@@ -4974,6 +5198,14 @@ export default function SettingsPage() {
                       {filter.label}
                     </button>
                   ))}
+                  <ListSearch
+                    className="w-full sm:ml-auto sm:w-auto"
+                    value={searchOf("staff")}
+                    onChange={setSearchOf("staff")}
+                    placeholder="Tìm tên, tài khoản, phòng ban, chức vụ..."
+                    shown={searchedMaintStaff.length}
+                    total={filteredMaintStaff.length}
+                  />
                 </div>
                 <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
@@ -4985,9 +5217,9 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredMaintStaff.length === 0 ? (
-                      <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">Chưa có nhân sự phù hợp</td></tr>
-                    ) : filteredMaintStaff.map((s) => (
+                    {searchedMaintStaff.length === 0 ? (
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">{searchOf("staff").trim() && filteredMaintStaff.length > 0 ? noSearchMatchText(searchOf("staff")) : "Chưa có nhân sự phù hợp"}</td></tr>
+                    ) : searchedMaintStaff.map((s) => (
                       <tr key={s.id} className="row-hover">
                         <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
                         <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
@@ -5015,6 +5247,8 @@ export default function SettingsPage() {
                 </ResponsiveTableWrapper>
                 </>
               ) : (
+                <>
+                <ListSearch className="mb-3" value={searchOf("ext-materials")} onChange={setSearchOf("ext-materials")} placeholder="Tìm mã, tên vật tư, quy cách..." shown={searchedMaintExtMats.length} total={maintExtMats.length} />
                 <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
@@ -5025,9 +5259,9 @@ export default function SettingsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {maintExtMats.length === 0 ? (
-                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">Chưa có vật tư nào</td></tr>
-                    ) : maintExtMats.map((m) => (
+                    {searchedMaintExtMats.length === 0 ? (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">{maintExtMats.length > 0 ? noSearchMatchText(searchOf("ext-materials")) : "Chưa có vật tư nào"}</td></tr>
+                    ) : searchedMaintExtMats.map((m) => (
                       <tr key={m.id} className="row-hover">
                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{m.code || "—"}</td>
                         <td className="px-4 py-3 font-medium text-slate-700">
@@ -5061,6 +5295,7 @@ export default function SettingsPage() {
                   </tbody>
                 </table>
                 </ResponsiveTableWrapper>
+                </>
               )}
             </div>
           </div>
@@ -5392,7 +5627,7 @@ export default function SettingsPage() {
         />
       )}
 
-      {assetQr && <EquipmentQrModal asset={assetQr} onClose={() => setAssetQr(null)} />}
+      {assetQr && <EquipmentQrModal asset={assetQr} onClose={() => setAssetQr(null)} canRegenerate={canViewMaintenanceConfig} />}
 
       {maintDelConfirm && (
         <ModalShell

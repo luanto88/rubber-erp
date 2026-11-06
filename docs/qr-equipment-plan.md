@@ -1,6 +1,20 @@
 # Tra cứu thiết bị bằng QR — ĐÃ CHỌN PA2 (token QR), rate limit bảng DB
 
-> Trạng thái (2026-11-06): GĐ1 ĐÃ CODE (chờ chạy migration `20261111_equipment_qr_tokens.sql` + test tay tem MCC-1, MCC-2). Domain tem chốt: qlsxkpt.vercel.app.
+> Trạng thái (2026-11-06): GĐ1 ĐÃ CODE + migration `20261111_equipment_qr_tokens.sql` ĐÃ CHẠY trên production.
+> Đã sửa lỗi production "Server Components render" (icon truyền từ server sang client). Đã thêm ảnh thumbnail
+> trong biên bản xổ ra + chip người đăng nhập góc phải — CHỜ deploy + test tay lại (tem MCC-1, MCC-2).
+> Domain tem chốt: qlsxkpt.vercel.app. Prompt bàn giao: mục cuối file.
+> Sửa sau test lần 2 (2026-11-06, chờ test): đăng xuất từ chip (ở lại trang), icon quét QR, quyền riêng
+> `maintenance.qr_lookup` (migration 20261112 CHƯA chạy). Kế hoạch GĐ2 (wireframe tab Vật tư) / GĐ3 (tem 35×35mm,
+> 20 tem/A4 — đã chốt) / ô tìm nhanh Cài đặt: `C:\Users\Software\.claude\plans\prompt-b-n-giao-cho-composed-walrus.md`.
+
+> GĐ2 tab Vật tư ĐÃ CODE + test localhost 2026-11-06; sửa sau test: ô tìm có dropdown gợi ý, quyền riêng
+> `maintenance.view_cost` (migration 20261113 CHƯA chạy) — xem rule 14. Đăng nhập tại chỗ: BỎ khỏi kế hoạch
+> (người dùng chốt 2026-11-06 giữ logic cũ `/login?next=`). Prompt phiên sau: cuối file.
+
+> GĐ3 (in tem hàng loạt + Tạo lại QR) + ô tìm nhanh Cài đặt ĐÃ CODE 2026-11-06, chờ test tay — xem rule 14.
+> Tem chốt bố cục A (QR 35mm + mã + tên bên dưới). Tạo lại QR xác nhận bằng gõ lại mã (không có cột lý do).
+> Còn của GĐ3: Quét QR thiết bị ở ô tìm trang Lý lịch & Biên bản; in tem từ trang Lý lịch; thống kê MTBF; PWA.
 
 ## Context
 Kỹ thuật viên cần quét QR dán trên máy/xe để xem ngay lý lịch sửa chữa/bảo dưỡng và vật tư đã thay.
@@ -141,7 +155,111 @@ Sửa: `settings/page.tsx` (tab Bảo trì), `maintenance/history/page.tsx` (qu�
 ## Câu hỏi còn mở
 - **Domain chính thức in lên tem** (bắt buộc chốt TRƯỚC khi in hàng loạt ở GĐ3; GĐ1 chỉ in thử vài tem):
   hiện `NEXT_PUBLIC_APP_URL` = qlsxkpt.vercel.app — QR đã in sẽ chết nếu đổi domain.
-- Khổ tem in (35mm như nhãn ngăn lưu, hay khổ khác)? → cần cho GĐ3.
+- ~~Khổ tem~~ ĐÃ CHỐT 2026-11-06: 35×35mm, 20 tem/A4 (như nhãn ngăn lưu).
 
 ## Kiểm chứng
 `npx tsc --noEmit` + `npx eslint <file>`; script Node gọi API thật (chưa đăng nhập / user thường / admin) so payload với whitelist; test tay trên điện thoại: quét, đăng nhập, lọc, tạo lại QR.
+
+## Prompt bàn giao cho phiên sau (2026-11-06)
+
+```
+Tiếp tục module "Tra cứu thiết bị bằng QR" (Bảo trì). Đọc trước, theo thứ tự:
+1. CLAUDE.md, .claude/rules/29-ui-standard.md, .claude/rules/14-maintenance-module.md (mục cuối
+   "Tra cứu thiết bị bằng QR — GĐ1" + "Cải tiến sau test"), docs/qr-equipment-plan.md (toàn bộ).
+2. Code GĐ1 đã có (đọc lại file thật trước khi sửa, không tin mô tả):
+   - supabase/migrations/20261111_equipment_qr_tokens.sql (ĐÃ CHẠY production): equipment_qr_tokens
+     (token base64url 22 ký tự, asset_id | dispatch_vehicle_id, revoked_at), public_rate_limits +
+     RPC public_rate_limit_hit. RLS bật, không policy ⇒ chỉ service role.
+   - src/lib/equipment-qr.ts (thuần: type, buildEquipmentQrUrl → https://qlsxkpt.vercel.app/tb/<token>,
+     parseEquipmentQrToken), src/lib/equipment-lookup.ts (service role: resolveEquipmentToken,
+     loadPublicEquipment, loadEquipmentHistory, loadEquipmentViewer, getOrCreateAssetToken),
+     src/lib/public-rate-limit.ts (60/phút/IP băm, lỗi DB ⇒ cho qua).
+   - src/app/tb/[token]/page.tsx (Server Component, noindex, no-referrer; thẻ công khai truyền làm
+     children vào EquipmentHistoryPanel), not-found.tsx, loading.tsx.
+   - src/app/api/equipment/[token]/history/route.ts (maintenance.view + cùng nhà máy; giá chỉ admin /
+     maintenance.approve; trả viewer), src/app/api/equipment/qr-token/route.ts (lấy/tạo token).
+   - src/app/dashboard/maintenance/_components/equipment-history-panel.tsx (client: chip người dùng góc
+     phải, banner, lịch sử thẻ xổ, thumbnail ảnh + ImageLightbox, lọc Sửa chữa/Bảo dưỡng, Xem thêm 20,
+     thanh đáy Quét QR khác/Lý lịch), equipment-qr-modal.tsx (nút QR ở Cài đặt → Bảo trì → Thiết bị).
+
+Quyết định đã chốt (KHÔNG tự đổi): trang công khai CHỈ tên, mã, loại, bộ phận, ngày bảo trì gần nhất
+(biên bản da_duyet) — không trạng thái, không biển số; token sai = thu hồi = cùng màn 404; giá/chi phí lọc
+ở SERVER; lịch sử đăng nhập gồm da_duyet + cho_duyet; GĐ1 chỉ máy móc (xe = GĐ4); domain tem
+qlsxkpt.vercel.app; login quay về bằng /login?next=/tb/<token>.
+
+Landmine đã gặp: page.tsx là Server Component — KHÔNG truyền hàm/component (icon, onClick) làm prop cho
+client component (PageHeaderBanner...) ⇒ production lỗi "An error occurred in the Server Components
+render" (dev không báo). Bọc trong client component.
+
+Việc 1 — xác nhận test tay GĐ1 + cải tiến (hỏi người dùng kết quả trước): quét tem MCC-1/MCC-2 khi chưa
+đăng nhập (chỉ 5 thông tin; MCC-1 gần nhất 24/10/2026, MCC-2 02/11/2026), đăng nhập → quay về đúng trang,
+chip góc phải đúng họ tên/@username/chức vụ, thumbnail ảnh bấm phóng to, tài khoản không có
+maintenance.approve không thấy giá, sửa 1 ký tự token → 404.
+
+Việc 2 — GĐ2 lọc vật tư thay thế (theo docs/qr-equipment-plan.md mục GĐ2). Mô tả wireframe tab "Vật tư"
+cho người dùng duyệt TRƯỚC khi code. Nội dung: GET /api/equipment/[token]/materials gom
+maintenance_materials của các dòng thiết bị (biên bản da_duyet + cho_duyet) theo inventory_item_id, không
+có thì tên chuẩn hoá (NFD bỏ dấu, thường, gộp khoảng trắng); trả số lần thay, tổng SL, lần gần nhất,
+khoảng cách TB giữa các lần, các tên gốc trong nhóm; lọc tên/mã, từ–đến ngày, Sửa chữa/Bảo dưỡng, số lần ≥ N;
+giá chỉ admin/maintenance.approve. Trang /tb: SegmentedTabs [Lịch sử | Vật tư], sắp vật tư theo số lần
+thay giảm dần. Nút "Tạo biên bản cho thiết bị này" (maintenance.create) — kiểm records/new có nhận tham số
+điền sẵn không trước khi hứa. Phân trang mọi query bảng lớn (.range), chia .in() theo lô 200.
+
+Việc 3 (nếu còn thời gian, hỏi trước): GĐ3 in QR hàng loạt (lưới nhãn A4, mã dưới QR — tham khảo
+downloadStorageBulkQrPdf trong src/lib/storage-pdf.ts; HỎI khổ tem), "Tạo lại QR" (thu hồi token).
+
+Kiểm tra: npx tsc --noEmit + npx eslint <file> (KHÔNG npm run build). Kiểm chứng dữ liệu bằng script Node
+gọi code thật: node --env-file=.env.local --experimental-strip-types --import <hook map @/ → src/>
+(cwd = gốc repo). Không cat/sed .env.local. Hỏi trước khi commit/push. Cuối phiên: cập nhật rule 14 +
+docs/qr-equipment-plan.md, hướng dẫn test tay, prompt bàn giao mới.
+```
+
+## Prompt bàn giao phiên sau (2026-11-06, sau GĐ2)
+
+```
+Tiếp tục module "Tra cứu thiết bị bằng QR" (Bảo trì). Đọc trước: CLAUDE.md, .claude/rules/29-ui-standard.md,
+.claude/rules/14-maintenance-module.md (các mục "Tra cứu thiết bị bằng QR" GĐ1 + GĐ2), docs/qr-equipment-plan.md.
+Đọc lại file thật trước khi sửa, không tin mô tả.
+
+Trạng thái: GĐ1 + GĐ2 (tab Vật tư, nút Tạo biên bản, quyền maintenance.view_cost) đã code, test localhost.
+Migration 20261112 (qr_lookup) đã chạy localhost — xác nhận production; 20261113 (view_cost) CHƯA chạy —
+chạy TRƯỚC deploy (code mới kiểm view_cost, thiếu ⇒ không ai thấy giá trừ admin).
+Đã chốt (KHÔNG đổi): đăng nhập tại chỗ ĐÃ BỎ (giữ /login?next=/tb/<token>); đăng xuất ở lại trang; quyền
+qr_lookup + view_cost cấp sẵn theo maintenance.view / maintenance.approve; tem 35×35mm, 20 tem/A4; trang công khai
+chỉ 5 thông tin; token sai = thu hồi = 404 giống nhau; domain tem qlsxkpt.vercel.app; GĐ1-3 chỉ máy móc.
+
+Việc 1 — Ô tìm nhanh trong Cài đặt: component dùng chung src/app/dashboard/settings/_components/list-search.tsx
+(ô tìm + nút xoá, lọc client bỏ dấu — dùng lại normalizeMaterialName của src/lib/equipment-qr.ts hoặc tách ra
+helper chung). Rà settings/page.tsx + settings/_components/* liệt kê đủ 11 danh sách CHƯA có ô tìm (mô tả danh
+sách cho người dùng duyệt trước khi sửa), mỗi danh sách có số "N/M" kết quả. Không đổi query/quyền.
+
+Việc 2 — GĐ3: (a) In tem QR hàng loạt từ Cài đặt → Bảo trì → Thiết bị (chọn nhiều/chọn theo bộ phận): PDF A4
+20 tem 35×35mm, mã thiết bị dưới QR, tên ngắn — tham khảo downloadStorageBulkQrPdf (src/lib/storage-pdf.ts) +
+pdf-qr-shared.ts; token lấy/tạo hàng loạt ở server (getOrCreateAssetToken, chia lô 200). (b) "Tạo lại QR"
+(admin / settings.maintenance_config): thu hồi token cũ (revoked_at) + tạo mới, hộp xác nhận nói rõ tem cũ sẽ
+chết. Mô tả wireframe trước khi code.
+
+Kiểm tra: npx tsc --noEmit + npx eslint <file> (KHÔNG npm run build). Script kiểm chứng: node --env-file=.env.local
+--experimental-strip-types --import <file đăng ký scripts/_ts-resolve-hook.mjs qua module.register> (cwd = gốc repo).
+Không cat/sed .env.local. Hỏi trước khi commit. Cuối phiên: cập nhật rule 14 + file này, hướng dẫn test tay.
+```
+
+## Prompt bàn giao phiên sau (2026-11-06, sau GĐ3 phần in tem)
+
+```
+Tiếp tục module "Tra cứu thiết bị bằng QR" (Bảo trì). Đọc trước: CLAUDE.md, .claude/rules/29-ui-standard.md,
+.claude/rules/14-maintenance-module.md (các mục "Tra cứu thiết bị bằng QR" GĐ1/GĐ2/GĐ3 + "Ô tìm nhanh trong Cài
+đặt"), docs/qr-equipment-plan.md. Đọc lại file thật trước khi sửa.
+
+Trạng thái: GĐ1 + GĐ2 + GĐ3 (in tem hàng loạt, Tạo lại QR) + ô tìm nhanh 12 danh sách Cài đặt đã code, chờ test tay.
+Hỏi người dùng kết quả test trước. Migration 20261112/20261113 phải chạy production TRƯỚC deploy.
+Đã chốt (KHÔNG đổi): như các prompt trên + tem bố cục A (QR 35mm, mã + tên bên dưới, 20 tem/A4); Tạo lại QR xác
+nhận bằng gõ lại mã thiết bị (không lưu lý do, không migration).
+
+Việc tiếp (mô tả wireframe trước khi code): Quét QR thiết bị (/tb/<token>) ở ô tìm trang Lý lịch & danh sách Biên
+bản ⇒ lọc đúng thiết bị (cần API tra token → asset_id, quyền maintenance.view); in tem từ trang Lý lịch (dùng lại
+buildEquipmentQrLabelsPdf + /api/equipment/qr-token/bulk). Thống kê MTBF / PWA để sau, hỏi trước.
+
+Kiểm tra: npx tsc --noEmit + npx eslint <file>. Script kiểm chứng: xem bản trước (cần shim jspdf default export khi
+chạy Node, chặn fetch /fonts/ đọc public/fonts). Không cat/sed .env.local. Hỏi trước khi commit.
+```

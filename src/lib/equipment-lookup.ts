@@ -4,9 +4,14 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import {
   isEquipmentQrToken,
+  normalizeMaterialName,
   type EquipmentHistoryMaterial,
+  type EquipmentMaterialGroup,
+  type EquipmentMaterialOccurrence,
+  type EquipmentMaterialSort,
   type EquipmentHistoryRecord,
   type EquipmentPublicInfo,
+  type EquipmentViewer,
 } from "@/lib/equipment-qr"
 
 const CHUNK = 200
@@ -62,13 +67,14 @@ type LineRow = {
   cong_tho: number | null
   loai_tien: string | null
   sort_order: number | null
+  image_urls: string[] | null
 }
 
 async function loadAssetLines(target: EquipmentTarget): Promise<LineRow[]> {
   return fetchAllPaginated<LineRow>((from, to) =>
     getSupabaseAdmin()
       .from("maintenance_record_lines")
-      .select("id, record_id, noi_dung, nguyen_nhan, cac_khac_phuc, loai_sua_chua, chi_phi_dk, cong_tho, loai_tien, sort_order")
+      .select("id, record_id, noi_dung, nguyen_nhan, cac_khac_phuc, loai_sua_chua, chi_phi_dk, cong_tho, loai_tien, sort_order, image_urls")
       .eq("factory_id", target.factoryId)
       .eq("asset_id", target.assetId)
       .order("id")
@@ -87,6 +93,7 @@ type RecordRow = {
   noi_dung_chung: string | null
   nguyen_nhan_chung: string | null
   cac_khac_phuc_chung: string | null
+  image_urls_chung?: string[] | null
   created_at: string | null
 }
 
@@ -129,6 +136,11 @@ export async function loadPublicEquipment(target: EquipmentTarget): Promise<Equi
   }
 }
 
+/** Chỉ giữ URL http(s) (ảnh lưu ở bucket public `order-files`). */
+function cleanImageUrls(urls: string[] | null | undefined): string[] {
+  return (urls || []).filter((u) => typeof u === "string" && /^https?:\/\//i.test(u))
+}
+
 function mergeText(common: string | null, own: string | null) {
   const v = [common, own].map((s) => (s || "").trim()).filter(Boolean).join("\n")
   return v || null
@@ -160,7 +172,7 @@ export async function loadEquipmentHistory(
         target.factoryId,
         recordIds,
         HISTORY_STATUSES,
-        "id, ma_bb, ngay, hang_muc, trang_thai, bo_phan, nguoi_thuc_hien, noi_dung_chung, nguyen_nhan_chung, cac_khac_phuc_chung, created_at",
+        "id, ma_bb, ngay, hang_muc, trang_thai, bo_phan, nguoi_thuc_hien, noi_dung_chung, nguyen_nhan_chung, cac_khac_phuc_chung, image_urls_chung, created_at",
       )
     : []
   const recordById = new Map(records.map((r) => [r.id, r]))
@@ -223,6 +235,8 @@ export async function loadEquipmentHistory(
       nguyen_nhan: isBaoDuong ? mergeText(r.nguyen_nhan_chung, l.nguyen_nhan) : l.nguyen_nhan,
       cac_khac_phuc: isBaoDuong ? mergeText(r.cac_khac_phuc_chung, l.cac_khac_phuc) : l.cac_khac_phuc,
       loai_sua_chua: l.loai_sua_chua,
+      images: cleanImageUrls(l.image_urls),
+      images_chung: isBaoDuong ? cleanImageUrls(r.image_urls_chung) : [],
       materials: mats,
     }
     if (opts.canSeeCost) {
@@ -234,6 +248,211 @@ export async function loadEquipmentHistory(
   })
 
   return { inactive: asset.trang_thai !== "active", total: entries.length, records: out }
+}
+
+type MaterialAggRow = MaterialRow & {
+  record_id: string
+  inventory_item_id: string | null
+}
+
+export type EquipmentMaterialsOptions = {
+  canSeeCost: boolean
+  q?: string | null
+  from?: string | null
+  to?: string | null
+  hangMuc?: string | null
+  minCount?: number
+  sort?: EquipmentMaterialSort
+}
+
+const DAY_MS = 86_400_000
+
+function dayNumber(iso: string) {
+  const t = Date.parse(`${iso.slice(0, 10)}T00:00:00Z`)
+  return Number.isFinite(t) ? Math.round(t / DAY_MS) : null
+}
+
+/** GĐ2 — vật tư đã thay của 1 thiết bị, gom theo `inventory_item_id`; dòng không có mã gom theo tên chuẩn
+ *  hoá (và nhập vào nhóm có mã nếu tên chuẩn hoá trùng tên vật tư kho / tên đã ghi trong nhóm đó).
+ *  Chỉ biên bản da_duyet + cho_duyet. `canSeeCost=false` ⇒ không trả trường giá nào. */
+export async function loadEquipmentMaterials(
+  target: EquipmentTarget,
+  opts: EquipmentMaterialsOptions,
+): Promise<{ recordCount: number; groups: EquipmentMaterialGroup[] } | null> {
+  const asset = await loadAsset(target)
+  if (!asset) return null
+  const lines = await loadAssetLines(target)
+  const recordIds = [...new Set(lines.map((l) => l.record_id))]
+  const records = recordIds.length
+    ? await loadRecords(target.factoryId, recordIds, HISTORY_STATUSES, "id, ma_bb, ngay, hang_muc, trang_thai, created_at")
+    : []
+  const recordById = new Map(
+    records
+      .filter((r) => {
+        if (opts.hangMuc && r.hang_muc !== opts.hangMuc) return false
+        const d = (r.ngay || "").slice(0, 10)
+        if (opts.from && (!d || d < opts.from)) return false
+        if (opts.to && (!d || d > opts.to)) return false
+        return true
+      })
+      .map((r) => [r.id, r]),
+  )
+  const lineIds = lines.filter((l) => recordById.has(l.record_id)).map((l) => l.id)
+
+  const mats: MaterialAggRow[] = []
+  for (let i = 0; i < lineIds.length; i += CHUNK) {
+    const { data, error } = await getSupabaseAdmin()
+      .from("maintenance_materials")
+      .select("line_id, record_id, inventory_item_id, ten_vat_tu, dvt, so_luong, nguon, don_gia, thanh_tien, loai_tien, sort_order")
+      .eq("factory_id", target.factoryId)
+      .in("line_id", lineIds.slice(i, i + CHUNK))
+    if (error) throw new Error(error.message)
+    mats.push(...((data || []) as MaterialAggRow[]))
+  }
+  const usable = mats.filter((m) => recordById.has(m.record_id) && (m.inventory_item_id || normalizeMaterialName(m.ten_vat_tu)))
+
+  // Tên + mã vật tư kho của các nhóm có mã.
+  const itemIds = [...new Set(usable.map((m) => m.inventory_item_id).filter((v): v is string => !!v))]
+  const itemById = new Map<string, { code: string | null; name: string | null }>()
+  for (let i = 0; i < itemIds.length; i += CHUNK) {
+    const { data, error } = await getSupabaseAdmin()
+      .from("inventory_items")
+      .select("id, code, name")
+      .eq("factory_id", target.factoryId)
+      .in("id", itemIds.slice(i, i + CHUNK))
+    if (error) throw new Error(error.message)
+    for (const it of (data || []) as { id: string; code: string | null; name: string | null }[]) {
+      itemById.set(it.id, { code: it.code, name: it.name })
+    }
+  }
+
+  // Mã trỏ vật tư kho không còn / không tồn tại (dữ liệu cũ từng ghi id của bảng vật tư ngoài) ⇒ coi như
+  // KHÔNG có mã, gom theo tên.
+  const itemIdOf = (m: MaterialAggRow) => (m.inventory_item_id && itemById.has(m.inventory_item_id) ? m.inventory_item_id : null)
+
+  // Tên chuẩn hoá → khoá nhóm có mã (để dòng KHÔNG mã nhập vào đúng nhóm).
+  const keyByNorm = new Map<string, string>()
+  for (const m of usable) {
+    const itemId = itemIdOf(m)
+    if (!itemId) continue
+    const key = `i:${itemId}`
+    for (const n of [normalizeMaterialName(itemById.get(itemId)?.name), normalizeMaterialName(m.ten_vat_tu)]) {
+      if (n && !keyByNorm.has(n)) keyByNorm.set(n, key)
+    }
+  }
+
+  type Acc = { itemId: string | null; rows: MaterialAggRow[] }
+  const accs = new Map<string, Acc>()
+  for (const m of usable) {
+    const norm = normalizeMaterialName(m.ten_vat_tu)
+    const itemId = itemIdOf(m)
+    const key = itemId ? `i:${itemId}` : keyByNorm.get(norm) || `n:${norm || "?"}`
+    const acc = accs.get(key) || { itemId: key.startsWith("i:") ? key.slice(2) : null, rows: [] }
+    acc.rows.push(m)
+    accs.set(key, acc)
+  }
+
+  const qNorm = normalizeMaterialName(opts.q)
+  const minCount = Math.max(1, opts.minCount || 1)
+  const groups: EquipmentMaterialGroup[] = []
+  for (const [key, acc] of accs) {
+    const item = acc.itemId ? itemById.get(acc.itemId) : undefined
+    const nameCount = new Map<string, number>()
+    for (const r of acc.rows) {
+      const n = (r.ten_vat_tu || "").trim()
+      if (n) nameCount.set(n, (nameCount.get(n) || 0) + 1)
+    }
+    const names = [...nameCount.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n)
+    const name = (item?.name || "").trim() || names[0] || "(không tên)"
+
+    if (qNorm) {
+      const hay = [name, item?.code || "", ...names].map(normalizeMaterialName)
+      if (!hay.some((h) => h.includes(qNorm))) continue
+    }
+
+    const recIds = [...new Set(acc.rows.map((r) => r.record_id))]
+    if (recIds.length < minCount) continue
+
+    // ĐVT gom không phân biệt hoa/thường/dấu câu ("Cái" = "cái." ); hiển thị cách viết dùng nhiều nhất.
+    // Dòng KHÔNG ghi ĐVT nhập vào ĐVT duy nhất của nhóm (nếu nhóm chỉ có 1 ĐVT).
+    const unitAcc = new Map<string, { qty: number; spellings: Map<string, number> }>()
+    const costs = new Map<string, number>()
+    const nguon = new Set<string>()
+    for (const r of acc.rows) {
+      const raw = (r.dvt || "").trim()
+      const u = normalizeMaterialName(raw)
+      const a = unitAcc.get(u) || { qty: 0, spellings: new Map<string, number>() }
+      a.qty += Number(r.so_luong ?? 0)
+      if (raw) a.spellings.set(raw, (a.spellings.get(raw) || 0) + 1)
+      unitAcc.set(u, a)
+      if (r.nguon) nguon.add(r.nguon)
+      if (opts.canSeeCost && r.thanh_tien != null) {
+        const lt = r.loai_tien || "USD"
+        costs.set(lt, (costs.get(lt) || 0) + Number(r.thanh_tien))
+      }
+    }
+
+    const namedUnits = [...unitAcc.keys()].filter(Boolean)
+    const blank = unitAcc.get("")
+    if (blank && namedUnits.length === 1) {
+      unitAcc.get(namedUnits[0])!.qty += blank.qty
+      unitAcc.delete("")
+    }
+    const totals = [...unitAcc.values()]
+      .map((a) => ({
+        dvt: [...a.spellings.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null,
+        so_luong: Math.round(a.qty * 1000) / 1000,
+      }))
+      .sort((x, y) => y.so_luong - x.so_luong)
+
+    const days = [...new Set(recIds.map((id) => recordById.get(id)?.ngay).filter((d): d is string => !!d))]
+      .map(dayNumber)
+      .filter((d): d is number => d != null)
+      .sort((a, b) => a - b)
+    const avgInterval = days.length >= 2 ? Math.round((days[days.length - 1] - days[0]) / (days.length - 1)) : null
+
+    const occurrences = acc.rows
+      .map<EquipmentMaterialOccurrence>((r) => {
+        const rec = recordById.get(r.record_id)!
+        const base: EquipmentMaterialOccurrence = {
+          record_id: rec.id,
+          ma_bb: rec.ma_bb,
+          ngay: rec.ngay,
+          hang_muc: rec.hang_muc,
+          trang_thai: rec.trang_thai,
+          ten_vat_tu: r.ten_vat_tu,
+          dvt: r.dvt,
+          so_luong: Number(r.so_luong ?? 0),
+          nguon: r.nguon,
+        }
+        return opts.canSeeCost ? { ...base, don_gia: r.don_gia, thanh_tien: r.thanh_tien, loai_tien: r.loai_tien } : base
+      })
+      .sort((a, b) => byNewest(recordById.get(a.record_id)!, recordById.get(b.record_id)!))
+
+    const group: EquipmentMaterialGroup = {
+      key,
+      item_code: item?.code || null,
+      name,
+      names,
+      times: recIds.length,
+      totals,
+      last_date: occurrences[0]?.ngay ?? null,
+      avg_interval_days: avgInterval,
+      nguon: [...nguon],
+      occurrences,
+    }
+    if (opts.canSeeCost) group.costs = [...costs.entries()].map(([loai_tien, thanh_tien]) => ({ loai_tien, thanh_tien }))
+    groups.push(group)
+  }
+
+  const byLatest = (a: EquipmentMaterialGroup, b: EquipmentMaterialGroup) => (b.last_date || "").localeCompare(a.last_date || "")
+  groups.sort((a, b) => {
+    if (opts.sort === "latest") return byLatest(a, b) || b.times - a.times || a.name.localeCompare(b.name, "vi")
+    return b.times - a.times || byLatest(a, b) || a.name.localeCompare(b.name, "vi")
+  })
+
+  const recordCount = new Set(usable.map((m) => m.record_id)).size
+  return { recordCount, groups }
 }
 
 /** Lấy (hoặc tạo) token còn hiệu lực của 1 máy móc. Thiết bị phải thuộc `factoryId`. */
@@ -272,4 +491,125 @@ export async function getOrCreateAssetToken(factoryId: string, assetId: string, 
     throw new Error(error.message)
   }
   return data.token as string
+}
+
+export type AssetQrLabel = { assetId: string; ma_tb: string; ten_tb: string; bo_phan: string; token: string }
+
+/** GĐ3 — lấy (tạo nếu thiếu) token còn hiệu lực cho NHIỀU máy móc, để in tem hàng loạt.
+ *  Thiết bị khác nhà máy / không tồn tại bị bỏ qua. Trả theo thứ tự `assetIds`. */
+export async function getOrCreateAssetTokensBulk(
+  factoryId: string,
+  assetIds: string[],
+  actorId: string,
+): Promise<AssetQrLabel[]> {
+  const admin = getSupabaseAdmin()
+  const ids = [...new Set(assetIds)]
+  const assets = new Map<string, { ma_tb: string; ten_tb: string; bo_phan: string }>()
+  const tokens = new Map<string, string>()
+
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK)
+    const { data, error } = await admin
+      .from("maintenance_assets")
+      .select("id, ma_tb, ten_tb, bo_phan")
+      .eq("factory_id", factoryId)
+      .in("id", chunk)
+    if (error) throw new Error(error.message)
+    for (const a of data || []) {
+      assets.set(a.id as string, { ma_tb: (a.ma_tb as string) || "", ten_tb: (a.ten_tb as string) || "", bo_phan: (a.bo_phan as string) || "" })
+    }
+    const { data: tk, error: tErr } = await admin
+      .from("equipment_qr_tokens")
+      .select("asset_id, token")
+      .in("asset_id", chunk)
+      .is("revoked_at", null)
+    if (tErr) throw new Error(tErr.message)
+    for (const t of tk || []) tokens.set(t.asset_id as string, t.token as string)
+  }
+
+  const missing = [...assets.keys()].filter((id) => !tokens.has(id))
+  for (let i = 0; i < missing.length; i += CHUNK) {
+    const chunk = missing.slice(i, i + CHUNK)
+    const { data, error } = await admin
+      .from("equipment_qr_tokens")
+      .insert(chunk.map((assetId) => ({ factory_id: factoryId, asset_id: assetId, created_by: actorId })))
+      .select("asset_id, token")
+    if (error) {
+      // Có người tạo song song (23505) ⇒ xử lý từng thiết bị của lô này.
+      if ((error as { code?: string }).code !== "23505") throw new Error(error.message)
+      for (const assetId of chunk) {
+        const token = await getOrCreateAssetToken(factoryId, assetId, actorId)
+        if (token) tokens.set(assetId, token)
+      }
+      continue
+    }
+    for (const t of data || []) tokens.set(t.asset_id as string, t.token as string)
+  }
+
+  const out: AssetQrLabel[] = []
+  for (const id of ids) {
+    const a = assets.get(id)
+    const token = tokens.get(id)
+    if (a && token) out.push({ assetId: id, ...a, token })
+  }
+  return out
+}
+
+/** GĐ3 — "Tạo lại QR": thu hồi token đang hiệu lực (tem cũ chết ngay) rồi tạo token mới.
+ *  Chèn token mới lỗi ⇒ gỡ thu hồi token cũ để thiết bị không bị mất QR. */
+export async function regenerateAssetToken(factoryId: string, assetId: string, actorId: string): Promise<string | null> {
+  const admin = getSupabaseAdmin()
+  const { data: asset, error: aErr } = await admin
+    .from("maintenance_assets")
+    .select("id")
+    .eq("id", assetId)
+    .eq("factory_id", factoryId)
+    .maybeSingle()
+  if (aErr) throw new Error(aErr.message)
+  if (!asset) return null
+
+  const { data: revoked, error: rErr } = await admin
+    .from("equipment_qr_tokens")
+    .update({ revoked_at: new Date().toISOString(), revoked_by: actorId })
+    .eq("asset_id", assetId)
+    .eq("factory_id", factoryId)
+    .is("revoked_at", null)
+    .select("token")
+  if (rErr) throw new Error(rErr.message)
+
+  const { data, error } = await admin
+    .from("equipment_qr_tokens")
+    .insert({ factory_id: factoryId, asset_id: assetId, created_by: actorId })
+    .select("token")
+    .single()
+  if (error) {
+    const oldTokens = (revoked || []).map((r) => r.token as string)
+    if (oldTokens.length > 0) {
+      await admin.from("equipment_qr_tokens").update({ revoked_at: null, revoked_by: null }).in("token", oldTokens)
+    }
+    throw new Error(error.message)
+  }
+  return data.token as string
+}
+
+/** Thông tin người đang đăng nhập cho góc phải trang QR: tên đăng nhập, họ tên, chức vụ
+ *  (`maintenance_staff.chuc_vu_chinh_quyen || chuc_vu` theo profile_id — cùng nguồn màn quét QR Thành phẩm). */
+export async function loadEquipmentViewer(userId: string): Promise<EquipmentViewer | null> {
+  const admin = getSupabaseAdmin()
+  const [{ data: profile }, { data: staff }] = await Promise.all([
+    admin.from("profiles").select("username, full_name").eq("id", userId).maybeSingle(),
+    admin
+      .from("maintenance_staff")
+      .select("chuc_vu, chuc_vu_chinh_quyen")
+      .eq("profile_id", userId)
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle(),
+  ])
+  if (!profile) return null
+  return {
+    username: (profile.username as string) || "",
+    full_name: (profile.full_name as string) || (profile.username as string) || "",
+    chuc_vu: ((staff?.chuc_vu_chinh_quyen as string) || (staff?.chuc_vu as string) || "").trim() || null,
+  }
 }

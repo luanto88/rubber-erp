@@ -1030,6 +1030,15 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         await fetchExtPrices({ recordId: id, sync: true })
         await loadRecord(fid, id)
       } else {
+        // Mở từ trang QR thiết bị (`/tb/<token>` → "Tạo biên bản"): `?asset_id=` điền sẵn bộ phận +
+        // thiết bị. Chỉ máy móc (xe Đội xe chưa có QR); thiết bị không thuộc nhà máy / bộ phận lạ ⇒ bỏ qua.
+        const prefillAssetId = new URLSearchParams(window.location.search).get("asset_id")
+        const prefill = prefillAssetId ? a.find((x) => x.id === prefillAssetId) : undefined
+        if (prefill && prefill.bo_phan !== "Đội xe" && (BO_PHAN_LIST as readonly string[]).includes(prefill.bo_phan)) {
+          setBoPhan(prefill.bo_phan)
+          setSelectedAssetIds([prefill.id])
+          setLines([emptyLine(prefill)])
+        }
         // Form trống, mặc định (Sửa chữa/ngày hôm nay/giờ hiện tại...) — chụp baseline ngay để
         // nút "Lưu" bắt đầu ở trạng thái tắt cho tới khi người dùng thực sự thay đổi gì đó.
         setLoadVersion((v) => v + 1)

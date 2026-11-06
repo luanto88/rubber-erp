@@ -553,6 +553,10 @@ export const DEFAULT_PERMISSION_CODES = [
   "maintenance.phe_duyet",
   "maintenance.print",
   "maintenance.export_file",
+  // Tra cứu lý lịch thiết bị bằng QR (/tb/<token>) — migration 20261112
+  "maintenance.qr_lookup",
+  // Xem giá / chi phí trên trang QR thiết bị — migration 20261113
+  "maintenance.view_cost",
   "output.view",
   "output.create",
   "output.edit",
@@ -647,6 +651,10 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "maintenance.approve",
     "maintenance.print",
     "maintenance.export_file",
+  // Tra cứu lý lịch thiết bị bằng QR (/tb/<token>) — migration 20261112
+  "maintenance.qr_lookup",
+  // Xem giá / chi phí trên trang QR thiết bị — migration 20261113
+  "maintenance.view_cost",
     "output.view",
     "output.create",
     "output.edit",

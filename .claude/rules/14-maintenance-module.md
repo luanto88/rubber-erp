@@ -1483,3 +1483,60 @@ Kế hoạch đầy đủ: `docs/qr-equipment-plan.md`. GĐ1 chỉ MÁY MÓC (`m
   `PageHeaderBanner` ("use client") ⇒ "An error occurred in the Server Components render" (dev chỉ cảnh báo).
   Sửa: banner bọc trong client `EquipmentQrBanner`. Quy tắc: trang server KHÔNG truyền hàm/component (icon,
   onClick…) làm prop cho client component — bọc trong 1 client component nhỏ.
+- Cải tiến sau test (2026-11-06, chờ test tay): mỗi biên bản xổ ra có ảnh thumbnail (lưới 4/6 cột, bấm phóng to bằng
+  `ImageLightbox` dùng lại từ purchase) — "Ảnh hiện trường" = `maintenance_record_lines.image_urls`, "Ảnh chung của
+  biên bản" = `maintenance_records.image_urls_chung` (chỉ Bảo dưỡng); header dòng có icon máy ảnh + số ảnh. Góc phải
+  trên cùng: chip người đăng nhập (chữ cái đầu, họ tên, `@username · chức vụ`) — API history trả `viewer`
+  (`loadEquipmentViewer`: `profiles.username/full_name` + `maintenance_staff.chuc_vu_chinh_quyen || chuc_vu` theo
+  profile_id) ở cả 200/403/404; chưa đăng nhập ⇒ nút "Đăng nhập". Banner + thẻ công khai nay nằm TRONG
+  `EquipmentHistoryPanel` (thẻ công khai truyền làm `children` từ server).
+- Sửa sau test lần 2 (2026-11-06, chờ test tay): chip người dùng bấm ⇒ menu "Về trang chính" / "Đăng xuất"
+  (`signOutEverywhere` rồi tải lại đúng `/tb/<token>` ở chế độ khách, KHÔNG về /login); icon banner `ScanQrCode`.
+  **Quyền riêng `maintenance.qr_lookup`** ("tra cứu lý lịch thiết bị bằng QR", ô tick nhóm Bảo trì) thay
+  `maintenance.view` ở API history — migration `20261112_maintenance_qr_lookup_permission.sql` (**chạy tay TRƯỚC
+  deploy**) cấp sẵn cho mọi role/tài khoản đang có `maintenance.view`. API trả `canOpenModule` (= `maintenance.view`)
+  ⇒ nút "Lý lịch" + "Mở biên bản" chỉ hiện khi có. Nút QR ở Cài đặt (`qr-token`) giữ quyền cũ.
+
+## Tra cứu thiết bị bằng QR — GĐ2 tab "Vật tư" (2026-11-06, chờ test tay)
+- API `GET /api/equipment/[token]/materials` (cùng điều kiện /history: `maintenance.qr_lookup` + cùng nhà máy; giá chỉ
+  admin / `maintenance.approve`). Query: `q`, `from`, `to`, `hang_muc`, `min_count`, `sort=count|latest`.
+- `loadEquipmentMaterials` (`src/lib/equipment-lookup.ts`): biên bản da_duyet + cho_duyet; gom theo `inventory_item_id`
+  CÓ THẬT trong `inventory_items` (id rác cũ của bảng vật tư ngoài ⇒ coi như không mã); không mã ⇒ tên chuẩn hoá
+  (`normalizeMaterialName` ở `equipment-qr.ts`) và nhập vào nhóm có mã nếu trùng tên. Số lần = số biên bản; TB ngày =
+  (ngày cuối − ngày đầu)/(số ngày khác nhau − 1). ĐVT gom không phân biệt hoa/dấu câu; dòng không ghi ĐVT nhập vào ĐVT
+  duy nhất của nhóm. Tên khác chính tả ("cuaroa" ≠ "curoa") vẫn tách nhóm — bảng bí danh để GĐ3.
+- UI: `equipment-materials-tab.tsx`; panel có `SegmentedTabs` [Lịch sử | Vật tư].
+- "Tạo biên bản": history trả `createRecordHref` khi có `maintenance.create` + `maintenance.view` và thiết bị đang dùng
+  ⇒ `/dashboard/maintenance/records/new?asset_id=`; `records/[id]` (nhánh tạo mới) đọc `asset_id` qua
+  `window.location.search`, điền bộ phận + thiết bị (chỉ máy móc active, bộ phận có trong `BO_PHAN_LIST`). Thanh đáy:
+  có nút Tạo biên bản thì thay nút "Lý lịch".
+- Kiểm bằng code thật (MCC-1/MCC-2): Dao băm ×22 / ×33, không quyền giá ⇒ không có trường giá.
+- Sửa sau test localhost (2026-11-06, chờ test lại):
+  - Ô tìm vật tư lọc ở CLIENT (API vẫn nhận `q`) + dropdown gợi ý ngay dưới ô (tên, mã, ×số lần); chọn 1 dòng ⇒
+    chỉ hiện đúng nhóm đó; Enter khi còn đúng 1 gợi ý ⇒ chọn.
+  - Quyền riêng **`maintenance.view_cost`** ("xem giá / chi phí khi tra cứu QR thiết bị", nhóm Bảo trì) thay
+    `maintenance.approve` ở cả /history lẫn /materials — migration `20261113_maintenance_view_cost_permission.sql`
+    (**chạy tay TRƯỚC deploy**) cấp sẵn cho role/tài khoản đang có `maintenance.approve`. Admin luôn xem được.
+  - Đăng nhập tại chỗ trên trang QR: ĐÃ BỎ (người dùng chốt) — giữ `/login?next=/tb/<token>`.
+
+## Tra cứu thiết bị bằng QR — GĐ3 in tem hàng loạt + Tạo lại QR (2026-11-06, chờ test tay)
+Không migration.
+- Cài đặt → Bảo trì → Thiết bị: cột ☐ chọn (ô tiêu đề = chọn/bỏ mọi dòng ĐANG HIỆN sau lọc), lọc bộ phận + ô tìm,
+  nút "In tem QR (N)" (cùng quyền nút QR từng dòng). API `POST /api/equipment/qr-token/bulk` `{assetIds}` (≤500):
+  `getOrCreateAssetTokensBulk` (`equipment-lookup.ts`) — chỉ thiết bị đúng nhà máy, `.in()` lô 200, tạo token còn
+  thiếu theo lô (23505 ⇒ tạo từng cái), trả theo thứ tự gửi lên kèm mã/tên/bộ phận.
+- PDF `src/lib/equipment-qr-pdf.ts` (client, nạp lười): A4 dọc, 4×5 = 20 tem/trang, QR 35×35mm + mã (giả đậm) +
+  tên 1 dòng cắt "…" bên dưới, viền nét đứt để cắt (bố cục A — như nhãn ngăn lưu, ô cao ~46mm). QR =
+  `buildEquipmentQrUrl` (domain qlsxkpt.vercel.app).
+- "Tạo lại QR" trong `EquipmentQrModal` (`canRegenerate` = admin | `settings.maintenance_config`): hộp xác nhận
+  bắt GÕ LẠI MÃ THIẾT BỊ (bảng token không có cột lý do ⇒ không nhập lý do). Route
+  `POST /api/equipment/qr-token/regenerate` → `regenerateAssetToken`: ghi `revoked_at/revoked_by` token cũ rồi chèn
+  token mới; chèn lỗi ⇒ gỡ thu hồi token cũ. Tem cũ ⇒ 404 trung tính ngay.
+
+## Ô tìm nhanh trong Cài đặt (2026-11-06, chờ test tay)
+- Component `settings/_components/list-search.tsx` (`ListSearch` + `noSearchMatchText`), lọc client bằng
+  `matchesSearchQuery` (`src/lib/text-normalize.ts`: bỏ dấu, đ→d, mọi từ phải khớp, "mcc1" khớp "MCC-1").
+  `normalizeMaterialName` (equipment-qr) nay gọi `normalizeSearchText`.
+- 12 danh sách: Người dùng (1 ô lọc 3 bảng), Nhân sự (dùng chung Hệ thống + Bảo trì), Nhóm vật tư, Vật tư/Hóa chất,
+  Điểm giao nhận, Lô vườn, Khách hàng, Ký hiệu kỹ thuật, Thiết bị, Xe, Tài xế, Vật tư ngoài. Hiện "N/M" khi có từ khoá.
+  Đổi tab/sub-tab ⇒ xoá từ khoá (trừ Nhân sự). Không đổi query/quyền.
