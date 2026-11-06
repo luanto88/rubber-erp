@@ -1,0 +1,54 @@
+Subject: EUDR geolocation & DDS – revised files for shipment XH52291025110 (Phuoc Hoa Kampong Thom)
+
+Dear Newbustar EUDR team,
+
+Thank you for the detailed review of 4500009691.geojson. Please find our answers and the revised files below.
+
+1. Which data belongs to us
+   - Only "Dataset 2" (plot codes beginning with 5.14PK / 5.14PH) comes from our factory, located in
+     Boeung Lavea Commune, Santuk District, Kampong Thom Province, Kingdom of Cambodia.
+   - "Dataset 1" (243 plots, Phuoc Hoa Rubber JSC, Binh Duong, Vietnam) and the open items STA, SVP, RAOT05,
+     CPA, BR, VNHHLX20260918_Lot_2 and Dau Tieng are not issued by us. Please address them to the
+     respective suppliers.
+   - The file we sent with shipment XH52291025110 (28/10/2025) was a raw export of our 2023 plantation map.
+     It is withdrawn and replaced by the files below. Merging it with other versions of our map
+     (2023 codes 5.14PK… and 2026 codes 5.14PH… describe the same land) is what produced the
+     duplicated plot codes and the 7,600 ha of overlapping surface you observed.
+
+2. Revised files (replace all previous files for this shipment)
+   - PHK_EUDR_plots_XH52291025110.geojson
+   - DDS-LOCA-NEWBUSTAR-XH52291025110-revised.pdf (plantation location declaration)
+   - DDS-EX-NEWBUSTAR-XH52291025110-revised.pdf (shipment lot declaration, 24 lots, 120.96 t CSR 10)
+
+3. How each point you raised has been resolved
+   - Producer / country: every feature now carries ProducerName "PHUOC HOA KAMPONG THOM PROCESSING FACTORY"
+     and ProducerCountry "KH". Plot codes 5.14PK / 5.14PH are internal codes of our plantation.
+   - Schema: each feature carries only ProducerName, ProducerCountry, ProductionPlace, Area and PlotName.
+     The internal plantation-inventory fields have been removed.
+   - Plot identifiers: ProductionPlace is the unique plot code. Plots made of several separate parcels are
+     split into one Polygon per parcel with suffixes -1, -2, -3. There are no duplicated codes
+     (434 production places for 406 plots).
+   - Area: Area is the geodesic area of each polygon, so declared and measured areas match exactly.
+   - Overlaps: none. Two small sub-plots (H6S inside H6T, J6S inside J6T) are now excluded from the
+     surrounding plot, so H6T contains an inner ring.
+   - Geometry: Polygon only, WGS84, 2D (no altitude), at most 6 decimals, no consecutive duplicate points,
+     all rings closed, all coordinates in Cambodia.
+   - Completeness: the 28/10/2025 plantation DDS listed 406 plots, but the old map contained polygons for
+     only 262 of them. The revised map covers all 406 declared plots (plot "G8" corresponds to parcel
+     G8N).
+
+4. Corrections to the shipment lot list
+   - Lot 1080cs: dates were blank in the previous declaration; extraction date 27/09/2025,
+     production date 21/10/2025.
+   - Lot "1677cs" was a typing error; the correct lot is 1077cs (extraction date 27/09/2025,
+     production date 21/10/2025).
+   The total remains 24 lots / 120.96 tons.
+
+5. Ongoing field work
+   Our field team is re-surveying the plots whose recorded area differs from the polygon by more than 10%.
+   Future files will reflect the updated boundaries.
+
+Please do not hesitate to contact us if any further clarification is needed.
+
+Best regards,
+PHUOC HOA KAMPONG THOM PROCESSING FACTORY

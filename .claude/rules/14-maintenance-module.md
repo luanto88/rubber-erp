@@ -1460,3 +1460,22 @@ Không migration. Người dùng chốt: đề nghị là nguồn giá; chưa c�
 - Gửi ký: người tạo, admin HOẶC NV phụ trách (`nv_phu_trach`/`phu_trach_bao_tri` trùng `full_name`/`username`) — client
   `canCreateSign`, server `create-request` dùng `isMaintenanceRecordTeam` (`src/lib/purchase/server.ts`). Vẫn cần
   `maintenance.create`.
+
+## Tra cứu thiết bị bằng QR — GĐ1 (2026-11-06, chờ test tay)
+Kế hoạch đầy đủ: `docs/qr-equipment-plan.md`. GĐ1 chỉ MÁY MÓC (`maintenance_assets`); xe để GĐ4.
+- Migration `20261111_equipment_qr_tokens.sql` (**chạy tay TRƯỚC deploy**): bảng `equipment_qr_tokens`
+  (token base64url 22 ký tự sinh bằng `extensions.gen_random_bytes(16)`, `asset_id` | `dispatch_vehicle_id`,
+  `revoked_at`; 1 token hiệu lực/thiết bị; backfill mọi máy móc) + `public_rate_limits` + RPC
+  `public_rate_limit_hit` (1 dòng/IP-băm/phút, tự xoá cửa sổ > 1 giờ). RLS bật, không policy ⇒ chỉ service role.
+- QR = `https://qlsxkpt.vercel.app/tb/<token>` (`buildEquipmentQrUrl`, `src/lib/equipment-qr.ts`; dùng
+  `NEXT_PUBLIC_APP_URL` nếu có, KHÔNG dùng origin hiện tại). Đổi domain = phải in lại toàn bộ tem.
+- Trang công khai `src/app/tb/[token]/page.tsx` (SSR, noindex, no-referrer, rate limit 60/phút/IP): CHỈ tên,
+  mã, loại, bộ phận, ngày bảo trì gần nhất (biên bản `da_duyet`). Token sai / thu hồi / khác GĐ1 ⇒ cùng 1 màn 404.
+- Đã đăng nhập: `EquipmentHistoryPanel` gọi `GET /api/equipment/[token]/history` (`maintenance.view` + cùng nhà
+  máy, khác nhà máy ⇒ 404); gồm biên bản `da_duyet` + `cho_duyet` (badge), lọc Sửa chữa/Bảo dưỡng, "Xem thêm"
+  20 dòng; giá/chi phí chỉ trả khi admin / `maintenance.approve` (lọc ở server). Nhãn "Ngừng dùng" chỉ khi đăng nhập.
+  Chưa đăng nhập ⇒ `/login?next=/tb/<token>`. Thanh đáy: Quét QR khác / Lý lịch.
+- Server: `src/lib/equipment-lookup.ts` (service role), `src/lib/public-rate-limit.ts` (lỗi DB ⇒ cho qua).
+- Cài đặt → Bảo trì → Thiết bị: nút QR từng dòng (`EquipmentQrModal`, `POST /api/equipment/qr-token` lấy/tạo
+  token; quyền `maintenance.view` | `settings.maintenance_config` | `settings.manage_config`), tải PNG có mã dưới QR.
+- Lưu ý dữ liệu: nhiều biên bản 2024 vẫn `cho_duyet` (dữ liệu cũ) ⇒ hiện badge "Chờ duyệt" trong lịch sử.

@@ -24,6 +24,7 @@ import { prepareForestPlotGeometry, mergeGeometryPieces, computeGeometryHash } f
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
 import { ExtMaterialModal, emptyExtMaterialForm, type ExtMaterialFormValues } from "../maintenance/_components/ext-material-modal"
+import { EquipmentQrModal, type EquipmentQrTarget } from "../maintenance/_components/equipment-qr-modal"
 import { CategoryNameClashWarning, findCategoryNameClashes, isClashConfirmed } from "../_components/category-name-clash"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { RepairThresholdCard } from "./_components/repair-threshold-card"
@@ -51,6 +52,7 @@ import {
 } from "@/lib/auth"
 import {
   Plus,
+  QrCode,
   Edit2,
   Trash2,
   X,
@@ -969,6 +971,7 @@ export default function SettingsPage() {
   const [maintSaving, setMaintSaving] = useState(false)
   const [maintError, setMaintError] = useState("")
   const [maintDelConfirm, setMaintDelConfirm] = useState<{ type: "asset" | "staff" | "staff-group" | "ext-mat"; id: string; label: string } | null>(null)
+  const [assetQr, setAssetQr] = useState<EquipmentQrTarget | null>(null)
   const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
 
@@ -4835,12 +4838,15 @@ export default function SettingsPage() {
                           <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (a.trang_thai === "active" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{a.trang_thai === "active" ? "Đang dùng" : "Ngừng"}</span>
                         </td>
                         <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => setAssetQr({ id: a.id, ma_tb: a.ma_tb, ten_tb: a.ten_tb })} title="QR tra cứu thiết bị" aria-label="QR tra cứu thiết bị" className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors"><QrCode size={13} /></button>
                           {canManageSettings && (
-                            <div className="flex items-center gap-1">
+                            <>
                               <button onClick={() => { setMaintEditId(a.id); setMaintError(""); setAssetForm({ ma_tb: a.ma_tb, ten_tb: a.ten_tb, bo_phan: a.bo_phan, loai: a.loai, nam_sd: a.nam_sd || "", bien_so: a.bien_so || "", mo_ta: a.mo_ta || "", trang_thai: a.trang_thai }); setMaintModal("asset") }} className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"><Edit2 size={13} /></button>
                               <button onClick={() => setMaintDelConfirm({ type: "asset", id: a.id, label: a.ten_tb })} className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"><Trash2 size={13} /></button>
-                            </div>
+                            </>
                           )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -5385,6 +5391,8 @@ export default function SettingsPage() {
           onUpdated={() => { setMaintModal(null); void loadMaintenanceData(factoryId) }}
         />
       )}
+
+      {assetQr && <EquipmentQrModal asset={assetQr} onClose={() => setAssetQr(null)} />}
 
       {maintDelConfirm && (
         <ModalShell

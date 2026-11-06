@@ -1,0 +1,127 @@
+﻿CÔNG TY CỔ PHẦN CAO SU PHƯỚC HOÀ
+CÔNG TY TNHH PHÁT TRIỀN CAO SU
+PHƯỚC HOÀ KAMPONG THOM
+ Số:        /BC- CSPK
+VƯƠNG QUỐC CAMPUCHIA
+Dân tộc – Tôn giáo – Quốc vương
+ Kampong Thom, ngày 15 tháng 10 năm 2026
+BÁO CÁO
+Về kết quả thực hiện khoa học, công nghệ, đổi mới sáng tạo, chuyển đổi số
+giai đoạn 2025-2026; đăng ký nhiệm vụ năm 2027 và hiện trạng ứng dụng
+trí tuệ nhân tạo
+Kính gửi:   Tập đoàn Công nghiệp cao su Việt Nam
+Thực hiện Công văn số 2718/CSVN-CN ngày 24 tháng 9 năm 2026 củaTập đoàn Công nghiệp Cao su Việt Nam - CTCP về việc cập nhật kết quả thực hiện nhiệm vụ khoa học, công nghệ (KHCN), đổi mới sáng tạo (ĐMST) và chuyển đổi số (CĐS) giai đoạn 2025-2026, đăng ký nhiệm vụ năm 2027, Công ty TNHH Phát Triển Cao Su Phước Hòa Kampong Thom xin báo cáo như sau:
+I. THÔNG TIN CHUNG
+1. Tên đơn vị
+Công ty TNHH Phát triển Cao su Phước Hòa Kampong Thom
+2. Lĩnh vực hoạt động chính
+Trồng, chăm sóc, khai thác và chế biến mủ cao su; hoạt động sản xuất kinh doanh tại tỉnh Kampong Thom, Vương quốc Campuchia.
+3. Người phụ trách báo cáo
+Lê Công Tuân – Phó Phòng TC-HC
+Email: lecongtuann1981@gmail.comTel:+855.978343616
+4. Đầu mối phối hợp chính
+Tô Thành Luân – Phó GD phụ trách điều hành NMCB 
+Email: tothanhluan88@gmail.comTel:+855.979119146
+5. Đầu mối dự phòng
+Huỳnh Ngô Ngọc Khoa – Trưởng phòng KH-XDCB
+Email: huynhkhoa2612@gmail.comTel:+855.973825678
+6. Thời điểm chốt số liệu
+30/9/2026
+II. KẾT QUẢ THỰC HIỆN GIAI ĐOẠN 2025-2026
+1. Tóm tắt kết quả
+Nhóm nội dung
+Số nhiệm vụ/giải pháp
+Đã hoàn thành
+Đang thực hiện
+Kinh phí/hiệu quả chính
+Khoa học, công nghệ và R&D
+Đổi mới sáng tạo, sáng kiến/cải tiến
+Xây dựng hệ thống truy xuất nguồn gốc chuỗi cung ứng mủ cao su khép kín từ vườn cây đến thành phẩm xuất khẩu, đáp ứng quy định eudr bằng công nghệ mã qr động và bản đồ số gis trên nền tảng rubber ERP
+Áp dụng hệ thống ký số nội bộ  cho tài liệu hồ sơ iso, các tài liệu nội bộ nhà máy chế biến
+Cải tiến nhập liệu, xếp hạng thành phẩm bằng phần mền phê duyệt phiếu kiểm nghiệm online
+Đã hoàn thành
+Cơ giới hóa, tự động hóa
+Cải tiến thay thế máy xé 18 dao bằng máy xé 24 dao nhằm cải thiện tạp chất và ổn định các chỉ tiêu hoá lý nguyên liệu.
+Đã hoàn thành
+.19,000 USD
+Chuyển đổi số và dữ liệu
+1. Trang bị phần mềm Truy xuất nguồn gốc nhằm hỗ trợ đáp ứng các yêu cầu đối với đơn hàng EUDR
+2. Triển khai bước đầu bản đồ số trong quản lý vườn cây, hỗ trợ công tác kiểm kê và giám sát diện tích
+Đã hoàn thành
+Điều kiện bảo đảm
+Hệ thống điện lưới không ổn định ảnh hưởng rất nhiều tới cơ giới, tự động hóa. Internet đã phủ sóng đến các ga mủ, tuy nhiên chất lượng đường truyển còn yếu, Công ty đang trong quá trình nâng cấp. Nguồn nhân lực đã được đào tạo, tuy nhiên chưa có nhân sự chuyên môn sâu trong lĩnh vực CNTT.
+TỔNG CỘNG
+19,000 USD
+2. Đánh giá theo từng nhóm nội dung
+2.1. Khoa học, công nghệ và R&D
+2.2. Đổi mới sáng tạo, sáng kiến/cải tiến
+Đánh giá Mục 1: Xây dựng hệ thống truy xuất nguồn gốc chuỗi cung ứng mủ cao su khép kín từ vườn cây đến thành phẩm xuất khẩu, đáp ứng quy định EUDR bằng công nghệ mã QR động và bản đồ số GIS trên nền tảng Rubber ERP.
+Nội dung & Tính cấp thiết: Rất tốt và hợp lý cao.
+Lý do: Quy định chống mất rừng của Liên minh Châu Âu (EUDR) bắt buộc các công ty cao su phải chứng minh được định vị địa lý (coordinates/GIS) của từng lô vườn cây khai thác. Ứng dụng tại Kampong Thom: Việc áp dụng mã QR động từ vườn cây -> xe chở mủ -> trạm cân -> nhà máy chế biến giúp minh bạch chuỗi cung ứng cho thị trường xuất khẩu.
+ Đánh giá Mục 2: Áp dụng hệ thống ký số nội bộ cho tài liệu hồ sơ ISO, các tài liệu nội bộ nhà máy chế biến. Nội dung & Tính hiệu quả: Hợp lý và mang tính thiết thực cao.Lý do: Đối với đơn vị hoạt động xa công ty mẹ như Kampong Thom (Campuchia), việc ký duyệt tay truyền thống rất tốn thời gian và chi phí vận chuyển tài liệu.Hiệu quả: Ký số giúp chuẩn hóa hệ thống quản lý chất lượng (ISO), giảm phụ thuộc vào giấy tờ, giúp Ban Điều hành phê duyệt từ xa tức thì.
+Đánh giá Mục 3: Cải tiến nhập liệu, xếp hạng thành phẩm bằng phần mềm phê duyệt phiếu kiểm nghiệm online.Nội dung & Tính hiệu quả: Rất thực tế đối với khối Nhà máy chế biến.Lý do: Khâu phân tích các chỉ tiêu cơ lý hóa của mủ (SVR 3L, SVR 10, SVR 20, v.v.) tại phòng thử nghiệm đòi hỏi sự chính xác cao.Hiệu quả: Thay thế nhập tay bằng phần mềm phê duyệt phiếu kiểm nghiệm online giúp giảm bớt sai sót do con người, tự động phân loại/xếp hạng mủ bành thành phẩm và rút ngắn thời gian phát hành phiếu kết quả kiểm nghiệm.
+2.3. Cơ giới hóa, tự động hóa
+Cải tiến thay thế máy xé 18 dao bằng máy xé 24 dao nhằm cải thiện tạp chất và ổn định các chỉ tiêu hoá lý nguyên liệu.
+Lý do: Đây là giải pháp phần cứng/cơ khí trực tiếp tại dây chuyền chế biến mủ sấy. Việc tăng từ 18 dao lên 24 dao giúp băm/xé mủ nhỏ hơn, đều hơn, loại bỏ tạp chất hiệu quả hơn và giúp mủ chín đều trong lò sấy.
+Hiệu quả: Nâng cao hạng chất lượng mủ thành phẩm, giảm tiêu hao nhiên liệu sấy và tăng năng suất dây chuyền.
+2.4. Chuyển đổi số và dữ liệu
+Đánh giá Mục 1: Trang bị phần mềm Truy xuất nguồn gốc nhằm hỗ trợ đáp ứng các yêu cầu đối với đơn hàng EUDR
+ Nội dung & Tính cấp thiết: Cực kỳ quan trọng và mang tính sống còn đối với hoạt động xuất khẩu.
+Lý do: Quy định Chống mất rừng của Liên minh Châu Âu (EUDR - European Union Deforestation Regulation) yêu cầu mọi lô hàng cao su xuất khẩu sang thị trường EU phải minh bạch tuyệt đối về tọa độ địa lý (polygon/GPS) của khu vực trồng, chứng minh không canh tác trên diện tích phá rừng sau ngày 31/12/2020.
+Hiệu quả: Việc trang bị phần mềm này giúp Phước Hòa Kampong Thom số hóa chuỗi cung ứng từ vườn cây đến nhà máy đến lô hàng xuất khẩu, tạo sự tin tưởng tuyệt đối cho khách hàng châu Âu và bảo vệ thị phần xuất khẩu của công ty.
+Đánh giá Mục 2: Triển khai bước đầu bản đồ số trong quản lý vườn cây, hỗ trợ công tác kiểm kê và giám sát diện tích
+Nội dung & Tính thiết thực: Rất phù hợp với đặc thù quản lý diện tích lớn ở nước ngoài.
+Lý do: Dự án cao su tại Kampong Thom (Campuchia) có quy mô diện tích lớn, trải dài trên địa hình rộng. Việc quản lý bằng bản đồ giấy hoặc thủ công trước đây gặp rất nhiều khó khăn trong việc kiểm tra ranh giới, diện tích cạo, thống kê cây chết hoặc quản lý sự cố (cháy, ngập nước, dịch bệnh).
+Hiệu quả: Bản đồ số hóa GIS giúp Ban lãnh đạo và các đội sản xuất quản lý trực quan từng lô, từng khoảnh, tiết kiệm thời gian đi kiểm tra hiện trường, đồng thời là cơ sở dữ liệu gốc cực kỳ quan trọng để liên thông với phần mềm EUDR 
+2.5. Điều kiện bảo đảm
+a) Hạ tầng số: Công ty hoạt động tại khu vực nông nghiệp thuộc tỉnh Kampong Thom, Campuchia, nơi hạ tầng viễn thông và nguồn điện chưa ổn định, ảnh hưởng đến việc triển khai, vận hành các hệ thống công nghệ và phần mềm quản trị. Hiện trạng cụ thể như sau:
++ Thiết bị công nghệ thông tin: Công ty trang bị máy tính xách tay cho cán bộ, nhân viên; ngoài ra, một số cá nhân sử dụng máy tính riêng phục vụ công việc. Công ty chưa xây dựng hệ thống quản lý tập trung đối với các thiết bị công nghệ thông tin;
++ Hạ tầng mạng: Công ty sử dụng hệ thống mạng nội bộ và đường truyền Internet của nhà mạng Metfone (Campuchia). Tuy nhiên, đường truyền thường xuyên không ổn định, xảy ra tình trạng mất kết nối và độ trễ cao, ảnh hưởng đến quá trình truy cập, trao đổi và đồng bộ dữ liệu.
++ Nguồn điện dự phòng: Công ty được trang bị máy phát điện công suất 400 kVA phục vụ khu vực chế biến của Xưởng chế biến; máy phát điện 30 kVA phục vụ văn phòng Công ty và văn phòng Xưởng chế biến; máy phát điện 25 kVA phục vụ văn phòng các Đội sản xuất. 
+b) An toàn thông tin: Đơn vị chưa có hệ thống giám sát an toàn thông tin chuyên dụng.
+c) Nhân lực công nghệ thông tin: Công ty chưa có nhân sự chuyên trách về công nghệ thông tin. Việc quản lý, vận hành và khai thác các phần mềm do cán bộ tại các phòng chuyên môn kiêm nhiệm. Công tác nâng cấp phần mềm, xử lý sự cố kỹ thuật và khắc phục các vấn đề phát sinh chủ yếu phụ thuộc vào đơn vị cung cấp phần mềm, ảnh hưởng đến tính chủ động trong vận hành hệ thống.
+d) Công tác đào tạo, hướng dẫn sử dụng
+Trong quá trình xây dựng phần mềm truy xuất nguồn gốc và phần mềm đọc, truy xuất, phân tích dữ liệu các chỉ tiêu kiểm phẩm, Công ty đã tổ chức tập huấn cho các đơn vị liên quan theo từng giai đoạn, bao gồm: chạy thử, tiếp nhận ý kiến góp ý, điều chỉnh và hoàn thiện phần mềm, vận hành chính thức và tiếp tục điều chỉnh trong quá trình sử dụng. Qua đó, từng bước nâng cao khả năng tiếp cận và ứng dụng công nghệ thông tin của cán bộ, nhân viên trong hoạt động chuyên môn.
+đ) Quỹ phát triển khoa học và công nghệ
+Công ty hoạt động tại Campuchia và thực hiện các quy định pháp luật của nước sở tại. Theo thông tin của Công ty, pháp luật Campuchia không quy định việc trích lập Quỹ phát triển khoa học và công nghệ như yêu cầu đang được đề cập; do đó, Công ty không thực hiện trích lập quỹ này.
+3. Tồn tại, khó khăn và nguyên nhân
+- Hạ tầng viễn thông: Đường truyền Internet không ổn định, thường xuyên xảy ra tình trạng mất kết nối, độ trễ cao, ảnh hưởng đến việc khai thác các phần mềm quản trị, truyền tải và đồng bộ dữ liệu trong quá trình vận hành;
+- Hạ tầng điện năng: Nguồn điện tại Công ty và khu vực thường xuyên xảy ra tình trạng mất điện đột ngột, sụt áp, ảnh hưởng đến hoạt động và tuổi thọ của máy móc, thiết bị, đặc biệt là các thiết bị điện tử, hệ thống điều khiển và thiết bị công nghệ;
+- Công tác sửa chữa, bảo trì, bảo dưỡng: Dịch vụ kỹ thuật tại Campuchia còn hạn chế về nhân lực có chuyên môn cao, gây khó khăn trong việc sửa chữa, bảo trì, bảo dưỡng thiết bị công nghệ, đồng thời có thể kéo dài thời gian xử lý sự cố và làm gián đoạn hoạt động sản xuất;
+- Nguồn cung thiết bị công nghệ: Thị trường Campuchia còn hạn chế về số lượng và chủng loại thiết bị công nghệ cao đáp ứng yêu cầu kỹ thuật của Công ty. Một số nhà cung cấp chưa đáp ứng đầy đủ yêu cầu về hồ sơ, chứng từ hợp pháp, hợp lệ phục vụ thanh toán. Trong khi đó, việc nhập khẩu thiết bị từ Việt Nam phải thực hiện các thủ tục xuất nhập khẩu phức tạp, phát sinh thêm chi phí và kéo dài thời gian cung ứng.
+III. ĐĂNG KÝ NHIỆM VỤ NĂM 2027
+1. CNTT: Đầu tư AI phân tích dữ liệu nông nghiệp để có những chính sách cụ thể cho việc quản trị nông nghiệp.
+Để đáp ứng xu hướng chuyển đổi số, Công ty hướng đến việc khuyến khích cán bộ, công nhân viên đăng ký các khóa đào tạo về công nghệ thông tin và trí tuệ nhân tạo (AI).
+IV. HIỆN TRẠNG ỨNG DỤNG TRÍ TUỆ NHÂN TẠO (AI)
+Đơn vị rà soát các ứng dụng AI đang nghiên cứu, thử nghiệm hoặc vận hành; phân biệt với việc cá nhân tự sử dụng các công cụ AI. Chi tiết tại Phụ lục 03.
+1. Có ứng dụng AI do đơn vị tổ chức triển khai?
+Không
+2. Số ứng dụng đang nghiên cứu/thử nghiệm
+0
+3. Số ứng dụng đã đưa vào vận hành
+0
+4. Kết quả/hiệu quả nổi bật
+Không
+5. Nhu cầu hỗ trợ
+Không 
+V. KIẾN NGHỊ, ĐỀ XUẤT
+VI. XÁC NHẬN VÀ TRÁCH NHIỆM
+Đơn vị chịu trách nhiệm về tính đầy đủ, chính xác và khả năng kiểm chứng của số liệu, thông tin trong báo cáo và các phụ lục kèm theo; chủ động cập nhật, giải trình và bổ sung khi Tập đoàn yêu cầu.
+Nơi nhận:- Như trên;- Lưu: VT.
+PHÓ TỔNG GIÁM ĐỐC
+PHỤ TRÁCH ĐIỀU HÀNH
+                                                                                 Vương Nguyễn Phương Lâm
+DANH MỤC PHỤ LỤC KÈM THEO BÁO CÁO
+STT
+Phụ lục
+Nội dung
+1
+Phụ lục 01
+Kết quả thực hiện các nhiệm vụ/giải pháp giai đoạn 2025-2026
+2
+Phụ lục 02
+Danh mục nhiệm vụ đăng ký thực hiện năm 2027
+3
+Phụ lục 03
+Khảo sát hiện trạng ứng dụng trí tuệ nhân tạo (AI)
+Lưu ý: Các phụ lục được thiết kế trong file Excel kèm theo để đơn vị nhập liệu, cập nhật định kỳ và gửi cùng báo cáo Word.
