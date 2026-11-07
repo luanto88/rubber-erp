@@ -832,12 +832,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       if (driverName) driverMap.set(a.vehicle_id, driverName)
     }
 
-    setDispatchVehicles(
-      ((vehicles || []) as { id: string; code: string; name: string; vehicle_type: string | null; plate_number: string | null }[]).map((v) => ({
-        ...v,
-        currentDriverName: driverMap.get(v.id) || null,
-      }))
-    )
+    const list: DispatchVehicle[] = ((vehicles || []) as { id: string; code: string; name: string; vehicle_type: string | null; plate_number: string | null }[]).map((v) => ({
+      ...v,
+      currentDriverName: driverMap.get(v.id) || null,
+    }))
+    setDispatchVehicles(list)
+    return list
   }, [])
 
   const loadSigningStatus = useCallback(async (fid: string, recordId: string) => {
@@ -1024,7 +1024,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       setRepairThreshold(getRepairThresholdUsd())
       setAssets(a)
       setStaffList(s)
-      await Promise.all([loadInventoryItems(fid), loadDispatchVehicles(fid)])
+      const [, vehicleList] = await Promise.all([loadInventoryItems(fid), loadDispatchVehicles(fid)])
 
       if (!isNew) {
         // GĐ4: đồng bộ giá theo đề nghị (chỉ biên bản Chờ duyệt chưa gửi ký) rồi mới nạp — lỗi không chặn.
@@ -1032,10 +1032,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
         await loadRecord(fid, id)
       } else {
         // Mở từ trang QR thiết bị (`/tb/<token>` → "Tạo biên bản"): `?asset_id=` điền sẵn bộ phận +
-        // thiết bị. Chỉ máy móc (xe Đội xe chưa có QR); thiết bị không thuộc nhà máy / bộ phận lạ ⇒ bỏ qua.
-        const prefillAssetId = new URLSearchParams(window.location.search).get("asset_id")
+        // thiết bị; `?vehicle_id=` (GĐ4a) điền sẵn "Đội xe" + xe + tài xế chính hiện hành.
+        // Không thuộc nhà máy / xe ngừng dùng (danh sách chỉ xe đang dùng) / bộ phận lạ ⇒ bỏ qua.
+        const qs = new URLSearchParams(window.location.search)
+        const prefillVehicleId = qs.get("vehicle_id")
+        const prefillVehicle = prefillVehicleId ? vehicleList.find((v) => v.id === prefillVehicleId) : undefined
+        const prefillAssetId = qs.get("asset_id")
         const prefill = prefillAssetId ? a.find((x) => x.id === prefillAssetId) : undefined
-        if (prefill && prefill.bo_phan !== "Đội xe" && (BO_PHAN_LIST as readonly string[]).includes(prefill.bo_phan)) {
+        if (prefillVehicle) {
+          setBoPhan("Đội xe")
+          setSelectedVehicleIds([prefillVehicle.id])
+          setLines([emptyLineFromVehicle(prefillVehicle)])
+        } else if (prefill && prefill.bo_phan !== "Đội xe" && (BO_PHAN_LIST as readonly string[]).includes(prefill.bo_phan)) {
           setBoPhan(prefill.bo_phan)
           setSelectedAssetIds([prefill.id])
           setLines([emptyLine(prefill)])

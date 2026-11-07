@@ -13,6 +13,7 @@ import {
 } from "@/lib/equipment-qr"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { FilterChips } from "./equipment-tab-ui"
 
 // Tab "Vật tư" của trang QR thiết bị `/tb/<token>` (GĐ2, docs/qr-equipment-plan.md).
 // Gom vật tư đã thay theo mã kho / tên chuẩn hoá; API tự kiểm quyền + lọc giá.
@@ -313,11 +314,10 @@ export function EquipmentMaterialsTab({ token }: { token: string }) {
             <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className={inputCls} />
           </label>
         </div>
-        <SegmentedTabs<HangMuc>
+        <FilterChips<HangMuc>
           ariaLabel="Lọc hạng mục"
           value={hangMuc}
           onChange={setHangMuc}
-          fullWidth
           items={[
             { key: "all", label: "Tất cả" },
             { key: "Sửa chữa", label: "Sửa chữa" },

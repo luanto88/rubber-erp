@@ -1577,6 +1577,26 @@ RPC `equipment_daily_product_output` (thành phẩm theo ngày + dây chuyền, 
   `computeStats` có `until` (chu kỳ đang mở chỉ khi khoảng kéo tới hôm nay). Kiểm MCC-2 06/10–19/10 lọc Dao băm = 1 chu
   kỳ 13 ngày 566,895 tấn ✓.
 
+## Tra cứu QR — GĐ4a tem cho xe Đội xe + 2 tầng tab /tb (2026-11-07, chờ test tay)
+- Migration `20261115_equipment_qr_vehicle_backfill.sql` (**chạy tay**, tuỳ chọn): tạo sẵn token cho mọi xe. Bảng
+  `equipment_qr_tokens` đã có `dispatch_vehicle_id` từ 20261111.
+- `equipment-lookup.ts`: `EquipmentTarget = { factoryId } & ({ assetId } | { vehicleId })` (`isVehicleTarget`);
+  `loadEntity` gộp máy móc / xe (xe: mã = `code`, bộ phận "Đội xe", `active` = `is_active`). Hàm token tổng quát:
+  `getOrCreateEquipmentToken(factory, kind, id, actor)`, `getOrCreateEquipmentTokensBulk`, `regenerateEquipmentToken`
+  (`kind` = "asset" | "vehicle"). API `qr-token*` nhận `{assetId}`/`{vehicleId}` hoặc `{assetIds}`/`{vehicleIds}`
+  (`qr-token/_lib/parse-ref.ts`). `/resolve` trả `kind`.
+- Công khai cho xe: tên, mã, loại xe (`vehicle_type`), "Đội xe", bảo trì gần nhất. Biển số + tài xế chính chỉ trả trong
+  `/history` (`vehicle`) — người dùng chốt. Xe ngừng hoạt động: mở bình thường, nhãn "Ngừng dùng" khi đăng nhập, không
+  có "Tạo biên bản".
+- "Tạo biên bản" xe ⇒ `?vehicle_id=` (form điền "Đội xe" + xe + tài xế chính; chỉ xe đang dùng).
+- Cài đặt → Bảo trì → Xe & Tài xế: cột chọn + "In tem QR (N)" + nút QR mỗi dòng (`EquipmentQrTarget.kind = "vehicle"`).
+  Lý lịch: quét tem xe chọn đúng xe + "Đội xe"; In tem cho xe. Biên bản: quét tem xe lọc theo xe.
+- /tb 2 tầng: `equipment-tab-ui.tsx` — `EquipmentMainTabs` (menu lớn, icon trên chữ, dính đầu màn) và `FilterChips`
+  (chip nhỏ lọc hạng mục, dùng cả tab Vật tư). KHÔNG dùng SegmentedTabs cho cả 2 tầng.
+- Cài đặt Xe sửa lỗi "Hiệu lực từ": Sửa xe điền NGÀY BẮT ĐẦU THẬT của tài xế chính (khoá ô khi không đổi tài xế);
+  đổi tài xế ⇒ mặc định hôm nay giờ nhà máy, phải SAU ngày cũ. `addDays` trong settings/page.tsx tính theo UTC (trước
+  lùi thêm 1 ngày ở UTC+7 ⇒ lịch sử tài xế hở 1 ngày giữa 2 dòng).
+
 ## Quyền xem giá `maintenance.view_cost` cho TOÀN module (2026-11-07, test localhost PASS, đã lên production)
 Người dùng chốt. Nhãn Cài đặt: "xem giá / chi phí bảo trì". Chặn ở GIAO DIỆN + mẫu in (API `/api/equipment/*` chặn ở server).
 - Helper `canSeeMaintenanceCostGlobal(user)` (admin | view_cost) và `canSeeMaintenanceRecordCost(user, rec)` (global |

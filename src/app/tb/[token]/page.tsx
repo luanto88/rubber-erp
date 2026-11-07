@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { headers } from "next/headers"
 import { notFound } from "next/navigation"
-import { CalendarCheck, Cog } from "lucide-react"
+import { CalendarCheck, Cog, Truck } from "lucide-react"
 import { ModuleThemeScope } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { EquipmentHistoryPanel } from "@/app/dashboard/maintenance/_components/equipment-history-panel"
 import { checkPublicRateLimit } from "@/lib/public-rate-limit"
@@ -10,6 +10,7 @@ import { isEquipmentQrToken } from "@/lib/equipment-qr"
 
 // Trang CÔNG KHAI mở từ QR dán trên thiết bị (docs/qr-equipment-plan.md, GĐ1).
 // Chỉ hiện đúng whitelist đã chốt: tên, mã, loại, bộ phận, lần bảo trì gần nhất.
+// Xe Đội xe (GĐ4a): thêm loại xe; biển số + tài xế chính CHỈ hiện khi đã đăng nhập (qua /history).
 // Lịch sử chi tiết do EquipmentHistoryPanel tải SAU khi đăng nhập (API tự kiểm quyền).
 export const dynamic = "force-dynamic"
 export const revalidate = 0
@@ -45,7 +46,9 @@ export default async function EquipmentQrPage({ params }: { params: Promise<{ to
   const info = target ? await loadPublicEquipment(target) : null
   if (!info) notFound()
 
-  const loaiLabel = info.loai === "xe" ? "Xe" : "Máy móc"
+  const isXe = info.loai === "xe"
+  const loaiLabel = isXe ? info.loai_xe || "Xe" : "Máy móc"
+  const LoaiIcon = isXe ? Truck : Cog
 
   return (
     <>
@@ -58,7 +61,7 @@ export default async function EquipmentQrPage({ params }: { params: Promise<{ to
             <p className="mt-1 font-code text-base font-bold text-slate-600">{info.ma_tb}</p>
             <div className="mt-3 flex flex-wrap gap-2 text-sm">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
-                <Cog size={14} /> {loaiLabel}
+                <LoaiIcon size={14} /> {loaiLabel}
               </span>
               <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
                 Bộ phận: {info.bo_phan}

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { isoActorHasPermission, isoAuthErrorStatus, resolveIsoActor } from "@/app/api/iso/_lib/iso-actor"
-import { getOrCreateAssetToken } from "@/lib/equipment-lookup"
+import { getOrCreateEquipmentToken } from "@/lib/equipment-lookup"
+import { parseEquipmentRef } from "./_lib/parse-ref"
 
 export const dynamic = "force-dynamic"
 
-// Lấy (hoặc tạo nếu chưa có) token QR còn hiệu lực của 1 máy móc — dùng cho nút "QR" ở
-// Cài đặt → Bảo trì → Thiết bị. Nhà máy lấy từ phiên, không tin client.
+// Lấy (hoặc tạo nếu chưa có) token QR còn hiệu lực của 1 máy móc (`assetId`) hoặc 1 xe Đội xe
+// (`vehicleId`, GĐ4a) — nút "QR" ở Cài đặt → Bảo trì. Nhà máy lấy từ phiên, không tin client.
 export async function POST(req: NextRequest) {
   try {
     const actor = await resolveIsoActor(req)
@@ -16,12 +17,9 @@ export async function POST(req: NextRequest) {
     ])
     if (!allowed) return NextResponse.json({ error: "Bạn chưa có quyền xem QR thiết bị" }, { status: 403 })
 
-    const body = (await req.json().catch(() => ({}))) as { assetId?: unknown }
-    const assetId = typeof body.assetId === "string" ? body.assetId : ""
-    if (!/^[0-9a-f-]{36}$/i.test(assetId)) {
-      return NextResponse.json({ error: "Thiếu mã thiết bị" }, { status: 400 })
-    }
-    const token = await getOrCreateAssetToken(actor.factoryId, assetId, actor.userId)
+    const ref = parseEquipmentRef(await req.json().catch(() => ({})))
+    if (!ref) return NextResponse.json({ error: "Thiếu mã thiết bị hoặc xe" }, { status: 400 })
+    const token = await getOrCreateEquipmentToken(actor.factoryId, ref.kind, ref.id, actor.userId)
     if (!token) return NextResponse.json({ error: "Không tìm thấy thiết bị" }, { status: 404 })
     return NextResponse.json({ token }, { headers: { "Cache-Control": "no-store" } })
   } catch (err) {

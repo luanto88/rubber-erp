@@ -11,6 +11,7 @@ import {
   type EquipmentMaterialSort,
   type EquipmentHistoryRecord,
   type EquipmentPublicInfo,
+  type EquipmentVehicleInfo,
   type EquipmentViewer,
 } from "@/lib/equipment-qr"
 import {
@@ -28,42 +29,104 @@ const CHUNK = 200
 /** Biên bản hiện cho người đã đăng nhập — bỏ "huy" và "tu_choi" (dữ liệu cũ). */
 const HISTORY_STATUSES = ["da_duyet", "cho_duyet"]
 
-export type EquipmentTarget = {
-  factoryId: string
-  assetId: string
+/** Đích của tem QR: 1 máy móc (`maintenance_assets`) HOẶC 1 xe Đội xe (`dispatch_vehicles`, GĐ4a). */
+export type EquipmentTarget = { factoryId: string } & ({ assetId: string } | { vehicleId: string })
+
+export function isVehicleTarget(t: EquipmentTarget): t is { factoryId: string; vehicleId: string } {
+  return "vehicleId" in t
 }
 
-/** Token còn hiệu lực → thiết bị. Token sai hình thức / không tồn tại / đã thu hồi ⇒ null (cùng 1 kết quả). */
+/** Token còn hiệu lực → thiết bị / xe. Token sai hình thức / không tồn tại / đã thu hồi ⇒ null (cùng 1 kết quả). */
 export async function resolveEquipmentToken(token: string): Promise<EquipmentTarget | null> {
   if (!isEquipmentQrToken(token)) return null
   const { data, error } = await getSupabaseAdmin()
     .from("equipment_qr_tokens")
-    .select("factory_id, asset_id, revoked_at")
+    .select("factory_id, asset_id, dispatch_vehicle_id, revoked_at")
     .eq("token", token)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  // GĐ1 chỉ máy móc — token trỏ xe (GĐ4) coi như không tồn tại.
-  if (!data || data.revoked_at || !data.asset_id) return null
-  return { factoryId: data.factory_id as string, assetId: data.asset_id as string }
+  if (!data || data.revoked_at) return null
+  const factoryId = data.factory_id as string
+  if (data.asset_id) return { factoryId, assetId: data.asset_id as string }
+  if (data.dispatch_vehicle_id) return { factoryId, vehicleId: data.dispatch_vehicle_id as string }
+  return null
 }
 
-type AssetRow = {
+/** Thông tin chung của máy móc / xe. Xe: mã = `code`, tên = `name`, bộ phận luôn "Đội xe". */
+type EntityRow = {
   ma_tb: string
   ten_tb: string
-  loai: string
+  loai: "may_moc" | "xe"
   bo_phan: string
-  trang_thai: string
+  active: boolean
+  vehicle_type: string | null
+  plate_number: string | null
 }
 
-async function loadAsset(target: EquipmentTarget): Promise<AssetRow | null> {
-  const { data, error } = await getSupabaseAdmin()
+async function loadEntity(target: EquipmentTarget): Promise<EntityRow | null> {
+  const admin = getSupabaseAdmin()
+  if (isVehicleTarget(target)) {
+    const { data, error } = await admin
+      .from("dispatch_vehicles")
+      .select("code, name, vehicle_type, plate_number, is_active")
+      .eq("id", target.vehicleId)
+      .eq("factory_id", target.factoryId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!data) return null
+    return {
+      ma_tb: (data.code as string) || "",
+      ten_tb: (data.name as string) || (data.code as string) || "",
+      loai: "xe",
+      bo_phan: "Đội xe",
+      active: data.is_active !== false,
+      vehicle_type: (data.vehicle_type as string | null) || null,
+      plate_number: (data.plate_number as string | null) || null,
+    }
+  }
+  const { data, error } = await admin
     .from("maintenance_assets")
     .select("ma_tb, ten_tb, loai, bo_phan, trang_thai")
     .eq("id", target.assetId)
     .eq("factory_id", target.factoryId)
     .maybeSingle()
   if (error) throw new Error(error.message)
-  return (data as AssetRow | null) ?? null
+  if (!data) return null
+  return {
+    ma_tb: data.ma_tb as string,
+    ten_tb: data.ten_tb as string,
+    loai: data.loai === "xe" ? "xe" : "may_moc",
+    bo_phan: data.bo_phan as string,
+    active: data.trang_thai === "active",
+    vehicle_type: null,
+    plate_number: null,
+  }
+}
+
+/** Tài xế chính hiện hành của xe (chỉ trả cho người đã đăng nhập). */
+async function loadCurrentDriverName(factoryId: string, vehicleId: string): Promise<string | null> {
+  const admin = getSupabaseAdmin()
+  const { data, error } = await admin
+    .from("dispatch_vehicle_driver_assignments")
+    .select("driver_id")
+    .eq("factory_id", factoryId)
+    .eq("vehicle_id", vehicleId)
+    .eq("is_current", true)
+    .limit(1)
+    .maybeSingle()
+  if (error || !data?.driver_id) return null
+  const { data: drv } = await admin
+    .from("dispatch_drivers")
+    .select("name")
+    .eq("id", data.driver_id as string)
+    .eq("factory_id", factoryId)
+    .maybeSingle()
+  return ((drv?.name as string | undefined) || "").trim() || null
+}
+
+/** Cột trên `maintenance_record_lines` trỏ tới đích. */
+function lineTargetColumn(target: EquipmentTarget): ["asset_id" | "dispatch_vehicle_id", string] {
+  return isVehicleTarget(target) ? ["dispatch_vehicle_id", target.vehicleId] : ["asset_id", target.assetId]
 }
 
 type LineRow = {
@@ -81,12 +144,13 @@ type LineRow = {
 }
 
 async function loadAssetLines(target: EquipmentTarget): Promise<LineRow[]> {
+  const [col, id] = lineTargetColumn(target)
   return fetchAllPaginated<LineRow>((from, to) =>
     getSupabaseAdmin()
       .from("maintenance_record_lines")
       .select("id, record_id, noi_dung, nguyen_nhan, cac_khac_phuc, loai_sua_chua, chi_phi_dk, cong_tho, loai_tien, sort_order, image_urls")
       .eq("factory_id", target.factoryId)
-      .eq("asset_id", target.assetId)
+      .eq(col, id)
       .order("id")
       .range(from, to),
   )
@@ -129,7 +193,7 @@ function byNewest(a: RecordRow, b: RecordRow) {
 
 /** Phần CÔNG KHAI — chỉ đúng whitelist đã chốt (tên, mã, loại, bộ phận, lần bảo trì gần nhất). */
 export async function loadPublicEquipment(target: EquipmentTarget): Promise<EquipmentPublicInfo | null> {
-  const asset = await loadAsset(target)
+  const asset = await loadEntity(target)
   if (!asset) return null
   const lines = await loadAssetLines(target)
   const recordIds = [...new Set(lines.map((l) => l.record_id))]
@@ -140,7 +204,9 @@ export async function loadPublicEquipment(target: EquipmentTarget): Promise<Equi
   return {
     ten_tb: asset.ten_tb,
     ma_tb: asset.ma_tb,
-    loai: asset.loai === "xe" ? "xe" : "may_moc",
+    loai: asset.loai,
+    // Loại xe (Xe nâng / Xe vận chuyển…) là thông tin công khai; biển số + tài xế KHÔNG (chỉ /history).
+    loai_xe: asset.vehicle_type,
     bo_phan: asset.bo_phan,
     last_maintenance: latest?.ngay ? { ngay: latest.ngay, hang_muc: latest.hang_muc } : null,
   }
@@ -172,9 +238,12 @@ type MaterialRow = {
 export async function loadEquipmentHistory(
   target: EquipmentTarget,
   opts: { canSeeCost: boolean; offset: number; limit: number; hangMuc?: string | null },
-): Promise<{ inactive: boolean; total: number; records: EquipmentHistoryRecord[] } | null> {
-  const asset = await loadAsset(target)
+): Promise<{ inactive: boolean; total: number; records: EquipmentHistoryRecord[]; vehicle: EquipmentVehicleInfo | null } | null> {
+  const asset = await loadEntity(target)
   if (!asset) return null
+  const vehicle: EquipmentVehicleInfo | null = isVehicleTarget(target)
+    ? { plate_number: asset.plate_number, driver_name: await loadCurrentDriverName(target.factoryId, target.vehicleId) }
+    : null
   const lines = await loadAssetLines(target)
   const recordIds = [...new Set(lines.map((l) => l.record_id))]
   const records = recordIds.length
@@ -257,7 +326,7 @@ export async function loadEquipmentHistory(
     return rec
   })
 
-  return { inactive: asset.trang_thai !== "active", total: entries.length, records: out }
+  return { inactive: !asset.active, total: entries.length, records: out, vehicle }
 }
 
 type MaterialAggRow = MaterialRow & {
@@ -289,7 +358,7 @@ export async function loadEquipmentMaterials(
   target: EquipmentTarget,
   opts: EquipmentMaterialsOptions,
 ): Promise<{ recordCount: number; groups: EquipmentMaterialGroup[] } | null> {
-  const asset = await loadAsset(target)
+  const asset = await loadEntity(target)
   if (!asset) return null
   const lines = await loadAssetLines(target)
   const recordIds = [...new Set(lines.map((l) => l.record_id))]
@@ -467,7 +536,7 @@ export async function loadEquipmentMaterials(
 
 // ── GĐ3b: thống kê chu kỳ sửa chữa / bảo dưỡng ─────────────────────────────────────────
 
-export type EquipmentStatsTarget = { factoryId: string } & ({ assetId: string } | { vehicleId: string })
+export type EquipmentStatsTarget = EquipmentTarget
 
 type StatsLineRow = {
   id: string
@@ -502,7 +571,7 @@ export async function loadEquipmentStats(
     kind = outputKindForVehicle(data.vehicle_type as string | null)
     vehicleCode = (data.code as string | null) || null
   } else {
-    const asset = await loadAsset({ factoryId: target.factoryId, assetId: target.assetId })
+    const asset = await loadEntity(target)
     if (!asset) return null
     kind = outputKindForAsset(asset.bo_phan)
   }
@@ -649,23 +718,43 @@ export async function loadEquipmentStats(
   return { kind, outputLabel: OUTPUT_LABEL[kind], today, events, daily, materials, canSeeCost: opts.canSeeCost }
 }
 
-/** Lấy (hoặc tạo) token còn hiệu lực của 1 máy móc. Thiết bị phải thuộc `factoryId`. */
-export async function getOrCreateAssetToken(factoryId: string, assetId: string, actorId: string): Promise<string | null> {
-  const admin = getSupabaseAdmin()
-  const { data: asset, error: aErr } = await admin
-    .from("maintenance_assets")
+// ── Token tem QR: máy móc (`asset`) hoặc xe Đội xe (`vehicle`, GĐ4a) ─────────────────────
+
+export type EquipmentKind = "asset" | "vehicle"
+
+const TOKEN_COL: Record<EquipmentKind, "asset_id" | "dispatch_vehicle_id"> = {
+  asset: "asset_id",
+  vehicle: "dispatch_vehicle_id",
+}
+
+/** Thiết bị / xe có thuộc nhà máy không (chặn tạo token cho id của nhà máy khác). */
+async function equipmentBelongs(factoryId: string, kind: EquipmentKind, id: string): Promise<boolean> {
+  const { data, error } = await getSupabaseAdmin()
+    .from(kind === "asset" ? "maintenance_assets" : "dispatch_vehicles")
     .select("id")
-    .eq("id", assetId)
+    .eq("id", id)
     .eq("factory_id", factoryId)
     .maybeSingle()
-  if (aErr) throw new Error(aErr.message)
-  if (!asset) return null
+  if (error) throw new Error(error.message)
+  return !!data
+}
+
+/** Lấy (hoặc tạo) token còn hiệu lực của 1 máy móc / xe. Phải thuộc `factoryId`. */
+export async function getOrCreateEquipmentToken(
+  factoryId: string,
+  kind: EquipmentKind,
+  id: string,
+  actorId: string,
+): Promise<string | null> {
+  const admin = getSupabaseAdmin()
+  if (!(await equipmentBelongs(factoryId, kind, id))) return null
+  const col = TOKEN_COL[kind]
 
   const findActive = async () => {
     const { data, error } = await admin
       .from("equipment_qr_tokens")
       .select("token")
-      .eq("asset_id", assetId)
+      .eq(col, id)
       .is("revoked_at", null)
       .maybeSingle()
     if (error) throw new Error(error.message)
@@ -676,7 +765,7 @@ export async function getOrCreateAssetToken(factoryId: string, assetId: string, 
   if (existing) return existing
   const { data, error } = await admin
     .from("equipment_qr_tokens")
-    .insert({ factory_id: factoryId, asset_id: assetId, created_by: actorId })
+    .insert({ factory_id: factoryId, [col]: id, created_by: actorId })
     .select("token")
     .single()
   if (error) {
@@ -687,85 +776,99 @@ export async function getOrCreateAssetToken(factoryId: string, assetId: string, 
   return data.token as string
 }
 
-export type AssetQrLabel = { assetId: string; ma_tb: string; ten_tb: string; bo_phan: string; token: string }
+/** Nhãn in tem: `ma_tb` = mã thiết bị / mã xe, `ten_tb` = tên thiết bị / tên xe. */
+export type EquipmentQrLabel = { id: string; ma_tb: string; ten_tb: string; bo_phan: string; token: string }
 
-/** GĐ3 — lấy (tạo nếu thiếu) token còn hiệu lực cho NHIỀU máy móc, để in tem hàng loạt.
- *  Thiết bị khác nhà máy / không tồn tại bị bỏ qua. Trả theo thứ tự `assetIds`. */
-export async function getOrCreateAssetTokensBulk(
+/** GĐ3/GĐ4a — lấy (tạo nếu thiếu) token còn hiệu lực cho NHIỀU máy móc HOẶC nhiều xe, để in tem hàng loạt.
+ *  Id khác nhà máy / không tồn tại bị bỏ qua. Trả theo thứ tự `ids`. */
+export async function getOrCreateEquipmentTokensBulk(
   factoryId: string,
-  assetIds: string[],
+  kind: EquipmentKind,
+  inputIds: string[],
   actorId: string,
-): Promise<AssetQrLabel[]> {
+): Promise<EquipmentQrLabel[]> {
   const admin = getSupabaseAdmin()
-  const ids = [...new Set(assetIds)]
-  const assets = new Map<string, { ma_tb: string; ten_tb: string; bo_phan: string }>()
+  const col = TOKEN_COL[kind]
+  const ids = [...new Set(inputIds)]
+  const items = new Map<string, { ma_tb: string; ten_tb: string; bo_phan: string }>()
   const tokens = new Map<string, string>()
 
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK)
-    const { data, error } = await admin
-      .from("maintenance_assets")
-      .select("id, ma_tb, ten_tb, bo_phan")
-      .eq("factory_id", factoryId)
-      .in("id", chunk)
-    if (error) throw new Error(error.message)
-    for (const a of data || []) {
-      assets.set(a.id as string, { ma_tb: (a.ma_tb as string) || "", ten_tb: (a.ten_tb as string) || "", bo_phan: (a.bo_phan as string) || "" })
+    if (kind === "asset") {
+      const { data, error } = await admin
+        .from("maintenance_assets")
+        .select("id, ma_tb, ten_tb, bo_phan")
+        .eq("factory_id", factoryId)
+        .in("id", chunk)
+      if (error) throw new Error(error.message)
+      for (const a of data || []) {
+        items.set(a.id as string, { ma_tb: (a.ma_tb as string) || "", ten_tb: (a.ten_tb as string) || "", bo_phan: (a.bo_phan as string) || "" })
+      }
+    } else {
+      const { data, error } = await admin
+        .from("dispatch_vehicles")
+        .select("id, code, name")
+        .eq("factory_id", factoryId)
+        .in("id", chunk)
+      if (error) throw new Error(error.message)
+      for (const v of data || []) {
+        items.set(v.id as string, { ma_tb: (v.code as string) || "", ten_tb: (v.name as string) || (v.code as string) || "", bo_phan: "Đội xe" })
+      }
     }
     const { data: tk, error: tErr } = await admin
       .from("equipment_qr_tokens")
-      .select("asset_id, token")
-      .in("asset_id", chunk)
+      .select(`${col}, token`)
+      .in(col, chunk)
       .is("revoked_at", null)
     if (tErr) throw new Error(tErr.message)
-    for (const t of tk || []) tokens.set(t.asset_id as string, t.token as string)
+    for (const t of (tk || []) as unknown as Record<string, string>[]) tokens.set(t[col], t.token)
   }
 
-  const missing = [...assets.keys()].filter((id) => !tokens.has(id))
+  const missing = [...items.keys()].filter((id) => !tokens.has(id))
   for (let i = 0; i < missing.length; i += CHUNK) {
     const chunk = missing.slice(i, i + CHUNK)
     const { data, error } = await admin
       .from("equipment_qr_tokens")
-      .insert(chunk.map((assetId) => ({ factory_id: factoryId, asset_id: assetId, created_by: actorId })))
-      .select("asset_id, token")
+      .insert(chunk.map((id) => ({ factory_id: factoryId, [col]: id, created_by: actorId })))
+      .select(`${col}, token`)
     if (error) {
       // Có người tạo song song (23505) ⇒ xử lý từng thiết bị của lô này.
       if ((error as { code?: string }).code !== "23505") throw new Error(error.message)
-      for (const assetId of chunk) {
-        const token = await getOrCreateAssetToken(factoryId, assetId, actorId)
-        if (token) tokens.set(assetId, token)
+      for (const id of chunk) {
+        const token = await getOrCreateEquipmentToken(factoryId, kind, id, actorId)
+        if (token) tokens.set(id, token)
       }
       continue
     }
-    for (const t of data || []) tokens.set(t.asset_id as string, t.token as string)
+    for (const t of (data || []) as unknown as Record<string, string>[]) tokens.set(t[col], t.token)
   }
 
-  const out: AssetQrLabel[] = []
+  const out: EquipmentQrLabel[] = []
   for (const id of ids) {
-    const a = assets.get(id)
+    const it = items.get(id)
     const token = tokens.get(id)
-    if (a && token) out.push({ assetId: id, ...a, token })
+    if (it && token) out.push({ id, ...it, token })
   }
   return out
 }
 
 /** GĐ3 — "Tạo lại QR": thu hồi token đang hiệu lực (tem cũ chết ngay) rồi tạo token mới.
  *  Chèn token mới lỗi ⇒ gỡ thu hồi token cũ để thiết bị không bị mất QR. */
-export async function regenerateAssetToken(factoryId: string, assetId: string, actorId: string): Promise<string | null> {
+export async function regenerateEquipmentToken(
+  factoryId: string,
+  kind: EquipmentKind,
+  id: string,
+  actorId: string,
+): Promise<string | null> {
   const admin = getSupabaseAdmin()
-  const { data: asset, error: aErr } = await admin
-    .from("maintenance_assets")
-    .select("id")
-    .eq("id", assetId)
-    .eq("factory_id", factoryId)
-    .maybeSingle()
-  if (aErr) throw new Error(aErr.message)
-  if (!asset) return null
+  if (!(await equipmentBelongs(factoryId, kind, id))) return null
+  const col = TOKEN_COL[kind]
 
   const { data: revoked, error: rErr } = await admin
     .from("equipment_qr_tokens")
     .update({ revoked_at: new Date().toISOString(), revoked_by: actorId })
-    .eq("asset_id", assetId)
+    .eq(col, id)
     .eq("factory_id", factoryId)
     .is("revoked_at", null)
     .select("token")
@@ -773,7 +876,7 @@ export async function regenerateAssetToken(factoryId: string, assetId: string, a
 
   const { data, error } = await admin
     .from("equipment_qr_tokens")
-    .insert({ factory_id: factoryId, asset_id: assetId, created_by: actorId })
+    .insert({ factory_id: factoryId, [col]: id, created_by: actorId })
     .select("token")
     .single()
   if (error) {

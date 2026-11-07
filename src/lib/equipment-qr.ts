@@ -33,8 +33,16 @@ export type EquipmentPublicInfo = {
   ten_tb: string
   ma_tb: string
   loai: "may_moc" | "xe"
+  /** Chỉ xe Đội xe (GĐ4a): `dispatch_vehicles.vehicle_type`. */
+  loai_xe?: string | null
   bo_phan: string
   last_maintenance: { ngay: string; hang_muc: string } | null
+}
+
+/** Chỉ trả cho người ĐÃ đăng nhập (qua /history) — người chốt 2026-11-07: biển số + tài xế không công khai. */
+export type EquipmentVehicleInfo = {
+  plate_number: string | null
+  driver_name: string | null
 }
 
 export type EquipmentHistoryMaterial = {
@@ -88,6 +96,8 @@ export type EquipmentHistoryResponse = {
   canOpenModule: boolean
   /** Có `maintenance.create` ⇒ link tạo biên bản điền sẵn thiết bị; không có quyền ⇒ null. */
   createRecordHref: string | null
+  /** Xe Đội xe: biển số + tài xế chính hiện hành; máy móc ⇒ null. */
+  vehicle: EquipmentVehicleInfo | null
   total: number
   records: EquipmentHistoryRecord[]
 }

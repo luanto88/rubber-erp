@@ -481,6 +481,13 @@ Test điện thoại: cần https ⇒ commit + push nhánh để có link previe
 4. GĐ4 khác (chưa chốt): BOM thực tế, lịch bảo trì định kỳ + nhắc, nút "Báo hỏng" công khai (CAPTCHA + rate limit).
 5. Ngoài phạm vi: vá `/storage` + `/product-label` (rate limit, noindex).
 
+## Trạng thái 2026-11-07 (phiên tối) — GĐ4a ĐÃ CODE, chờ test tay
+- Test điện thoại thật GĐ3c: PASS (người dùng xác nhận).
+- /tb: 2 tầng tab tách hình thức (menu lớn dính đầu màn + chip lọc nhỏ).
+- GĐ4a QR cho xe: xem rule 14 mục "GĐ4a". Migration 20261115 (tuỳ chọn) chưa chạy.
+- Sửa lỗi Cài đặt → Xe "Hiệu lực từ" luôn = hôm nay + `addDays` lệch 1 ngày. Dữ liệu thật (kiểm 2026-11-07, chỉ đọc):
+  66 dòng lịch sử tài xế / 46 xe, 19 cặp hở 1 ngày, 2 dòng "đến < từ" (X03, 5B) — CHƯA sửa, chờ người dùng quyết.
+
 ## Prompt bàn giao phiên sau (2026-11-07, sau khi lên production)
 ```
 Đọc CLAUDE.md, rule 14 (các mục "Tra cứu thiết bị bằng QR" GĐ1→GĐ3c) và docs/qr-equipment-plan.md mục

@@ -25,7 +25,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
       return NextResponse.json(NOT_FOUND, { status: 404, headers: NO_STORE })
     }
     const canSeeCost = await isoActorHasPermission(actor, ["maintenance.view_cost"])
-    const result = await loadEquipmentStats({ factoryId: target.factoryId, assetId: target.assetId }, { canSeeCost })
+    const result = await loadEquipmentStats(target, { canSeeCost })
     if (!result) return NextResponse.json(NOT_FOUND, { status: 404, headers: NO_STORE })
     return NextResponse.json(result, { headers: NO_STORE })
   } catch (err) {

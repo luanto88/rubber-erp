@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import dynamic from "next/dynamic"
-import { BarChart3, Camera, ChevronDown, ExternalLink, FilePlus2, History, Home, LogIn, LogOut, Package, QrCode, ScanQrCode, WifiOff } from "lucide-react"
+import { BarChart3, Camera, ChevronDown, CreditCard, ExternalLink, FilePlus2, History, Home, LogIn, LogOut, Package, QrCode, ScanQrCode, UserRound, WifiOff } from "lucide-react"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { getFreshAuthSession, signOutEverywhere } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
@@ -14,13 +14,14 @@ import {
   parseEquipmentQrToken,
   type EquipmentHistoryRecord,
   type EquipmentHistoryResponse,
+  type EquipmentVehicleInfo,
   type EquipmentViewer,
 } from "@/lib/equipment-qr"
 import { ImageLightbox } from "@/app/dashboard/purchase/_components/purchase-image-picker"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
-import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { QrScanPortal } from "@/app/dashboard/_components/qr-scan-portal"
 import { EquipmentMaterialsTab } from "./equipment-materials-tab"
+import { EquipmentMainTabs, FilterChips } from "./equipment-tab-ui"
 
 // Recharts chỉ nạp khi mở tab Thống kê.
 const EquipmentStatsView = dynamic(() => import("./equipment-stats-view").then((m) => m.EquipmentStatsView), {
@@ -288,6 +289,7 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
   const [canSeeCost, setCanSeeCost] = useState(false)
   const [canOpenModule, setCanOpenModule] = useState(false)
   const [createRecordHref, setCreateRecordHref] = useState<string | null>(null)
+  const [vehicle, setVehicle] = useState<EquipmentVehicleInfo | null>(null)
   const [view, setView] = useState<View>("history")
   const [viewer, setViewer] = useState<EquipmentViewer | null>(null)
   const [zoomUrl, setZoomUrl] = useState<string | null>(null)
@@ -376,6 +378,7 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
         setCanSeeCost(!!json.canSeeCost)
         setCanOpenModule(!!json.canOpenModule)
         setCreateRecordHref(json.createRecordHref ?? null)
+        setVehicle(json.vehicle ?? null)
         setTotal(json.total || 0)
         setRecords((prev) => (offset === 0 ? json.records || [] : [...prev, ...(json.records || [])]))
         setState({ kind: "ready" })
@@ -454,6 +457,24 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
 
       {children}
 
+      {/* Xe Đội xe — biển số + tài xế chính chỉ cho người đã đăng nhập có quyền tra cứu. */}
+      {state.kind === "ready" && vehicle && (
+        <section className="grid grid-cols-2 gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+              <CreditCard size={14} /> Biển số
+            </p>
+            <p className="truncate font-code text-base font-bold text-slate-800">{vehicle.plate_number || "—"}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+              <UserRound size={14} /> Tài xế chính
+            </p>
+            <p className="truncate text-base font-bold text-slate-800">{vehicle.driver_name || "—"}</p>
+          </div>
+        </section>
+      )}
+
       {state.kind === "offline" && !swBanner && (
         <div
           role="status"
@@ -499,11 +520,10 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
       )}
 
       {state.kind === "ready" && (
-        <SegmentedTabs<View>
+        <EquipmentMainTabs<View>
           ariaLabel="Lịch sử, vật tư hoặc thống kê"
           value={view}
           onChange={setView}
-          fullWidth
           items={[
             { key: "history", label: "Lịch sử", icon: History },
             { key: "materials", label: "Vật tư", icon: Package },
@@ -527,11 +547,10 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
             </h2>
             {inactive && <StatusBadge tone="danger" label="Ngừng dùng" />}
           </div>
-          <SegmentedTabs<Filter>
+          <FilterChips<Filter>
             ariaLabel="Lọc hạng mục"
             value={filter}
             onChange={(k) => setFilter(k)}
-            fullWidth
             items={[
               { key: "all", label: "Tất cả" },
               { key: "Sửa chữa", label: "Sửa chữa" },

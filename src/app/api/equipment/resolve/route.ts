@@ -21,6 +21,22 @@ export async function GET(req: NextRequest) {
     )
     if (!target || target.factoryId !== actor.factoryId) return notFound
 
+    // GĐ4a — tem xe Đội xe.
+    if ("vehicleId" in target) {
+      const { data: v, error: vErr } = await getSupabaseAdmin()
+        .from("dispatch_vehicles")
+        .select("id, code, name")
+        .eq("id", target.vehicleId)
+        .eq("factory_id", actor.factoryId)
+        .maybeSingle()
+      if (vErr) throw new Error(vErr.message)
+      if (!v) return notFound
+      return NextResponse.json(
+        { kind: "vehicle", vehicleId: v.id, ma_tb: v.code, ten_tb: v.name || v.code, bo_phan: "Đội xe" },
+        { headers: { "Cache-Control": "no-store" } },
+      )
+    }
+
     const { data, error } = await getSupabaseAdmin()
       .from("maintenance_assets")
       .select("id, ma_tb, ten_tb, bo_phan")
@@ -31,7 +47,7 @@ export async function GET(req: NextRequest) {
     if (!data) return notFound
 
     return NextResponse.json(
-      { assetId: data.id, ma_tb: data.ma_tb, ten_tb: data.ten_tb, bo_phan: data.bo_phan },
+      { kind: "asset", assetId: data.id, ma_tb: data.ma_tb, ten_tb: data.ten_tb, bo_phan: data.bo_phan },
       { headers: { "Cache-Control": "no-store" } },
     )
   } catch (err) {

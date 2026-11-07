@@ -7,7 +7,8 @@ import { OrderQrDownload } from "@/app/dashboard/export/_components/order-qr-dow
 import { authFetch } from "@/lib/auth-fetch"
 import { buildEquipmentQrUrl } from "@/lib/equipment-qr"
 
-export type EquipmentQrTarget = { id: string; ma_tb: string; ten_tb: string }
+/** `kind` mặc định "asset" (máy móc); "vehicle" = xe Đội xe (GĐ4a, `ma_tb` = mã xe). */
+export type EquipmentQrTarget = { id: string; ma_tb: string; ten_tb: string; kind?: "asset" | "vehicle" }
 
 // QR dán trên thiết bị (docs/qr-equipment-plan.md, GĐ1). Lấy/tạo token qua API service role,
 // hiển thị QR + tải PNG (mã thiết bị in dưới QR để người đọc được khi QR mờ).
@@ -28,6 +29,9 @@ export function EquipmentQrModal({
   const [regenerating, setRegenerating] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
   const [regenerated, setRegenerated] = useState(false)
+  const isVehicle = asset.kind === "vehicle"
+  const refBody = JSON.stringify(isVehicle ? { vehicleId: asset.id } : { assetId: asset.id })
+  const noun = isVehicle ? "xe" : "thiết bị"
 
   useEffect(() => {
     let alive = true
@@ -36,7 +40,7 @@ export function EquipmentQrModal({
         const res = await authFetch("/api/equipment/qr-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ assetId: asset.id }),
+          body: refBody,
         })
         const json = (await res.json().catch(() => ({}))) as { token?: string; error?: string }
         if (!alive) return
@@ -50,7 +54,7 @@ export function EquipmentQrModal({
     return () => {
       alive = false
     }
-  }, [asset.id])
+  }, [refBody])
 
   // Xác nhận bằng ô tick (trước gõ lại mã — vô nghĩa vì mã hiện ngay trên hộp thoại).
   const handleRegenerate = async () => {
@@ -61,7 +65,7 @@ export function EquipmentQrModal({
       const res = await authFetch("/api/equipment/qr-token/regenerate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetId: asset.id }),
+        body: refBody,
       })
       const json = (await res.json().catch(() => ({}))) as { token?: string; error?: string }
       if (!res.ok || !json.token) {
@@ -83,7 +87,7 @@ export function EquipmentQrModal({
 
   return (
     <>
-      <ModalShell title={`QR thiết bị ${asset.ma_tb}`} onClose={onClose} maxWidth="sm">
+      <ModalShell title={`QR ${noun} ${asset.ma_tb}`} onClose={onClose} maxWidth="sm">
         <p className="text-sm font-semibold text-slate-700">{asset.ten_tb}</p>
         {error ? (
           <p className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>
@@ -107,7 +111,8 @@ export function EquipmentQrModal({
               <ExternalLink size={14} /> Mở trang tra cứu
             </a>
             <p className="text-xs text-slate-500">
-              Người chưa đăng nhập chỉ thấy tên, mã, loại, bộ phận và ngày bảo trì gần nhất.
+              Người chưa đăng nhập chỉ thấy tên, mã, loại, bộ phận và ngày bảo trì gần nhất
+              {isVehicle ? " (không thấy biển số, tài xế)." : "."}
             </p>
             {canRegenerate && (
               <div className="border-t border-slate-100 pt-3">
@@ -127,7 +132,7 @@ export function EquipmentQrModal({
 
       {confirmOpen && (
         <ModalShell
-          title="Tạo lại QR thiết bị?"
+          title={`Tạo lại QR ${noun}?`}
           onClose={() => { if (!regenerating) setConfirmOpen(false) }}
           maxWidth="sm"
           zIndexClassName="z-[60]"

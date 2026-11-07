@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { isoActorHasPermission, isoAuthErrorStatus, resolveIsoActor } from "@/app/api/iso/_lib/iso-actor"
-import { getOrCreateAssetTokensBulk } from "@/lib/equipment-lookup"
+import { getOrCreateEquipmentTokensBulk } from "@/lib/equipment-lookup"
+import { parseEquipmentRefList } from "../_lib/parse-ref"
 
 export const dynamic = "force-dynamic"
 
-const MAX_ASSETS = 500
-const UUID_RE = /^[0-9a-f-]{36}$/i
+const MAX_ITEMS = 500
 
-// GĐ3 — lấy/tạo token QR cho nhiều máy móc để in tem hàng loạt (Cài đặt → Bảo trì → Thiết bị).
-// Cùng quyền với nút QR từng dòng. Nhà máy lấy từ phiên, không tin client.
+// GĐ3/GĐ4a — lấy/tạo token QR cho nhiều máy móc (`assetIds`) HOẶC nhiều xe (`vehicleIds`) để in tem
+// hàng loạt. Cùng quyền với nút QR từng dòng. Nhà máy lấy từ phiên, không tin client.
 export async function POST(req: NextRequest) {
   try {
     const actor = await resolveIsoActor(req)
@@ -19,16 +19,13 @@ export async function POST(req: NextRequest) {
     ])
     if (!allowed) return NextResponse.json({ error: "Bạn chưa có quyền in tem QR thiết bị" }, { status: 403 })
 
-    const body = (await req.json().catch(() => ({}))) as { assetIds?: unknown }
-    const assetIds = Array.isArray(body.assetIds)
-      ? body.assetIds.filter((v): v is string => typeof v === "string" && UUID_RE.test(v))
-      : []
-    if (assetIds.length === 0) return NextResponse.json({ error: "Chưa chọn thiết bị nào" }, { status: 400 })
-    if (assetIds.length > MAX_ASSETS) {
-      return NextResponse.json({ error: `Mỗi lần in tối đa ${MAX_ASSETS} thiết bị` }, { status: 400 })
+    const { kind, ids } = parseEquipmentRefList(await req.json().catch(() => ({})))
+    if (ids.length === 0) return NextResponse.json({ error: "Chưa chọn thiết bị nào" }, { status: 400 })
+    if (ids.length > MAX_ITEMS) {
+      return NextResponse.json({ error: `Mỗi lần in tối đa ${MAX_ITEMS} thiết bị` }, { status: 400 })
     }
 
-    const labels = await getOrCreateAssetTokensBulk(actor.factoryId, assetIds, actor.userId)
+    const labels = await getOrCreateEquipmentTokensBulk(actor.factoryId, kind, ids, actor.userId)
     return NextResponse.json({ labels }, { headers: { "Cache-Control": "no-store" } })
   } catch (err) {
     const status = isoAuthErrorStatus(err)

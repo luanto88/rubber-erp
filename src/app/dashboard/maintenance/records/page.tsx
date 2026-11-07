@@ -199,6 +199,21 @@ export default function MaintenanceRecordsPage() {
         return
       }
       const eq = res.equipment
+      if (eq.kind === "vehicle") {
+        // GĐ4a — tem xe: lọc biên bản của đúng xe đó, bỏ lọc bộ phận, giữ khoảng ngày.
+        setVehicles((prev) =>
+          prev.some((v) => v.id === eq.vehicleId)
+            ? prev
+            : [...prev, { id: eq.vehicleId, code: eq.ma_tb, name: eq.ten_tb, vehicle_type: null, plate_number: null }],
+        )
+        setFilterBoPhan([])
+        setSelectedAssetIds([])
+        setSelectedVehicleIds([eq.vehicleId])
+        setFilterSearch("")
+        setScanning(false)
+        setToast({ msg: `Đã lọc biên bản của xe ${eq.ma_tb} — ${eq.ten_tb}`, ok: true })
+        return
+      }
       setAssets((prev) =>
         prev.some((a) => a.id === eq.assetId)
           ? prev

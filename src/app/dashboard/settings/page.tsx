@@ -20,11 +20,13 @@ import { fetchSecureUrl } from "@/app/dashboard/_components/secure-file-open"
 import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
 import { isBlankNoteContent } from "@/lib/note-filter"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
+import { getFactoryTodayISO } from "@/lib/date-utils"
 import { prepareForestPlotGeometry, mergeGeometryPieces, computeGeometryHash } from "@/lib/eudr-write-gate"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
 import { ExtMaterialModal, emptyExtMaterialForm, type ExtMaterialFormValues } from "../maintenance/_components/ext-material-modal"
 import { EquipmentQrModal, type EquipmentQrTarget } from "../maintenance/_components/equipment-qr-modal"
+import { printEquipmentLabels } from "../maintenance/_components/equipment-scan"
 import { CategoryNameClashWarning, findCategoryNameClashes, isClashConfirmed } from "../_components/category-name-clash"
 import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { RepairThresholdCard } from "./_components/repair-threshold-card"
@@ -593,16 +595,23 @@ function emptyDispatchVehicleForm(sortOrder = "0"): DispatchVehicleForm {
     plate_number: "",
     sort_order: sortOrder,
     primary_driver_id: "",
-    effective_from: new Date().toISOString().slice(0, 10),
+    effective_from: getFactoryTodayISO(),
     note: "",
     is_active: true,
   }
 }
 
+// Cộng ngày trên chuỗi YYYY-MM-DD theo UTC (trước đây tạo ngày giờ ĐỊA PHƯƠNG rồi đọc bằng toISOString
+// ⇒ ở UTC+7 lùi thêm 1 ngày: addDays("2026-11-07", -1) ra "2026-11-05").
 function addDays(value: string, days: number) {
-  const date = new Date(`${value}T00:00:00`)
-  date.setDate(date.getDate() + days)
+  const date = new Date(`${value}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
+}
+
+function formatIsoDateVN(iso: string) {
+  const [y, m, d] = iso.slice(0, 10).split("-")
+  return y && m && d ? `${d}/${m}/${y}` : iso
 }
 
 function parsePointPhaseList(value: string) {
@@ -988,6 +997,9 @@ export default function SettingsPage() {
   const [assetBoPhanFilter, setAssetBoPhanFilter] = useState("")
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(() => new Set())
   const [assetLabelPrinting, setAssetLabelPrinting] = useState(false)
+  const [selectedVehicleQrIds, setSelectedVehicleQrIds] = useState<Set<string>>(new Set())
+  const [vehicleLabelPrinting, setVehicleLabelPrinting] = useState(false)
+  const [vehicleLabelError, setVehicleLabelError] = useState<string | null>(null)
   const [assetLabelError, setAssetLabelError] = useState<string | null>(null)
   const [assetForm, setAssetForm] = useState({ ma_tb: "", ten_tb: "", bo_phan: "Mủ tạp", loai: "may_moc", nam_sd: "", bien_so: "", mo_ta: "", trang_thai: "active" })
   const [departments, setDepartments] = useState<DepartmentOption[]>([])
@@ -1833,6 +1845,15 @@ export default function SettingsPage() {
     if (!dispatchVehicleForm.name.trim()) { setConfigError("Tên xe không được để trống"); return }
     if (!dispatchVehicleForm.primary_driver_id) { setConfigError("Vui lòng chọn tài xế chính"); return }
     if (!dispatchVehicleForm.effective_from) { setConfigError("Ngày hiệu lực không được để trống"); return }
+    // Đổi tài xế chính: ngày hiệu lực mới phải SAU ngày bắt đầu của tài xế hiện tại (dòng cũ được đóng
+    // vào ngày hôm trước — trước đây không kiểm nên có thể sinh dòng "đến ngày" nhỏ hơn "từ ngày").
+    if (configEditId) {
+      const cur = dispatchVehicleAssignments.find((row) => row.vehicle_id === configEditId && row.is_current) || null
+      if (cur && cur.driver_id !== dispatchVehicleForm.primary_driver_id && dispatchVehicleForm.effective_from <= cur.effective_from) {
+        setConfigError(`Ngày hiệu lực của tài xế mới phải sau ${formatIsoDateVN(cur.effective_from)} (ngày bắt đầu của tài xế chính hiện tại)`)
+        return
+      }
+    }
     setConfigSaving(true)
     setConfigError("")
     try {
@@ -2489,6 +2510,29 @@ export default function SettingsPage() {
     () => dispatchVehicles.filter((r) => matchesSearchQuery(listSearch.vehicles || "", [r.code, r.name, r.vehicle_type, r.plate_number, r.current_driver_name])),
     [dispatchVehicles, listSearch.vehicles],
   )
+  // GĐ4a — chọn xe để in tem QR hàng loạt (cùng cách tab Thiết bị).
+  const allShownVehiclesSelected = searchedDispatchVehicles.length > 0 && searchedDispatchVehicles.every((v) => selectedVehicleQrIds.has(v.id))
+  const toggleVehicleQrSelected = (id: string) => setSelectedVehicleQrIds((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+  const toggleAllShownVehicles = () => setSelectedVehicleQrIds((prev) => {
+    const next = new Set(prev)
+    if (allShownVehiclesSelected) searchedDispatchVehicles.forEach((v) => next.delete(v.id))
+    else searchedDispatchVehicles.forEach((v) => next.add(v.id))
+    return next
+  })
+  const printVehicleLabels = async () => {
+    if (selectedVehicleQrIds.size === 0 || vehicleLabelPrinting) return
+    setVehicleLabelPrinting(true)
+    setVehicleLabelError(null)
+    const ordered = dispatchVehicles.filter((v) => selectedVehicleQrIds.has(v.id)).map((v) => v.id)
+    const res = await printEquipmentLabels(ordered, "vehicle")
+    setVehicleLabelPrinting(false)
+    setVehicleLabelError(res.error || res.note || null)
+  }
   const searchedDispatchDrivers = useMemo(
     () => dispatchDrivers.filter((r) => matchesSearchQuery(listSearch.drivers || "", [r.code, r.name, r.phone, r.license_class])),
     [dispatchDrivers, listSearch.drivers],
@@ -5077,11 +5121,44 @@ export default function SettingsPage() {
                 </>
               ) : maintTab === "vehicles" ? (
                 <>
-                <ListSearch className="mb-3" value={searchOf("vehicles")} onChange={setSearchOf("vehicles")} placeholder="Tìm mã xe, tên, biển số, tài xế..." shown={searchedDispatchVehicles.length} total={dispatchVehicles.length} />
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                  <ListSearch value={searchOf("vehicles")} onChange={setSearchOf("vehicles")} placeholder="Tìm mã xe, tên, biển số, tài xế..." shown={searchedDispatchVehicles.length} total={dispatchVehicles.length} />
+                  <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                    {selectedVehicleQrIds.size > 0 && (
+                      <>
+                        <span className="text-xs font-bold text-slate-600">Đã chọn {selectedVehicleQrIds.size}</span>
+                        <button type="button" onClick={() => setSelectedVehicleQrIds(new Set())} className="text-xs font-bold text-slate-500 hover:underline">Bỏ chọn</button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void printVehicleLabels()}
+                      disabled={selectedVehicleQrIds.size === 0 || vehicleLabelPrinting}
+                      title={selectedVehicleQrIds.size === 0 ? "Tick chọn xe cần in tem" : "Tải PDF tem QR (A4, 20 tem/trang)"}
+                      className="flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm transition-all hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Printer size={13} /> {vehicleLabelPrinting ? "Đang tạo PDF..." : `In tem QR (${selectedVehicleQrIds.size})`}
+                    </button>
+                  </div>
+                </div>
+                {vehicleLabelError && (
+                  <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">{vehicleLabelError}</p>
+                )}
                 <ResponsiveTableWrapper>
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
+                      <th className="w-10 px-4 py-3 text-left">
+                        <input
+                          type="checkbox"
+                          checked={allShownVehiclesSelected}
+                          onChange={toggleAllShownVehicles}
+                          disabled={searchedDispatchVehicles.length === 0}
+                          aria-label="Chọn tất cả xe đang hiện"
+                          title="Chọn/bỏ chọn tất cả xe đang hiện"
+                          className="h-4 w-4 accent-brand-600"
+                        />
+                      </th>
                       {["Mã xe", "Tên xe", "Loại", "Biển số", "Tài xế chính", "Trạng thái", ""].map((h) => (
                         <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
                       ))}
@@ -5089,9 +5166,18 @@ export default function SettingsPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {searchedDispatchVehicles.length === 0 ? (
-                      <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">{dispatchVehicles.length > 0 ? noSearchMatchText(searchOf("vehicles")) : "Chưa có xe nào"}</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">{dispatchVehicles.length > 0 ? noSearchMatchText(searchOf("vehicles")) : "Chưa có xe nào"}</td></tr>
                     ) : searchedDispatchVehicles.map((v) => (
-                      <tr key={v.id} className="row-hover">
+                      <tr key={v.id} className={"row-hover " + (selectedVehicleQrIds.has(v.id) ? "bg-brand-50" : "")}>
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedVehicleQrIds.has(v.id)}
+                            onChange={() => toggleVehicleQrSelected(v.id)}
+                            aria-label={`Chọn xe ${v.code}`}
+                            className="h-4 w-4 accent-brand-600"
+                          />
+                        </td>
                         <td className="px-4 py-3 font-mono font-bold text-orange-700">{v.code}</td>
                         <td className="px-4 py-3 font-medium text-slate-700">{v.name}</td>
                         <td className="px-4 py-3 text-slate-500 text-xs">{v.vehicle_type || "—"}</td>
@@ -5101,13 +5187,15 @@ export default function SettingsPage() {
                           <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (v.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{v.is_active ? "Hoạt động" : "Ngừng"}</span>
                         </td>
                         <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                          <button onClick={() => setAssetQr({ kind: "vehicle", id: v.id, ma_tb: v.code, ten_tb: v.name || v.code })} title="QR tra cứu xe" aria-label="QR tra cứu xe" className="p-1.5 hover:bg-slate-100 text-slate-600 rounded-lg transition-colors"><QrCode size={13} /></button>
                           {canManageSettings && (
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={() => {
                                   setConfigEditId(v.id); setConfigError("")
                                   const cur = dispatchVehicleAssignments.find(a => a.vehicle_id === v.id && a.is_current)
-                                  setDispatchVehicleForm({ code: v.code, name: v.name, vehicle_type: v.vehicle_type || "", plate_number: v.plate_number || "", sort_order: String(v.sort_order ?? 0), is_active: v.is_active, primary_driver_id: cur?.driver_id || "", effective_from: new Date().toISOString().slice(0, 10), note: "" })
+                                  setDispatchVehicleForm({ code: v.code, name: v.name, vehicle_type: v.vehicle_type || "", plate_number: v.plate_number || "", sort_order: String(v.sort_order ?? 0), is_active: v.is_active, primary_driver_id: cur?.driver_id || "", effective_from: cur?.effective_from || getFactoryTodayISO(), note: "" })
                                   setConfigModal("vehicle")
                                 }}
                                 className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
@@ -5123,6 +5211,7 @@ export default function SettingsPage() {
                               ><UserCog size={13} /></button>
                             </div>
                           )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -6360,7 +6449,21 @@ export default function SettingsPage() {
                       />
                       <select
                         value={dispatchVehicleForm.primary_driver_id}
-                        onChange={(e) => { setDispatchVehicleForm((p) => ({ ...p, primary_driver_id: e.target.value })); setVehicleDriverSearch("") }}
+                        onChange={(e) => {
+                          const nextDriver = e.target.value
+                          const cur = configEditId ? dispatchVehicleAssignments.find((a) => a.vehicle_id === configEditId && a.is_current) || null : null
+                          // Giữ tài xế cũ ⇒ ngày = ngày bắt đầu thật của tài xế đó; đổi tài xế ⇒ mặc định hôm nay (giờ nhà máy).
+                          setDispatchVehicleForm((p) => ({
+                            ...p,
+                            primary_driver_id: nextDriver,
+                            effective_from: cur
+                              ? cur.driver_id === nextDriver
+                                ? cur.effective_from
+                                : p.effective_from === cur.effective_from ? getFactoryTodayISO() : p.effective_from
+                              : p.effective_from,
+                          }))
+                          setVehicleDriverSearch("")
+                        }}
                         className="w-full px-3 py-2 border border-t-0 border-slate-300 rounded-b-xl text-sm outline-none focus:border-emerald-500"
                         size={Math.min(5, dispatchDrivers.filter(r => (r.is_active || r.id === dispatchVehicleForm.primary_driver_id) && (!vehicleDriverSearch || r.name.toLowerCase().includes(vehicleDriverSearch.toLowerCase()) || (r.code || "").toLowerCase().includes(vehicleDriverSearch.toLowerCase()))).length + 1)}
                       >
@@ -6374,10 +6477,32 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Hiệu lực từ *</label>
-                      <input type="date" value={dispatchVehicleForm.effective_from} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, effective_from: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
-                    </div>
+                    {(() => {
+                      const cur = configEditId ? dispatchVehicleAssignments.find((a) => a.vehicle_id === configEditId && a.is_current) || null : null
+                      const keepDriver = !!cur && cur.driver_id === dispatchVehicleForm.primary_driver_id
+                      return (
+                        <div>
+                          <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                            {cur && !keepDriver ? "Tài xế mới hiệu lực từ *" : "Hiệu lực từ *"}
+                          </label>
+                          <input
+                            type="date"
+                            value={dispatchVehicleForm.effective_from}
+                            min={cur && !keepDriver ? addDays(cur.effective_from, 1) : undefined}
+                            disabled={keepDriver}
+                            onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, effective_from: e.target.value }))}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50 disabled:text-slate-500"
+                          />
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {keepDriver
+                              ? "Ngày bắt đầu của tài xế chính hiện tại — chỉ sửa khi đổi tài xế."
+                              : cur
+                                ? `Tài xế hiện tại được đóng vào ngày trước ngày này (phải sau ${formatIsoDateVN(cur.effective_from)}).`
+                                : "Ngày tài xế chính bắt đầu phụ trách xe."}
+                          </p>
+                        </div>
+                      )
+                    })()}
                     <div className="flex items-end">
                       <label className="flex items-center gap-2 text-sm text-slate-700">
                         <input type="checkbox" checked={dispatchVehicleForm.is_active} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, is_active: e.target.checked }))} /> Đang dùng

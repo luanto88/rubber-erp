@@ -444,6 +444,23 @@ export default function MaintenanceHistoryPage() {
         return
       }
       const eq = res.equipment
+      if (eq.kind === "vehicle") {
+        // GĐ4a — tem xe: chọn đúng xe, bộ phận "Đội xe". Xe ngừng dùng chưa có trong danh sách ⇒ thêm tạm.
+        setVehicles((prev) =>
+          prev.some((v) => v.id === eq.vehicleId)
+            ? prev
+            : [...prev, { id: eq.vehicleId, code: eq.ma_tb, name: eq.ten_tb, vehicle_type: null, plate_number: null }],
+        )
+        setFilterBoPhan("Đội xe")
+        setSelectedAssetIds([])
+        setSelectedVehicleIds([eq.vehicleId])
+        setFilterFrom("")
+        setFilterTo("")
+        setFilterSearch("")
+        setScanning(false)
+        setScanNotice({ text: `Đã quét tem xe ${eq.ma_tb} — ${eq.ten_tb}. Đang hiển thị lý lịch.`, tone: "ok" })
+        return
+      }
       // Thiết bị ngừng dùng không có trong danh sách chọn ⇒ thêm vào để chip/in tem vẫn chạy.
       setAssets((prev) =>
         prev.some((a) => a.id === eq.assetId)
@@ -505,20 +522,19 @@ export default function MaintenanceHistoryPage() {
     )
   }
 
-  // In tem QR cho các máy móc đang chọn (giữ thứ tự danh sách thiết bị). Xe chưa có tem (GĐ4).
+  // In tem QR cho các máy móc HOẶC các xe đang chọn (giữ thứ tự danh sách). Xe từ GĐ4a.
   const handlePrintLabels = async () => {
-    if (labelPrinting || selectedAssetIds.length === 0) return
+    if (labelPrinting || (selectedAssetIds.length === 0 && selectedVehicleIds.length === 0)) return
     setLabelPrinting(true)
-    const ordered = assets.filter((a) => selectedAssetIds.includes(a.id)).map((a) => a.id)
-    const res = await printEquipmentLabels(ordered)
+    const res =
+      selectedVehicleIds.length > 0
+        ? await printEquipmentLabels(vehicles.filter((v) => selectedVehicleIds.includes(v.id)).map((v) => v.id), "vehicle")
+        : await printEquipmentLabels(assets.filter((a) => selectedAssetIds.includes(a.id)).map((a) => a.id))
     setLabelPrinting(false)
     if (res.error) setScanNotice({ text: res.error, tone: "warn" })
     else if (res.note) setScanNotice({ text: res.note, tone: "warn" })
   }
-  const labelHint =
-    selectedVehicleIds.length > 0
-      ? "Tem QR chỉ áp dụng máy móc (chưa áp dụng xe)"
-      : "Chọn thiết bị để in tem QR"
+  const labelHint = "Chọn thiết bị hoặc xe để in tem QR"
 
   // Chips display
   const selectedVehicles = vehicles.filter((v) => selectedVehicleIds.includes(v.id))
@@ -573,9 +589,17 @@ export default function MaintenanceHistoryPage() {
             )}
             <BannerAction
               href={null}
-              onClick={selectedAssetIds.length > 0 && !labelPrinting ? () => void handlePrintLabels() : undefined}
+              onClick={totalSelected > 0 && !labelPrinting ? () => void handlePrintLabels() : undefined}
               icon={Tag}
-              label={labelPrinting ? "Đang tạo tem..." : selectedAssetIds.length > 0 ? `In tem QR (${selectedAssetIds.length})` : "In tem QR"}
+              label={
+                labelPrinting
+                  ? "Đang tạo tem..."
+                  : selectedVehicleIds.length > 0
+                    ? `In tem QR (${selectedVehicleIds.length} xe)`
+                    : selectedAssetIds.length > 0
+                      ? `In tem QR (${selectedAssetIds.length})`
+                      : "In tem QR"
+              }
               disabledHint={labelPrinting ? "Đang tạo PDF tem" : labelHint}
             />
             <BannerAction

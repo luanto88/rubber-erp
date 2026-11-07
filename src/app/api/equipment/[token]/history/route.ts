@@ -46,9 +46,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     const result = await loadEquipmentHistory(target, { canSeeCost, offset, limit, hangMuc })
     if (!result) return NextResponse.json({ ...NOT_FOUND, viewer }, { status: 404, headers: NO_STORE })
     // Trang biên bản cần maintenance.view để mở; form chỉ chọn được thiết bị đang dùng ⇒ ẩn khi "Ngừng dùng".
+    // Xe (GĐ4a) ⇒ `?vehicle_id=` (form điền sẵn bộ phận "Đội xe" + xe + tài xế chính).
     const createRecordHref =
       canCreate && canOpenModule && !result.inactive
-        ? `/dashboard/maintenance/records/new?asset_id=${encodeURIComponent(target.assetId)}`
+        ? "vehicleId" in target
+          ? `/dashboard/maintenance/records/new?vehicle_id=${encodeURIComponent(target.vehicleId)}`
+          : `/dashboard/maintenance/records/new?asset_id=${encodeURIComponent(target.assetId)}`
         : null
     const body: EquipmentHistoryResponse = { ...result, canSeeCost, canOpenModule, createRecordHref, viewer }
     return NextResponse.json(body, { headers: NO_STORE })
