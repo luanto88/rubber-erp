@@ -1529,7 +1529,8 @@ Không migration.
   tên 1 dòng cắt "…" bên dưới, viền nét đứt để cắt (bố cục A — như nhãn ngăn lưu, ô cao ~46mm). QR =
   `buildEquipmentQrUrl` (domain qlsxkpt.vercel.app).
 - "Tạo lại QR" trong `EquipmentQrModal` (`canRegenerate` = admin | `settings.maintenance_config`): hộp xác nhận
-  bắt GÕ LẠI MÃ THIẾT BỊ (bảng token không có cột lý do ⇒ không nhập lý do). Route
+  bắt tick "Tôi hiểu tem cũ sẽ ngừng hoạt động…" (2026-11-07 thay việc gõ lại mã — vô nghĩa vì mã hiện ngay trên
+  hộp; bảng token không có cột lý do ⇒ không nhập lý do). Route
   `POST /api/equipment/qr-token/regenerate` → `regenerateAssetToken`: ghi `revoked_at/revoked_by` token cũ rồi chèn
   token mới; chèn lỗi ⇒ gỡ thu hồi token cũ. Tem cũ ⇒ 404 trung tính ngay.
 
@@ -1540,3 +1541,63 @@ Không migration.
 - 12 danh sách: Người dùng (1 ô lọc 3 bảng), Nhân sự (dùng chung Hệ thống + Bảo trì), Nhóm vật tư, Vật tư/Hóa chất,
   Điểm giao nhận, Lô vườn, Khách hàng, Ký hiệu kỹ thuật, Thiết bị, Xe, Tài xế, Vật tư ngoài. Hiện "N/M" khi có từ khoá.
   Đổi tab/sub-tab ⇒ xoá từ khoá (trừ Nhân sự). Không đổi query/quyền.
+
+## Tra cứu thiết bị bằng QR — GĐ3 quét tem ở ô tìm + in tem từ Lý lịch (2026-11-07, chờ test tay)
+Không migration.
+- API `GET /api/equipment/resolve?token=` (`maintenance.view`): token → `{assetId, ma_tb, ten_tb, bo_phan}`; token sai /
+  thu hồi / khác nhà máy ⇒ cùng 404. Client: `resolveScannedEquipment` + `printEquipmentLabels`
+  (`maintenance/_components/equipment-scan.ts`).
+- Lý lịch (`history/page.tsx`): nút Quét QR nay nhận cả tem `/tb/<token>` ⇒ chọn đúng thiết bị, bộ phận theo thiết bị
+  (trừ "Đội xe"), xoá lọc ngày + ô tìm, thông báo xanh. QR biên bản giữ như cũ. Banner thêm "In tem QR (N)" (khi đã
+  chọn máy móc; đang chọn xe ⇒ khoá, gợi ý "chưa áp dụng xe"), dùng `/api/equipment/qr-token/bulk` (quyền
+  `maintenance.view`). `BannerAction` thêm prop `onClick` (render nút).
+- Biên bản (`records/page.tsx`): ô tìm có nút xoá + Quét QR. Tem thiết bị ⇒ lọc Thiết bị/Xe = thiết bị đó, BỎ lọc bộ
+  phận (biên bản cũ có thể ghi bộ phận khác), giữ khoảng ngày, toast. QR biên bản (UUID / URL / mã `XX-ddmmyy/NNN`)
+  ⇒ mở thẳng biên bản. Chuỗi khác ⇒ ô tìm. Thiết bị ngừng dùng được thêm tạm vào danh sách để chip hiện.
+- "Tạo lại QR": xác nhận bằng ô tick (bỏ gõ lại mã).
+- Còn lại GĐ3 (chưa làm, wireframe đã gửi): thống kê MTBF (đề xuất tab "Thống kê" trên `/tb`), PWA mở `/tb` khi mất
+  mạng (đề xuất chỉ cache phần công khai) — 2 câu hỏi chờ người dùng chốt.
+
+## Tra cứu thiết bị bằng QR — GĐ3b thống kê chu kỳ (2026-11-07, test localhost PASS, đã lên production)
+Người dùng chốt (docs/qr-equipment-plan.md mục GĐ3b). Migration `20261114_equipment_stats_rpc.sql` (**chạy tay TRƯỚC deploy**):
+RPC `equipment_daily_product_output` (thành phẩm theo ngày + dây chuyền, gồm lô mồ côi) và `equipment_daily_dispatch_output`
+(KL tươi Điều xe theo ngày, đọc JSONB `rows`, lọc `p_so_xe`), chỉ service_role.
+- Chu kỳ sửa chữa = giữa 2 lần **Sửa chữa** liên tiếp, bất kể Lớn/Nhỏ, cả `cho_duyet` + `da_duyet` (bỏ huỷ/từ chối); cùng
+  ngày = 1 lần. TB ngày cần ≥ 3 lần. Sản lượng chu kỳ tính **cả ngày đầu và ngày cuối** (MCC-2 06/10–19/10 = 566.895 kg ✓).
+- Bảo dưỡng: chỉ thống kê thời gian (TB ngày, từ lần gần nhất, dự kiến lần sau). Lọc "theo vật tư" chỉ cho sửa chữa.
+- Loại sản lượng (`src/lib/equipment-stats.ts`, hàm thuần): máy Mủ tạp/Mủ nước → thành phẩm cùng dây chuyền (toàn nhà máy);
+  xe "Nâng" → chỉ giờ; xe "Xúc" (trừ "Xúc Biomass" = none) → giờ + KL tươi mủ tạp nhập về toàn nhà máy; xe vận chuyển →
+  KL tươi xe đó chở (theo `so_xe` = mã xe); còn lại không. Giờ = hiệu đồng hồ, chỉ khi CẢ 2 đầu có số và hiệu > 0.
+- API: `GET /api/equipment/[token]/stats` (`maintenance.qr_lookup`) và `GET /api/equipment/stats?asset_id|vehicle_id`
+  (`maintenance.view`); chi phí chỉ khi `maintenance.view_cost`. Loader `loadEquipmentStats` (`equipment-lookup.ts`).
+- UI `_components/equipment-stats-view.tsx` (recharts nạp lười): tab "Thống kê" trên `/tb/<token>`; Lý lịch có
+  SegmentedTabs "Lịch sử | Thống kê chu kỳ" khi chọn ĐÚNG 1 thiết bị/xe. 2 biểu đồ cột riêng (số ngày + đường TB; tấn) —
+  không dùng 2 trục. Kỳ 6/12 tháng/Tất cả tính ở client.
+- Sửa sau test (2026-11-07): Lý lịch truyền Từ–Đến ngày xuống tab Thống kê (`range`) ⇒ kỳ "Theo ngày đã chọn" chọn sẵn;
+  `computeStats` có `until` (chu kỳ đang mở chỉ khi khoảng kéo tới hôm nay). Kiểm MCC-2 06/10–19/10 lọc Dao băm = 1 chu
+  kỳ 13 ngày 566,895 tấn ✓.
+
+## Quyền xem giá `maintenance.view_cost` cho TOÀN module (2026-11-07, test localhost PASS, đã lên production)
+Người dùng chốt. Nhãn Cài đặt: "xem giá / chi phí bảo trì". Chặn ở GIAO DIỆN + mẫu in (API `/api/equipment/*` chặn ở server).
+- Helper `canSeeMaintenanceCostGlobal(user)` (admin | view_cost) và `canSeeMaintenanceRecordCost(user, rec)` (global |
+  `created_by` = mình | `nguoi_tao`/`nv_phu_trach`/`phu_trach_bao_tri` trùng `full_name`/`username`) — `maintenance-data.ts`.
+- Màn tổng hợp (chỉ global): Lý lịch (cột Giá trị + chi phí trong dòng xổ), in F01/F02/F07, `/tb`.
+- Màn theo biên bản (global hoặc người tạo/phụ trách): dòng xổ Tổng quan + Biên bản (`MaintenanceLinesDetail showCost`),
+  chi tiết biên bản (`canSeeCost`: đơn giá, tiền tệ, chi phí ước tính, công thợ, thẻ tổng hợp/Inspector chi phí), in biên
+  bản lẻ, bản xem trước PDF chưa ký. Chỉ ẩn HIỂN THỊ — state/payload lưu giữ nguyên giá.
+- PDF: `withMaintenancePdfCostVisible(visible, fn)` (`maintenance-pdf.ts`) — ẩn ⇒ `pdfMoney` trả "—", F07 bỏ dòng quy đổi
+  USD; bố cục cột biểu mẫu giữ nguyên. `build…PdfForSigning` KHÔNG bọc ⇒ PDF gửi ký luôn có giá; PDF đã ký bất biến.
+
+## Trang tem `/tb` khi mất mạng — GĐ3c (2026-11-07, test PC bản `next start` PASS, đã lên production)
+⚠️ Test SW phải tắt HẲN `npm run dev` trước (dev giữ cổng 3000 ⇒ `npm run start` không lên, trình duyệt vẫn bản dev — bản dev
+cố ý gỡ SW, dấu hiệu: nút tròn "N" góc trái dưới + Service workers trống).
+- `public/service-worker.js`: nhánh `/tb/<token 22 ký tự>` network-first 5s; HTML công khai lưu ở cache `qlsxkpt-tb-pages`
+  (KHÔNG xoá theo bản build, tối đa 30 trang, 404 ⇒ xoá); chunk ở `qlsxkpt-tb-<v>`. Mất mạng ⇒ bản lưu + chèn thanh vàng
+  `#sw-offline-banner` "lưu lúc …" cuối `<body>`; chưa lưu ⇒ trang tĩnh. Message `cache-tb` {path, statics}. Nhánh màn quét
+  Thành phẩm không đổi (static lookup thêm cache tb).
+- `equipment-history-panel.tsx`: theo dõi online/offline; offline ⇒ state "offline", không gọi API, chỉ thẻ công khai + thông
+  báo (không lặp nếu đã có thanh SW); gửi `cache-tb` sau 2s khi có mạng.
+- Kiểm bằng giả lập SW 12/12 (lưu, offline + thanh, chưa lưu, 404 xoá, giới hạn 30, không chặn đường khác, activate).
+- Sửa sau test lần 2 (2026-11-07): TB ngày / TB sản lượng hiện khi có ≥ 1 chu kỳ (trước đây "—" khi < 3 lần, trông như
+  treo); `reliable` (≥ 3 lần) chỉ quyết định ghi chú "chưa đủ để coi là trung bình" và "Dự kiến lần sau". Khoảng ngày kết
+  thúc trước hôm nay ⇒ thẻ "Đang chạy" ghi "Khoảng ngày đã chọn kết thúc …".

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Camera, ChevronDown, ExternalLink, FilePlus2, History, Home, LogIn, LogOut, Package, QrCode, ScanQrCode } from "lucide-react"
+import dynamic from "next/dynamic"
+import { BarChart3, Camera, ChevronDown, ExternalLink, FilePlus2, History, Home, LogIn, LogOut, Package, QrCode, ScanQrCode, WifiOff } from "lucide-react"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { getFreshAuthSession, signOutEverywhere } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
@@ -21,15 +22,22 @@ import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs
 import { QrScanPortal } from "@/app/dashboard/_components/qr-scan-portal"
 import { EquipmentMaterialsTab } from "./equipment-materials-tab"
 
+// Recharts chỉ nạp khi mở tab Thống kê.
+const EquipmentStatsView = dynamic(() => import("./equipment-stats-view").then((m) => m.EquipmentStatsView), {
+  ssr: false,
+  loading: () => <div className="h-40 animate-pulse rounded-2xl border border-slate-200 bg-white" />,
+})
+
 // Phần NỘI BỘ của trang QR thiết bị `/tb/<token>` (docs/qr-equipment-plan.md, GĐ1).
 // Chưa đăng nhập ⇒ nút "Đăng nhập để xem lịch sử" (quay về đúng trang qua `?next=`).
 // Đã đăng nhập ⇒ tải lịch sử qua API có Bearer; API tự kiểm quyền/nhà máy/giá.
 
 const PAGE_SIZE = 20
 type Filter = "all" | "Sửa chữa" | "Bảo dưỡng"
-type View = "history" | "materials"
+type View = "history" | "materials" | "stats"
 type State =
   | { kind: "checking" }
+  | { kind: "offline" }
   | { kind: "guest" }
   | { kind: "error"; message: string }
   | { kind: "ready" }
@@ -288,6 +296,55 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
   const [scanError, setScanError] = useState<string | null>(null)
   const [scanKey, setScanKey] = useState(0)
   const reqSeq = useRef(0)
+  // GĐ3c — mất mạng: chỉ hiện phần công khai (thẻ server dựng sẵn) + thông báo; không gọi API.
+  const [online, setOnline] = useState(true)
+  const [swBanner, setSwBanner] = useState(false)
+
+  useEffect(() => {
+    const sync = () => setOnline(navigator.onLine)
+    sync()
+    // Trang trả từ bản lưu của service worker đã có thanh "Không có kết nối" ⇒ không hiện thêm thanh thứ 2.
+    setSwBanner(!!document.getElementById("sw-offline-banner"))
+    window.addEventListener("online", sync)
+    window.addEventListener("offline", sync)
+    return () => {
+      window.removeEventListener("online", sync)
+      window.removeEventListener("offline", sync)
+    }
+  }, [])
+
+  // Nhờ service worker lưu sẵn trang tem này (HTML công khai + chunk đã tải) để mở được khi mất mạng.
+  // Lần mở đầu SW chưa kiểm soát trang, và mở bằng link trong app Next.js chỉ tải RSC ⇒ phải tự gửi
+  // (cùng cách màn quét Thành phẩm). Chỉ có SW ở bản production.
+  useEffect(() => {
+    if (!online || typeof navigator === "undefined" || !("serviceWorker" in navigator)) return
+    let cancelled = false
+    const run = async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready
+        if (cancelled) return
+        const statics = performance
+          .getEntriesByType("resource")
+          .map((e) => {
+            try {
+              return new URL(e.name).pathname
+            } catch {
+              return ""
+            }
+          })
+          .filter((p) => p.startsWith("/_next/static/"))
+        reg.active?.postMessage({ type: "cache-tb", path: buildEquipmentQrPath(token), statics })
+      } catch {
+        /* trình duyệt chặn SW (WebView) — bỏ qua */
+      }
+    }
+    // Chờ trang tải xong các chunk rồi mới gửi danh sách.
+    const id = window.setTimeout(() => void run(), 2000)
+    return () => {
+      cancelled = true
+      window.clearTimeout(id)
+    }
+  }, [online, token])
 
   const load = useCallback(
     async (offset: number, f: Filter) => {
@@ -323,7 +380,9 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
         setRecords((prev) => (offset === 0 ? json.records || [] : [...prev, ...(json.records || [])]))
         setState({ kind: "ready" })
       } catch {
-        if (seq === reqSeq.current) setState({ kind: "error", message: "Mất kết nối. Vui lòng thử lại." })
+        if (seq !== reqSeq.current) return
+        if (!navigator.onLine) setState({ kind: "offline" })
+        else setState({ kind: "error", message: "Mất kết nối. Vui lòng thử lại." })
       } finally {
         if (seq === reqSeq.current) setLoading(false)
       }
@@ -334,6 +393,10 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
   useEffect(() => {
     let alive = true
     const run = async () => {
+      if (!online) {
+        setState({ kind: "offline" })
+        return
+      }
       let hasSession = false
       try {
         hasSession = !!(await getFreshAuthSession())?.user
@@ -351,7 +414,7 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
     return () => {
       alive = false
     }
-  }, [load, filter])
+  }, [load, filter, online])
 
   const onScanned = (text: string) => {
     const next = parseEquipmentQrToken(text)
@@ -391,6 +454,21 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
 
       {children}
 
+      {state.kind === "offline" && !swBanner && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-800"
+        >
+          <WifiOff size={18} className="mt-0.5 shrink-0" />
+          <span>Không có kết nối — chỉ hiển thị thông tin công khai. Lịch sử, vật tư và thống kê sẽ tải lại khi có mạng.</span>
+        </div>
+      )}
+      {state.kind === "offline" && swBanner && (
+        <p className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+          <WifiOff size={16} /> Lịch sử, vật tư và thống kê sẽ tải lại khi có mạng.
+        </p>
+      )}
+
       {state.kind === "checking" && (
         <div className="h-24 animate-pulse rounded-2xl border border-slate-200 bg-white" />
       )}
@@ -422,18 +500,23 @@ export function EquipmentHistoryPanel({ token, children }: { token: string; chil
 
       {state.kind === "ready" && (
         <SegmentedTabs<View>
-          ariaLabel="Lịch sử hoặc vật tư"
+          ariaLabel="Lịch sử, vật tư hoặc thống kê"
           value={view}
           onChange={setView}
           fullWidth
           items={[
             { key: "history", label: "Lịch sử", icon: History },
             { key: "materials", label: "Vật tư", icon: Package },
+            { key: "stats", label: "Thống kê", icon: BarChart3 },
           ]}
         />
       )}
 
       {state.kind === "ready" && view === "materials" && <EquipmentMaterialsTab token={token} />}
+
+      {state.kind === "ready" && view === "stats" && (
+        <EquipmentStatsView fetchUrl={`/api/equipment/${encodeURIComponent(token)}/stats`} canOpenModule={canOpenModule} />
+      )}
 
       {state.kind === "ready" && view === "history" && (
         <section className="space-y-3">

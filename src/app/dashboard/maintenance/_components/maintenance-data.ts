@@ -1,12 +1,42 @@
 import { supabase } from "@/lib/supabase"
 import { convertCurrency, currencySymbol as sharedCurrencySymbol } from "@/lib/currency"
 import { classifyRepairByUsd } from "@/lib/maintenance-threshold"
+import { hasPermission, type SessionUser } from "@/lib/auth"
 
 // Re-export để không phải sửa các import cũ trong module Bảo trì đang dùng currencySymbol từ đây.
 export const currencySymbol = sharedCurrencySymbol
 
 // Danh sách Bộ phận chuyển sang file thuần `@/lib/bo-phan` (dùng được ở API route); re-export giữ import cũ.
 export { BO_PHAN_LIST, type BoPhan } from "@/lib/bo-phan"
+
+// ── Quyền xem giá / chi phí bảo trì (người dùng chốt 2026-11-07) ─────────────────────────────
+// Chặn ở GIAO DIỆN + mẫu in (API /api/equipment/* chặn ở server). PDF đã ký số là bất biến, vẫn có giá.
+
+/** Màn tổng hợp (Lý lịch, in F01/F02/F07, KPI Tổng quan): chỉ admin hoặc `maintenance.view_cost`. */
+export function canSeeMaintenanceCostGlobal(user: SessionUser | null | undefined): boolean {
+  return !!user && (user.role === "admin" || hasPermission(user, "maintenance.view_cost"))
+}
+
+export type MaintenanceCostOwnerFields = {
+  created_by?: string | null
+  nguoi_tao?: string | null
+  nv_phu_trach?: string | null
+  phu_trach_bao_tri?: string | null
+}
+
+/** Màn theo từng biên bản (danh sách, chi tiết, in biên bản lẻ): quyền global HOẶC chính người tạo /
+ *  người phụ trách của biên bản đó (so `created_by` hoặc tên hiển thị như `isRecordTeamMember`). */
+export function canSeeMaintenanceRecordCost(
+  user: SessionUser | null | undefined,
+  rec: MaintenanceCostOwnerFields | null | undefined,
+): boolean {
+  if (!user) return false
+  if (canSeeMaintenanceCostGlobal(user)) return true
+  if (!rec) return false
+  if (rec.created_by && rec.created_by === user.id) return true
+  const myNames = [user.full_name, user.username].map((n) => (n || "").trim()).filter(Boolean)
+  return [rec.nguoi_tao, rec.nv_phu_trach, rec.phu_trach_bao_tri].some((n) => !!n && myNames.includes(n.trim()))
+}
 
 export const HANG_MUC_LIST = ["Sửa chữa", "Bảo dưỡng"] as const
 export type HangMuc = (typeof HANG_MUC_LIST)[number]

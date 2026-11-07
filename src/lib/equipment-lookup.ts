@@ -13,6 +13,16 @@ import {
   type EquipmentPublicInfo,
   type EquipmentViewer,
 } from "@/lib/equipment-qr"
+import {
+  OUTPUT_LABEL,
+  outputKindForAsset,
+  outputKindForVehicle,
+  type EquipmentOutputKind,
+  type EquipmentStatsEvent,
+  type EquipmentStatsMaterialOption,
+  type EquipmentStatsResponse,
+} from "@/lib/equipment-stats"
+import { getFactoryTodayISO } from "@/lib/date-utils"
 
 const CHUNK = 200
 /** Biên bản hiện cho người đã đăng nhập — bỏ "huy" và "tu_choi" (dữ liệu cũ). */
@@ -453,6 +463,190 @@ export async function loadEquipmentMaterials(
 
   const recordCount = new Set(usable.map((m) => m.record_id)).size
   return { recordCount, groups }
+}
+
+// ── GĐ3b: thống kê chu kỳ sửa chữa / bảo dưỡng ─────────────────────────────────────────
+
+export type EquipmentStatsTarget = { factoryId: string } & ({ assetId: string } | { vehicleId: string })
+
+type StatsLineRow = {
+  id: string
+  record_id: string
+  km_dong_ho: number | null
+  loai_sua_chua: string | null
+  chi_phi_dk: number | null
+  cong_tho: number | null
+  loai_tien: string | null
+}
+
+/** Dữ liệu thống kê chu kỳ của 1 máy móc HOẶC 1 xe. Sản lượng theo ngày qua 2 RPC
+ *  (migration 20261114). `canSeeCost=false` ⇒ không trả chi phí. Thiết bị khác nhà máy ⇒ null. */
+export async function loadEquipmentStats(
+  target: EquipmentStatsTarget,
+  opts: { canSeeCost: boolean },
+): Promise<EquipmentStatsResponse | null> {
+  const admin = getSupabaseAdmin()
+  const isVehicle = "vehicleId" in target
+  let kind: EquipmentOutputKind = "none"
+  let vehicleCode: string | null = null
+
+  if (isVehicle) {
+    const { data, error } = await admin
+      .from("dispatch_vehicles")
+      .select("code, vehicle_type")
+      .eq("id", target.vehicleId)
+      .eq("factory_id", target.factoryId)
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!data) return null
+    kind = outputKindForVehicle(data.vehicle_type as string | null)
+    vehicleCode = (data.code as string | null) || null
+  } else {
+    const asset = await loadAsset({ factoryId: target.factoryId, assetId: target.assetId })
+    if (!asset) return null
+    kind = outputKindForAsset(asset.bo_phan)
+  }
+
+  const lines = await fetchAllPaginated<StatsLineRow>((from, to) => {
+    const q = admin
+      .from("maintenance_record_lines")
+      .select("id, record_id, km_dong_ho, loai_sua_chua, chi_phi_dk, cong_tho, loai_tien")
+      .eq("factory_id", target.factoryId)
+    return (isVehicle ? q.eq("dispatch_vehicle_id", target.vehicleId) : q.eq("asset_id", target.assetId))
+      .order("id")
+      .range(from, to)
+  })
+  const recordIds = [...new Set(lines.map((l) => l.record_id))]
+  const records = recordIds.length
+    ? await loadRecords(target.factoryId, recordIds, HISTORY_STATUSES, "id, ma_bb, ngay, hang_muc, trang_thai, created_at")
+    : []
+  const recordById = new Map(
+    records
+      .filter((r) => !!r.ngay && (r.hang_muc === "Sửa chữa" || r.hang_muc === "Bảo dưỡng"))
+      .map((r) => [r.id, r]),
+  )
+  const usedLines = lines.filter((l) => recordById.has(l.record_id))
+
+  // Vật tư của các dòng → khoá nhóm như tab Vật tư (mã vật tư kho, không có thì tên chuẩn hoá).
+  const mats: { line_id: string; inventory_item_id: string | null; ten_vat_tu: string }[] = []
+  const lineIds = usedLines.map((l) => l.id)
+  for (let i = 0; i < lineIds.length; i += CHUNK) {
+    const { data, error } = await admin
+      .from("maintenance_materials")
+      .select("line_id, inventory_item_id, ten_vat_tu")
+      .eq("factory_id", target.factoryId)
+      .in("line_id", lineIds.slice(i, i + CHUNK))
+    if (error) throw new Error(error.message)
+    mats.push(...((data || []) as typeof mats))
+  }
+  const itemIds = [...new Set(mats.map((m) => m.inventory_item_id).filter((v): v is string => !!v))]
+  const itemName = new Map<string, string>()
+  for (let i = 0; i < itemIds.length; i += CHUNK) {
+    const { data, error } = await admin
+      .from("inventory_items")
+      .select("id, name")
+      .eq("factory_id", target.factoryId)
+      .in("id", itemIds.slice(i, i + CHUNK))
+    if (error) throw new Error(error.message)
+    for (const it of (data || []) as { id: string; name: string | null }[]) itemName.set(it.id, (it.name || "").trim())
+  }
+  const keyByNorm = new Map<string, string>()
+  for (const m of mats) {
+    if (!m.inventory_item_id || !itemName.has(m.inventory_item_id)) continue
+    for (const n of [normalizeMaterialName(itemName.get(m.inventory_item_id)), normalizeMaterialName(m.ten_vat_tu)]) {
+      if (n && !keyByNorm.has(n)) keyByNorm.set(n, `i:${m.inventory_item_id}`)
+    }
+  }
+  const matsByLine = new Map<string, { key: string; name: string }[]>()
+  const nameByKey = new Map<string, string>()
+  for (const m of mats) {
+    const n = normalizeMaterialName(m.ten_vat_tu)
+    const key =
+      m.inventory_item_id && itemName.has(m.inventory_item_id)
+        ? `i:${m.inventory_item_id}`
+        : keyByNorm.get(n) || (n ? `n:${n}` : null)
+    if (!key) continue
+    const name = (key.startsWith("i:") ? itemName.get(key.slice(2)) : "") || (m.ten_vat_tu || "").trim()
+    if (!nameByKey.has(key) && name) nameByKey.set(key, name)
+    const list = matsByLine.get(m.line_id) || []
+    list.push({ key, name: (m.ten_vat_tu || "").trim() || name })
+    matsByLine.set(m.line_id, list)
+  }
+
+  const linesByRecord = new Map<string, StatsLineRow[]>()
+  for (const l of usedLines) {
+    const list = linesByRecord.get(l.record_id) || []
+    list.push(l)
+    linesByRecord.set(l.record_id, list)
+  }
+  const events: EquipmentStatsEvent[] = []
+  for (const [recordId, ls] of linesByRecord) {
+    const r = recordById.get(recordId)!
+    const meters = ls.map((l) => Number(l.km_dong_ho)).filter((v) => Number.isFinite(v) && v > 0)
+    const lm = ls.flatMap((l) => matsByLine.get(l.id) || [])
+    const ev: EquipmentStatsEvent = {
+      record_id: recordId,
+      ma_bb: r.ma_bb,
+      ngay: (r.ngay || "").slice(0, 10),
+      hang_muc: r.hang_muc as EquipmentStatsEvent["hang_muc"],
+      trang_thai: r.trang_thai,
+      loai_sua_chua: ls.some((l) => l.loai_sua_chua === "lon") ? "lon" : ls.find((l) => l.loai_sua_chua)?.loai_sua_chua ?? null,
+      dong_ho: meters.length ? Math.max(...meters) : null,
+      material_keys: [...new Set(lm.map((m) => m.key))],
+      material_names: [...new Set(lm.map((m) => m.name).filter(Boolean))],
+    }
+    if (opts.canSeeCost) {
+      const costs = new Map<string, number>()
+      for (const l of ls) {
+        const amount = Number(l.chi_phi_dk ?? 0) + Number(l.cong_tho ?? 0)
+        if (amount > 0) costs.set(l.loai_tien || "USD", (costs.get(l.loai_tien || "USD") || 0) + amount)
+      }
+      ev.costs = [...costs.entries()].map(([loai_tien, amount]) => ({ loai_tien, amount }))
+    }
+    events.push(ev)
+  }
+  events.sort((a, b) => a.ngay.localeCompare(b.ngay))
+
+  // Lựa chọn lọc "theo vật tư" — chỉ vật tư xuất hiện trên biên bản Sửa chữa.
+  const matTimes = new Map<string, number>()
+  for (const e of events) if (e.hang_muc === "Sửa chữa") for (const k of e.material_keys) matTimes.set(k, (matTimes.get(k) || 0) + 1)
+  const materials: EquipmentStatsMaterialOption[] = [...matTimes.entries()]
+    .map(([key, times]) => ({ key, name: nameByKey.get(key) || key.slice(2), times }))
+    .sort((a, b) => b.times - a.times || a.name.localeCompare(b.name, "vi"))
+
+  // Sản lượng theo ngày — từ lần Sửa chữa đầu tiên tới hôm nay.
+  const today = getFactoryTodayISO()
+  const firstRepair = events.find((e) => e.hang_muc === "Sửa chữa")?.ngay
+  let daily: [string, number][] = []
+  if (firstRepair && kind !== "none" && kind !== "xe_nang" && firstRepair <= today) {
+    if (kind === "tp_mu_tap" || kind === "tp_mu_nuoc") {
+      const dc = kind === "tp_mu_tap" ? "Mủ tạp" : "Mủ nước"
+      const { data, error } = await admin.rpc("equipment_daily_product_output", {
+        p_factory: target.factoryId,
+        p_from: firstRepair,
+        p_to: today,
+      })
+      if (error) throw new Error(error.message)
+      daily = ((data || []) as { ngay: string; day_chuyen: string | null; so_kg: number | string }[])
+        .filter((r) => r.day_chuyen === dc)
+        .map((r) => [String(r.ngay).slice(0, 10), Number(r.so_kg) || 0])
+    } else {
+      const { data, error } = await admin.rpc("equipment_daily_dispatch_output", {
+        p_factory: target.factoryId,
+        p_from: firstRepair,
+        p_to: today,
+        p_so_xe: kind === "xe_van_chuyen" ? vehicleCode : null,
+      })
+      if (error) throw new Error(error.message)
+      daily = ((data || []) as { ngay: string; kl_tuoi: number | string; kl_tuoi_mu_tap: number | string }[]).map((r) => [
+        String(r.ngay).slice(0, 10),
+        Number(kind === "xe_xuc" ? r.kl_tuoi_mu_tap : r.kl_tuoi) || 0,
+      ])
+    }
+    daily = daily.filter(([, v]) => v !== 0)
+  }
+
+  return { kind, outputLabel: OUTPUT_LABEL[kind], today, events, daily, materials, canSeeCost: opts.canSeeCost }
 }
 
 /** Lấy (hoặc tạo) token còn hiệu lực của 1 máy móc. Thiết bị phải thuộc `factoryId`. */

@@ -17,7 +17,10 @@ export function BannerAction({
   disabled = false,
   disabledHint,
   newTab = false,
+  onClick,
 }: {
+  /** Có `onClick` ⇒ render nút bấm (bỏ qua href). */
+  onClick?: () => void
   href: string | null
   icon: LucideIcon
   label: string
@@ -26,7 +29,7 @@ export function BannerAction({
   disabledHint?: string
   newTab?: boolean
 }) {
-  const off = disabled || !href
+  const off = disabled || (!onClick && !href)
   const base =
     "inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-xl px-4 text-[13.5px] font-bold tracking-tight transition-all"
   const tone = off
@@ -42,8 +45,16 @@ export function BannerAction({
       </span>
     )
   }
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={`${base} ${tone}`}>
+        <Icon size={16} />
+        {label}
+      </button>
+    )
+  }
   return (
-    <Link href={href} target={newTab ? "_blank" : undefined} className={`${base} ${tone}`}>
+    <Link href={href as string}target={newTab ? "_blank" : undefined} className={`${base} ${tone}`}>
       <Icon size={16} />
       {label}
     </Link>

@@ -178,7 +178,24 @@ function fmtTimeVN(t: string | null): string {
 
 // Không dùng ký hiệu tiền tệ Unicode (៛/₫) — rủi ro thiếu glyph trong font NotoSans
 // nhúng cho PDF (chỉ hỗ trợ Latin). Dùng mã tiền tệ ASCII-safe thay thế.
+// ─── Ẩn giá theo quyền (người dùng chốt 2026-11-07) ───────────────────────
+// Người xem không có quyền xem giá ⇒ mọi ô tiền in "—" và bỏ dòng quy đổi USD của F07. Bố cục cột biểu mẫu ISO
+// giữ nguyên. Hàm `build…PdfForSigning` KHÔNG bọc ⇒ PDF gửi ký (bản chính thức) luôn có giá.
+let costHidden = false
+
+/** Dựng PDF với giá hiện (`visible=true`) hay ẩn (`false`); trả cờ về như cũ khi xong. */
+export async function withMaintenancePdfCostVisible<T>(visible: boolean, fn: () => Promise<T>): Promise<T> {
+  const prev = costHidden
+  costHidden = !visible
+  try {
+    return await fn()
+  } finally {
+    costHidden = prev
+  }
+}
+
 function pdfMoney(amount: number, loaiTien: string): string {
+  if (costHidden) return "—"
   return loaiTien === "USD" ? `$${amount.toLocaleString()}` : `${amount.toLocaleString()} ${loaiTien}`
 }
 
@@ -1935,15 +1952,17 @@ function drawF07(
   })
   y = ((doc as PdfWithTable).lastAutoTable?.finalY ?? y) + 4
 
-  y = ensureSpace(doc, y, LINE_H)
-  doc.setFont(PDF_FONT_NAME, "normal")
-  doc.setFontSize(8)
-  doc.setTextColor(...INK)
-  doc.text(
-    `Quy đổi sang đơn giá USD 1USD=${rateVnd.toLocaleString()}VND; 1USD=${rateKhr.toLocaleString()} Riel: ${totalUsd.toFixed(2)} USD`,
-    MARGIN, y,
-  )
-  y += LINE_H
+  if (!costHidden) {
+    y = ensureSpace(doc, y, LINE_H)
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setFontSize(8)
+    doc.setTextColor(...INK)
+    doc.text(
+      `Quy đổi sang đơn giá USD 1USD=${rateVnd.toLocaleString()}VND; 1USD=${rateKhr.toLocaleString()} Riel: ${totalUsd.toFixed(2)} USD`,
+      MARGIN, y,
+    )
+    y += LINE_H
+  }
 
   y = drawSignatureRow(doc, y, [{ role: "LÃNH ĐẠO ĐƠN VỊ" }, { role: "LẬP BIỂU", name: lapBieuName }])
   drawDocumentFooter(doc, y, "KHXD-QT02-F07")

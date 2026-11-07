@@ -11,6 +11,7 @@ import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-t
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import { type MaintenanceSigningStatus } from "./records/_components/maintenance-sign-types"
+import { canSeeMaintenanceRecordCost } from "./_components/maintenance-data"
 import { MaintenanceLinesDetail, MaintenanceRowActions, MaintenanceSignCell, type MaintenanceLineSummary } from "./_components/maintenance-row-cells"
 import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import { HangMucLabel } from "./_components/hang-muc-label"
@@ -38,6 +39,8 @@ type RecentRecord = {
   trang_thai: string
   nguoi_tao: string | null
   created_by: string | null
+  nv_phu_trach: string | null
+  phu_trach_bao_tri: string | null
   lines_count: number
   maintenance_record_lines: (MaintenanceLineSummary & { loai_sua_chua: string | null })[]
 }
@@ -127,7 +130,7 @@ export default function MaintenanceDashboardPage() {
           .gte("ngay", firstOfMonth),
         supabase
           .from("maintenance_records")
-          .select("id, ma_bb, hang_muc, bo_phan, ngay, trang_thai, nguoi_tao, created_by, maintenance_record_lines(ma_tb, ten_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, ten_tai_xe, loai_sua_chua, sort_order)")
+          .select("id, ma_bb, hang_muc, bo_phan, ngay, trang_thai, nguoi_tao, created_by, nv_phu_trach, phu_trach_bao_tri, maintenance_record_lines(ma_tb, ten_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, ten_tai_xe, loai_sua_chua, sort_order)")
           .eq("factory_id", fid)
           .order("created_at", { ascending: false })
           .limit(8),
@@ -281,7 +284,13 @@ export default function MaintenanceDashboardPage() {
                   colSpan={7}
                   label="Xem thiết bị trong biên bản"
                   endCell={<MaintenanceRowActions recordId={r.id} maBb={r.ma_bb} sign={sign} canPrint={canPrint} onError={(msg) => setToast({ msg, ok: false })} />}
-                  detail={<MaintenanceLinesDetail lines={lines} isXe={r.bo_phan === "Đội xe"} />}
+                  detail={
+                    <MaintenanceLinesDetail
+                      lines={lines}
+                      isXe={r.bo_phan === "Đội xe"}
+                      showCost={canSeeMaintenanceRecordCost(user, r)}
+                    />
+                  }
                 >
                   <td onClick={(e) => e.stopPropagation()}>
                     <Link href={`/dashboard/maintenance/records/${r.id}`} className="hover:opacity-80">

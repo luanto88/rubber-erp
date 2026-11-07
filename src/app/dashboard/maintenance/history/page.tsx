@@ -4,11 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import dynamic from "next/dynamic"
 import Link from "next/link"
-import { ChevronDown, FileBarChart, History, Printer, QrCode, Search, X } from "lucide-react"
+import { BarChart3, ChevronDown, FileBarChart, History, Printer, QrCode, Search, Tag, X } from "lucide-react"
+import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
+import { parseEquipmentQrToken } from "@/lib/equipment-qr"
+import { printEquipmentLabels, resolveScannedEquipment } from "../_components/equipment-scan"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../_components/maintenance-shell"
-import { BO_PHAN_LIST, currencySymbol, type MaintenanceAsset } from "../_components/maintenance-data"
+import { BO_PHAN_LIST, canSeeMaintenanceCostGlobal, currencySymbol, type MaintenanceAsset } from "../_components/maintenance-data"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { ExpandAllToggle, ExpandableRow, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
@@ -20,6 +23,12 @@ import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 
 // html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client (mirror inventory/item/page.tsx).
+// GĐ3b — thống kê chu kỳ sửa chữa (recharts nạp khi mở).
+const EquipmentStatsView = dynamic(
+  () => import("../_components/equipment-stats-view").then((m) => m.EquipmentStatsView),
+  { ssr: false, loading: () => <div className="h-40 animate-pulse rounded-2xl border border-slate-200 bg-white" /> },
+)
+
 const QrScanner = dynamic(
   () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
   { ssr: false },
@@ -60,6 +69,7 @@ export default function MaintenanceHistoryPage() {
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState<string | null>(null)
   const [scanNotice, setScanNotice] = useState<{ text: string; tone: "ok" | "warn"; recordId?: string } | null>(null)
+  const [labelPrinting, setLabelPrinting] = useState(false)
   const [assets, setAssets] = useState<AssetOption[]>([])
   const [vehicles, setVehicles] = useState<DispatchVehicleOption[]>([])
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
@@ -75,6 +85,7 @@ export default function MaintenanceHistoryPage() {
   const [filterTo, setFilterTo] = useState("")
   const [filterSearch, setFilterSearch] = useState("")
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [histView, setHistView] = useState<"history" | "stats">("history")
 
   const isVehicleMode = filterBoPhan === "Đội xe"
 
@@ -410,6 +421,8 @@ export default function MaintenanceHistoryPage() {
   // Báo cáo công tác bảo trì theo kỳ (F07) — cùng tham số với trang Biên bản; trang in luôn chỉ
   // lấy biên bản "Đã duyệt". Bắt buộc có Từ ngày + Đến ngày.
   const canPrintF07 = hasPermission(user, "maintenance.print")
+  // Màn tổng hợp ⇒ chỉ admin / maintenance.view_cost thấy giá trị (người dùng chốt 2026-11-07).
+  const canSeeCost = canSeeMaintenanceCostGlobal(user)
   const bcKyUrl = filterFrom && filterTo
     ? `/dashboard/maintenance/print?type=bao_cao_ky&from=${filterFrom}&to=${filterTo}` +
       (filterBoPhan ? `&bo_phan=${encodeURIComponent(filterBoPhan)}` : "") +
@@ -422,6 +435,31 @@ export default function MaintenanceHistoryPage() {
     if (!factoryId) return
     setScanError(null)
     const raw = text.trim()
+    // GĐ3: tem thiết bị /tb/<token> → chọn đúng thiết bị đó, bỏ lọc ngày/tìm.
+    const tbToken = parseEquipmentQrToken(raw)
+    if (tbToken) {
+      const res = await resolveScannedEquipment(tbToken)
+      if (!res.ok) {
+        setScanError(res.error)
+        return
+      }
+      const eq = res.equipment
+      // Thiết bị ngừng dùng không có trong danh sách chọn ⇒ thêm vào để chip/in tem vẫn chạy.
+      setAssets((prev) =>
+        prev.some((a) => a.id === eq.assetId)
+          ? prev
+          : [...prev, { id: eq.assetId, ma_tb: eq.ma_tb, ten_tb: eq.ten_tb, bo_phan: eq.bo_phan, loai: "may_moc" }],
+      )
+      setFilterBoPhan((BO_PHAN_LIST as readonly string[]).includes(eq.bo_phan) && eq.bo_phan !== "Đội xe" ? eq.bo_phan : "")
+      setSelectedVehicleIds([])
+      setSelectedAssetIds([eq.assetId])
+      setFilterFrom("")
+      setFilterTo("")
+      setFilterSearch("")
+      setScanning(false)
+      setScanNotice({ text: `Đã quét tem ${eq.ma_tb} — ${eq.ten_tb}. Đang hiển thị lý lịch.`, tone: "ok" })
+      return
+    }
     const uuid = raw.match(UUID_RE)?.[0] ?? null
     let q = supabase
       .from("maintenance_records")
@@ -467,10 +505,33 @@ export default function MaintenanceHistoryPage() {
     )
   }
 
+  // In tem QR cho các máy móc đang chọn (giữ thứ tự danh sách thiết bị). Xe chưa có tem (GĐ4).
+  const handlePrintLabels = async () => {
+    if (labelPrinting || selectedAssetIds.length === 0) return
+    setLabelPrinting(true)
+    const ordered = assets.filter((a) => selectedAssetIds.includes(a.id)).map((a) => a.id)
+    const res = await printEquipmentLabels(ordered)
+    setLabelPrinting(false)
+    if (res.error) setScanNotice({ text: res.error, tone: "warn" })
+    else if (res.note) setScanNotice({ text: res.note, tone: "warn" })
+  }
+  const labelHint =
+    selectedVehicleIds.length > 0
+      ? "Tem QR chỉ áp dụng máy móc (chưa áp dụng xe)"
+      : "Chọn thiết bị để in tem QR"
+
   // Chips display
   const selectedVehicles = vehicles.filter((v) => selectedVehicleIds.includes(v.id))
   const selectedAssets = assets.filter((a) => selectedAssetIds.includes(a.id))
   const showBanner = selectedAssets.length > 0 || selectedVehicles.length > 0
+  // Thống kê chu kỳ chỉ khi chọn ĐÚNG 1 thiết bị hoặc 1 xe.
+  const statsUrl =
+    selectedVehicleIds.length === 1 && selectedAssetIds.length === 0
+      ? `/api/equipment/stats?vehicle_id=${selectedVehicleIds[0]}`
+      : selectedAssetIds.length === 1 && selectedVehicleIds.length === 0
+        ? `/api/equipment/stats?asset_id=${selectedAssetIds[0]}`
+        : null
+  const showStats = histView === "stats" && !!statsUrl
 
   return (
     <MaintenanceShell>
@@ -480,7 +541,7 @@ export default function MaintenanceHistoryPage() {
             <QrScanner
               onDecoded={(t) => void handleScanDecoded(t)}
               onCancel={() => { setScanning(false); setScanError(null) }}
-              hintText="Đưa camera vào mã QR trên biên bản đã in"
+              hintText="Quét tem QR thiết bị hoặc QR trên biên bản đã in"
               cancelText="Hủy quét"
               cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
               uploadButtonText="Tải ảnh chứa QR"
@@ -510,6 +571,13 @@ export default function MaintenanceHistoryPage() {
                 newTab
               />
             )}
+            <BannerAction
+              href={null}
+              onClick={selectedAssetIds.length > 0 && !labelPrinting ? () => void handlePrintLabels() : undefined}
+              icon={Tag}
+              label={labelPrinting ? "Đang tạo tem..." : selectedAssetIds.length > 0 ? `In tem QR (${selectedAssetIds.length})` : "In tem QR"}
+              disabledHint={labelPrinting ? "Đang tạo PDF tem" : labelHint}
+            />
             <BannerAction
               href={printUrl}
               icon={Printer}
@@ -550,8 +618,8 @@ export default function MaintenanceHistoryPage() {
           <button
             type="button"
             onClick={() => { setScanError(null); setScanning(true) }}
-            title="Quét QR biên bản đã in"
-            aria-label="Quét QR biên bản đã in"
+            title="Quét tem QR thiết bị hoặc QR biên bản"
+            aria-label="Quét tem QR thiết bị hoặc QR biên bản"
             className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-mod-50 px-2.5 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-200"
           >
             <QrCode size={15} />
@@ -769,8 +837,32 @@ export default function MaintenanceHistoryPage() {
         </div>
       )}
 
+      {showBanner && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <SegmentedTabs<"history" | "stats">
+            ariaLabel="Lịch sử hoặc thống kê chu kỳ"
+            value={statsUrl ? histView : "history"}
+            onChange={setHistView}
+            items={[
+              { key: "history", label: "Lịch sử", icon: History },
+              { key: "stats", label: "Thống kê chu kỳ", icon: BarChart3, disabled: !statsUrl },
+            ]}
+          />
+          {!statsUrl && (
+            <span className="text-xs text-slate-500">Chọn đúng 1 thiết bị hoặc 1 xe để xem thống kê chu kỳ sửa chữa.</span>
+          )}
+        </div>
+      )}
+
+      {showStats && statsUrl && <EquipmentStatsView
+          key={statsUrl}
+          fetchUrl={statsUrl}
+          canOpenModule
+          range={{ from: filterFrom || null, to: filterTo || null }}
+        />}
+
       {/* History table — dòng có chi tiết con: mũi tên ở CUỐI dòng (quy tắc U1) */}
-      {!loading && filtered.length > 0 && (
+      {!showStats && !loading && filtered.length > 0 && (
         <div className="flex justify-end">
           <ExpandAllToggle
             allExpanded={filtered.every((r) => expandedRows.has(r.line_id))}
@@ -779,6 +871,7 @@ export default function MaintenanceHistoryPage() {
           />
         </div>
       )}
+      {!showStats && (
       <ResponsiveTableWrapper>
         {loading ? (
           <ListState kind="loading" />
@@ -798,7 +891,7 @@ export default function MaintenanceHistoryPage() {
                 <th>Ngày</th>
                 {totalSelected !== 1 && <th>Thiết bị / Xe</th>}
                 <th>Nội dung sửa chữa / thay thế</th>
-                <th>Giá trị</th>
+                {canSeeCost && <th>Giá trị</th>}
                 <th>Người thực hiện</th>
                 <th>Người theo dõi</th>
                 <th>Biên bản</th>
@@ -811,7 +904,7 @@ export default function MaintenanceHistoryPage() {
                   key={row.line_id}
                   expanded={expandedRows.has(row.line_id)}
                   onToggle={() => toggleExpand(row.line_id)}
-                  colSpan={totalSelected === 1 ? 7 : 8}
+                  colSpan={(totalSelected === 1 ? 7 : 8) - (canSeeCost ? 0 : 1)}
                   label="Xem chi tiết lần bảo trì"
                   detail={
                     <div className="grid grid-cols-1 gap-x-6 gap-y-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
@@ -845,10 +938,12 @@ export default function MaintenanceHistoryPage() {
                           <span className="text-slate-700">{row.phu_trach_bao_tri}</span>
                         </div>
                       )}
-                      <div>
-                        <span className="font-bold text-slate-600">Chi phí ước tính: </span>
-                        <span className="text-slate-700">{formatValue(row)}</span>
-                      </div>
+                      {canSeeCost && (
+                        <div>
+                          <span className="font-bold text-slate-600">Chi phí ước tính: </span>
+                          <span className="text-slate-700">{formatValue(row)}</span>
+                        </div>
+                      )}
                     </div>
                   }
                 >
@@ -867,7 +962,7 @@ export default function MaintenanceHistoryPage() {
                   <td className="text-slate-700 max-w-xs">
                     <div className="line-clamp-2">{row.noi_dung || "—"}</div>
                   </td>
-                  <td className="text-slate-700 text-xs font-bold whitespace-nowrap">{formatValue(row)}</td>
+                  {canSeeCost && <td className="text-slate-700 text-xs font-bold whitespace-nowrap">{formatValue(row)}</td>}
                   <td className="text-slate-600 text-xs">
                     {row.nguoi_thuc_hien.length > 0
                       ? row.nguoi_thuc_hien.slice(0, 2).join(", ") +
@@ -891,6 +986,7 @@ export default function MaintenanceHistoryPage() {
           </table>
         )}
       </ResponsiveTableWrapper>
+      )}
 
       {/* Summary */}
       {filtered.length > 0 && (

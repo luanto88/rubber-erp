@@ -38,6 +38,7 @@ import {
   generateMaBB,
   loadMaintenanceAssets,
   loadMaintenanceStaff,
+  canSeeMaintenanceRecordCost,
   suggestLoaiSuaChua,
   trangThaiLabel,
   type MaintenanceAsset,
@@ -71,7 +72,7 @@ import { TimelineProgress, TimelineSteps, type TimelineStepItem } from "@/app/da
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
-import { buildMaintenanceDraftPdfBytes, type MaintenanceSignBundle } from "@/lib/maintenance-pdf"
+import { buildMaintenanceDraftPdfBytes, withMaintenancePdfCostVisible, type MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 
 type InventoryItemOption = {
   id: string
@@ -1651,6 +1652,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const myNames = [user?.full_name, user?.username].filter((v): v is string => !!v)
   const isNvPhuTrach = !!record && [record.nv_phu_trach, record.phu_trach_bao_tri].some((n) => !!n && myNames.includes(n))
   const canCreateSign = !!user && hasPermission(user, "maintenance.create") && (isAdmin || isCreator || isNvPhuTrach)
+  // Quyền xem giá (người dùng chốt 2026-11-07): admin / maintenance.view_cost, hoặc chính người tạo / phụ trách
+  // biên bản này. Chỉ ẩn HIỂN THỊ — state + payload lưu giữ nguyên giá. PDF đã ký số bất biến, vẫn có giá.
+  const canSeeCost = effectiveIsNew || isCreator || isNvPhuTrach || canSeeMaintenanceRecordCost(user, record)
   // BGĐ phụ trách và Giám đốc phải là 2 người khác nhau (2 bước ký khác nhau).
   const sameApproverReason = bgdPhuTrach && giamDoc && bgdPhuTrach === giamDoc
     ? "BGĐ phụ trách và Giám đốc phải là 2 người khác nhau."
@@ -1829,9 +1833,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   >
                     Chất lượng: {line.chat_luong || "Đạt"}
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono">
-                    {currencySymbol(line.loai_tien)} {Number(line.chi_phi_dk || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                  </span>
+                  {canSeeCost && (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono">
+                      {currencySymbol(line.loai_tien)} {Number(line.chi_phi_dk || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1884,6 +1890,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               </div>
 
               {/* Chi phí & Công thợ */}
+              {canSeeCost && (
               <div className="flex flex-wrap items-center gap-4 py-2.5 px-3.5 bg-slate-100/70 rounded-xl mb-4 text-xs">
                 <div>
                   <span className="text-slate-500 font-medium">Chi phí vật tư: </span>
@@ -1899,6 +1906,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                   </span>
                 </div>
               </div>
+              )}
 
               {/* Ảnh hiện trường */}
               <div className="mb-4">
@@ -1938,8 +1946,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           <th className="py-2.5 px-3">Tên / Quy cách vật tư</th>
                           <th className="py-2.5 px-3 text-center">ĐVT</th>
                           <th className="py-2.5 px-3 text-right">Số lượng</th>
-                          <th className="py-2.5 px-3 text-right">Đơn giá</th>
-                          <th className="py-2.5 px-3 text-right">Thành tiền</th>
+                          {canSeeCost && <th className="py-2.5 px-3 text-right">Đơn giá</th>}
+                          {canSeeCost && <th className="py-2.5 px-3 text-right">Thành tiền</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -1972,12 +1980,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                               <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
                                 {soLuong.toLocaleString()}
                               </td>
-                              <td className="py-2.5 px-3 text-right text-slate-700 font-mono">
-                                {donGia > 0 ? `${donGia.toLocaleString()} ${mat.loai_tien || ""}` : "—"}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
-                                {thanhTien > 0 ? `${thanhTien.toLocaleString()} ${mat.loai_tien || ""}` : "—"}
-                              </td>
+                              {canSeeCost && (
+                                <td className="py-2.5 px-3 text-right text-slate-700 font-mono">
+                                  {donGia > 0 ? `${donGia.toLocaleString()} ${mat.loai_tien || ""}` : "—"}
+                                </td>
+                              )}
+                              {canSeeCost && (
+                                <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
+                                  {thanhTien > 0 ? `${thanhTien.toLocaleString()} ${mat.loai_tien || ""}` : "—"}
+                                </td>
+                              )}
                             </tr>
                           )
                         })}
@@ -2485,6 +2497,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
               {/* Cost */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {canSeeCost && (
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Chi phí ước tính (tự tổng hợp)</label>
                   <input
@@ -2496,6 +2509,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm bg-slate-50 text-slate-600 font-semibold cursor-not-allowed"
                   />
                 </div>
+                )}
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Loại tiền</label>
                   <select
@@ -2524,6 +2538,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     </div>
                   )
                 })()}
+                {canSeeCost && (
                 <div>
                   <label className="text-xs font-bold text-slate-600 block mb-1.5">Công thợ</label>
                   <input
@@ -2534,6 +2549,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                     className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-mod-600 disabled:bg-slate-50"
                   />
                 </div>
+                )}
               </div>
 
               {/* Fuel (Đội xe) */}
@@ -2848,6 +2864,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             )
                           })()}
                         </div>
+                        {canSeeCost && (<>
                         <div className="w-[72px]">
                           <label className="text-xs font-bold text-slate-500 block mb-1">Đơn giá</label>
                           <input
@@ -2872,6 +2889,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                             {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                           </select>
                         </div>
+                        </>)}
                         {!isReadOnly && (
                           <button
                             type="button"
@@ -2882,7 +2900,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                           </button>
                         )}
                       </div>
-                      {priceShown && (
+                      {priceShown && canSeeCost && (
                         <p className="mt-1 text-[10px] text-slate-500 text-right">
                           Đơn giá: {extPriceLabel(priceShown)}
                           {mat.inventory_item_id && extPriceNotes[mat.inventory_item_id] && (
@@ -3225,6 +3243,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
       <div className="space-y-3">
         {/* Chi phí vật tư theo loại tiền */}
+        {canSeeCost && (
         <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1.5">
           <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wider">
             Chi phí vật tư ước tính
@@ -3242,15 +3261,18 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
             <p className="text-xs text-slate-400 italic">0.00</p>
           )}
         </div>
+        )}
 
         {/* Công thợ và số lượng */}
         <div className="grid grid-cols-2 gap-2 text-xs">
+          {canSeeCost && (
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
             <span className="text-slate-500 block text-[11px] font-medium">Tổng công thợ</span>
             <span className="text-base font-bold text-slate-900 font-mono mt-0.5 block">
               {totalCongTho.toLocaleString()}
             </span>
           </div>
+          )}
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
             <span className="text-slate-500 block text-[11px] font-medium">Số {isDoiXe ? "xe" : "thiết bị"}</span>
             <span className="text-base font-bold text-slate-900 font-mono mt-0.5 block">
@@ -3471,7 +3493,10 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     const loaded = await loadRecordForSigning(effectiveId, factoryId)
     if (!loaded) throw new Error("Không tải được dữ liệu biên bản")
     const qrUrl = `${window.location.origin}/dashboard/maintenance/records/${effectiveId}`
-    return buildMaintenanceDraftPdfBytes(draftBundle, loaded.record, qrUrl, loaded.staffMap)
+    // Người không có quyền xem giá của biên bản này ⇒ bản xem trước in "—" ở ô giá (PDF đã ký giữ nguyên).
+    return withMaintenancePdfCostVisible(canSeeCost, () =>
+      buildMaintenanceDraftPdfBytes(draftBundle, loaded.record, qrUrl, loaded.staffMap),
+    )
   }
   const myTurn = !!signingStatus && signingStatus.trangThai === "dang_luan_chuyen" &&
     computeMyTurn(signingStatus.signers, user?.id)
@@ -3643,7 +3668,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               key={`draft-${effectiveId}`}
               active={(isDesktop || mobileTab === "doc") && !signModalOpen}
               loadBytes={loadDraftPdf}
-              sourceKey={`draft-${effectiveId}-${record?.updated_at || ""}`}
+              sourceKey={`draft-${effectiveId}-${record?.updated_at || ""}-${canSeeCost ? "gia" : "an-gia"}`}
               kind="pdf"
               fileExt="pdf"
               label="Bản chưa ký · PDF"
@@ -3721,9 +3746,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               )}
             </div>
           </InspectorCard>
-          <InspectorCard title="Chi phí" icon={Coins}>
+          <InspectorCard title={canSeeCost ? "Chi phí" : "Vật tư"} icon={Coins}>
             <MetaList>
-              {Object.keys(costByCurrency).length > 0 ? (
+              {!canSeeCost ? null : Object.keys(costByCurrency).length > 0 ? (
                 Object.entries(costByCurrency).map(([cur, amount]) => (
                   <MetaRow
                     key={cur}
@@ -3735,7 +3760,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               ) : (
                 <MetaRow label="Chi phí dự kiến" value="0" mono />
               )}
-              <MetaRow label="Công thợ" value={totalCongTho.toLocaleString()} mono />
+              {canSeeCost && <MetaRow label="Công thợ" value={totalCongTho.toLocaleString()} mono />}
               <MetaRow label="Vật tư" value={`${totalMaterialsCount} dòng (${totalMaterialsQty.toLocaleString()} SL)`} />
             </MetaList>
           </InspectorCard>

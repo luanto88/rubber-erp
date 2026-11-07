@@ -1,14 +1,18 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Calendar, ChevronDown, ClipboardList, Filter, Plus, Search, X } from "lucide-react"
+import { Calendar, ChevronDown, ClipboardList, Filter, Plus, QrCode, Search, X } from "lucide-react"
+import { parseEquipmentQrToken } from "@/lib/equipment-qr"
+import { resolveScannedEquipment } from "../_components/equipment-scan"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { getFirstDayOfMonthISO, getTodayISODate } from "@/lib/date-utils"
 import { MaintenanceShell } from "../_components/maintenance-shell"
-import { BO_PHAN_LIST, HANG_MUC_LIST } from "../_components/maintenance-data"
+import { BO_PHAN_LIST, HANG_MUC_LIST, canSeeMaintenanceRecordCost } from "../_components/maintenance-data"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
@@ -26,6 +30,13 @@ import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
 import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
 
+// html5-qrcode cần navigator ⇒ chỉ client (mirror history/page.tsx).
+const QrScanner = dynamic(
+  () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
+  { ssr: false },
+)
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+
 type RecordRow = {
   id: string
   ma_bb: string | null
@@ -37,6 +48,8 @@ type RecordRow = {
   trang_thai: string
   nguoi_tao: string | null
   created_by: string | null
+  nv_phu_trach: string | null
+  phu_trach_bao_tri: string | null
   created_at: string
   maintenance_record_lines: {
     ma_tb: string | null
@@ -110,6 +123,8 @@ export default function MaintenanceRecordsPage() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerSearch, setPickerSearch] = useState("")
   const pickerRef = useRef<HTMLDivElement>(null)
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -170,6 +185,51 @@ export default function MaintenanceRecordsPage() {
   const isItemSelected = (item: PickerItem) =>
     item.kind === "asset" ? selectedAssetIds.includes(item.id) : selectedVehicleIds.includes(item.id)
 
+  // Quét QR ở ô tìm (GĐ3): tem thiết bị /tb/<token> ⇒ lọc đúng thiết bị (giữ khoảng ngày);
+  // QR biên bản (URL /records/<id>, UUID, mã BB) ⇒ mở biên bản; chuỗi khác ⇒ đưa vào ô tìm.
+  const handleScanDecoded = async (text: string) => {
+    if (!factoryId) return
+    setScanError(null)
+    const raw = text.trim()
+    const tbToken = parseEquipmentQrToken(raw)
+    if (tbToken) {
+      const res = await resolveScannedEquipment(tbToken)
+      if (!res.ok) {
+        setScanError(res.error)
+        return
+      }
+      const eq = res.equipment
+      setAssets((prev) =>
+        prev.some((a) => a.id === eq.assetId)
+          ? prev
+          : [...prev, { id: eq.assetId, ma_tb: eq.ma_tb, ten_tb: eq.ten_tb, bo_phan: eq.bo_phan, loai: "may_moc" }],
+      )
+      // Bỏ lọc bộ phận: biên bản cũ có thể ghi bộ phận khác bộ phận hiện tại của thiết bị.
+      setFilterBoPhan([])
+      setSelectedVehicleIds([])
+      setSelectedAssetIds([eq.assetId])
+      setFilterSearch("")
+      setScanning(false)
+      setToast({ msg: `Đã lọc biên bản của ${eq.ma_tb} — ${eq.ten_tb}`, ok: true })
+      return
+    }
+    const uuid = raw.match(UUID_RE)?.[0] ?? null
+    if (uuid || /^[A-Z]{1,3}-\d{6}\/\d+$/i.test(raw)) {
+      let q = supabase.from("maintenance_records").select("id").eq("factory_id", factoryId)
+      q = uuid ? q.eq("id", uuid) : q.eq("ma_bb", raw)
+      const { data, error } = await q.maybeSingle()
+      if (error || !data) {
+        setScanError("Không tìm thấy biên bản từ mã QR này trong nhà máy hiện tại.")
+        return
+      }
+      setScanning(false)
+      router.push(`/dashboard/maintenance/records/${(data as { id: string }).id}`)
+      return
+    }
+    setFilterSearch(raw)
+    setScanning(false)
+  }
+
   const totalDeviceSelected = selectedAssetIds.length + selectedVehicleIds.length
   const selectedAssetsChips = assets.filter((a) => selectedAssetIds.includes(a.id))
   const selectedVehiclesChips = vehicles.filter((v) => selectedVehicleIds.includes(v.id))
@@ -205,7 +265,7 @@ export default function MaintenanceRecordsPage() {
 
       let q = supabase
         .from("maintenance_records")
-        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_by, created_at, maintenance_record_lines(ma_tb, ten_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, ten_tai_xe, loai_sua_chua, sort_order)")
+        .select("id, ma_bb, hang_muc, bo_phan, ngay, tu_gio, den_gio, trang_thai, nguoi_tao, created_by, nv_phu_trach, phu_trach_bao_tri, created_at, maintenance_record_lines(ma_tb, ten_tb, noi_dung, cac_khac_phuc, chi_phi_dk, loai_tien, ten_tai_xe, loai_sua_chua, sort_order)")
         .eq("factory_id", fid)
         .order("ngay", { ascending: false })
         .order("created_at", { ascending: false })
@@ -320,6 +380,24 @@ export default function MaintenanceRecordsPage() {
           {toast.msg}
         </div>
       )}
+      {scanning && typeof document !== "undefined" &&
+        createPortal(
+          <div className="fixed inset-0 z-[90] overflow-y-auto bg-black">
+            <QrScanner
+              onDecoded={(t) => void handleScanDecoded(t)}
+              onCancel={() => { setScanning(false); setScanError(null) }}
+              hintText="Quét tem QR thiết bị hoặc QR trên biên bản đã in"
+              cancelText="Hủy quét"
+              cameraErrorText="Không mở được camera. Hãy cấp quyền camera hoặc tải ảnh chứa QR."
+              uploadButtonText="Tải ảnh chứa QR"
+              uploadScanningText="Đang xử lý ảnh..."
+              uploadNotFoundText="Không tìm thấy mã QR trong ảnh."
+              orDividerText="hoặc"
+              scanError={scanError}
+            />
+          </div>,
+          document.body,
+        )}
       <div className="mb-3"><KtShortageBanner /></div>
       <PageBackgroundMotif theme="slate" />
       <PageHeaderBanner
@@ -476,14 +554,34 @@ export default function MaintenanceRecordsPage() {
           />
         </div>
 
-        <div className="flex items-center gap-2 border border-slate-300 rounded-xl px-3 py-2 flex-1 min-w-[180px]">
-          <Search size={14} className="text-slate-400" />
+        <div className="flex items-center gap-2 border border-slate-300 rounded-xl pl-3 pr-1 py-1 flex-1 min-w-[180px] focus-within:border-mod-600">
+          <Search size={14} className="shrink-0 text-slate-400" />
           <input
             value={filterSearch}
             onChange={(e) => setFilterSearch(e.target.value)}
             placeholder="Tìm mã biên bản, bộ phận..."
-            className="flex-1 text-sm outline-none bg-transparent"
+            className="min-w-0 flex-1 py-1 text-sm outline-none bg-transparent"
           />
+          {filterSearch && (
+            <button
+              type="button"
+              aria-label="Xoá tìm kiếm"
+              onClick={() => setFilterSearch("")}
+              className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <X size={13} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => { setScanError(null); setScanning(true) }}
+            title="Quét tem QR thiết bị hoặc QR biên bản"
+            aria-label="Quét tem QR thiết bị hoặc QR biên bản"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-mod-50 px-2.5 text-xs font-bold text-mod-800 transition-colors hover:bg-mod-200"
+          >
+            <QrCode size={15} />
+            <span className="hidden sm:inline">Quét QR</span>
+          </button>
         </div>
       </FilterBar>
 
@@ -560,7 +658,9 @@ export default function MaintenanceRecordsPage() {
                   ? "—"
                   : codes.length > 2 ? `${codes.slice(0, 2).join(", ")} +${codes.length - 2} khác` : codes.join(", ")
                 const lines = r.maintenance_record_lines || []
-                const detail = <MaintenanceLinesDetail lines={lines} isXe={r.bo_phan === "Đội xe"} />
+                const detail = (
+                  <MaintenanceLinesDetail lines={lines} isXe={r.bo_phan === "Đội xe"} showCost={canSeeMaintenanceRecordCost(user, r)} />
+                )
                 return (
                 <ExpandableRow
                   key={r.id}

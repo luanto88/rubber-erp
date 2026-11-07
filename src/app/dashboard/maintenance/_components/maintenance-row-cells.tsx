@@ -144,8 +144,17 @@ export type MaintenanceLineSummary = {
   sort_order: number | null
 }
 
-/** Bảng con thiết bị/xe của 1 biên bản — dùng trong dòng xổ ở Tổng quan và Danh sách biên bản. */
-export function MaintenanceLinesDetail({ lines, isXe }: { lines: MaintenanceLineSummary[]; isXe: boolean }) {
+/** Bảng con thiết bị/xe của 1 biên bản — dùng trong dòng xổ ở Tổng quan và Danh sách biên bản.
+ *  `showCost=false` ⇒ bỏ cột chi phí (người xem không có quyền xem giá của biên bản này). */
+export function MaintenanceLinesDetail({
+  lines,
+  isXe,
+  showCost = true,
+}: {
+  lines: MaintenanceLineSummary[]
+  isXe: boolean
+  showCost?: boolean
+}) {
   const sorted = [...lines].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
   return (
     <table className="enterprise-table dense min-w-[540px]">
@@ -155,7 +164,7 @@ export function MaintenanceLinesDetail({ lines, isXe }: { lines: MaintenanceLine
           <th>{isXe ? "Xe" : "Thiết bị"}</th>
           {isXe && <th>Tài xế</th>}
           <th>Nội dung</th>
-          <th className="text-right">Chi phí dự kiến</th>
+          {showCost && <th className="text-right">Chi phí dự kiến</th>}
         </tr>
       </thead>
       <tbody>
@@ -165,9 +174,11 @@ export function MaintenanceLinesDetail({ lines, isXe }: { lines: MaintenanceLine
             <td className="whitespace-nowrap">{l.ten_tb || "—"}</td>
             {isXe && <td className="whitespace-nowrap">{l.ten_tai_xe || "—"}</td>}
             <td className="max-w-md">{l.cac_khac_phuc || l.noi_dung || "—"}</td>
-            <td className="whitespace-nowrap text-right tabular-nums">
-              {l.chi_phi_dk ? `${Number(l.chi_phi_dk).toLocaleString()} ${l.loai_tien || ""}` : "—"}
-            </td>
+            {showCost && (
+              <td className="whitespace-nowrap text-right tabular-nums">
+                {l.chi_phi_dk ? `${Number(l.chi_phi_dk).toLocaleString()} ${l.loai_tien || ""}` : "—"}
+              </td>
+            )}
           </tr>
         ))}
       </tbody>

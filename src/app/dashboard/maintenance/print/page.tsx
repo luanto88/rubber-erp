@@ -4,9 +4,9 @@ import { useSearchParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangle, CheckCircle2, ChevronLeft, Download } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere } from "@/lib/auth"
+import { authBlockReason, hasPermission, hydrateActiveSession, signOutEverywhere, type SessionUser } from "@/lib/auth"
 import { setCurrencyRates, getCurrencyRates } from "@/lib/currency"
-import { BO_PHAN_LIST } from "../_components/maintenance-data"
+import { BO_PHAN_LIST, canSeeMaintenanceCostGlobal, canSeeMaintenanceRecordCost } from "../_components/maintenance-data"
 import {
   downloadMaintenanceSuCoNhoPdf,
   downloadMaintenanceBaoDuongPdf,
@@ -15,6 +15,7 @@ import {
   downloadMaintenanceLyLichPdf,
   downloadMaintenanceLyLichXePdf,
   downloadMaintenanceBaoCaoKyPdf,
+  withMaintenancePdfCostVisible,
   type RecordData,
   type LineData,
   type MaterialRow,
@@ -30,6 +31,8 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type PrintType = "su_co" | "de_nghi" | "ly_lich" | "su_co_nho" | "bao_duong" | "bao_duong_xe" | "sua_chua_nho_xe" | "ly_lich_xe" | "bao_cao_ky"
+
+class EmptyReportError extends Error {}
 
 type PdfState = "idle" | "generating" | "done" | "error" | "empty"
 
@@ -80,6 +83,7 @@ export default function MaintenancePrintPage() {
   }[]>([])
   const [baoCaoKySections, setBaoCaoKySections] = useState<BaoCaoKySection[]>([])
   const [lapBieuName, setLapBieuName] = useState("")
+  const [authUser, setAuthUser] = useState<SessionUser | null>(null)
 
   const qrUrl = useMemo(() => {
     if (!recordId || typeof window === "undefined") return ""
@@ -113,6 +117,7 @@ export default function MaintenancePrintPage() {
         return
       }
       setLapBieuName(user.full_name || "")
+      setAuthUser(user)
       setAuthFactoryId(user.factory_id)
     }
     void check()
@@ -455,7 +460,14 @@ export default function MaintenancePrintPage() {
 
   const generatePdf = useCallback(async () => {
     setPdfState("generating")
+    // Quyền xem giá (người dùng chốt 2026-11-07): biên bản lẻ ⇒ global hoặc người tạo / phụ trách biên bản đó;
+    // lý lịch F01/F02 + báo cáo kỳ F07 ⇒ chỉ admin / maintenance.view_cost. Không có quyền ⇒ ô giá in "—".
+    const isSummary = printType === "ly_lich" || printType === "ly_lich_xe" || printType === "bao_cao_ky"
+    const costVisible = isSummary
+      ? canSeeMaintenanceCostGlobal(authUser)
+      : canSeeMaintenanceRecordCost(authUser, record as unknown as Parameters<typeof canSeeMaintenanceRecordCost>[1])
     try {
+      await withMaintenancePdfCostVisible(costVisible, async () => {
       switch (printType) {
         case "su_co_nho": {
           if (!record) throw new Error("Thiếu dữ liệu biên bản")
@@ -494,7 +506,7 @@ export default function MaintenancePrintPage() {
           break
         }
         case "bao_cao_ky": {
-          if (baoCaoKySections.length === 0) { setPdfState("empty"); return }
+          if (baoCaoKySections.length === 0) throw new EmptyReportError()
           const { VND: rateVnd, KHR: rateKhr } = getCurrencyRates()
           await downloadMaintenanceBaoCaoKyPdf(baoCaoKySections, filterFrom, filterTo, rateVnd, rateKhr, lapBieuName)
           break
@@ -506,12 +518,13 @@ export default function MaintenancePrintPage() {
           else throw new Error("Thiếu dữ liệu biên bản")
         }
       }
+      })
       setPdfState("done")
-    } catch {
-      setPdfState("error")
+    } catch (err) {
+      setPdfState(err instanceof EmptyReportError ? "empty" : "error")
     }
   }, [
-    printType, record, qrUrl, staffMap,
+    printType, record, qrUrl, staffMap, authUser,
     multiAssets, assetInfo, historyRows,
     multiVehicles, vehicleInfo, vehicleDrivers, vehicleMaintRows, vehicleRepairRows,
     baoCaoKySections, lapBieuName, filterFrom, filterTo,

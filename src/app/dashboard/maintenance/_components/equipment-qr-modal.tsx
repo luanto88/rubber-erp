@@ -24,7 +24,7 @@ export function EquipmentQrModal({
   const [token, setToken] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [confirmCode, setConfirmCode] = useState("")
+  const [confirmed, setConfirmed] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
   const [regenError, setRegenError] = useState<string | null>(null)
   const [regenerated, setRegenerated] = useState(false)
@@ -52,10 +52,9 @@ export function EquipmentQrModal({
     }
   }, [asset.id])
 
-  const codeMatches = confirmCode.trim().toUpperCase() === asset.ma_tb.trim().toUpperCase()
-
+  // Xác nhận bằng ô tick (trước gõ lại mã — vô nghĩa vì mã hiện ngay trên hộp thoại).
   const handleRegenerate = async () => {
-    if (!codeMatches || regenerating) return
+    if (!confirmed || regenerating) return
     setRegenerating(true)
     setRegenError(null)
     try {
@@ -72,7 +71,7 @@ export function EquipmentQrModal({
       setToken(json.token)
       setRegenerated(true)
       setConfirmOpen(false)
-      setConfirmCode("")
+      setConfirmed(false)
     } catch {
       setRegenError("Mất kết nối. Tem cũ có thể vẫn còn hiệu lực — mở lại để kiểm tra.")
     } finally {
@@ -114,7 +113,7 @@ export function EquipmentQrModal({
               <div className="border-t border-slate-100 pt-3">
                 <button
                   type="button"
-                  onClick={() => { setConfirmOpen(true); setConfirmCode(""); setRegenError(null) }}
+                  onClick={() => { setConfirmOpen(true); setConfirmed(false); setRegenError(null) }}
                   className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50"
                 >
                   <RefreshCw size={13} /> Tạo lại QR
@@ -145,7 +144,7 @@ export function EquipmentQrModal({
               <button
                 type="button"
                 onClick={() => void handleRegenerate()}
-                disabled={!codeMatches || regenerating}
+                disabled={!confirmed || regenerating}
                 className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {regenerating ? "Đang tạo..." : "Tạo lại QR"}
@@ -161,16 +160,16 @@ export function EquipmentQrModal({
                 không tìm thấy. Bạn phải in và dán tem mới. Không hoàn tác được.
               </p>
             </div>
-            <label className="block">
-              <span className="text-xs font-bold text-slate-500">Gõ lại mã thiết bị để xác nhận</span>
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-slate-200 p-3 hover:bg-slate-50">
               <input
-                value={confirmCode}
-                onChange={(e) => setConfirmCode(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void handleRegenerate() }}
-                placeholder={asset.ma_tb}
-                autoFocus
-                className="mt-1 h-10 w-full rounded-xl border border-slate-200 px-3 font-code text-sm outline-none focus:border-red-400"
+                type="checkbox"
+                checked={confirmed}
+                onChange={(e) => setConfirmed(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-red-600"
               />
+              <span className="text-sm font-semibold text-slate-700">
+                Tôi hiểu tem cũ của {asset.ma_tb} sẽ ngừng hoạt động và cần dán tem mới.
+              </span>
             </label>
             {regenError && <p className="text-sm font-semibold text-red-600">{regenError}</p>}
           </div>

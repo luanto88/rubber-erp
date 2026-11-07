@@ -696,7 +696,7 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "export.view_own": "xem đơn được cấp",
   "inventory.cancel": "hủy phiếu đã ghi sổ (hoàn tồn)",
   "maintenance.qr_lookup": "tra cứu lý lịch thiết bị bằng QR",
-  "maintenance.view_cost": "xem giá / chi phí khi tra cứu QR thiết bị",
+  "maintenance.view_cost": "xem giá / chi phí bảo trì",
   "settings.manage_config": "quản trị cấu hình hệ thống",
   "settings.master_data": "quản lý danh mục",
   "settings.maintenance_config": "cấu hình bảo trì",
