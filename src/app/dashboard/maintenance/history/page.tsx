@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import dynamic from "next/dynamic"
 import Link from "next/link"
-import { BarChart3, ChevronDown, FileBarChart, History, Printer, QrCode, Search, Tag, X } from "lucide-react"
+import { ArrowLeft, BarChart3, ChevronDown, FileBarChart, History, Printer, QrCode, Search, Tag, X } from "lucide-react"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { parseEquipmentQrToken } from "@/lib/equipment-qr"
 import { printEquipmentLabels, resolveScannedEquipment } from "../_components/equipment-scan"
+import { EquipmentStatsSummary, type StatsSummaryTarget } from "../_components/equipment-stats-summary"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../_components/maintenance-shell"
@@ -86,6 +87,8 @@ export default function MaintenanceHistoryPage() {
   const [filterSearch, setFilterSearch] = useState("")
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [histView, setHistView] = useState<"history" | "stats">("history")
+  // Thiết bị đang xem chi tiết từ bảng tóm tắt (≥ 2 mục được chọn).
+  const [statsFocus, setStatsFocus] = useState<StatsSummaryTarget | null>(null)
 
   const isVehicleMode = filterBoPhan === "Đội xe"
 
@@ -540,14 +543,22 @@ export default function MaintenanceHistoryPage() {
   const selectedVehicles = vehicles.filter((v) => selectedVehicleIds.includes(v.id))
   const selectedAssets = assets.filter((a) => selectedAssetIds.includes(a.id))
   const showBanner = selectedAssets.length > 0 || selectedVehicles.length > 0
-  // Thống kê chu kỳ chỉ khi chọn ĐÚNG 1 thiết bị hoặc 1 xe.
-  const statsUrl =
-    selectedVehicleIds.length === 1 && selectedAssetIds.length === 0
-      ? `/api/equipment/stats?vehicle_id=${selectedVehicleIds[0]}`
-      : selectedAssetIds.length === 1 && selectedVehicleIds.length === 0
-        ? `/api/equipment/stats?asset_id=${selectedAssetIds[0]}`
+  // Thống kê chu kỳ: chọn ĐÚNG 1 thiết bị/xe ⇒ khối chi tiết; ≥ 2 ⇒ bảng tóm tắt (bấm dòng xem chi tiết).
+  const statsTargets: StatsSummaryTarget[] =
+    selectedVehicles.length > 0
+      ? selectedVehicles.map((v) => ({ id: v.id, kind: "vehicle", code: v.code, name: v.name }))
+      : selectedAssets.map((a) => ({ id: a.id, kind: "asset", code: a.ma_tb, name: a.ten_tb }))
+  const focusTarget =
+    statsTargets.length === 1
+      ? statsTargets[0]
+      : statsFocus && statsTargets.some((t) => t.kind === statsFocus.kind && t.id === statsFocus.id)
+        ? statsFocus
         : null
-  const showStats = histView === "stats" && !!statsUrl
+  const statsUrl = focusTarget
+    ? `/api/equipment/stats?${focusTarget.kind === "vehicle" ? "vehicle_id" : "asset_id"}=${focusTarget.id}`
+    : null
+  const statsAvailable = statsTargets.length > 0
+  const showStats = histView === "stats" && statsAvailable
 
   return (
     <MaintenanceShell>
@@ -865,15 +876,27 @@ export default function MaintenanceHistoryPage() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <SegmentedTabs<"history" | "stats">
             ariaLabel="Lịch sử hoặc thống kê chu kỳ"
-            value={statsUrl ? histView : "history"}
+            value={statsAvailable ? histView : "history"}
             onChange={setHistView}
             items={[
               { key: "history", label: "Lịch sử", icon: History },
-              { key: "stats", label: "Thống kê chu kỳ", icon: BarChart3, disabled: !statsUrl },
+              {
+                key: "stats",
+                label: statsTargets.length > 1 ? `Thống kê chu kỳ (${statsTargets.length})` : "Thống kê chu kỳ",
+                icon: BarChart3,
+                disabled: !statsAvailable,
+              },
             ]}
           />
-          {!statsUrl && (
-            <span className="text-xs text-slate-500">Chọn đúng 1 thiết bị hoặc 1 xe để xem thống kê chu kỳ sửa chữa.</span>
+          {showStats && statsTargets.length > 1 && focusTarget && (
+            <button
+              type="button"
+              onClick={() => setStatsFocus(null)}
+              className="inline-flex items-center gap-1 self-start text-sm font-semibold text-brand-600 hover:underline sm:self-auto"
+            >
+              <ArrowLeft size={14} /> Bảng tóm tắt {statsTargets.length} {selectedVehicles.length > 0 ? "xe" : "thiết bị"}
+              <span className="font-normal text-slate-500">· đang xem {focusTarget.code}</span>
+            </button>
           )}
         </div>
       )}
@@ -884,6 +907,13 @@ export default function MaintenanceHistoryPage() {
           canOpenModule
           range={{ from: filterFrom || null, to: filterTo || null }}
         />}
+      {showStats && !statsUrl && statsTargets.length > 1 && (
+        <EquipmentStatsSummary
+          targets={statsTargets}
+          range={{ from: filterFrom || null, to: filterTo || null }}
+          onSelect={(t) => setStatsFocus(t)}
+        />
+      )}
 
       {/* History table — dòng có chi tiết con: mũi tên ở CUỐI dòng (quy tắc U1) */}
       {!showStats && !loading && filtered.length > 0 && (

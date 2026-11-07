@@ -1621,3 +1621,14 @@ cố ý gỡ SW, dấu hiệu: nút tròn "N" góc trái dưới + Service worke
 - Sửa sau test lần 2 (2026-11-07): TB ngày / TB sản lượng hiện khi có ≥ 1 chu kỳ (trước đây "—" khi < 3 lần, trông như
   treo); `reliable` (≥ 3 lần) chỉ quyết định ghi chú "chưa đủ để coi là trung bình" và "Dự kiến lần sau". Khoảng ngày kết
   thúc trước hôm nay ⇒ thẻ "Đang chạy" ghi "Khoảng ngày đã chọn kết thúc …".
+
+## Lý lịch — bảng tóm tắt thống kê nhiều thiết bị (2026-11-07, test PASS, đã lên production)
+- Chọn ≥ 2 thiết bị (hoặc ≥ 2 xe) ⇒ tab "Thống kê chu kỳ (N)" mở được, hiện `EquipmentStatsSummary`
+  (`maintenance/_components/equipment-stats-summary.tsx`): mỗi thiết bị 1 dòng — số lần sửa, TB ngày giữa 2 lần sửa
+  ("ít dữ liệu" khi < 3 lần), sửa gần nhất, từ lần gần nhất, dự kiến lần tới (quá ⇒ đỏ), TB sản lượng/chu kỳ, số lần +
+  TB ngày bảo dưỡng, chi phí sửa chữa theo loại tiền (chỉ khi `canSeeCost`). Mặc định xếp TB ngày tăng dần; bấm tiêu đề đổi.
+- Không API mới: gọi `/api/equipment/stats` từng mục (4 song song, tối đa `SUMMARY_MAX` = 50) + `computeStats` ⇒ khớp số
+  liệu khối chi tiết. Kỳ thống kê giống khối chi tiết (Theo ngày đã chọn / 6 / 12 tháng / Tất cả).
+- Bấm 1 dòng ⇒ khối chi tiết của thiết bị đó (state `statsFocus`), nút "Bảng tóm tắt N thiết bị" để quay lại. Không đổi lựa chọn.
+- Driver history: `scripts/fix-driver-assignment-gaps.mjs` đã `--apply` 17 dòng hở 1 ngày (2026-11-07). Còn 5B (3 dòng
+  chồng chéo, nghi trùng người "Chres Meng Hout"/"Meng Hout") và X03 (Đến < Từ) — chờ người dùng sửa tay.

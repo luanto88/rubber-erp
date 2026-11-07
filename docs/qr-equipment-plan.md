@@ -488,6 +488,13 @@ Test điện thoại: cần https ⇒ commit + push nhánh để có link previe
 - Sửa lỗi Cài đặt → Xe "Hiệu lực từ" luôn = hôm nay + `addDays` lệch 1 ngày. Dữ liệu thật (kiểm 2026-11-07, chỉ đọc):
   66 dòng lịch sử tài xế / 46 xe, 19 cặp hở 1 ngày, 2 dòng "đến < từ" (X03, 5B) — CHƯA sửa, chờ người dùng quyết.
 
+## Trạng thái 2026-11-07 (cuối phiên tối) — GĐ4a + bảng tóm tắt ĐÃ LÊN PRODUCTION
+- GĐ4a: test tay 7 bước PASS, commit `c31cb54`. Migration 20261115 tuỳ chọn, không cần chạy.
+- `scripts/fix-driver-assignment-gaps.mjs --apply`: sửa 17/17 dòng hở 1 ngày. Còn 5B (3 dòng chồng chéo, nghi trùng
+  người "Chres Meng Hout"/"Meng Hout") và X03 (Đến < Từ) — người dùng sửa tay ở Cài đặt → Bảo trì → Xe & Tài xế.
+- Lý lịch: bảng tóm tắt thống kê nhiều thiết bị/xe (`equipment-stats-summary.tsx`) — test PASS, đã lên main.
+- Việc tiếp (chưa chọn): GĐ4b (nếu có), hoặc các mục còn treo trong CLAUDE.md.
+
 ## Prompt bàn giao phiên sau (2026-11-07, sau khi lên production)
 ```
 Đọc CLAUDE.md, rule 14 (các mục "Tra cứu thiết bị bằng QR" GĐ1→GĐ3c) và docs/qr-equipment-plan.md mục
