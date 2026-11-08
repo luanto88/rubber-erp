@@ -34,6 +34,9 @@ import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import { ShiftNamesTab } from "./_components/shift-names-tab"
 import { OpeningStockTab } from "./_components/opening-stock-tab"
 import { ExportPalletTypesTab } from "./_components/export-pallet-types-tab"
+import { ProductPackagingTab } from "./_components/product-packaging-tab"
+import { PalletComponentsTab } from "./_components/pallet-components-tab"
+import { ProductGradeTab } from "./_components/product-grade-tab"
 import { ListSearch, noSearchMatchText } from "./_components/list-search"
 import { matchesSearchQuery } from "@/lib/text-normalize"
 import { getErrorMessage } from "@/lib/error-message"
@@ -231,7 +234,7 @@ type VanBanDocumentTypeRow = {
   is_active: boolean
 }
 
-type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments" | "opening-stock" | "export-pallet-types"
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments" | "opening-stock" | "export-pallet-types" | "product-packaging" | "product-grade" | "pallet-components"
 
 type MaintenanceTab = "assets" | "staff" | "vehicles" | "ext-materials"
 type ListSearchKey =
@@ -856,6 +859,21 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
     "export-pallet-types": {
       // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
       filename: "loai_pallet_xuat.csv",
+      rows: [],
+    },
+    "product-packaging": {
+      // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
+      filename: "quy_cach_dong_goi.csv",
+      rows: [],
+    },
+    "product-grade": {
+      // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
+      filename: "quy_cach_chung_loai.csv",
+      rows: [],
+    },
+    "pallet-components": {
+      // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
+      filename: "thanh_phan_pallet.csv",
       rows: [],
     },
   }
@@ -4027,7 +4045,7 @@ export default function SettingsPage() {
                 <SlidersHorizontal size={16} className="text-amber-600" />
                 <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
               </div>
-              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && configTab !== "opening-stock" && configTab !== "export-pallet-types" && (
+              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && configTab !== "opening-stock" && configTab !== "export-pallet-types" && configTab !== "product-packaging" && configTab !== "product-grade" && configTab !== "pallet-components" && (
                 <div className="flex flex-wrap items-center gap-2">
                   {configTab !== "forest-plots" && (
                     <>
@@ -4113,6 +4131,9 @@ export default function SettingsPage() {
                   { key: "quality-targets" as const, label: "Mục tiêu chất lượng" },
                   { key: "shift-assignments" as const, label: "Phân công trực ca" },
                   { key: "opening-stock" as const, label: "Tồn đầu kỳ thành phẩm" },
+                  { key: "product-grade" as const, label: "Quy cách chủng loại" },
+                  { key: "product-packaging" as const, label: "Quy cách đóng gói TP" },
+                  { key: "pallet-components" as const, label: "Thành phần pallet" },
                   { key: "export-pallet-types" as const, label: "Loại pallet xuất" },
                 ].map((item) => (
                   <button
@@ -4448,6 +4469,12 @@ export default function SettingsPage() {
                 <OpeningStockTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "export-pallet-types" ? (
                 <ExportPalletTypesTab factoryId={factoryId} canManage={canManageSettings} />
+              ) : configTab === "product-packaging" ? (
+                <ProductPackagingTab factoryId={factoryId} canManage={canManageSettings} />
+              ) : configTab === "product-grade" ? (
+                <ProductGradeTab factoryId={factoryId} canManage={canManageSettings} />
+              ) : configTab === "pallet-components" ? (
+                <PalletComponentsTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "shift-assignments" ? (
                 <ShiftAssignmentsTab
                   factoryId={factoryId}

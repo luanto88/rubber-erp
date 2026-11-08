@@ -7,6 +7,8 @@ import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
+import { loadGradeConfig } from "@/lib/product-grade-client"
+import { setWarehouseGradeConfig } from "./_components/warehouse-types"
 import WarehouseKpi from "./_components/warehouse-kpi"
 import WarehouseFloorPlan from "./_components/warehouse-floor-plan"
 import LotPanel from "./_components/lot-panel"
@@ -55,6 +57,8 @@ export default function WarehousePage() {
       }
       const fid = await getActiveFactoryId()
       if (!fid) { setLoading(false); return }
+      // Bành/kiện theo cấu hình nhà máy (nạp trước khi setFactoryId để lần render dữ liệu đầu đã đúng).
+      setWarehouseGradeConfig(await loadGradeConfig(fid))
       setFactoryId(fid)
     }
     void bootstrap()

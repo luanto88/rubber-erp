@@ -3,6 +3,7 @@ import { loadDispatchEntriesWithResolvedRows } from "@/lib/dispatch-entry-rows"
 import { supabase } from "@/lib/supabase"
 import { normalizeDateInput } from "@/lib/date-utils"
 import { getLoaiBanhConfig } from "@/lib/product-lot-config"
+import type { GradeConfig } from "@/lib/product-grade"
 
 export type StorageNgan = {
   id: string
@@ -875,7 +876,10 @@ function storageLotDedupeKey(lot: StorageProducedLot) {
 // dòng nếu được quét QR theo từng kiện riêng lẻ hoặc nhiều ca).
 // Hàm này tổng hợp lại theo từng mã lô của riêng ngăn này để xác định đúng sản lượng, số kiện
 // phát sinh từ ngăn đó, và phân loại chính xác Lô tròn hay Lô dở dang theo từng ngăn.
-export function aggregateStorageLotsByLot(lots: StorageProducedLot[]): AggregatedStorageLot[] {
+export function aggregateStorageLotsByLot(
+  lots: StorageProducedLot[],
+  grade?: GradeConfig | null,
+): AggregatedStorageLot[] {
   const map = new Map<string, {
     lot_id: string
     ma_lo: string
@@ -928,7 +932,7 @@ export function aggregateStorageLotsByLot(lots: StorageProducedLot[]): Aggregate
   }
 
   return Array.from(map.values()).map((agg) => {
-    const cfg = getLoaiBanhConfig(agg.loai_csr || "", agg.loai_banh || 35)
+    const cfg = getLoaiBanhConfig(agg.loai_csr || "", agg.loai_banh || 35, grade)
     const loTronBanh = cfg.lo_tron || 144
     // 1 lô được coi là tròn lô trong ngăn này nếu tổng số bành sản xuất từ ngăn này đạt đủ tiêu chuẩn lô tròn (vd 144 bành)
     // và không bị đánh dấu dở dang.
@@ -954,9 +958,9 @@ export function aggregateStorageLotsByLot(lots: StorageProducedLot[]): Aggregate
   })
 }
 
-export function summarizeStorageLots(lots: StorageProducedLot[]) {
+export function summarizeStorageLots(lots: StorageProducedLot[], grade?: GradeConfig | null) {
   const thanhPhamKg = lots.reduce((sum, lot) => sum + (lot.tong_kg || 0), 0)
-  const aggregatedLots = aggregateStorageLotsByLot(lots)
+  const aggregatedLots = aggregateStorageLotsByLot(lots, grade)
   const tronLoCount = aggregatedLots.filter((lot) => lot.isTronLo).length
   const doDangCount = aggregatedLots.filter((lot) => lot.isDoDang).length
 
@@ -972,8 +976,8 @@ export function summarizeStorageLots(lots: StorageProducedLot[]) {
 // Dùng cho cột "Số lô chi tiết" của Báo cáo cân đối ngăn lưu theo kỳ — mỗi lô chỉ liệt kê
 // đúng 1 lần. Lô đang "Dở dang" trong ngăn này hiển thị thêm breakdown số bành theo từng kiện (A/B/C/D)
 // thực tế đã sản xuất từ nguyên liệu của ngăn đó (ví dụ: `1258cs/26 (D=36)`).
-export function buildStorageLotDetailLines(lots: StorageProducedLot[]): string[] {
-  const aggregatedLots = aggregateStorageLotsByLot(lots)
+export function buildStorageLotDetailLines(lots: StorageProducedLot[], grade?: GradeConfig | null): string[] {
+  const aggregatedLots = aggregateStorageLotsByLot(lots, grade)
 
   return aggregatedLots
     .sort((a, b) => a.ma_lo.localeCompare(b.ma_lo, "vi", { numeric: true, sensitivity: "base" }))

@@ -165,7 +165,7 @@ export default function LotPanel({
           sortedLots.map(lot => {
             const c = getCsrColor(lot.loai_csr)
             const isExpanded = expandedLots.has(lot.id)
-            const maxBanh = getMaxBanh(lot.loai_banh)
+            const maxBanh = getMaxBanh(lot.loai_banh, lot.loai_csr)
             const placedCount = KIEN_LABELS.filter(k => placedKienSet.has(`${lot.id}:${k}`)).length
             const allPlaced = placedCount === 4
 

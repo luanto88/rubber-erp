@@ -46,6 +46,9 @@ import {
 import { logoutWithConfirmQueueCheck } from "@/lib/confirm-logout";
 import { getTodayISODate } from "@/lib/date-utils";
 import { getBocsForLoaiCSR, getLoaiBanhConfig, getLoaiBanhOptions, getLoaiCSRByDayChuyen } from "@/lib/product-lot-config";
+import { mergeWithLegacy, resolvePalletOptions } from "@/lib/product-packaging";
+import { usePackaging } from "@/app/dashboard/product/confirm/use-packaging";
+import { useGradeConfig } from "@/app/dashboard/product/confirm/use-grade";
 import type { ConfirmQueueItem } from "@/lib/confirm-offline-store";
 import {
   computeKienLookup,
@@ -132,7 +135,6 @@ const QrScanner = dynamic(
 );
 
 const CA_OPTS = ["A", "B", "C"] as const;
-const PALLET_OPTS = ["Sắt đế gỗ", "Sắt đế nhựa", "Sắt mỏng", "MB5", "Gỗ"];
 
 // Style dùng chung cho các trường cần "nổi bật hơn" (Ngày SX, Ca SX, Số chỉ thị, Bọc): cỡ chữ
 // +10% so với chuẩn text-sm (14px -> 15.4px), viền dày 2px, nền nhấn nhẹ — tương phản rõ với các
@@ -302,6 +304,11 @@ export default function ConfirmKienProductionPage() {
   // đang chọn trên form quét, để nhãn dropdown khớp ca trưởng của ngày đó.
   // Mất mạng ⇒ lấy tên ca từ gói tải sẵn (hôm nay / hôm qua), không gọi server.
   const packShiftNames = offline.pack?.shiftNames;
+  // Quy cách đóng gói theo nhà máy (bảng product_packaging_types; offline ⇒ lấy từ gói tải sẵn).
+  const packaging = usePackaging(factoryId, offline.pack?.packaging);
+  const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
+  // Quy cách chủng loại / loại bành theo nhà máy (product_grade_types; offline ⇒ lấy từ gói tải sẵn).
+  const grade = useGradeConfig(factoryId, offline.pack?.grade);
   useEffect(() => {
     if (!factoryId) return;
     if (!isOnline) {
@@ -549,10 +556,11 @@ export default function ConfirmKienProductionPage() {
   const offlineCsrOptions = useMemo(() => {
     const fromPack = offline.pack?.csrOptions || [];
     if (fromPack.length > 0) return fromPack;
-    return [...getLoaiCSRByDayChuyen("Mủ tạp", "CSR"), ...getLoaiCSRByDayChuyen("Mủ nước", "CSR")].filter(
-      (c) => c !== "Ngoại lệ",
-    );
-  }, [offline.pack]);
+    return [
+      ...getLoaiCSRByDayChuyen("Mủ tạp", grade.prefix, grade),
+      ...getLoaiCSRByDayChuyen("Mủ nước", grade.prefix, grade),
+    ].filter((c) => c !== "Ngoại lệ");
+  }, [offline.pack, grade]);
 
   // Tra kiện khi mất mạng: cùng logic với server (computeKienLookup) trên gói tải sẵn, cộng thêm các
   // kiện CHÍNH MÁY NÀY đã lưu trong hàng đợi (chưa có trên server) để không đếm hụt số bành đã nhập.
@@ -561,8 +569,8 @@ export default function ConfirmKienProductionPage() {
     const pack = offline.pack;
     const src = pack?.sources[code];
     if (!pack || !src) {
-      const csr = offlineCsrOptions[0] || "CSR10";
-      return offlineUnknownLookup(code, kienValue, csr, getLoaiBanhOptions(csr)[0]);
+      const csr = offlineCsrOptions[0] || `${grade.prefix}10`;
+      return offlineUnknownLookup(code, kienValue, csr, getLoaiBanhOptions(csr, grade)[0], grade);
     }
     const userId = currentUser?.id || "";
     const known = new Set(src.drafts.map((d) => d.id));
@@ -582,6 +590,7 @@ export default function ConfirmKienProductionPage() {
     const drafts = [...src.drafts, ...local].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
     return computeKienLookup({ ...src, drafts }, code, kienValue, {
       ...pack.ctx,
+      grade: pack.ctx.grade ?? grade,
       profileNames: { ...pack.ctx.profileNames, [userId]: currentUser?.full_name || currentUser?.username || "—" },
     });
   };
@@ -589,7 +598,7 @@ export default function ConfirmKienProductionPage() {
   // Đổi CSR / loại bành cho mã ngoài gói ⇒ dựng lại lookup tạm (bọc, số bành tối đa đổi theo).
   const changeOfflineUnknown = (loaiCsr: string, loaiBanh: number) => {
     if (!lookup) return;
-    const next = offlineUnknownLookup(lookup.maLo, lookup.kien, loaiCsr, loaiBanh);
+    const next = offlineUnknownLookup(lookup.maLo, lookup.kien, loaiCsr, loaiBanh, grade);
     setLookup(next);
     setBoc("");
     setSoBanh(next.maxPerKien || 36);
@@ -673,8 +682,8 @@ export default function ConfirmKienProductionPage() {
 
   const bocOptions = useMemo(() => {
     if (!lookup?.loaiCsr) return [];
-    return getBocsForLoaiCSR(lookup.dayChuyen || "Mủ tạp", lookup.loaiCsr);
-  }, [lookup?.dayChuyen, lookup?.loaiCsr]);
+    return getBocsForLoaiCSR(lookup.dayChuyen || "Mủ tạp", lookup.loaiCsr, packaging);
+  }, [lookup?.dayChuyen, lookup?.loaiCsr, packaging]);
 
   const effectiveNganId = lookup?.nganId || manualNganId || "";
 
@@ -1525,7 +1534,7 @@ export default function ConfirmKienProductionPage() {
                         <select
                           value={lookup.loaiCsr || ""}
                           onChange={(e) =>
-                            changeOfflineUnknown(e.target.value, getLoaiBanhOptions(e.target.value)[0])
+                            changeOfflineUnknown(e.target.value, getLoaiBanhOptions(e.target.value, grade)[0])
                           }
                           className={highlightFieldClassAmber}
                         >
@@ -1542,7 +1551,7 @@ export default function ConfirmKienProductionPage() {
                           onChange={(e) => changeOfflineUnknown(lookup.loaiCsr || "", Number(e.target.value))}
                           className={highlightFieldClassAmber}
                         >
-                          {getLoaiBanhOptions(lookup.loaiCsr || "").map((b) => (
+                          {getLoaiBanhOptions(lookup.loaiCsr || "", grade).map((b) => (
                             <option key={b} value={String(b)}>
                               {b}
                             </option>
@@ -1789,7 +1798,7 @@ export default function ConfirmKienProductionPage() {
                     quét QR này còn tối đa 1 phần tử. */}
                 <Field label={tt("loaiPallet")} icon={<Boxes size={13} />}>
                   <div className="flex flex-wrap gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/40 p-2.5">
-                    {PALLET_OPTS.map((p) => {
+                    {mergeWithLegacy(PALLET_OPTS, pallet).map((p) => {
                       const checked = pallet.length === 1 && pallet[0] === p;
                       return (
                         <button
@@ -1927,7 +1936,7 @@ export default function ConfirmKienProductionPage() {
             dayChuyen: editingQueueItem.dayChuyen,
             soBanh: editingQueueItem.soBanh,
             soKg: Math.round(editingQueueItem.soBanh * editingQueueItem.loaiBanh * 100) / 100,
-            maxPerKien: getLoaiBanhConfig(editingQueueItem.loaiCsr, editingQueueItem.loaiBanh).max_per_kien,
+            maxPerKien: getLoaiBanhConfig(editingQueueItem.loaiCsr, editingQueueItem.loaiBanh, grade).max_per_kien,
             ngaySx: editingQueueItem.ngaySx,
             ca: editingQueueItem.ca,
             boc: editingQueueItem.boc,
@@ -2693,13 +2702,16 @@ function EditEntryModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId]);
 
+  const packaging = usePackaging(factoryId);
+  const grade = useGradeConfig(factoryId);
+  const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
   const bocOptions = useMemo(
-    () => getBocsForLoaiCSR(entry.dayChuyen || "Mủ tạp", entry.loaiCsr),
-    [entry.dayChuyen, entry.loaiCsr],
+    () => mergeWithLegacy(getBocsForLoaiCSR(entry.dayChuyen || "Mủ tạp", entry.loaiCsr, packaging), entry.boc),
+    [entry.dayChuyen, entry.loaiCsr, entry.boc, packaging],
   );
   const maxPerKien = useMemo(
-    () => getLoaiBanhConfig(entry.loaiCsr, entry.loaiBanh).max_per_kien,
-    [entry.loaiCsr, entry.loaiBanh],
+    () => getLoaiBanhConfig(entry.loaiCsr, entry.loaiBanh, grade).max_per_kien,
+    [entry.loaiCsr, entry.loaiBanh, grade],
   );
 
   const canSave = !!nganId && soBanh > 0 && soBanh <= maxPerKien;
@@ -2778,7 +2790,7 @@ function EditEntryModal({
           </Field>
           <Field label={tt("loaiPallet")} icon={<Boxes size={13} />}>
             <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-              {PALLET_OPTS.map((p) => {
+              {mergeWithLegacy(PALLET_OPTS, pallet).map((p) => {
                 const checked = pallet.length === 1 && pallet[0] === p;
                 return (
                   <button
@@ -2929,13 +2941,16 @@ function EditDraftModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [factoryId]);
 
+  const packaging = usePackaging(factoryId);
+  const grade = useGradeConfig(factoryId);
+  const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
   const bocOptions = useMemo(
-    () => getBocsForLoaiCSR(draft.dayChuyen || "Mủ tạp", draft.loaiCsr),
-    [draft.dayChuyen, draft.loaiCsr],
+    () => mergeWithLegacy(getBocsForLoaiCSR(draft.dayChuyen || "Mủ tạp", draft.loaiCsr, packaging), draft.boc),
+    [draft.dayChuyen, draft.loaiCsr, draft.boc, packaging],
   );
   const maxPerKien = useMemo(
-    () => getLoaiBanhConfig(draft.loaiCsr, draft.loaiBanh).max_per_kien,
-    [draft.loaiCsr, draft.loaiBanh],
+    () => getLoaiBanhConfig(draft.loaiCsr, draft.loaiBanh, grade).max_per_kien,
+    [draft.loaiCsr, draft.loaiBanh, grade],
   );
 
   const canSave = !!nganId && soBanh > 0 && soBanh <= maxPerKien && !!boc && pallet.length > 0;
@@ -3014,7 +3029,7 @@ function EditDraftModal({
           </Field>
           <Field label={tt("loaiPallet")} icon={<Boxes size={13} />}>
             <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-              {PALLET_OPTS.map((p) => {
+              {mergeWithLegacy(PALLET_OPTS, pallet).map((p) => {
                 const checked = pallet.length === 1 && pallet[0] === p;
                 return (
                   <button

@@ -13,6 +13,9 @@ import {
   PRODUCT_CREATE_PERMISSIONS,
 } from "@/app/dashboard/product/confirm/report-access";
 import { getBocsForLoaiCSR, getLoaiBanhConfig } from "@/lib/product-lot-config";
+import { loadGradeConfigServer } from "@/lib/product-grade-server";
+import { isConfiguredOption } from "@/lib/product-packaging";
+import { loadPackagingConfigServer } from "@/lib/product-packaging-server";
 import {
   applyTxToKienBoc,
   applyTxToKienPallet,
@@ -453,7 +456,11 @@ export async function adminUpdateLotTransaction(
     const lot = tx ? (Array.isArray(tx.lots) ? tx.lots[0] : tx.lots) : null;
     if (!lot || lot.factory_id !== input.factoryId) throw new Error("Giao dịch không thuộc nhà máy hiện tại.");
 
-    const maxPerKien = getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined).max_per_kien;
+    const maxPerKien = getLoaiBanhConfig(
+      lot.loai_csr,
+      Number(lot.loai_banh) || undefined,
+      await loadGradeConfigServer(input.factoryId),
+    ).max_per_kien;
     const toInt = (v: number) => Math.max(0, Math.round(Number(v) || 0));
 
     const { data, error } = await supabase.rpc("admin_update_lot_transaction", {
@@ -751,11 +758,13 @@ export async function performSangKienThayBoc(input: {
         .eq("factory_id", input.factoryId)
         .in("id", lots.map((l) => l.lot_id));
       if (lotErr) return { success: false, error: lotErr.message };
+      // Danh sách bọc theo cấu hình nhà máy (Cài đặt → Quy cách đóng gói); bọc đã tắt không được chọn làm bọc mới.
+      const packaging = await loadPackagingConfigServer(input.factoryId);
       for (const l of lotRows || []) {
         const folded = String(l.day_chuyen || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
         const dc = folded.includes("nuoc") ? "Mủ nước" : "Mủ tạp";
-        const allowed = getBocsForLoaiCSR(dc, String(l.loai_csr || "").trim());
-        if (!allowed.includes(newBoc)) {
+        const allowed = getBocsForLoaiCSR(dc, String(l.loai_csr || "").trim(), packaging);
+        if (!isConfiguredOption(allowed, newBoc)) {
           return { success: false, error: `Bọc "${newBoc}" không dùng được cho lô ${l.ma_lo} (${l.loai_csr}, ${dc}).` };
         }
       }

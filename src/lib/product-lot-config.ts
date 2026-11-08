@@ -1,43 +1,49 @@
-// Cấu hình "lô tròn" theo loai_csr/loai_banh, dùng riêng cho tính năng Dự đoán số lô
-// (module Thành phẩm — src/app/dashboard/product/page.tsx) — mirror đúng công thức gốc,
-// không import trực tiếp từ page.tsx vì các hàm đó không export (module-private).
-// Nếu chỉnh sửa công thức ở product/page.tsx, phải cập nhật đồng bộ ở đây.
+// Nguồn DUY NHẤT cho chủng loại / loại bành / bành-kiện / lô tròn của Thành phẩm (client + server).
+// Từ GĐ2 (2026-11-08) đọc cấu hình nhà máy `product_grade_types` qua tham số `cfg` (product-grade.ts);
+// không truyền `cfg` ⇒ đúng quy tắc hard-code cũ. Hàm SQL product_grade_lo_tron() phải khớp logic này.
 
-export type LoaiBanhConfig = {
-  loai_banh: number
-  max_per_kien: number
-  lo_tron: number
+import { DEFAULT_PACKAGING, resolveBocOptions, type PackagingConfig } from "@/lib/product-packaging"
+import {
+  gradeLoaiBanhConfig,
+  gradeLoaiBanhOptions,
+  gradeLoaiCSRByDayChuyen,
+  gradeDayChuyenOf,
+  type CsrPrefix,
+  type GradeConfig,
+  type LoaiBanhConfig,
+} from "@/lib/product-grade"
+
+export type { LoaiBanhConfig } from "@/lib/product-grade"
+
+export function getLoaiBanhConfig(loai_csr: string, selected_banh?: number, cfg?: GradeConfig | null): LoaiBanhConfig {
+  return gradeLoaiBanhConfig(cfg, loai_csr, selected_banh)
 }
 
-export function getLoaiBanhConfig(loai_csr: string, selected_banh?: number): LoaiBanhConfig {
-  if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr)) {
-    const b = selected_banh || 35
-    return b === 20
-      ? { loai_banh: 20, max_per_kien: 60, lo_tron: 240 }
-      : { loai_banh: 35, max_per_kien: 36, lo_tron: 144 }
-  }
-  if (["CSRL", "CSR3L", "SVRL", "SVR3L"].includes(loai_csr)) {
-    const b = selected_banh || 33.33
-    return { loai_banh: b, max_per_kien: 36, lo_tron: 144 }
-  }
-  return { loai_banh: 35, max_per_kien: 36, lo_tron: 144 }
+/** `current` = loại bành đang lưu trên lô/phiếu — luôn giữ trong danh sách (dữ liệu cũ không mất). */
+export function getLoaiBanhOptions(loai_csr: string, cfg?: GradeConfig | null, current?: number | null): number[] {
+  return gradeLoaiBanhOptions(cfg, loai_csr, current)
 }
 
-export function getLoaiBanhOptions(loai_csr: string): number[] {
-  if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr)) return [35, 20]
-  if (["CSRL", "CSR3L", "SVRL", "SVR3L"].includes(loai_csr)) return [35, 33.33]
-  return [35]
+export function getLoaiCSRByDayChuyen(dc: string, prefix: CsrPrefix, cfg?: GradeConfig | null): string[] {
+  return gradeLoaiCSRByDayChuyen(cfg, dc, prefix)
 }
 
-export function getLoaiCSRByDayChuyen(dc: string, prefix: "CSR" | "SVR"): string[] {
-  if (dc === "Mủ nước") return [`${prefix}L`, `${prefix}3L`, `${prefix}CV50`, `${prefix}CV60`, "Ngoại lệ"]
-  return [`${prefix}10`, `${prefix}20`, "Ngoại lệ"]
+/**
+ * Danh sách bọc của (dây chuyền, chủng loại). Nguồn = bảng product_packaging_types (truyền `cfg` đã tải);
+ * không truyền ⇒ danh sách mặc định (đúng hành vi hard-code cũ).
+ */
+export function getBocsForLoaiCSR(dc: string, loai_csr: string, cfg?: PackagingConfig | null): string[] {
+  return resolveBocOptions(cfg ?? DEFAULT_PACKAGING, dc, loai_csr)
 }
 
-export function getBocsForLoaiCSR(dc: string, loai_csr: string): string[] {
-  const base = [`Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG ${loai_csr}`]
-  if (dc === "Mủ nước") return [...base, `Bọc trơn 0,13`, `Bọc nhãn 0,13 VRG ${loai_csr}`]
-  return base
+const MU_NUOC_CSR_SUFFIX = ["L", "3L", "CV50", "CV60"]
+
+/** Dây chuyền suy từ loại CSR (CSRL/SVR3L/CSRCV50… ⇒ Mủ nước, còn lại Mủ tạp); có cấu hình thì theo cấu hình. */
+export function dayChuyenForCsr(loaiCsr: string, cfg?: GradeConfig | null): string {
+  const fromCfg = gradeDayChuyenOf(cfg, loaiCsr)
+  if (fromCfg) return fromCfg
+  const suffix = String(loaiCsr || "").replace(/\s+/g, "").toUpperCase().replace(/^(CSR|SVR)/, "")
+  return MU_NUOC_CSR_SUFFIX.includes(suffix) ? "Mủ nước" : "Mủ tạp"
 }
 
 export function buildMaLo(num: number, suffix: string, year: string): string {

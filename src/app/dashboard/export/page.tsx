@@ -15,6 +15,18 @@ import {
 import { fetchAllPaginated } from "@/lib/supabase-helpers";
 import { DEFAULT_EXPORT_PALLET_TYPES } from "@/lib/pallet-usage";
 import {
+  DEFAULT_PACKAGING,
+  defaultBoc,
+  mergeWithLegacy,
+  resolveBocOptions,
+  type PackagingConfig,
+} from "@/lib/product-packaging";
+import { loadPackagingConfig } from "@/lib/product-packaging-client";
+import { gradeAllCsr, resolveFactoryPrefix, type GradeConfig } from "@/lib/product-grade";
+import { loadGradeConfig } from "@/lib/product-grade-client";
+import { getLoaiBanhOptions as getLoaiBanhOptionsFromConfig } from "@/lib/product-lot-config";
+import { dayChuyenForCsr } from "@/lib/product-lot-config";
+import {
   applyTxToKienPallet,
   buildLotKienBocMap,
   KIEN_KEYS,
@@ -301,7 +313,7 @@ const emptyForm = (prefix: "CSR" | "SVR" = "CSR") => ({
   chung_loai: `${prefix}10`,
   loai_pallet: "Rời",
   loai_banh: 35,
-  loai_boc: `Bọc nhãn 0,04 VRG ${prefix}10`,
+  loai_boc: defaultBoc(DEFAULT_PACKAGING, "Mủ tạp", `${prefix}10`),
   vehicles: [emptyVehicle()] as Vehicle[],
   assignments: [] as Assignment[],
   yeu_cau_chi_tieu: [] as ChiTieuReq[],
@@ -332,29 +344,14 @@ type MaintenanceStaffApproverRow = {
 };
 
 // --- Helpers -----------------------------------------------------------------
-function getLoaiBanhOptions(chung_loai: string): number[] {
-  if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(chung_loai))
-    return [35, 20];
-  if (["CSRL", "CSR3L", "SVRL", "SVR3L"].includes(chung_loai))
-    return [35, 33.33];
-  return [35];
+// Loại bành theo cấu hình nhà máy (product_grade_types, GĐ2); chưa có ⇒ quy tắc cũ.
+function getLoaiBanhOptions(chung_loai: string, grade?: GradeConfig | null, current?: number | null): number[] {
+  return getLoaiBanhOptionsFromConfig(chung_loai, grade, current);
 }
 
-function getBocOpts(chung_loai: string): string[] {
-  const isMuNuoc = [
-    "CSRL",
-    "CSR3L",
-    "CSRCV50",
-    "CSRCV60",
-    "SVRL",
-    "SVR3L",
-    "SVRCV50",
-    "SVRCV60",
-  ].includes(chung_loai);
-  const base = [`Bọc trơn 0,04`, `Bọc nhãn 0,04 VRG ${chung_loai}`];
-  return isMuNuoc
-    ? [...base, `Bọc trơn 0,13`, `Bọc nhãn 0,13 VRG ${chung_loai}`]
-    : base;
+// Bọc theo cấu hình nhà máy (bảng product_packaging_types); dây chuyền suy từ CSR.
+function getBocOpts(chung_loai: string, cfg: PackagingConfig): string[] {
+  return resolveBocOptions(cfg, dayChuyenForCsr(chung_loai), chung_loai);
 }
 
 function ddmmyy(dateStr: string) {
@@ -434,7 +431,9 @@ export default function ExportPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [factoryId, setFactoryId] = useState<string | null>(null);
-  const [factory, setFactory] = useState<{ id: string; name: string } | null>(
+  // Quy cách đóng gói (bọc) theo nhà máy — Cài đặt → Cấu hình nhà máy → Quy cách đóng gói.
+  const [packaging, setPackaging] = useState<PackagingConfig>(DEFAULT_PACKAGING);
+  const [factory, setFactory] = useState<{ id: string; name: string; prefix?: string | null } | null>(
     null,
   );
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(() => {
@@ -452,11 +451,16 @@ export default function ExportPage() {
     Record<string, Array<{ id: string; userId: string; userName: string }>>
   >({});
   const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null);
+  const [grade, setGrade] = useState<GradeConfig | null>(null);
+  // Tiền tố chủng loại theo factories.prefix (thiếu ⇒ suy từ tên nhà máy).
   const isNMCP = useMemo(
-    () => factory?.name?.toLowerCase().includes("cuaparis") ?? false,
+    () => (factory ? resolveFactoryPrefix(factory.prefix, factory.name) === "SVR" : false),
     [factory],
   );
-  const csrOpts = useMemo(() => (isNMCP ? SVR_OPTS : CSR_OPTS), [isNMCP]);
+  const csrOpts = useMemo(
+    () => (grade?.fromDb ? gradeAllCsr(grade) : isNMCP ? SVR_OPTS : CSR_OPTS),
+    [grade, isNMCP],
+  );
 
   // Pallet xuất: base list + custom options added at runtime
   const [palletTypes, setPalletTypes] = useState<string[]>(PALLET_XUAT_DEFAULT);
@@ -775,7 +779,7 @@ export default function ExportPage() {
       }
       supabase
         .from("factories")
-        .select("id,name")
+        .select("id,name,prefix")
         .eq("id", fid)
         .single()
         .then(({ data }) => {
@@ -834,6 +838,8 @@ export default function ExportPage() {
     void loadCustomers(factoryId);
     void loadGrants(factoryId);
     void loadPalletTypes(factoryId);
+    void loadPackagingConfig(factoryId).then(setPackaging);
+    void loadGradeConfig(factoryId).then(setGrade);
   }, [factoryId, loadData, loadLots, loadQcResults, loadCustomers, loadGrants, loadPalletTypes]);
 
   // -- Compute remaining per lot --------------------------------------------
@@ -1101,7 +1107,7 @@ export default function ExportPage() {
     const editBoc =
       normalizeBocAlias(order.loai_boc, editCsr) ||
       (kienBocs.length === 1 ? kienBocs[0] : null) ||
-      `Bọc nhãn 0,04 VRG ${editCsr}`;
+      defaultBoc(packaging, dayChuyenForCsr(editCsr), editCsr);
     setForm({
       ma_don: order.ma_don || "",
       ngay: order.ngay?.slice(0, 10) || new Date().toISOString().slice(0, 10),
@@ -3362,12 +3368,12 @@ export default function ExportPage() {
                     value={form.chung_loai}
                     onChange={(e) => {
                       const cl = e.target.value;
-                      const bOpts = getBocOpts(cl);
+                      const bOpts = getBocOpts(cl, packaging);
                       setForm((p) => ({
                         ...p,
                         chung_loai: cl,
-                        loai_banh: getLoaiBanhOptions(cl)[0],
-                        loai_boc: bOpts[1] || bOpts[0],
+                        loai_banh: getLoaiBanhOptions(cl, grade)[0],
+                        loai_boc: defaultBoc(packaging, dayChuyenForCsr(cl), cl) || bOpts[0] || "",
                         assignments: [],
                       }));
                     }}
@@ -3448,7 +3454,7 @@ export default function ExportPage() {
                   Loại bành (kg)
                 </label>
                 <div className="flex gap-2 flex-wrap">
-                  {getLoaiBanhOptions(form.chung_loai).map((opt) => (
+                  {getLoaiBanhOptions(form.chung_loai, grade, form.loai_banh).map((opt) => (
                     <button
                       key={opt}
                       type="button"
@@ -3475,7 +3481,7 @@ export default function ExportPage() {
                   }
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 >
-                  {getBocOpts(form.chung_loai).map((b) => (
+                  {mergeWithLegacy(getBocOpts(form.chung_loai, packaging), form.loai_boc).map((b) => (
                     <option key={b}>{b}</option>
                   ))}
                 </select>

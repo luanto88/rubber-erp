@@ -63,6 +63,7 @@ import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
 import { IconAction } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif"
+import { loadGradeConfig } from "@/lib/product-grade-client"
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALL_POSITIONS = [
@@ -965,12 +966,13 @@ export default function StoragePage() {
         lotMap = await loadStorageLotsByNgans(factoryId, nganIds)
       }
 
+      const grade = await loadGradeConfig(factoryId)
       const rows = matchedNgans
         .sort((a, b) => a.ngay_bd.localeCompare(b.ngay_bd) || a.ten_ngan.localeCompare(b.ten_ngan))
         .map((ngan) => {
           const lots = lotMap[ngan.id] || []
-          const summary = summarizeStorageLots(lots)
-          const lotDetailsText = buildStorageLotDetailLines(lots).join(", ")
+          const summary = summarizeStorageLots(lots, grade)
+          const lotDetailsText = buildStorageLotDetailLines(lots, grade).join(", ")
           return {
             ngan,
             thanhPhamKg: summary.thanhPhamKg,

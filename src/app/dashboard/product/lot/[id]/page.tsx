@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase"
 import { hasPermission, hydrateActiveSession } from "@/lib/auth"
 import { formatStorageDate } from "@/lib/storage-detail"
 import { getLoaiBanhConfig } from "@/lib/product-lot-config"
+import type { GradeConfig } from "@/lib/product-grade"
+import { loadGradeConfig } from "@/lib/product-grade-client"
 import { buildProductLabelLookupPath, type KienLetter } from "@/lib/product-label"
 import {
   buildProductLotPdfBytes,
@@ -100,6 +102,7 @@ export default function ProductLotDetailPage() {
   const [qc, setQc] = useState<QcRow | null>(null)
   const [exportsList, setExportsList] = useState<ExportRow[]>([])
   const [factoryName, setFactoryName] = useState("")
+  const [grade, setGrade] = useState<GradeConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
@@ -134,6 +137,7 @@ export default function ProductLotDetailPage() {
         return
       }
       const fid = user.factory_id
+      if (fid) void loadGradeConfig(fid).then(setGrade)
       if (!fid) {
         setLoadError("Tài khoản chưa được gán nhà máy.")
         return
@@ -225,7 +229,7 @@ export default function ProductLotDetailPage() {
   )
 
   const detailUrl = origin && lot ? `${origin}/dashboard/product/lot/${lot.id}` : ""
-  const cfg = getLoaiBanhConfig(lot?.loai_csr || "", lot?.loai_banh || undefined)
+  const cfg = getLoaiBanhConfig(lot?.loai_csr || "", lot?.loai_banh || undefined, grade)
   const qcText = qc
     ? `${qc.dat_hang || (qc.trang_thai === "dat" ? "Đạt" : qc.trang_thai || "—")} · PKN ${qc.pkn ?? "—"} · ${formatStorageDate(qc.ngay_kn)}${num(qc.lan) > 1 ? ` (lần ${qc.lan})` : ""}`
     : "Chưa kiểm nghiệm"

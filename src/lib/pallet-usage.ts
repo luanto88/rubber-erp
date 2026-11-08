@@ -3,36 +3,12 @@
 // Đã chốt với người dùng 2026-10-26: Sắt đế gỗ = 1 sắt dày + 1 đế gỗ; Sắt đế nhựa = 1 sắt dày + 1 đế
 // nhựa; Sắt mỏng = 1 sắt mỏng; MB5 = 1 MB5; Gỗ = 1 pallet gỗ. 2026-10-27: thêm MB4.
 
-export type PalletComponent = "sat_day" | "sat_mong" | "de_go" | "de_nhua" | "mb5" | "mb4" | "pallet_go"
+// GĐ3 (2026-11-08): danh sách thành phần nằm ở bảng pallet_components (src/lib/pallet-components.ts), người dùng
+// thêm được thành phần mới ⇒ mã là chuỗi tự do. Các hằng số cứng dưới đây CHỈ còn là quy đổi dự phòng (palletComponents)
+// khi pallet sản xuất chưa khai báo thành phần trong Quy cách đóng gói.
+export type PalletComponent = string
 
-export const PALLET_COMPONENT_LABEL: Record<PalletComponent, string> = {
-  sat_day: "Pallet sắt dày",
-  sat_mong: "Pallet sắt mỏng",
-  de_go: "Đế gỗ",
-  de_nhua: "Đế nhựa",
-  mb5: "Pallet MB5",
-  mb4: "Pallet MB4",
-  pallet_go: "Pallet gỗ",
-}
-
-export const PALLET_COMPONENT_ORDER: PalletComponent[] = ["sat_day", "sat_mong", "de_go", "de_nhua", "mb5", "mb4", "pallet_go"]
-
-/**
- * Thành phần → mã vật tư trong Kho vật tư (phân loại "Pallet các loại"). Sắt mỏng gộp nhiều mã
- * (UBE/Zeon, Chemie) thành 1 dòng "PM" — từng mã chỉ còn là ghi chú. Mã chưa tạo trong kho (vd MB4)
- * vẫn tính được số pallet, chỉ không có tồn sổ sách.
- */
-export const PALLET_COMPONENT_ITEMS: Record<PalletComponent, { groupCode: string; itemCodes: string[] }> = {
-  sat_day: { groupCode: "DPH", itemCodes: ["DPH"] },
-  sat_mong: { groupCode: "PM", itemCodes: ["MUBEZ", "MCH"] },
-  de_go: { groupCode: "ĐG", itemCodes: ["ĐG"] },
-  de_nhua: { groupCode: "ĐN", itemCodes: ["ĐN"] },
-  mb5: { groupCode: "PMB5", itemCodes: ["PMB5"] },
-  mb4: { groupCode: "PMB4", itemCodes: ["PMB4"] },
-  pallet_go: { groupCode: "PG", itemCodes: ["PG"] },
-}
-
-export const PALLET_COMPONENT_CODES = new Set<string>(PALLET_COMPONENT_ORDER)
+type LegacyPalletComponent = "sat_day" | "sat_mong" | "de_go" | "de_nhua" | "mb5" | "mb4" | "pallet_go"
 
 const strip = (s: string) =>
   s
@@ -45,7 +21,7 @@ const strip = (s: string) =>
     .replace(/\s+/g, " ")
     .trim()
 
-const RECIPES: Record<string, PalletComponent[]> = {
+const RECIPES: Record<string, LegacyPalletComponent[]> = {
   "sat de go": ["sat_day", "de_go"],
   "sat de nhua": ["sat_day", "de_nhua"],
   "sat mong": ["sat_mong"],
@@ -57,17 +33,6 @@ const RECIPES: Record<string, PalletComponent[]> = {
 /** Vật tư thành phần của 1 loại pallet; `null` = loại chưa có quy đổi (báo "Không xác định"). */
 export function palletComponents(palletType: string): PalletComponent[] | null {
   return RECIPES[strip(palletType)] || null
-}
-
-/** Mã pallet thành phần đã chuẩn hoá (sắt mỏng ⇒ PM) của 1 mã vật tư kho; null nếu không phải pallet. */
-export function palletGroupOfItemCode(itemCode: string): { component: PalletComponent; groupCode: string } | null {
-  const code = itemCode.trim().toUpperCase()
-  for (const c of PALLET_COMPONENT_ORDER) {
-    if (PALLET_COMPONENT_ITEMS[c].itemCodes.some((x) => x.toUpperCase() === code)) {
-      return { component: c, groupCode: PALLET_COMPONENT_ITEMS[c].groupCode }
-    }
-  }
-  return null
 }
 
 // ── Loại pallet xuất (bảng export_pallet_types) ──

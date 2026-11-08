@@ -1,6 +1,8 @@
 // Types và helpers cho module Quản lý kho thành phẩm
 // Slot_code format: "{frameCode}-R{row}C{col}"  ví dụ "1A-R1C1"
 
+import { getLoaiBanhConfig } from "@/lib/product-lot-config"
+import type { GradeConfig } from "@/lib/product-grade"
 export type WarehouseCode = "kho1" | "kho2"
 
 export type WarehouseSlot = {
@@ -188,15 +190,25 @@ export function getCsrColor(loaiCsr: string): {
   return { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-300", dot: "bg-slate-400", bgDark: "bg-slate-400" }
 }
 
-// Số bành tối đa theo loại bành
-export function getMaxBanh(loaiBanh: number): number {
+// Cấu hình chủng loại / loại bành của nhà máy (product_grade_types, GĐ2) — trang Kho thành phẩm nạp 1 lần
+// lúc bootstrap qua setWarehouseGradeConfig. Chưa nạp ⇒ quy tắc cũ (20kg → 60 bành/kiện, khác → 36).
+let warehouseGradeConfig: GradeConfig | null = null
+export function setWarehouseGradeConfig(cfg: GradeConfig | null) {
+  warehouseGradeConfig = cfg
+}
+
+// Số bành tối đa / kiện theo (chủng loại, loại bành)
+export function getMaxBanh(loaiBanh: number, loaiCsr?: string | null): number {
+  if (warehouseGradeConfig?.fromDb && loaiCsr) {
+    return getLoaiBanhConfig(loaiCsr, loaiBanh, warehouseGradeConfig).max_per_kien
+  }
   if (loaiBanh === 20) return 60
   return 36  // 35 hoặc 33.33
 }
 
 // Kiện có đầy không
-export function isKienFull(banh: number, loaiBanh: number): boolean {
-  return banh >= getMaxBanh(loaiBanh)
+export function isKienFull(banh: number, loaiBanh: number, loaiCsr?: string | null): boolean {
+  return banh >= getMaxBanh(loaiBanh, loaiCsr)
 }
 
 // Lấy số bành của kiện theo label

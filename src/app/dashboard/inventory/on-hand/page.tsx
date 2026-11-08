@@ -20,12 +20,8 @@ import { supabase } from "@/lib/supabase"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { QrScanButton, QrScanPortal } from "@/app/dashboard/_components/qr-scan-portal"
 import { getFreshAuthSession } from "@/lib/auth"
-import {
-  PALLET_COMPONENT_ITEMS,
-  PALLET_COMPONENT_LABEL,
-  PALLET_COMPONENT_ORDER,
-  palletGroupOfItemCode,
-} from "@/lib/pallet-usage"
+import { itemComponentMap, sortedComponents, type PalletComponentsConfig } from "@/lib/pallet-components"
+import { loadPalletComponents } from "@/lib/pallet-components-client"
 import { loadPalletFlow, type PalletFlowResult } from "../pallet-flow-actions"
 import { InventoryPageShell, ScrollReveal, ScrollRevealSection } from "../_components/inventory-shell"
 import {
@@ -164,6 +160,18 @@ export default function InventoryOnHandPage() {
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
   const [search, setSearch] = useState("")
   const [factoryId, setFactoryId] = useState<string | null>(null)
+  // Thành phần pallet theo nhà máy (Cài đặt → Thành phần pallet); chưa có bảng ⇒ danh sách mặc định.
+  const [palletComponents, setPalletComponents] = useState<PalletComponentsConfig | null>(null)
+  useEffect(() => {
+    if (!factoryId) return
+    let alive = true
+    void loadPalletComponents(factoryId).then((cfg) => {
+      if (alive) setPalletComponents(cfg)
+    })
+    return () => {
+      alive = false
+    }
+  }, [factoryId])
   const [fromDate, setFromDate] = useState("")
   const [toDate, setToDate] = useState("")
   const [periodMovements, setPeriodMovements] = useState<PeriodMovement[]>([])
@@ -293,15 +301,17 @@ export default function InventoryOnHandPage() {
 
   // Chế độ pallet: chỉ bật khi người dùng chọn phân loại có vật tư pallet hoặc chọn mã pallet cụ thể.
   // Khi bật, dòng pallet không tách theo kho mà gộp 1 dòng/nhóm (pallet dùng theo TỔNG mọi kho).
+  const palletItemMap = useMemo(() => itemComponentMap(palletComponents, items), [palletComponents, items])
+
   const palletMode = useMemo(() => {
     if (selectedCategoryIds.length === 0 && selectedItemIds.length === 0) return false
     return items.some(
       (item) =>
-        palletGroupOfItemCode(item.code) &&
+        palletItemMap.has(item.id) &&
         (selectedCategoryIds.length === 0 || categoryFilterSet.has(item.category_id || "")) &&
         (selectedItemIds.length === 0 || itemFilterSet.has(item.id)),
     )
-  }, [categoryFilterSet, itemFilterSet, items, selectedCategoryIds.length, selectedItemIds.length])
+  }, [categoryFilterSet, itemFilterSet, items, palletItemMap, selectedCategoryIds.length, selectedItemIds.length])
 
   const onHandRows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
@@ -314,7 +324,7 @@ export default function InventoryOnHandPage() {
         if (!item || !warehouse) return null
         if (selectedCategoryIds.length > 0 && !categoryFilterSet.has(item.category_id || "")) return null
         if (selectedItemIds.length > 0 && !itemFilterSet.has(item.id)) return null
-        if (palletMode && palletGroupOfItemCode(item.code)) return null
+        if (palletMode && palletItemMap.has(item.id)) return null
 
         const rule = getRule(item.id, balance.warehouse_id, warehouseRules)
         const minStock = Number(rule?.min_stock ?? item.min_stock ?? 0)
@@ -378,6 +388,7 @@ export default function InventoryOnHandPage() {
     itemFilterSet,
     itemMap,
     lotBalances,
+    palletItemMap,
     palletMode,
     periodKey,
     periodReady,
@@ -486,11 +497,16 @@ export default function InventoryOnHandPage() {
     const categorySelected = selectedCategoryIds.length > 0
     const itemSelected = selectedItemIds.length > 0
 
-    return PALLET_COMPONENT_ORDER.map((c) => {
-      const { groupCode, itemCodes } = PALLET_COMPONENT_ITEMS[c]
-      const label = PALLET_COMPONENT_LABEL[c]
-      const codeSet = new Set(itemCodes.map((x) => x.toUpperCase()))
-      const groupItems = items.filter((item) => codeSet.has(item.code.trim().toUpperCase()))
+    return sortedComponents(palletComponents, { includeInactive: true }).map((comp) => {
+      const groupCode = comp.group_code
+      const label = comp.ten
+      const groupItems = items.filter((item) => palletItemMap.get(item.id)?.code === comp.code)
+      const itemCodes = groupItems.map((item) => item.code)
+      // Thành phần đã tắt chỉ hiện khi còn số liệu luồng (kiện cũ vẫn dùng).
+      if (!comp.is_active) {
+        const fl = flow?.[groupCode]
+        if (!fl || !(fl.dangLuu || fl.xuatLuu || fl.traVe || fl.matXuatKhau)) return null
+      }
       const matched = groupItems.filter(
         (item) =>
           (!categorySelected || categoryFilterSet.has(item.category_id || "")) &&
@@ -559,7 +575,9 @@ export default function InventoryOnHandPage() {
     categoryFilterSet,
     itemFilterSet,
     items,
+    palletComponents,
     palletFlow,
+    palletItemMap,
     palletMode,
     periodKey,
     periodReady,
@@ -1173,7 +1191,7 @@ export default function InventoryOnHandPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-700">
                       {row.item.name}
-                      {palletGroupOfItemCode(row.item.code) ? (
+                      {palletItemMap.has(row.item.id) ? (
                         <div className="text-[11px] text-slate-400">
                           Sổ sách theo kho — chọn phân loại Pallet các loại để xem tồn trống
                         </div>

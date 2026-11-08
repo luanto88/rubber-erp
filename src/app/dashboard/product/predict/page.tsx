@@ -18,6 +18,10 @@ import {
   getLoaiCSRByDayChuyen,
   getBocsForLoaiCSR,
 } from "@/lib/product-lot-config";
+import { DEFAULT_PACKAGING, defaultTham, resolveThamOptions, type PackagingConfig } from "@/lib/product-packaging";
+import { loadPackagingConfig } from "@/lib/product-packaging-client";
+import { resolveFactoryPrefix, type GradeConfig } from "@/lib/product-grade";
+import { loadGradeConfig } from "@/lib/product-grade-client";
 import {
   downloadProductLabelPdf,
   downloadProductLabelSmallQrPdf,
@@ -64,8 +68,6 @@ const KIEN_COLS: {
 
 type SuffixOption = { code: string; name: string };
 
-const THAM_OPTIONS = ["Cũ", "Mới"];
-const THAM_DEFAULT = "Cũ";
 // Giá trị sentinel của option "-- Chọn hậu tố --" (không trùng được mã hậu tố thật nào).
 const SUFFIX_UNSET = "__unset__";
 
@@ -97,7 +99,10 @@ export default function ProductPredictPage() {
   const [loaiBanh, setLoaiBanh] = useState(35);
   const [boc, setBoc] = useState("");
   // Thảm bắt buộc, dropdown cứng Cũ/Mới (mặc định Cũ) — cùng bộ giá trị module Thành phẩm dùng.
-  const [tham, setTham] = useState<string>(THAM_DEFAULT);
+  const [packaging, setPackaging] = useState<PackagingConfig>(DEFAULT_PACKAGING);
+  const [grade, setGrade] = useState<GradeConfig | null>(null);
+  const THAM_OPTIONS = useMemo(() => resolveThamOptions(packaging), [packaging]);
+  const [tham, setTham] = useState<string>(() => defaultTham(DEFAULT_PACKAGING));
   // null = CHƯA chọn hậu tố (bắt buộc chọn rõ ràng); "" = đã chọn "Trống (không hậu tố)".
   const [suffix, setSuffix] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -174,9 +179,15 @@ export default function ProductPredictPage() {
     () => new Set(selectedNgans.map((n) => normalizeDayChuyenFromLoaiNl(n.loai_nl))).size > 1,
     [selectedNgans],
   );
-  const csrOptions = useMemo(() => getLoaiCSRByDayChuyen(dayChuyen, factoryPrefix), [dayChuyen, factoryPrefix]);
-  const banhOptions = useMemo(() => (loaiCsr ? getLoaiBanhOptions(loaiCsr) : []), [loaiCsr]);
-  const bocOptions = useMemo(() => (loaiCsr ? getBocsForLoaiCSR(dayChuyen, loaiCsr) : []), [dayChuyen, loaiCsr]);
+  const csrOptions = useMemo(
+    () => getLoaiCSRByDayChuyen(dayChuyen, factoryPrefix, grade),
+    [dayChuyen, factoryPrefix, grade],
+  );
+  const banhOptions = useMemo(() => (loaiCsr ? getLoaiBanhOptions(loaiCsr, grade) : []), [loaiCsr, grade]);
+  const bocOptions = useMemo(
+    () => (loaiCsr ? getBocsForLoaiCSR(dayChuyen, loaiCsr, packaging) : []),
+    [dayChuyen, loaiCsr, packaging],
+  );
   const canManage = hasPermission(currentUser, "product.predict_manage");
   const isAdmin = currentUser?.role === "admin";
 
@@ -192,7 +203,7 @@ export default function ProductPredictPage() {
     if (justSelected && !loaiCsr && csrOptions.length > 0) {
       const defaultCsr = csrOptions[0];
       setLoaiCsr(defaultCsr);
-      setLoaiBanh(getLoaiBanhOptions(defaultCsr)[0] || 35);
+      setLoaiBanh(getLoaiBanhOptions(defaultCsr, grade)[0] || 35);
     }
     // Tự động nhận diện hậu tố mã lô theo nguồn gốc ngăn đầu tiên
     if (justSelected && suffix === null && selectedNgans[0]) {
@@ -228,9 +239,11 @@ export default function ProductPredictPage() {
         return;
       }
       setFactoryId(fid);
+      void loadPackagingConfig(fid).then(setPackaging);
+      void loadGradeConfig(fid).then(setGrade);
       setCurrentUser(user);
-      const { data: factory } = await supabase.from("factories").select("name").eq("id", fid).single();
-      setFactoryPrefix(factory?.name?.toLowerCase().includes("cuaparis") ? "SVR" : "CSR");
+      const { data: factory } = await supabase.from("factories").select("name, prefix").eq("id", fid).single();
+      setFactoryPrefix(resolveFactoryPrefix(factory?.prefix, factory?.name));
       const { data: suffixRows } = await supabase
         .from("suffixes")
         .select("code,name")
@@ -855,7 +868,7 @@ export default function ProductPredictPage() {
                     setSelectedNganIds([]);
                     setLoaiCsr("");
                     setBoc("");
-                    setTham(THAM_DEFAULT);
+                    setTham(defaultTham(packaging));
                     setRequestedLotCount("");
                     setTrailingKienCount("");
                     setClosesNganChecked(true);
@@ -908,7 +921,7 @@ export default function ProductPredictPage() {
                         value={loaiCsr}
                         onChange={(e) => {
                           setLoaiCsr(e.target.value);
-                          setLoaiBanh(getLoaiBanhOptions(e.target.value)[0] || 35);
+                          setLoaiBanh(getLoaiBanhOptions(e.target.value, grade)[0] || 35);
                           setBoc("");
                         }}
                         className="w-full min-h-[42px] rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"

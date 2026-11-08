@@ -3,7 +3,9 @@
 import dynamic from "next/dynamic"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Boxes, Download, ExternalLink, FileText, Map as MapIcon, Pencil, Truck, Warehouse, Weight } from "lucide-react"
-import { hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
+import type { GradeConfig } from "@/lib/product-grade"
+import { loadGradeConfig } from "@/lib/product-grade-client"
 import {
   buildStorageLookupPath,
   formatStorageDate,
@@ -137,7 +139,21 @@ export function StorageDetailDashboard({ nganId }: { nganId: string }) {
     if (docTab === "map" && !geoJson && !geoLoading && !geoError) void ensureGeoJson()
   }, [docTab, geoJson, geoLoading, geoError, ensureGeoJson])
 
-  const summary = useMemo(() => (detail ? summarizeStorageLots(detail.lots) : null), [detail])
+  // Quy cách chủng loại / loại bành (lô tròn theo cấu hình nhà máy); lỗi ⇒ quy tắc cũ.
+  const [grade, setGrade] = useState<GradeConfig | null>(null)
+  useEffect(() => {
+    let alive = true
+    void getActiveFactoryId()
+      .then((fid) => (fid ? loadGradeConfig(fid) : null))
+      .then((g) => {
+        if (alive && g) setGrade(g)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const summary = useMemo(() => (detail ? summarizeStorageLots(detail.lots, grade) : null), [detail, grade])
 
   // Lô thành phẩm gom theo chủng loại (CSR / bành / bọc) — thay modal "Xem chi tiết" cũ ở danh sách.
   const lotGroups = useMemo(() => {

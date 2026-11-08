@@ -22,6 +22,10 @@ import {
 } from "@/app/dashboard/product/confirm/report-access";
 import { normalizeLotStatus } from "@/app/dashboard/product/shared";
 import { getLoaiBanhConfig } from "@/lib/product-lot-config";
+import type { PackagingConfig } from "@/lib/product-packaging";
+import { loadPackagingConfigServer } from "@/lib/product-packaging-server";
+import type { GradeConfig } from "@/lib/product-grade";
+import { loadGradeConfigServer } from "@/lib/product-grade-server";
 import { getFactoryTodayISO, getTodayISODate } from "@/lib/date-utils";
 import { resolveShiftNamesAt, SHIFT_CODES } from "@/app/dashboard/product/confirm/shift-names";
 import { fetchAllPaginated } from "@/lib/supabase-helpers";
@@ -179,6 +183,7 @@ export async function resolveKienForConfirm(
     nganInfo: Object.fromEntries((nganRes.data || []).map((n) => [n.id, { ma_ngan: n.ma_ngan, ten_ngan: n.ten_ngan }])),
     profileNames: Object.fromEntries(nameMap),
     suggestedChiThi,
+    grade: await loadGradeConfigServer(factoryId),
   };
   return computeKienLookup(source, maLo, kien, ctx);
 }
@@ -445,7 +450,7 @@ export async function confirmKienProduction(input: ConfirmKienInput): Promise<Co
     // Chống race: tính lại số bành hiện có của đúng kiện này trước khi ghi (lô có thể vừa được
     // người khác xác nhận thêm giữa lúc mở trang và lúc bấm gửi) — cho phép top-up phần còn
     // thiếu, chỉ chặn khi vượt quá maxPerKien của đúng loại bành/CSR đang gửi lên.
-    const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh);
+    const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh, await loadGradeConfigServer(input.factoryId));
     const maxPerKien = config.max_per_kien;
 
     // 3 truy vấn ĐỌC đầu tiên không phụ thuộc lẫn nhau (existingLot chỉ cần maLo; ngan và
@@ -760,9 +765,10 @@ export async function checkIncompleteLotsForDay(
     .in("id", lotIds);
 
   const warnings: LotCompletenessWarning[] = [];
+  const grade = await loadGradeConfigServer(factoryId);
   for (const lot of lots || []) {
     if (normalizeLotStatus(lot.trang_thai) !== "Dở dang") continue;
-    const config = getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined);
+    const config = getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined, grade);
     const totals: Record<KienLetter, number> = {
       A: Number(lot.kien_a || 0),
       B: Number(lot.kien_b || 0),
@@ -823,8 +829,9 @@ export async function checkOtherIncompleteLotsForCategory(
   }
 
   const result: OtherIncompleteLot[] = [];
+  const grade = await loadGradeConfigServer(factoryId);
   for (const lot of rows) {
-    const config = getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined);
+    const config = getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined, grade);
     const committed: Record<KienLetter, number> = {
       A: Number(lot.kien_a || 0),
       B: Number(lot.kien_b || 0),
@@ -1618,7 +1625,7 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
     // Đặt SAU nhánh alreadySaved: nháp đã lưu trước khi khoá vẫn được xác nhận lại bình thường.
     await assertShiftNotLocked({ factoryId: input.factoryId, ngaySx: input.ngaySx, ca: input.ca, actorUserId: userId });
 
-    const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh);
+    const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh, await loadGradeConfigServer(input.factoryId));
     const soKg = Math.round(input.soBanh * input.loaiBanh * 100) / 100;
 
     // Chặn cứng vượt max_per_kien NGAY LÚC LƯU TẠM (khác 110% ngăn/hạn mức tổng thể — vẫn để RPC
@@ -1903,7 +1910,7 @@ export async function updateDraftKien(input: UpdateDraftKienInput): Promise<Upda
     if (draft.factory_id !== input.factoryId) return { success: false, error: "Nháp không thuộc nhà máy hiện tại." };
 
     const kien = draft.kien as KienLetter;
-    const config = getLoaiBanhConfig(draft.loai_csr, Number(draft.loai_banh));
+    const config = getLoaiBanhConfig(draft.loai_csr, Number(draft.loai_banh), await loadGradeConfigServer(input.factoryId));
     const soKg = Math.round(input.soBanh * Number(draft.loai_banh) * 100) / 100;
 
     const [{ data: existingLot }, { data: siblingDrafts }, { data: otherDraftRows }] = await Promise.all([
@@ -2038,9 +2045,10 @@ export async function submitConfirmDraftBatch(
 
     // max_per_kien luôn tính MỚI ngay trước khi gửi (không tin cột đã lưu từ lúc Lưu tạm) — tránh
     // lệch dữ liệu nếu mapping loai_csr/loai_banh -> max_per_kien từng thay đổi giữa 2 thời điểm.
+    const grade = await loadGradeConfigServer(factoryId);
     const recomputed = draftRows.map((d) => ({
       draft_id: d.id,
-      max_per_kien: getLoaiBanhConfig(d.loai_csr, Number(d.loai_banh)).max_per_kien,
+      max_per_kien: getLoaiBanhConfig(d.loai_csr, Number(d.loai_banh), grade).max_per_kien,
     }));
 
     const { data: resultRows, error: rpcError } = await supabase.rpc("submit_confirm_draft_batch", {
@@ -2112,6 +2120,10 @@ export type ConfirmOfflinePack = {
   lockedShifts: string[];
   /** Các loại CSR đang có trong dữ liệu (để chọn tay khi mã ngoài gói). */
   csrOptions: string[];
+  /** Quy cách đóng gói (bọc / pallet SX / thảm) — gói tải trước 2026-11-08 không có ⇒ mặc định. */
+  packaging?: PackagingConfig;
+  /** Quy cách chủng loại / loại bành (product_grade_types) — gói cũ không có ⇒ quy tắc cũ. */
+  grade?: GradeConfig;
 };
 
 export type LoadConfirmOfflinePackResult =
@@ -2289,17 +2301,20 @@ export async function loadConfirmOfflinePack(
       if (s.lot?.loai_csr) csrSet.add(s.lot.loai_csr);
       if (s.predicted?.loai_csr) csrSet.add(s.predicted.loai_csr);
     }
+    const grade = await loadGradeConfigServer(factoryId);
 
     return {
       success: true,
       pack: {
         generatedAt: new Date().toISOString(),
         sources,
-        ctx: { nganInfo, profileNames: Object.fromEntries(nameMap), suggestedChiThi },
+        ctx: { nganInfo, profileNames: Object.fromEntries(nameMap), suggestedChiThi, grade },
         ngans,
         shiftNames: { [today]: namesToday, [yesterday]: namesYesterday },
         lockedShifts: (lockRows || []).map((r) => `${r.ngay_sx}|${r.ca}`),
         csrOptions: [...csrSet].sort(),
+        packaging: await loadPackagingConfigServer(factoryId),
+        grade,
       },
     };
   } catch (error) {

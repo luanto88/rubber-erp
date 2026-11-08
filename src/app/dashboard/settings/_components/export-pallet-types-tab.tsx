@@ -9,12 +9,12 @@ import { Pencil, Plus, Trash2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import {
   EXPORT_PALLET_FORM_LABEL,
-  PALLET_COMPONENT_LABEL,
-  PALLET_COMPONENT_ORDER,
   type ExportPalletForm,
   type ExportPalletType,
   type PalletComponent,
 } from "@/lib/pallet-usage"
+import { componentLabel, sortedComponents, type PalletComponentsConfig } from "@/lib/pallet-components"
+import { loadPalletComponents } from "@/lib/pallet-components-client"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { ModalShell } from "../../_components/modal-shell"
 
@@ -77,8 +77,11 @@ export function ExportPalletTypesTab({ factoryId, canManage }: { factoryId: stri
     }
   }, [])
 
+  const [components, setComponents] = useState<PalletComponentsConfig | null>(null)
   useEffect(() => {
-    if (factoryId) void load(factoryId)
+    if (!factoryId) return
+    void load(factoryId)
+    void loadPalletComponents(factoryId).then(setComponents)
   }, [factoryId, load])
 
   const save = async () => {
@@ -198,7 +201,7 @@ export function ExportPalletTypesTab({ factoryId, canManage }: { factoryId: stri
                       ? "Toàn bộ pallet của kiện"
                       : r.hinh_thuc === "roi"
                         ? "—"
-                        : (r.mat_thanh_phan || []).map((c) => PALLET_COMPONENT_LABEL[c] || c).join(", ")}
+                        : (r.mat_thanh_phan || []).map((c) => componentLabel(components, c)).join(", ")}
                   </td>
                   <td className="text-right">{r.sort_order}</td>
                   <td>{r.is_active ? "Đang dùng" : "Đã tắt"}</td>
@@ -296,7 +299,11 @@ export function ExportPalletTypesTab({ factoryId, canManage }: { factoryId: stri
               <div>
                 <label className="mb-1.5 block text-xs font-bold text-slate-600">Thành phần bị mất (mỗi kiện 1 cái) *</label>
                 <div className="flex flex-wrap gap-2">
-                  {PALLET_COMPONENT_ORDER.map((c) => {
+                  {[
+                    // Nắp: mất hay trả về do ô "Xuất kèm nắp" trên từng đơn xuất quyết định, không khai báo ở đây.
+                    ...sortedComponents(components).filter((x) => !x.la_nap).map((x) => x.code),
+                    ...form.mat_thanh_phan.filter((c) => !sortedComponents(components).some((x) => x.code === c)),
+                  ].map((c) => {
                     const on = form.mat_thanh_phan.includes(c)
                     return (
                       <button
@@ -312,7 +319,7 @@ export function ExportPalletTypesTab({ factoryId, canManage }: { factoryId: stri
                           on ? "border-sky-500 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-500"
                         }`}
                       >
-                        {PALLET_COMPONENT_LABEL[c]}
+                        {componentLabel(components, c)}
                       </button>
                     )
                   })}

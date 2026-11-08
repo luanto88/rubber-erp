@@ -159,3 +159,50 @@ Rule:
 - Giá trị mới chỉ áp dụng cho nhà máy đang đăng nhập
 - Lưu vào database
 - Tự động bổ sung vào cấu hình nhà máy để dùng cho các lần sau
+
+## Quy cách đóng gói thành phẩm theo nhà máy — GĐ1 (2026-11-08, chờ chạy migration + test tay)
+- Bọc / Pallet sản xuất / Thảm KHÔNG còn hard-code: bảng `product_packaging_types` (migration
+  `20261108_product_packaging_types.sql`, **chạy tay TRƯỚC deploy**). Quản trị: Cài đặt → Cấu hình nhà máy →
+  **Quy cách đóng gói TP** (`settings/_components/product-packaging-tab.tsx`).
+- Mỗi mục: tên (bọc có token `{CSR}`), Dây chuyền / Chủng loại (multi, rỗng = tất cả), Mã vật tư kho (multi, GĐ1 chỉ
+  lưu), Thành phần pallet (pallet_sx, thay `RECIPES` của pallet-usage.ts), Mặc định, Đang dùng.
+- Nguồn logic DUY NHẤT: `src/lib/product-packaging.ts` (thuần) + loader `product-packaging-client.ts` /
+  `product-packaging-server.ts`. `getBocsForLoaiCSR(dc, csr, cfg?)` không truyền cfg = danh sách mặc định cũ.
+  Bảng lỗi/rỗng ⇒ `DEFAULT_PACKAGING` (phải khớp seed migration).
+- Chỉ áp cho phiếu MỚI: lô cũ giữ chuỗi đã lưu (`mergeWithLegacy` giữ giá trị cũ trong form sửa). Mục đã có lô
+  dùng ⇒ không đổi tên/xoá, chỉ tắt; đổi tên = thêm mới + tắt cũ.
+- GĐ1 test tay PASS (2026-11-08).
+
+## Quy cách chủng loại theo nhà máy — GĐ2 (2026-11-08, chờ chạy migration + test tay)
+- Bảng `product_grade_types` (migration `20261116_product_grade_types.sql`, **chạy tay TRƯỚC deploy**): mỗi dòng =
+  (dây chuyền, chủng loại, loại bành, bành/kiện, mặc định, thứ tự, đang dùng). **Lô tròn = 4 × bành/kiện**, không lưu
+  riêng. Seed = quy tắc cũ theo `factories.prefix` (CSR/SVR — cột có sẵn, không còn so tên "cuaparis").
+  Quản trị: Cài đặt → Cấu hình nhà máy → **Quy cách chủng loại** (`settings/_components/product-grade-tab.tsx`).
+- Nguồn logic DUY NHẤT: `src/lib/product-grade.ts` (thuần) + `product-lot-config.ts`
+  (`getLoaiBanhConfig(csr, banh?, cfg?)`, `getLoaiBanhOptions(csr, cfg?, current?)`,
+  `getLoaiCSRByDayChuyen(dc, prefix, cfg?)`, `dayChuyenForCsr(csr, cfg?)`). Loader: `product-grade-client.ts` /
+  `product-grade-server.ts` / `loadGradeConfigWith(client, fid)`. Không truyền cfg / bảng lỗi / rỗng ⇒ quy tắc cũ y hệt.
+  Có bảng: dòng đúng (csr, bành) KỂ CẢ đã tắt → dòng mặc định của csr → quy tắc cũ (CSR lạ, "Ngoại lệ").
+- SQL: `product_grade_lo_tron(factory, csr, bành)` cùng thứ tự tra như JS; `sync_lot_master_snapshot` (chép từ
+  20260929) và trigger `update_lot_master_totals` (chép từ 20260708) chỉ đổi dòng tính lô tròn. Mọi
+  `CREATE OR REPLACE` 2 hàm này về sau PHẢI chép từ `20261116_product_grade_types.sql`.
+- Trigger `trg_product_grade_types_guard`: dòng đã dùng (lots / lot_prediction_lots / product_confirm_drafts, đếm
+  bằng `product_grade_usage_count`) ⇒ không đổi chủng loại / loại bành / bành-kiện, không xoá (lỗi
+  `PRODUCT_GRADE_IN_USE`). Chỉ tắt, đổi thứ tự, dây chuyền, mặc định.
+- Đã gộp 3 bản sao (product/page, export/page, warehouse getMaxBanh) + nối: màn quét QR (+ gói offline có `grade`,
+  `ctx.grade` cho `computeKienLookup`), predict, server actions (admin sửa giao dịch, nháp, gửi nháp), nhãn QR, chi
+  tiết ngăn / báo cáo kỳ, chi tiết lô. Trang công khai `/storage` không đọc được bảng (RLS) ⇒ dùng quy tắc cũ.
+- Khác biệt duy nhất với hàm cũ khi đã có bảng: lô L/3L KHÔNG có loại bành ⇒ kg = 35 (cũ 33,33); bành/kiện, lô tròn
+  không đổi. Kiểm 2026-11-08: 380/380 PASS; dữ liệu thật 2.030 lô (CSR10×35) ⇒ 0 lô đổi trạng thái.
+- CHƯA làm (GĐ3): ánh xạ thành phần pallet → mã vật tư kho (`PALLET_COMPONENT_ITEMS`), cột `quality/page.tsx`
+  vẫn suy tiền tố từ `FACTORY_CODE`. Bàn giao: `.claude/plans/quy-cach-thanh-pham-gd2.md`.
+
+## Thành phần pallet theo nhà máy — GĐ3 phần A (2026-11-08, chờ chạy migration + test tay)
+- Bảng `pallet_components` (migration `20261117_pallet_components.sql`, **chạy tay TRƯỚC deploy**): `code` (bất biến),
+  `ten`, `group_code` (dòng ở Kho vật tư → Tồn), `inventory_item_ids`, `la_nap` (nắp), `co_nap` (pallet nền cần chọn
+  nắp — sắt dày DPH). Seed 7 thành phần cũ + `nap_sat` (NS), `nap_go` (NG). Trigger chặn đổi mã / xoá khi đang dùng ở
+  `product_packaging_types.thanh_phan` hoặc `export_pallet_types.mat_thanh_phan` (phần B thêm `lot_transactions.nap`).
+- Quản trị: Cài đặt → Cấu hình nhà máy → **Thành phần pallet** (`settings/_components/pallet-components-tab.tsx`); thêm
+  được thành phần mới (vd Đế sắt). Nguồn logic: `src/lib/pallet-components.ts` + loader client/server; bảng lỗi/rỗng ⇒
+  DEFAULT (gắn vật tư theo mã như bảng cứng cũ). Nắp không hiện trong chip thành phần của pallet SX / loại pallet xuất.
+- Kế hoạch đầy đủ + phần B (nắp theo kiện): `.claude/plans/quy-cach-thanh-pham-gd3-nap.md`.

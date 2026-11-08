@@ -2,6 +2,7 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getLoaiBanhConfig, kienWeightKg as calcKienWeightKg } from "@/lib/product-lot-config";
+import { loadGradeConfigServer } from "@/lib/product-grade-server";
 
 export type PredictAvailableNgan = {
   id: string;
@@ -279,8 +280,9 @@ async function getReservedKgForPartialKien(
     }
   }
 
+  const grade = await loadGradeConfigServer(factoryId);
   for (const lot of activeDodangLots) {
-    const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh);
+    const cfg = getLoaiBanhConfig(lot.loai_csr, lot.loai_banh, grade);
     const { data: txs } = await supabase
       .from("lot_transactions")
       .select("ngan_id,kien_a,kien_b,kien_c,kien_d,ngay_nhap,created_at")
@@ -444,7 +446,7 @@ export type PredictPreview = {
 export async function previewLotPrediction(
   input: PredictPreviewInput,
 ): Promise<PredictPreview> {
-  const cfg = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh);
+  const cfg = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh, await loadGradeConfigServer(input.factoryId));
   const kienW = calcKienWeightKg(cfg);
   const lotW = kienW * 4;
   const [existingRealKg, existingPredictedKg, reservedKg] = await Promise.all([
@@ -502,7 +504,7 @@ export async function createLotPredictionBatch(
   input: CreateLotPredictionBatchInput,
 ): Promise<CreateLotPredictionBatchResult> {
   const supabase = getSupabaseAdmin();
-  const cfg = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh);
+  const cfg = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh, await loadGradeConfigServer(input.factoryId));
   const kienW = calcKienWeightKg(cfg);
   const [existingRealKg, reservedKg, continuation] = await Promise.all([
     getExistingRealKg(input.factoryId, input.nganId),

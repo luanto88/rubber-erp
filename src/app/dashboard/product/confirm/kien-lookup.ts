@@ -4,7 +4,8 @@
 // KHÔNG import gì chạy server (supabase-admin, fs...) — file này bị bundle cho trình duyệt.
 
 import type { KienLetter } from "@/lib/product-label";
-import { getLoaiBanhConfig } from "@/lib/product-lot-config";
+import { dayChuyenForCsr, getLoaiBanhConfig } from "@/lib/product-lot-config";
+import type { GradeConfig } from "@/lib/product-grade";
 
 // "partial_kien": kiện đã có MỘT PHẦN bành (do top-up dở dang trước đó, tính CẢ committed lẫn nháp
 // chưa gửi của bất kỳ ai) — vẫn cho quét lại, nhưng số bành tối đa cho phép nhập = maxPerKien -
@@ -125,6 +126,8 @@ export type KienLookupContext = {
   nganInfo: Record<string, { ma_ngan: string | null; ten_ngan: string | null }>;
   profileNames: Record<string, string>;
   suggestedChiThi: string;
+  /** Quy cách chủng loại / loại bành của nhà máy (product_grade_types); thiếu ⇒ quy tắc cũ. */
+  grade?: GradeConfig | null;
 };
 
 const KIEN_LOWER: Record<KienLetter, "a" | "b" | "c" | "d"> = { A: "a", B: "b", C: "c", D: "d" };
@@ -221,7 +224,7 @@ export function computeKienLookup(
     const existingKienBoc = pendingAgg.lastBoc ?? lastKienTx?.boc ?? null;
     const existingKienPallet = pendingAgg.lastPallet ?? lastKienTx?.pallet ?? null;
 
-    const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined) : null;
+    const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined, ctx.grade) : null;
     const maxPerKien = config?.max_per_kien ?? 36;
     const totalClaimed = existingBanh + pendingAgg.totalBanh;
     const common = {
@@ -289,7 +292,7 @@ export function computeKienLookup(
   }
 
   if (predicted) {
-    const config = getLoaiBanhConfig(predicted.loai_csr, Number(predicted.loai_banh) || undefined);
+    const config = getLoaiBanhConfig(predicted.loai_csr, Number(predicted.loai_banh) || undefined, ctx.grade);
     const totalClaimed = pendingAgg.totalBanh; // lô chưa tồn tại nên committed = 0
     const base = {
       maLo,
@@ -332,24 +335,25 @@ export function computeKienLookup(
   return notFoundLookup(maLo, kien);
 }
 
-const MU_NUOC_CSR_SUFFIX = ["L", "3L", "CV50", "CV60"];
-
-/** Dây chuyền suy từ loại CSR (CSRL/SVR3L/CSRCV50… ⇒ Mủ nước, còn lại Mủ tạp). */
-export function dayChuyenForCsr(loaiCsr: string): string {
-  const suffix = loaiCsr.replace(/^(CSR|SVR)/, "");
-  return MU_NUOC_CSR_SUFFIX.includes(suffix) ? "Mủ nước" : "Mủ tạp";
-}
+/** Đã chuyển sang product-lot-config.ts (dùng chung); giữ re-export cho nơi đang import. */
+export { dayChuyenForCsr };
 
 /** Lookup tạm cho mã KHÔNG có trong gói tải sẵn khi mất mạng — người dùng tự chọn CSR/bành/ngăn. */
-export function offlineUnknownLookup(maLo: string, kien: KienLetter, loaiCsr: string, loaiBanh: number): ConfirmKienLookup {
-  const config = getLoaiBanhConfig(loaiCsr, loaiBanh);
+export function offlineUnknownLookup(
+  maLo: string,
+  kien: KienLetter,
+  loaiCsr: string,
+  loaiBanh: number,
+  grade?: GradeConfig | null,
+): ConfirmKienLookup {
+  const config = getLoaiBanhConfig(loaiCsr, loaiBanh, grade);
   return {
     ...notFoundLookup(maLo.trim(), kien),
     status: "offline_unknown",
     isNewLot: true,
     loaiCsr,
     loaiBanh: config.loai_banh,
-    dayChuyen: dayChuyenForCsr(loaiCsr),
+    dayChuyen: dayChuyenForCsr(loaiCsr, grade),
     maxPerKien: config.max_per_kien,
     kienWeightKg: kienWeight(config),
     remainingBanh: config.max_per_kien,

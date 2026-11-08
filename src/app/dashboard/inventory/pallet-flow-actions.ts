@@ -14,12 +14,13 @@ import { applyTxToKienPallet, KIEN_KEYS, kienPalletOf, type KienKey, type KienPa
 import {
   DEFAULT_EXPORT_PALLET_TYPES,
   normalizePalletTypeName,
-  PALLET_COMPONENT_CODES,
-  PALLET_COMPONENT_ITEMS,
-  palletComponents,
   type ExportPalletForm,
   type PalletComponent,
 } from "@/lib/pallet-usage"
+import { palletComponentsFromConfig } from "@/lib/product-packaging"
+import { loadPackagingConfigServer } from "@/lib/product-packaging-server"
+import { componentGroupCode, isPalletComponentCode, itemComponentMap } from "@/lib/pallet-components"
+import { loadPalletComponentsServer } from "@/lib/pallet-components-server"
 
 export type PalletFlowCounts = {
   dangLuu: number
@@ -82,10 +83,15 @@ export async function loadPalletFlow(
       for (const r of rows as { ten: string; hinh_thuc: ExportPalletForm; mat_thanh_phan: string[] | null }[]) {
         typeMap.set(normalizePalletTypeName(r.ten), {
           form: r.hinh_thuc,
-          lose: (r.mat_thanh_phan || []).filter((c): c is PalletComponent => PALLET_COMPONENT_CODES.has(c)),
+          lose: (r.mat_thanh_phan || []).filter(isPalletComponentCode),
         })
       }
     }
+
+    // Quy đổi pallet sản xuất → thành phần: theo cấu hình nhà máy (Quy cách đóng gói), thiếu ⇒ quy đổi cứng cũ.
+    const packaging = await loadPackagingConfigServer(factoryId)
+    // Thành phần → mã nhóm + mã vật tư kho: bảng pallet_components (thiếu ⇒ bảng cứng cũ + NS/NG).
+    const components = await loadPalletComponentsServer(factoryId)
 
     // 2. Lô + giao dịch theo kiện
     type LotRow = { id: string; ma_lo: string | null; pallet: string[] | null }
@@ -179,19 +185,14 @@ export async function loadPalletFlow(
     const byGroup: Record<string, PalletFlowCounts> = {}
     const groupOf = (g: string) => (byGroup[g] = byGroup[g] || emptyCounts())
     {
-      const codeToGroup = new Map<string, string>()
-      for (const { groupCode, itemCodes } of Object.values(PALLET_COMPONENT_ITEMS)) {
-        for (const code of itemCodes) codeToGroup.set(code.trim().toUpperCase(), groupCode)
-      }
       const { data: itemRows, error: itemErr } = await supabase
         .from("inventory_items")
         .select("id, code")
         .eq("factory_id", factoryId)
       if (itemErr) throw new Error(itemErr.message)
       const itemGroup = new Map<string, string>()
-      for (const it of (itemRows || []) as { id: string; code: string | null }[]) {
-        const g = codeToGroup.get(String(it.code || "").trim().toUpperCase())
-        if (g) itemGroup.set(it.id, g)
+      for (const [id, comp] of itemComponentMap(components, (itemRows || []) as { id: string; code: string | null }[])) {
+        itemGroup.set(id, comp.group_code)
       }
       const itemIds = [...itemGroup.keys()]
       if (itemIds.length > 0) {
@@ -231,11 +232,11 @@ export async function loadPalletFlow(
     // 5. Cộng theo nhóm mã pallet
     type CountField = "dangLuu" | "xuatLuu" | "traVe" | "matXuatKhau" | "matTuMoc"
     const bump = (c: PalletComponent, field: CountField, n = 1) => {
-      groupOf(PALLET_COMPONENT_ITEMS[c].groupCode)[field] += n
+      groupOf(componentGroupCode(components, c))[field] += n
     }
     const lose = (c: PalletComponent, exitDay: string | null, counted: boolean) => {
       if (counted) bump(c, "matXuatKhau")
-      const moc = byGroup[PALLET_COMPONENT_ITEMS[c].groupCode]?.mocNgay
+      const moc = byGroup[componentGroupCode(components, c)]?.mocNgay
       if (moc && exitDay && exitDay.slice(0, 10) >= moc) bump(c, "matTuMoc")
     }
     let unknownKien = 0
@@ -249,7 +250,7 @@ export async function loadPalletFlow(
       const comps: PalletComponent[] = []
       let unknown = pallet.length === 0
       for (const p of pallet) {
-        const c = palletComponents(p)
+        const c = palletComponentsFromConfig(packaging, p)
         if (c) comps.push(...c)
         else {
           unknown = true

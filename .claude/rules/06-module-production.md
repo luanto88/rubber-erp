@@ -875,3 +875,13 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
 - Rủi ro: tab cũ quá 2 lần deploy khi offline ⇒ lỗi nạp chunk; WebView Telegram/Zalo không có SW (chỉ GĐ-A);
   iOS Safari quota ~50MB + xoá dữ liệu site (cả IndexedDB) sau 7 ngày không dùng nếu không cài PWA; mạng "giả có"
   + token hết hạn vẫn có thể về /login (không sửa `refreshSessionOnce` toàn app).
+
+## 4.22. Bọc / Pallet SX / Thảm theo cấu hình nhà máy (2026-11-08, chờ test tay)
+Danh sách bọc, pallet sản xuất, thảm ở Thành phẩm, màn quét QR (cả offline — gói có `packaging`), Dự đoán số lô,
+Thay bọc (server kiểm theo cấu hình), Xuất hàng đọc bảng `product_packaging_types`. Bọc mặc định = mục
+`is_default` (trước: phần tử thứ 2). Thảm lưu chuẩn "Cũ"/"Mới" (`normalizeTham`). Chi tiết: rule 11 mục cuối.
+
+## 4.23. Chủng loại / loại bành / lô tròn theo cấu hình nhà máy — GĐ2 (2026-11-08, chờ test tay)
+Bảng `product_grade_types` thay hard-code `getLoaiBanhConfig/Options/getLoaiCSRByDayChuyen` (đã xoá bản sao trong
+`product/page.tsx` — nay là lớp bọc đọc `pageGradeConfig` nạp lúc bootstrap) và CASE 20→240/144 trong SQL. Lô tròn =
+4 × bành/kiện. Dòng đã có lô dùng không sửa số được. Chi tiết: rule 11 mục "GĐ2".

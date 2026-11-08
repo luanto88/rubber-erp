@@ -44,6 +44,10 @@ Các file module đơn lẻ chỉ nên tham chiếu tới file này, không lặ
 
 - `quality_targets` — Mục tiêu chất lượng theo năm
 
+#### Thành phẩm
+
+- `product_packaging_types` — Quy cách đóng gói (bọc / pallet sản xuất / thảm), xem rule 11 mục cuối
+
 ### Tab Danh mục
 
 - `suffixes` — Hậu tố lô (đổi tên từ "Hậu tố mã lô")

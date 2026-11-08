@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { supabase } from "@/lib/supabase"
 import { buildStorageLookupPath } from "@/lib/storage-detail"
 import { getLoaiBanhConfig } from "@/lib/product-lot-config"
+import { loadGradeConfigWith } from "@/lib/product-grade"
 
 import { normalizeLotStatus } from "@/app/dashboard/product/shared"
 
@@ -95,6 +96,8 @@ export async function resolveProductLabelLookupTarget(
   const normalizedFactoryId = normalizeLookupValue(factoryId)
   const normalizedMaLo = normalizeLookupValue(maLo)
   const kienKey = KIEN_LOWER[kien]
+  // Quy cách chủng loại / loại bành của nhà máy (lỗi / chưa cấu hình ⇒ quy tắc cũ).
+  const grade = normalizedFactoryId ? await loadGradeConfigWith(client, normalizedFactoryId) : null
 
   if (!normalizedFactoryId || !normalizedMaLo) {
     return {
@@ -175,7 +178,7 @@ export async function resolveProductLabelLookupTarget(
       (row) => Number((row as unknown as Record<string, unknown>)[kienField] || 0) > 0,
     )
 
-    const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined) : null
+    const config = lot.loai_csr ? getLoaiBanhConfig(lot.loai_csr, Number(lot.loai_banh) || undefined, grade) : null
     const maxPerKien = config?.max_per_kien ?? 36
 
     const datHang = await fetchLatestDatHang(lot.id, client)
@@ -335,7 +338,7 @@ export async function resolveProductLabelLookupTarget(
       nganTen = ngan?.ten_ngan || null
     }
     const config = predicted.loai_csr
-      ? getLoaiBanhConfig(predicted.loai_csr, Number(predicted.loai_banh) || undefined)
+      ? getLoaiBanhConfig(predicted.loai_csr, Number(predicted.loai_banh) || undefined, grade)
       : null
     return {
       status: "predicted",

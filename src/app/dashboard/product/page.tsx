@@ -16,6 +16,27 @@ import {
   type DailyReportDraft,
   type ShiftReportBundle,
 } from "@/app/dashboard/product/confirm/report-bundle";
+import {
+  DEFAULT_PACKAGING,
+  defaultBoc,
+  defaultPallet,
+  defaultTham,
+  mergeWithLegacy,
+  normalizeTham,
+  resolvePalletOptions,
+  resolveThamOptions,
+  type PackagingConfig,
+} from "@/lib/product-packaging";
+import { loadPackagingConfig } from "@/lib/product-packaging-client";
+import {
+  dayChuyenForCsr,
+  getBocsForLoaiCSR as getBocsForLoaiCSRFromConfig,
+  getLoaiBanhConfig as getLoaiBanhConfigFromConfig,
+  getLoaiBanhOptions as getLoaiBanhOptionsFromConfig,
+  getLoaiCSRByDayChuyen as getLoaiCSRByDayChuyenFromConfig,
+} from "@/lib/product-lot-config";
+import { resolveFactoryPrefix, type GradeConfig } from "@/lib/product-grade";
+import { loadGradeConfig } from "@/lib/product-grade-client";
 import { ReasonConfirmBanner } from "@/app/dashboard/product/_components/reason-confirm-banner";
 import { DailyReportInputForm } from "@/app/dashboard/product/confirm/daily-report-input-form";
 import type { DailyReportInputs } from "@/app/dashboard/product/confirm/daily-report-pdf";
@@ -540,9 +561,7 @@ type ErrorWithDigest = Error & { digest?: string };
 
 // Constants
 const CA_OPTS = ["A", "B", "C"] as const;
-const THAM_OPTS = ["c\u0169", "M\u1edbi"];
 const TRANG_THAI_OPTS = ["Ho\u00e0n th\u00e0nh", "D\u1edf dang", "Xu\u1ea5t h\u00e0ng"];
-const PALLET_OPTS = ["S\u1eaft \u0111\u1ebf g\u1ed7", "S\u1eaft \u0111\u1ebf nh\u1ef1a", "S\u1eaft m\u1ecfng", "MB5", "G\u1ed7"];
 const DAY_CHUYEN_TAP = "Mủ tạp";
 const DAY_CHUYEN_NUOC = "Mủ nước";
 const STANDARD_NGAN_MAX = 24;
@@ -625,38 +644,24 @@ function isProjectedPctBlocked(pct: number) {
 }
 
 
-// Business Logic
-function getLoaiBanhConfig(loai_csr: string, selected_banh?: number) {
-  if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr)) {
-    const b = selected_banh || 35;
-    return b === 20
-      ? { loai_banh: 20, max_per_kien: 60, lo_tron: 240 }
-      : { loai_banh: 35, max_per_kien: 36, lo_tron: 144 };
-  }
-  if (["CSRL", "CSR3L", "SVRL", "SVR3L"].includes(loai_csr)) {
-    const b = selected_banh || 33.33;
-    return { loai_banh: b, max_per_kien: 36, lo_tron: 144 };
-  }
-  return { loai_banh: 35, max_per_kien: 36, lo_tron: 144 };
+// Business Logic \u2014 ch\u1ee7ng lo\u1ea1i / lo\u1ea1i b\u00e0nh / b\u00e0nh-ki\u1ec7n / l\u00f4 tr\u00f2n \u0111\u1ecdc c\u1ea5u h\u00ecnh nh\u00e0 m\u00e1y (product_grade_types,
+// G\u01102 2026-11-08) qua product-lot-config. `pageGradeConfig` do component n\u1ea1p 1 l\u1ea7n l\u00fac bootstrap
+// (setPageGradeConfig) r\u1ed3i set state `gradeCfg` \u0111\u1ec3 render l\u1ea1i; ch\u01b0a n\u1ea1p / l\u1ed7i \u21d2 quy t\u1eafc c\u0169.
+let pageGradeConfig: GradeConfig | null = null;
+function setPageGradeConfig(cfg: GradeConfig | null) {
+  pageGradeConfig = cfg;
 }
 
-function getLoaiBanhOptions(loai_csr: string): number[] {
-  if (["CSRCV50", "CSRCV60", "SVRCV50", "SVRCV60"].includes(loai_csr))
-    return [35, 20];
-  if (["CSRL", "CSR3L", "SVRL", "SVR3L"].includes(loai_csr)) return [35, 33.33];
-  return [35];
+function getLoaiBanhConfig(loai_csr: string, selected_banh?: number) {
+  return getLoaiBanhConfigFromConfig(loai_csr, selected_banh, pageGradeConfig);
+}
+
+function getLoaiBanhOptions(loai_csr: string, current?: number | null): number[] {
+  return getLoaiBanhOptionsFromConfig(loai_csr, pageGradeConfig, current);
 }
 
 function getLoaiCSRByDayChuyen(dc: string, prefix: "CSR" | "SVR"): string[] {
-  if (dc === "M\u1ee7 n\u01b0\u1edbc")
-    return [
-      `${prefix}L`,
-      `${prefix}3L`,
-      `${prefix}CV50`,
-      `${prefix}CV60`,
-      "Ngo\u1ea1i l\u1ec7",
-    ];
-  return [`${prefix}10`, `${prefix}20`, "Ngo\u1ea1i l\u1ec7"];
+  return getLoaiCSRByDayChuyenFromConfig(dc, prefix, pageGradeConfig);
 }
 
 // Mặc định bộ lọc ngày của danh sách: đầu tháng → hôm nay, theo MÚI GIỜ NHÀ MÁY (không dùng
@@ -666,12 +671,6 @@ function getDefaultListDateRange(): { from: string; to: string } {
   return { from: `${today.slice(0, 7)}-01`, to: today };
 }
 
-function getBocsForLoaiCSR(dc: string, loai_csr: string): string[] {
-  const base = [`B\u1ecdc tr\u01a1n 0,04`, `B\u1ecdc nh\u00e3n 0,04 VRG ${loai_csr}`];
-  if (dc === "M\u1ee7 n\u01b0\u1edbc")
-    return [...base, `B\u1ecdc tr\u01a1n 0,13`, `B\u1ecdc nh\u00e3n 0,13 VRG ${loai_csr}`];
-  return base;
-}
 
 function autoTrangThai(
   tong_banh: number,
@@ -1237,10 +1236,10 @@ function defaultSession(prefix: "CSR" | "SVR" = "CSR"): SessionHeader {
     suffix: "cs",
     loai_csr: defaultCsr,
     loai_banh: 35,
-    boc: `B\u1ecdc nh\u00e3n 0,04 VRG ${defaultCsr}`,
-    tham: "C\u0169",
+    boc: defaultBoc(DEFAULT_PACKAGING, "Mủ tạp", defaultCsr),
+    tham: defaultTham(DEFAULT_PACKAGING),
     chi_thi: "1",
-    pallet: ["S\u1eaft \u0111\u1ebf g\u1ed7"],
+    pallet: [defaultPallet(DEFAULT_PACKAGING)],
     ghi_chu: "",
     image_url_1: "",
     image_url_2: "",
@@ -1297,9 +1296,9 @@ function emptyEditForm(): EditForm {
     day_chuyen: "M\u1ee7 t\u1ea1p",
     loai_csr: "CSR10",
     loai_banh: 35,
-    boc: "B\u1ecdc nh\u00e3n 0,04 VRG CSR10",
-    tham: "C\u0169",
-    pallet: ["S\u1eaft \u0111\u1ebf g\u1ed7"],
+    boc: defaultBoc(DEFAULT_PACKAGING, "Mủ tạp", "CSR10"),
+    tham: defaultTham(DEFAULT_PACKAGING),
+    pallet: [defaultPallet(DEFAULT_PACKAGING)],
     chi_thi: "1",
     kien_a: 36,
     kien_b: 36,
@@ -1362,18 +1361,29 @@ export default function ProductPage() {
   const [, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [factoryId, setFactoryId] = useState<string | null>(null);
-  const [factory, setFactory] = useState<{ id: string; name: string } | null>(
+  const [factory, setFactory] = useState<{ id: string; name: string; prefix?: string | null } | null>(
     null,
   );
   const [suffixList, setSuffixList] = useState<SuffixItem[]>([]);
+  // Quy cách đóng gói (bọc / pallet SX / thảm) theo nhà máy — bảng product_packaging_types.
+  const [packaging, setPackaging] = useState<PackagingConfig>(DEFAULT_PACKAGING);
+  const getBocsForLoaiCSR = useCallback(
+    (dc: string, loaiCsr: string) => getBocsForLoaiCSRFromConfig(dc, loaiCsr, packaging),
+    [packaging],
+  );
+  const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
+  const THAM_OPTS = useMemo(() => resolveThamOptions(packaging), [packaging]);
 
   // "Gắn bản ghi tại chỗ" — gợi ý gắn lô thành phẩm vừa lưu vào công việc KPI đang mở hôm nay
   const [kpiPrompt, setKpiPrompt] = useState<null | { recordId: string; recordLabel: string }>(null);
 
-  // Factory prefix: CSR cho NMPHK, SVR cho NMCP
+  // Cấu hình chủng loại / loại bành (product_grade_types). State chỉ để render lại khi nạp xong.
+  const [gradeCfg, setGradeCfg] = useState<GradeConfig | null>(null);
+
+  // Factory prefix: factories.prefix (CSR cho NMPHK, SVR cho NMCP); thiếu thì suy từ tên.
   const factoryPrefix = useMemo<"CSR" | "SVR">(() => {
     if (!factory) return "CSR";
-    return factory.name?.toLowerCase().includes("cuaparis") ? "SVR" : "CSR";
+    return resolveFactoryPrefix(factory.prefix, factory.name);
   }, [factory]);
 
   // Quyền 2 nút báo cáo cuối ngày — mirror đúng REPORT_*_PERMISSIONS (confirm/report-access.ts),
@@ -1593,10 +1603,15 @@ export default function ProductPage() {
       }
       setFactoryId(fid);
       loadData(fid);
+      void loadPackagingConfig(fid).then(setPackaging);
+      void loadGradeConfig(fid).then((g) => {
+        setPageGradeConfig(g);
+        setGradeCfg(g);
+      });
 
       supabase
         .from("factories")
-        .select("id,name")
+        .select("id,name,prefix")
         .eq("id", fid)
         .single()
         .then(({ data }) => {
@@ -1724,7 +1739,7 @@ export default function ProductPage() {
   // được lô cũ lệch cấu hình (vd "CSR5").
   const filterLoaiOptions = useMemo(() => {
     const dcs = filterDC ? [filterDC] : [DAY_CHUYEN_TAP, DAY_CHUYEN_NUOC];
-    const configured = dcs.flatMap((dc) => getLoaiCSRByDayChuyen(dc, factoryPrefix));
+    const configured = dcs.flatMap((dc) => getLoaiCSRByDayChuyenFromConfig(dc, factoryPrefix, gradeCfg));
     const actual = contributions
       .filter(
         (c) => !filterDC || normalizeDayChuyen(c.day_chuyen) === normalizeDayChuyen(filterDC),
@@ -1732,7 +1747,7 @@ export default function ProductPage() {
       .map((c) => (c.loai_csr || "").trim())
       .filter(Boolean);
     return [...new Set([...configured, ...actual])];
-  }, [contributions, factoryPrefix, filterDC]);
+  }, [contributions, factoryPrefix, filterDC, gradeCfg]);
 
   // Option "Loại bọc": theo Dây chuyền + Loại CSR (chưa chọn CSR thì hợp các CSR của dây chuyền),
   // cộng giá trị `boc` thực tế có trong dữ liệu khớp cùng điều kiện (dữ liệu cũ có thể lệch cấu hình).
@@ -1741,7 +1756,7 @@ export default function ProductPage() {
     const configured = dcs.flatMap((dc) => {
       const csrs = filterLoai
         ? [filterLoai]
-        : getLoaiCSRByDayChuyen(dc, factoryPrefix).filter((l) => l !== "Ngoại lệ");
+        : getLoaiCSRByDayChuyenFromConfig(dc, factoryPrefix, gradeCfg).filter((l) => l !== "Ngoại lệ");
       return csrs.flatMap((csr) => getBocsForLoaiCSR(dc, csr));
     });
     const actual = contributions
@@ -1753,7 +1768,7 @@ export default function ProductPage() {
       .map((c) => (c.boc || "").trim())
       .filter(Boolean);
     return [...new Set([...configured, ...actual])];
-  }, [contributions, factoryPrefix, filterDC, filterLoai]);
+  }, [contributions, factoryPrefix, filterDC, filterLoai, getBocsForLoaiCSR, gradeCfg]);
 
   // Đổi Dây chuyền/CSR mà giá trị con đang chọn không còn hợp lệ → reset (điều chỉnh state trong
   // render theo đúng mẫu "adjusting state when a prop changes" của React, không dùng effect).
@@ -1924,8 +1939,7 @@ export default function ProductPage() {
   // Bọc mới hợp lệ = giao getBocsForLoaiCSR theo (dây chuyền, CSR) của các lô đang chờ (chưa có lô → theo
   // lọc), trừ bọc nguồn (không thay nhãn → nhãn). Server cũng kiểm lại.
   const skNewBocOptions = useMemo(() => {
-    const inferDc = (csr: string) =>
-      ["L", "3L", "CV50", "CV60"].some((x) => csr.endsWith(x)) ? DAY_CHUYEN_NUOC : DAY_CHUYEN_TAP;
+    const inferDc = (csr: string) => dayChuyenForCsr(csr);
     const pairs: Array<[string, string]> =
       skPending.length > 0
         ? skPending.map((p) => [normalizeDayChuyen(p.lot.day_chuyen), p.lot.loai_csr])
@@ -1938,7 +1952,7 @@ export default function ProductPage() {
       opts = opts ? opts.filter((b) => list.includes(b)) : list;
     }
     return (opts ?? skBocOptions).filter((b) => b !== skFilterBoc);
-  }, [skPending, skFilterLoai, skFilterDC, skBocOptions, skFilterBoc]);
+  }, [skPending, skFilterLoai, skFilterDC, skBocOptions, skFilterBoc, getBocsForLoaiCSR]);
   const skToBocValid = !!skToBoc && skNewBocOptions.includes(skToBoc);
   // Sang kiện: lô có kiện đang chọn mà tập pallet hiện tại trùng đúng tập pallet mới.
   const skPalletDupLots = useMemo(() => {
@@ -1991,7 +2005,7 @@ export default function ProductPage() {
       bagSuggestionMap.exact.get(exactKey) || bagSuggestionMap.byLoai.get(loaiKey) || "";
 
     if (historyMatch && bocOptions.includes(historyMatch)) return historyMatch;
-    return bocOptions[1] || bocOptions[0] || fallback;
+    return defaultBoc(packaging, dayChuyenVal, loaiCsr) || fallback;
   };
 
   const latestLotByNganId = useMemo(() => {
@@ -2085,9 +2099,10 @@ export default function ProductPage() {
       remainingKg: Math.max(Number(ngan.tong_kho || 0) - projectedKg, 0),
     };
   }, [editForm.loai_banh, editForm.ngan_id, editForm.tong_banh, editTransactionId, lots, ngans]);
+  // Giữ bọc đang lưu của giao dịch dù đã tắt trong cấu hình (không làm mất dữ liệu cũ).
   const editBocOptions = useMemo(
-    () => getBocsForLoaiCSR(editForm.day_chuyen, editForm.loai_csr),
-    [editForm.day_chuyen, editForm.loai_csr],
+    () => mergeWithLegacy(getBocsForLoaiCSR(editForm.day_chuyen, editForm.loai_csr), editForm.boc),
+    [editForm.day_chuyen, editForm.loai_csr, editForm.boc, getBocsForLoaiCSR],
   );
 
   const allDorDangLots = lots.filter(
@@ -3151,9 +3166,9 @@ export default function ProductPage() {
       loai_banh: cfg.loai_banh,
       boc:
         getSuggestedBoc(DAY_CHUYEN_TAP, defaultCsr, cfg.loai_banh),
-      tham: "cũ",
+      tham: defaultTham(packaging),
       chi_thi: lastChiThi,
-    pallet: ["Sắt đế gỗ"],
+    pallet: [defaultPallet(packaging)],
     ghi_chu: "",
     image_url_1: "",
     image_url_2: "",
@@ -3289,7 +3304,7 @@ export default function ProductPage() {
                 loai_csr: block.loai_csr,
                 loai_banh: block.loai_banh,
                 boc: block.boc,
-                tham: block.tham,
+                tham: normalizeTham(block.tham),
                 chi_thi: session.chi_thi,
                 pallet: block.pallet,
                 ghi_chu: session.ghi_chu,
@@ -4392,7 +4407,7 @@ export default function ProductPage() {
                   );
                   const blockKg = Math.round(blockBanh * block.loai_banh * 100) / 100;
                   const banhOpts = getLoaiBanhOptions(block.loai_csr);
-                  const bocOpts = getBocsForLoaiCSR(session.day_chuyen, block.loai_csr);
+                  const bocOpts = mergeWithLegacy(getBocsForLoaiCSR(session.day_chuyen, block.loai_csr), block.boc);
                   const firstLot = block.lots[0];
                   const lastLot = block.lots.at(-1);
                   const middleLots = block.lots.filter((lot) => lot.role === "giua");
@@ -4572,13 +4587,13 @@ export default function ProductPage() {
                             Thảm
                           </label>
                           <select
-                            value={block.tham}
+                            value={normalizeTham(block.tham)}
                             onChange={(e) =>
                               updateCaBlock(caIdx, blockIdx, { tham: e.target.value })
                             }
                             className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                           >
-                            {THAM_OPTS.map((t) => (
+                            {mergeWithLegacy(THAM_OPTS, block.tham).map((t) => (
                               <option key={t}>{t}</option>
                             ))}
                           </select>
@@ -4630,7 +4645,7 @@ export default function ProductPage() {
                           Pallet
                         </label>
                         <div className="flex flex-wrap gap-2.5">
-                          {PALLET_OPTS.map((p) => {
+                          {mergeWithLegacy(PALLET_OPTS, block.pallet).map((p) => {
                             const checked = block.pallet.includes(p);
                             return (
                               <button
@@ -5970,7 +5985,7 @@ export default function ProductPage() {
                           </span>
                         </div>
                         <div className="grid gap-2 sm:grid-cols-2">
-                          {PALLET_OPTS.map((p) => {
+                          {mergeWithLegacy(PALLET_OPTS, editForm.pallet).map((p) => {
                             const checked = editForm.pallet.includes(p);
                             return (
                               <button
