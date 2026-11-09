@@ -16,6 +16,8 @@ import { getBocsForLoaiCSR, getLoaiBanhConfig } from "@/lib/product-lot-config";
 import { loadGradeConfigServer } from "@/lib/product-grade-server";
 import { isConfiguredOption } from "@/lib/product-packaging";
 import { loadPackagingConfigServer } from "@/lib/product-packaging-server";
+import { loadPalletComponentsServer } from "@/lib/pallet-components-server";
+import { lotNapByKien, sanitizeNapMap, type LotNapState, type NapMap } from "@/lib/pallet-nap";
 import {
   applyTxToKienBoc,
   applyTxToKienPallet,
@@ -68,6 +70,8 @@ type SaveLotTransactionInput = {
     boc?: string | null;
     pallet?: string[] | null;
     chi_thi?: string | null;
+    // GĐ3B: nắp theo kiện {"a":"nap_sat"} — server lọc lại (kiện có bành, mã là nắp, pallet cần nắp).
+    nap?: NapMap | null;
   };
   // Access token Supabase của người thao tác — server tự xác thực (không tin userId client khai),
   // dùng để kiểm quyền tạo thành phẩm + "Khóa ca sản xuất" (admin bypass).
@@ -262,6 +266,21 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
     }
 
     const effectiveBoc = transaction.boc ?? lot.boc;
+    const effectivePallet = transaction.pallet ?? lot.pallet ?? null;
+    let napToSave: NapMap = {};
+    if (transaction.nap && Object.keys(transaction.nap).length > 0) {
+      const [packCfg, compCfg] = await Promise.all([
+        loadPackagingConfigServer(lot.factory_id),
+        loadPalletComponentsServer(lot.factory_id),
+      ]);
+      napToSave = sanitizeNapMap(
+        transaction.nap,
+        { a: kienA, b: kienB, c: kienC, d: kienD },
+        effectivePallet,
+        packCfg,
+        compCfg,
+      );
+    }
     const { data: savedTransaction, error: saveTransactionError } = await supabase
       .from("lot_transactions")
       .insert(
@@ -280,6 +299,7 @@ export async function saveLotTransaction(input: SaveLotTransactionInput) {
           ...(effectiveBoc !== undefined ? { boc: effectiveBoc } : {}),
           ...(transaction.pallet !== undefined ? { pallet: transaction.pallet } : lot.pallet !== undefined ? { pallet: lot.pallet } : {}),
           ...(transaction.chi_thi !== undefined ? { chi_thi: transaction.chi_thi } : lot.chi_thi !== undefined ? { chi_thi: lot.chi_thi } : {}),
+          ...(Object.keys(napToSave).length > 0 ? { nap: napToSave } : {}),
         },
       )
       // created_at thêm vào select để caller (confirmKienProduction) không phải query lại
@@ -425,6 +445,8 @@ export type AdminUpdateLotTransactionInput = {
   pallet: string[] | null;
   chiThi: string | null;
   lyDo: string;
+  /** GĐ3B: undefined = giữ nắp cũ; {} = bỏ hết nắp. RPC tự lọc kiện có bành + pallet cần nắp. */
+  nap?: NapMap | null;
 };
 
 export type AdminUpdateLotTransactionResult =
@@ -478,6 +500,7 @@ export async function adminUpdateLotTransaction(
       p_max_per_kien: maxPerKien,
       p_actor_id: actorUserId,
       p_ly_do: input.lyDo.trim(),
+      ...(input.nap !== undefined ? { p_nap: input.nap || {} } : {}),
     });
     if (error) throw new Error(error.message);
 
@@ -785,3 +808,50 @@ export async function performSangKienThayBoc(input: {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+// ── GĐ3B: nắp đã ghi của các lô (giao dịch đã gửi + nháp chưa gửi) — để cảnh báo > 2 nắp/lô ──
+
+export async function loadLotNapStates(input: {
+  accessToken: string | null;
+  factoryId: string;
+  maLos: string[];
+}): Promise<{ success: true; states: Record<string, LotNapState> } | { success: false; error: string }> {
+  try {
+    await assertProductAccess(input.accessToken, input.factoryId, PRODUCT_CREATE_PERMISSIONS, "xem nắp của lô");
+    const maLos = [...new Set(input.maLos.map((m) => m.trim()).filter(Boolean))].slice(0, 200);
+    const states: Record<string, LotNapState> = {};
+    for (const m of maLos) states[m] = { sent: {}, drafts: {} };
+    if (maLos.length === 0) return { success: true, states };
+    const supabase = getSupabaseAdmin();
+    const [{ data: lots, error: lotErr }, { data: drafts, error: draftErr }] = await Promise.all([
+      supabase.from("lots").select("id, ma_lo").eq("factory_id", input.factoryId).in("ma_lo", maLos),
+      supabase.from("product_confirm_drafts").select("ma_lo, kien, nap").eq("factory_id", input.factoryId).in("ma_lo", maLos),
+    ]);
+    if (lotErr) throw new Error(lotErr.message);
+    if (draftErr) throw new Error(draftErr.message);
+    const maByLot = new Map((lots || []).map((l) => [l.id as string, l.ma_lo as string]));
+    if (maByLot.size > 0) {
+      const { data: txs, error: txErr } = await supabase
+        .from("lot_transactions")
+        .select("lot_id, kien_a, kien_b, kien_c, kien_d, nap, created_at")
+        .in("lot_id", [...maByLot.keys()]);
+      if (txErr) throw new Error(txErr.message);
+      const byMa = new Map<string, typeof txs>();
+      for (const tx of txs || []) {
+        const m = maByLot.get(tx.lot_id as string);
+        if (!m) continue;
+        byMa.set(m, [...(byMa.get(m) || []), tx]);
+      }
+      for (const [m, list] of byMa) states[m].sent = lotNapByKien(list || []);
+    }
+    for (const d of drafts || []) {
+      const code = String(d.nap || "").trim();
+      const k = String(d.kien || "").toLowerCase() as keyof NapMap;
+      if (code && states[d.ma_lo as string]) states[d.ma_lo as string].drafts[k] = code;
+    }
+    return { success: true, states };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+

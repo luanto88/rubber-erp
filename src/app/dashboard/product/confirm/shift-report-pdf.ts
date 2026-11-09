@@ -349,8 +349,89 @@ export async function buildShiftReportPdf(data: ShiftReportData): Promise<jsPDF>
     },
   });
 
+  renderCumulative(doc, (doc as PdfWithTable).lastAutoTable?.finalY ?? y + 20, data);
+
   renderFooter(doc);
   return doc;
+}
+
+const fmtTan = (kg: number) =>
+  (kg / 1000).toLocaleString("vi-VN", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+// Lũy kế tháng / năm — dạng GHI CHÚ (không kẻ bảng) góc phải ngay dưới bảng "Tổng hợp", các dòng ngăn bằng nét đứt
+// mờ (mẫu người dùng duyệt 2026-11-09). Mỗi (CSR, loại bành) có sản xuất trong ngày: dòng "Chế biến" (hàng công ty,
+// gộp mọi bọc) rồi Thu mua / Gia công nếu có, có ≥ 2 dòng thì thêm dòng "Tổng". Không có dữ liệu ⇒ không vẽ.
+const CUM_WIDTH = 100;
+const CUM_ROW_H = 6.3;
+
+function drawCumDash(doc: jsPDF, left: number, right: number, y: number) {
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.15);
+  doc.setLineDashPattern([0.8, 0.8], 0);
+  doc.line(left, y, right, y);
+  doc.setLineDashPattern([], 0);
+}
+
+function renderCumulative(doc: jsPDF, startY: number, data: ShiftReportData) {
+  const all = data.cumulative || [];
+  const todayKeys = new Set(all.filter((r) => r.ngayKg > 0).map((r) => `${r.loaiCsr}||${r.loaiBanh}`));
+  const groups = new Map<string, typeof all>();
+  for (const r of all) {
+    const k = `${r.loaiCsr}||${r.loaiBanh}`;
+    if (todayKeys.has(k)) groups.set(k, [...(groups.get(k) || []), r]);
+  }
+  if (groups.size === 0) return;
+  const monthLabel = `Tháng ${data.ngay.slice(5, 7)}/${data.ngay.slice(0, 4)}:`;
+  const yearLabel = `Năm ${data.ngay.slice(0, 4)}:`;
+  const right = PAGE_LEFT + CONTENT_WIDTH;
+  const left = right - CUM_WIDTH;
+  let lineCount = 0;
+  for (const rows of groups.values()) lineCount += 1 + rows.length + (rows.length > 1 ? 1 : 0);
+
+  let y = ensurePageSpace(doc, startY, 10 + lineCount * CUM_ROW_H) + 7;
+  doc.setTextColor(15, 23, 42);
+  doc.setFont(PDF_FONT_NAME, "bold");
+  doc.setFontSize(8.6);
+  doc.text("Lũy kế thành phẩm", left, y);
+  doc.setFont(PDF_FONT_NAME, "normal");
+  doc.setFontSize(7.6);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`hết ngày ${formatDateDisplay(data.ngay)} · đơn vị: tấn`, right, y, { align: "right" });
+  y += 2.2;
+  drawCumDash(doc, left, right, y);
+
+  const drawLine = (label: string, thangKg: number, namKg: number, bold: boolean) => {
+    y += 4.4;
+    doc.setFont(PDF_FONT_NAME, bold ? "bold" : "normal");
+    doc.setFontSize(7.6);
+    doc.setTextColor(51, 65, 85);
+    doc.text(label, left + 2, y);
+    doc.text(monthLabel, left + 30, y);
+    doc.text(yearLabel, left + 67, y);
+    doc.setTextColor(15, 23, 42);
+    doc.text(fmtTan(thangKg), left + 63, y, { align: "right" });
+    doc.text(fmtTan(namKg), right, y, { align: "right" });
+    y += 1.9;
+    drawCumDash(doc, left, right, y);
+  };
+
+  for (const rows of groups.values()) {
+    y += 4.3;
+    doc.setFont(PDF_FONT_NAME, "bold");
+    doc.setFontSize(7.8);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${loaiCsrLabel(rows[0].loaiCsr)} · bành ${rows[0].loaiBanh || "—"} kg`, left, y);
+    for (const r of rows) drawLine(`– ${r.nguon || "—"}`, r.thangKg, r.namKg, false);
+    if (rows.length > 1) {
+      drawLine(
+        "Tổng",
+        rows.reduce((s, r) => s + r.thangKg, 0),
+        rows.reduce((s, r) => s + r.namKg, 0),
+        true,
+      );
+    }
+  }
+  doc.setTextColor(15, 23, 42);
 }
 
 export function buildShiftReportFileName(data: ShiftReportData): string {

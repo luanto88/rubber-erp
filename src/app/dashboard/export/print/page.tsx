@@ -40,6 +40,7 @@ type ExportOrder = {
   customer_id: string | null;
   chung_loai: string;
   loai_pallet: string;
+  xuat_nap?: boolean | null;
   loai_banh: number;
   loai_boc: string;
   vehicles: Vehicle[];
@@ -127,6 +128,7 @@ function PrintContent() {
         so_hop_dong: order.so_hop_dong,
         chung_loai: order.chung_loai,
         loai_pallet: order.loai_pallet,
+        xuat_nap: order.xuat_nap,
         loai_banh: order.loai_banh,
         loai_boc: order.loai_boc,
         vehicles: order.vehicles || [],

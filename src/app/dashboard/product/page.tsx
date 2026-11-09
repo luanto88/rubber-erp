@@ -28,6 +28,20 @@ import {
   type PackagingConfig,
 } from "@/lib/product-packaging";
 import { loadPackagingConfig } from "@/lib/product-packaging-client";
+import { loadPalletComponents } from "@/lib/pallet-components-client";
+import { DEFAULT_PALLET_COMPONENTS, type PalletComponentsConfig } from "@/lib/pallet-components";
+import {
+  lotNapByKien,
+  lotNapTotalAfter,
+  MAX_NAP_PER_LOT,
+  NAP_KIENS,
+  palletNeedsNap,
+  parseNapMap,
+  type NapKien,
+  type NapMap,
+} from "@/lib/pallet-nap";
+import { NapKienPicker } from "@/app/dashboard/product/_components/nap-kien-picker";
+import { useNapLimitConfirm } from "@/app/dashboard/product/_components/nap-limit-banner";
 import {
   dayChuyenForCsr,
   getBocsForLoaiCSR as getBocsForLoaiCSRFromConfig,
@@ -54,6 +68,7 @@ import {
   performSangKienThayBoc,
   saveDateHeaderEdits,
   saveLotTransaction,
+  loadLotNapStates,
   type SkKienAvailability,
   type SkKienKey,
 } from "@/app/dashboard/product/actions";
@@ -174,6 +189,8 @@ type LotTransaction = {
   boc?: string | null;
   pallet?: string[] | null;
   chi_thi?: string | null;
+  // GĐ3B: nắp theo kiện {"a":"nap_sat"}.
+  nap?: Record<string, string> | null;
   created_at?: string;
 };
 
@@ -249,6 +266,8 @@ type CaBlock = {
   boc: string;
   tham: string;
   pallet: string[];
+  // GĐ3B: nắp theo kiện, áp cho mọi lô của block (chỉ kiện có bành nhập mới).
+  nap?: NapMap;
   lots: LotDraft[];
 };
 
@@ -280,6 +299,8 @@ type EditForm = {
   tong_kg: number;
   trang_thai: string;
   ghi_chu: string;
+  // GĐ3B: nắp của giao dịch đang sửa.
+  nap?: NapMap;
 };
 
 type DateEditHeaderForm = {
@@ -1372,6 +1393,10 @@ export default function ProductPage() {
     [packaging],
   );
   const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
+  // GĐ3B: thành phần pallet (nắp) theo nhà máy — bảng pallet_components.
+  const [palletComps, setPalletComps] = useState<PalletComponentsConfig>(DEFAULT_PALLET_COMPONENTS);
+  // GĐ3B: banner cảnh báo lô quá 2 nắp (thay hộp hỏi của trình duyệt).
+  const { confirmNap, napBanner } = useNapLimitConfirm();
   const THAM_OPTS = useMemo(() => resolveThamOptions(packaging), [packaging]);
 
   // "Gắn bản ghi tại chỗ" — gợi ý gắn lô thành phẩm vừa lưu vào công việc KPI đang mở hôm nay
@@ -1505,7 +1530,7 @@ export default function ProductPage() {
           const { data, error } = await supabase
             .from("lots")
             .select(
-              "*, ngans(ten_ngan, ma_ngan, loai_nl), lot_transactions(id, lot_id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, boc, pallet, chi_thi, created_at)",
+              "*, ngans(ten_ngan, ma_ngan, loai_nl), lot_transactions(id, lot_id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, boc, pallet, chi_thi, nap, created_at)",
             )
             .eq("factory_id", fid)
             .order("ngay_sx", { ascending: false })
@@ -1604,6 +1629,7 @@ export default function ProductPage() {
       setFactoryId(fid);
       loadData(fid);
       void loadPackagingConfig(fid).then(setPackaging);
+      void loadPalletComponents(fid).then(setPalletComps);
       void loadGradeConfig(fid).then((g) => {
         setPageGradeConfig(g);
         setGradeCfg(g);
@@ -2763,6 +2789,7 @@ export default function ProductPage() {
                 boc: templateBlock.boc,
                 tham: templateBlock.tham,
                 pallet: [...templateBlock.pallet],
+                nap: { ...(templateBlock.nap || {}) },
                 from_num: startPlan.fromNum,
                 to_num: Math.max(startPlan.fromNum, startPlan.fromNum),
               },
@@ -2809,6 +2836,8 @@ export default function ProductPage() {
             ...patch,
             pallet: patch.pallet ? [...patch.pallet] : block.pallet,
           };
+          // GĐ3B: đổi sang pallet không cần nắp ⇒ bỏ nắp.
+          if (patch.pallet && !palletNeedsNap(packaging, palletComps, nextBlock.pallet)) nextBlock.nap = {};
           if (patch.loai_csr !== undefined || patch.loai_banh !== undefined) {
             const cfg = getLoaiBanhConfig(nextBlock.loai_csr, nextBlock.loai_banh);
             nextBlock.loai_banh = cfg.loai_banh;
@@ -2861,6 +2890,7 @@ export default function ProductPage() {
           boc: template.boc,
           tham: template.tham,
           pallet: [...template.pallet],
+          nap: { ...(template.nap || {}) },
           from_num: startPlan.fromNum,
           to_num: startPlan.fromNum,
         }, startPlan.inheritedDraft);
@@ -3194,6 +3224,48 @@ export default function ProductPage() {
     setView("create");
   };
 
+  // GĐ3B: nắp của block cho đúng các kiện có bành nhập mới trong lần này.
+  const blockNapFor = (block: CaBlock, delta: Record<NapKien, number>): NapMap => {
+    if (!block.nap || !palletNeedsNap(packaging, palletComps, block.pallet)) return {};
+    const out: NapMap = {};
+    for (const k of NAP_KIENS) if (block.nap[k] && delta[k] > 0) out[k] = block.nap[k];
+    return out;
+  };
+
+  const confirmCreateNapLimit = async (year: string): Promise<boolean> => {
+    if (!factoryId) return true;
+    const planned = new Map<string, NapMap>();
+    for (const cs of caSections) {
+      for (const block of cs.blocks) {
+        for (const draft of block.lots) {
+          if (draft.is_already_completed) continue;
+          const delta: Record<NapKien, number> = {
+            a: draft.is_continuation ? Math.max(0, draft.kien_a - draft.prev_a) : draft.kien_a,
+            b: draft.is_continuation ? Math.max(0, draft.kien_b - draft.prev_b) : draft.kien_b,
+            c: draft.is_continuation ? Math.max(0, draft.kien_c - draft.prev_c) : draft.kien_c,
+            d: draft.is_continuation ? Math.max(0, draft.kien_d - draft.prev_d) : draft.kien_d,
+          };
+          const nap = blockNapFor(block, delta);
+          if (Object.keys(nap).length === 0) continue;
+          const maLo = buildMaLo(draft.num, session.suffix, year);
+          planned.set(maLo, { ...(planned.get(maLo) || {}), ...nap });
+        }
+      }
+    }
+    if (planned.size === 0) return true;
+    const res = await loadLotNapStates({
+      accessToken: (await getFreshAuthSession())?.access_token ?? null,
+      factoryId,
+      maLos: [...planned.keys()],
+    });
+    const states = res.success ? res.states : {};
+    const over = [...planned.entries()]
+      .map(([maLo, nap]) => ({ maLo, total: lotNapTotalAfter(states[maLo], nap) }))
+      .filter((x) => x.total > MAX_NAP_PER_LOT);
+    if (over.length === 0) return true;
+    return confirmNap(over.map((x) => `Lô ${x.maLo} sẽ có ${x.total} nắp`));
+  };
+
 // Save create
   const handleCreateSave = async () => {
     if (!factoryId) return;
@@ -3220,6 +3292,8 @@ export default function ProductPage() {
       );
       return;
     }
+    // GĐ3B: cảnh báo (không chặn) lô sẽ có quá MAX_NAP_PER_LOT nắp.
+    if (!(await confirmCreateNapLimit(lotYear))) return;
     setSaving(true);
     setSaveError(null);
     let hasError = false;
@@ -3327,6 +3401,7 @@ export default function ProductPage() {
                 boc: block.boc,
                 pallet: block.pallet,
                 chi_thi: session.chi_thi,
+                nap: blockNapFor(block, { a: deltaA, b: deltaB, c: deltaC, d: deltaD }),
               },
               accessToken: (await getFreshAuthSession())?.access_token ?? null,
             });
@@ -3449,6 +3524,7 @@ export default function ProductPage() {
       tong_kg: targetTx ? targetTx.so_kg : lot.tong_kg,
       trang_thai: targetTx ? derivedStatus : lot.trang_thai,
       ghi_chu: lot.ghi_chu || "",
+      nap: parseNapMap(targetTx?.nap),
     });
     setEditId(lot.id);
     setEditTransactionId(targetTx?.id || null);
@@ -3803,6 +3879,24 @@ export default function ProductPage() {
         return;
       }
 
+      // GĐ3B: nắp chỉ giữ cho kiện còn bành + pallet cần nắp; cảnh báo > MAX_NAP_PER_LOT nắp/lô.
+      const editNapToSave: NapMap = {};
+      if (palletNeedsNap(packaging, palletComps, editForm.pallet)) {
+        const banh: Record<NapKien, number> = {
+          a: editForm.kien_a,
+          b: editForm.kien_b,
+          c: editForm.kien_c,
+          d: editForm.kien_d,
+        };
+        for (const k of NAP_KIENS) if (editForm.nap?.[k] && banh[k] > 0) editNapToSave[k] = editForm.nap[k];
+      }
+      {
+        const editLot = lots.find((l) => l.id === editId);
+        const others = lotNapByKien((editLot?.lot_transactions || []).filter((tx) => tx.id !== targetTx.id));
+        const total = lotNapTotalAfter({ sent: others, drafts: {} }, editNapToSave);
+        if (total > MAX_NAP_PER_LOT && !(await confirmNap([`Lô ${editForm.ma_lo} sẽ có ${total} nắp`]))) return;
+      }
+
       const result = await adminUpdateLotTransaction({
         accessToken: (await getFreshAuthSession())?.access_token ?? null,
         factoryId,
@@ -3815,6 +3909,7 @@ export default function ProductPage() {
         pallet: editForm.pallet || null,
         chiThi: editForm.chi_thi || null,
         lyDo: editLyDo,
+        nap: editNapToSave,
       });
       if (!result.success) {
         setSaveError(`Không sửa được giao dịch: ${result.error}`);
@@ -4669,6 +4764,16 @@ export default function ProductPage() {
                             );
                           })}
                         </div>
+                        {palletNeedsNap(packaging, palletComps, block.pallet) && (
+                          <div className="mt-3">
+                            <NapKienPicker
+                              components={palletComps}
+                              value={block.nap}
+                              onChange={(nap) => updateCaBlock(caIdx, blockIdx, { nap })}
+                              hint="Áp cho mọi lô của block, chỉ kiện có bành nhập lần này. Thường 4 kiện DPH có 2 nắp."
+                            />
+                          </div>
+                        )}
                       </div>
 
                       <div className="space-y-4">
@@ -4870,6 +4975,7 @@ export default function ProductPage() {
             </div>
           ))}
 
+        {napBanner}
         {saveError && (
           <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
             <AlertTriangle size={16} className="shrink-0" />
@@ -4964,6 +5070,7 @@ export default function ProductPage() {
   return (
     <div className={moduleThemeClass("forest")}>
       <PageBackgroundMotif theme="forest"/>
+      {napBanner}
       {saveError && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 bg-red-600 text-white rounded-2xl shadow-2xl max-w-xl">
           <AlertTriangle size={16} className="shrink-0" />
@@ -6011,6 +6118,20 @@ export default function ProductPage() {
                         {editForm.pallet.length > 0 && (
                           <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
                             Đang chọn: <strong>{editForm.pallet.join(" · ")}</strong>
+                          </div>
+                        )}
+                        {palletNeedsNap(packaging, palletComps, editForm.pallet) && (
+                          <div className="mt-3">
+                            <NapKienPicker
+                              components={palletComps}
+                              value={editForm.nap}
+                              onChange={(nap) => setEditForm((prev) => ({ ...prev, nap }))}
+                              enabledKiens={NAP_KIENS.filter(
+                                (k) =>
+                                  ({ a: editForm.kien_a, b: editForm.kien_b, c: editForm.kien_c, d: editForm.kien_d })[k] > 0,
+                              )}
+                              hint="Chỉ kiện có bành trong giao dịch này. Thường 4 kiện DPH có 2 nắp."
+                            />
                           </div>
                         )}
                       </div>

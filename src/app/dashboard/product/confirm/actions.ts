@@ -24,6 +24,10 @@ import { normalizeLotStatus } from "@/app/dashboard/product/shared";
 import { getLoaiBanhConfig } from "@/lib/product-lot-config";
 import type { PackagingConfig } from "@/lib/product-packaging";
 import { loadPackagingConfigServer } from "@/lib/product-packaging-server";
+import { loadPalletComponentsServer } from "@/lib/pallet-components-server";
+import { loadProductionCumulative, type ProductionCumulativeRow } from "@/app/dashboard/product/confirm/daily-report-actions";
+import { formatNapSuffix, isNapCode, lotNapByKien, palletNeedsNap, parseNapMap, type LotNapState, type NapMap } from "@/lib/pallet-nap";
+import type { PalletComponentsConfig } from "@/lib/pallet-components";
 import type { GradeConfig } from "@/lib/product-grade";
 import { loadGradeConfigServer } from "@/lib/product-grade-server";
 import { getFactoryTodayISO, getTodayISODate } from "@/lib/date-utils";
@@ -672,6 +676,7 @@ type ShiftTxRow = {
   boc: string | null;
   pallet: string[] | null;
   chi_thi: string | null;
+  nap?: unknown;
   ngan_id: string | null;
   created_at: string | null;
   created_by: string | null;
@@ -704,7 +709,7 @@ async function loadShiftTransactions(factoryId: string, ngaySx: string, ca: stri
   const { data, error } = await supabase
     .from("lot_transactions")
     .select(
-      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,boc,pallet,chi_thi,factory_id)",
+      "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,nap,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,boc,pallet,chi_thi,factory_id)",
     )
     .eq("lots.factory_id", factoryId)
     .eq("ngay_nhap", ngaySx)
@@ -726,7 +731,7 @@ async function loadDayTransactions(factoryId: string, ngaySx: string): Promise<S
       supabase
         .from("lot_transactions")
         .select(
-          "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,boc,pallet,chi_thi,factory_id)",
+          "id,lot_id,ca,ngay_nhap,kien_a,kien_b,kien_c,kien_d,so_banh,so_kg,boc,pallet,chi_thi,nap,ngan_id,created_at,created_by,lots!inner(ma_lo,loai_csr,loai_banh,trang_thai,day_chuyen,boc,pallet,chi_thi,factory_id)",
         )
         .eq("lots.factory_id", factoryId)
         .eq("ngay_nhap", ngaySx)
@@ -886,6 +891,8 @@ export type ShiftHistoryEntry = {
   boc: string | null;
   pallet: string[] | null;
   chiThi: string | null;
+  /** GĐ3B: nắp theo kiện của giao dịch. */
+  nap: NapMap;
   loaiCsr: string;
   loaiBanh: number;
   dayChuyen: string | null;
@@ -986,6 +993,7 @@ export async function loadShiftHistory(
         boc: row.boc ?? lotInfo?.boc ?? null,
         pallet: row.pallet ?? lotInfo?.pallet ?? null,
         chiThi: row.chi_thi ?? lotInfo?.chi_thi ?? null,
+        nap: parseNapMap(row.nap),
         loaiCsr: lotInfo?.loai_csr || "",
         loaiBanh: Number(lotInfo?.loai_banh) || 35,
         dayChuyen: lotInfo?.day_chuyen ?? null,
@@ -1079,6 +1087,8 @@ export type EditShiftHistoryInput = {
   pallet: string[] | null;
   chiThi: string | null;
   lyDo: string;
+  /** GĐ3B: nắp của kiện (dòng 1 kiện). undefined = giữ nguyên; null/"" = bỏ nắp. */
+  nap?: string | null;
 };
 
 export type EditShiftHistoryResult = { success: true } | { success: false; error: string };
@@ -1129,6 +1139,10 @@ export async function editShiftHistoryEntry(input: EditShiftHistoryInput): Promi
       pallet: input.pallet,
       chiThi: input.chiThi,
       lyDo: input.lyDo,
+      // Dòng nhiều kiện: màn này chỉ có 1 ô nắp ⇒ giữ nguyên nắp (sửa ở trang Thành phẩm).
+      ...(input.nap !== undefined && withBales.length === 1
+        ? { nap: input.nap ? ({ [withBales[0]]: input.nap } as NapMap) : {} }
+        : {}),
     });
     if (!result.success) return { success: false, error: result.error };
     return { success: true };
@@ -1203,6 +1217,8 @@ export type ShiftReportData = {
   tongKg: number;
   byGroup: ShiftReportGroupRow[];
   completedLots: CompletedLotRow[];
+  /** F09: lũy kế chế biến tháng/năm theo (CSR, loại bành, bọc) — cùng nguồn F12. Lỗi tính ⇒ undefined (không chặn phiếu). */
+  cumulative?: ProductionCumulativeRow[];
 };
 
 function joinUniqueSlash(values: (string | null | undefined)[]): string {
@@ -1264,8 +1280,10 @@ async function loadCompletedLotsForDay(factoryId: string, ngaySx: string): Promi
   type LotTxLite = {
     lot_id: string; boc: string | null; pallet: string[] | null;
     kien_a: number | null; kien_b: number | null; kien_c: number | null; kien_d: number | null;
+    nap?: unknown; created_at?: string | null;
   };
   const txByLot = new Map<string, LotTxLite[]>();
+  const palletComps = await loadPalletComponentsServer(factoryId);
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
     let txs: LotTxLite[];
@@ -1273,7 +1291,7 @@ async function loadCompletedLotsForDay(factoryId: string, ngaySx: string): Promi
       txs = await fetchAllPaginated<LotTxLite>((from, to) =>
         supabase
           .from("lot_transactions")
-          .select("lot_id,boc,pallet,kien_a,kien_b,kien_c,kien_d,created_at,id")
+          .select("lot_id,boc,pallet,kien_a,kien_b,kien_c,kien_d,nap,created_at,id")
           .in("lot_id", chunk)
           .order("created_at", { ascending: true })
           .order("id", { ascending: true })
@@ -1306,7 +1324,10 @@ async function loadCompletedLotsForDay(factoryId: string, ngaySx: string): Promi
         txs.map((t) => ({ ...t, pallet: t.boc ? [t.boc] : null })),
         l.boc ? [l.boc] : [],
       ),
-      pallet: formatPalletByKien(txs, l.pallet || []),
+      // GĐ3B: kèm nắp theo kiện, vd "Sắt đế gỗ + NS A, C".
+      pallet: [formatPalletByKien(txs, l.pallet || []), formatNapSuffix(palletComps, lotNapByKien(txs))]
+        .filter(Boolean)
+        .join(" "),
       ghiChu: (l.ghi_chu || "").trim(),
     });
   }
@@ -1536,6 +1557,16 @@ export async function loadShiftReportData(
 
   const soChiThi = chiThiSet.size > 0 ? [...chiThiSet].join(", ") : "—";
 
+  // F09: lũy kế tháng/năm (chỉ phiếu thành phẩm). Lỗi không chặn phiếu.
+  let cumulative: ProductionCumulativeRow[] | undefined;
+  if (purpose === "shift") {
+    try {
+      cumulative = await loadProductionCumulative(factoryId, ngaySx, accessToken);
+    } catch (err) {
+      console.warn("[F09] không tính được lũy kế:", err);
+    }
+  }
+
   return {
     ngay: ngaySx,
     soChiThi,
@@ -1544,6 +1575,7 @@ export async function loadShiftReportData(
     tongKg: Math.round(allRows.reduce((s, r) => s + r.soKg, 0) * 100) / 100,
     byGroup: [...byGroupMap.values()].map((g) => ({ ...g, soKg: Math.round(g.soKg * 100) / 100 })),
     completedLots,
+    cumulative,
   };
 }
 
@@ -1569,6 +1601,8 @@ export type SaveDraftKienInput = {
   chiThi: string | null;
   tham: string | null;
   ghiChu: string | null;
+  /** GĐ3B: mã nắp của kiện (pallet cần nắp). Rỗng = không nắp. */
+  nap?: string | null;
   /** Access token của phiên — server tự xác thực người lưu, không tin userId client gửi. */
   accessToken: string | null;
   /**
@@ -1582,6 +1616,23 @@ export type SaveDraftKienInput = {
    */
   unverified?: boolean;
 };
+
+// GĐ3B: kiểm nắp của nháp ở server — mã phải là thành phần nắp; pallet không cần nắp ⇒ bỏ nắp.
+async function resolveDraftNap(
+  factoryId: string,
+  nap: string | null | undefined,
+  pallet: string[] | null | undefined,
+): Promise<{ ok: true; nap: string | null } | { ok: false; error: string }> {
+  const code = String(nap ?? "").trim();
+  if (!code) return { ok: true, nap: null };
+  const [packCfg, compCfg] = await Promise.all([
+    loadPackagingConfigServer(factoryId),
+    loadPalletComponentsServer(factoryId),
+  ]);
+  if (!isNapCode(compCfg, code)) return { ok: false, error: `Mã nắp "${code}" không hợp lệ — tải lại trang để lấy danh sách nắp mới.` };
+  if (!palletNeedsNap(packCfg, compCfg, pallet || [])) return { ok: true, nap: null };
+  return { ok: true, nap: code };
+}
 
 export type SaveDraftKienResult =
   | { success: true; draftId: string; alreadySaved?: boolean }
@@ -1731,10 +1782,14 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
       };
     }
 
+    const napCheck = await resolveDraftNap(input.factoryId, input.nap, input.pallet);
+    if (!napCheck.ok) return { success: false, error: napCheck.error };
+
     const { data, error } = await supabase
       .from("product_confirm_drafts")
       .insert({
         ...(draftId ? { id: draftId } : {}),
+        nap: napCheck.nap,
         factory_id: input.factoryId,
         created_by: userId,
         ma_lo: maLo,
@@ -1791,6 +1846,8 @@ export type ConfirmDraftRow = {
   chiThi: string | null;
   tham: string | null;
   ghiChu: string | null;
+  /** GĐ3B: mã nắp của kiện. */
+  nap: string | null;
   createdAt: string | null;
 };
 
@@ -1800,7 +1857,7 @@ export async function loadDrafts(factoryId: string, userId: string): Promise<Con
   const { data, error } = await supabase
     .from("product_confirm_drafts")
     .select(
-      "id,ma_lo,kien,is_new_lot,ngan_id,loai_csr,loai_banh,day_chuyen,so_banh,so_kg,max_per_kien,ngay_sx,ca,boc,pallet,chi_thi,tham,ghi_chu,created_at",
+      "id,ma_lo,kien,is_new_lot,ngan_id,loai_csr,loai_banh,day_chuyen,so_banh,so_kg,max_per_kien,ngay_sx,ca,boc,pallet,chi_thi,tham,ghi_chu,nap,created_at",
     )
     .eq("factory_id", factoryId)
     .eq("created_by", userId)
@@ -1836,6 +1893,7 @@ export async function loadDrafts(factoryId: string, userId: string): Promise<Con
     chiThi: r.chi_thi,
     tham: r.tham,
     ghiChu: r.ghi_chu,
+    nap: r.nap ?? null,
     createdAt: r.created_at,
   }));
 }
@@ -1879,6 +1937,8 @@ export type UpdateDraftKienInput = {
   chiThi: string | null;
   tham: string | null;
   ghiChu: string | null;
+  /** GĐ3B: mã nắp; undefined = giữ nguyên. */
+  nap?: string | null;
 };
 
 export type UpdateDraftKienResult = { success: true } | { success: false; error: string };
@@ -1992,9 +2052,24 @@ export async function updateDraftKien(input: UpdateDraftKienInput): Promise<Upda
       }
     }
 
+    let napPatch: { nap?: string | null } = {};
+    if (input.nap !== undefined) {
+      const napCheck = await resolveDraftNap(input.factoryId, input.nap, input.pallet);
+      if (!napCheck.ok) return { success: false, error: napCheck.error };
+      napPatch = { nap: napCheck.nap };
+    } else {
+      // Đổi sang pallet không cần nắp ⇒ bỏ nắp đang có.
+      const [packCfg, compCfg] = await Promise.all([
+        loadPackagingConfigServer(input.factoryId),
+        loadPalletComponentsServer(input.factoryId),
+      ]);
+      if (!palletNeedsNap(packCfg, compCfg, input.pallet)) napPatch = { nap: null };
+    }
+
     const { error: updateError } = await supabase
       .from("product_confirm_drafts")
       .update({
+        ...napPatch,
         ngan_id: input.nganId,
         so_banh: input.soBanh,
         so_kg: soKg,
@@ -2124,6 +2199,10 @@ export type ConfirmOfflinePack = {
   packaging?: PackagingConfig;
   /** Quy cách chủng loại / loại bành (product_grade_types) — gói cũ không có ⇒ quy tắc cũ. */
   grade?: GradeConfig;
+  /** GĐ3B: thành phần pallet (nắp) — gói cũ không có ⇒ mặc định. */
+  palletComponents?: PalletComponentsConfig;
+  /** GĐ3B: nắp đã ghi của các lô trong gói (giao dịch + nháp) — để cảnh báo > 2 nắp khi mất mạng. */
+  lotNap?: Record<string, LotNapState>;
 };
 
 export type LoadConfirmOfflinePackResult =
@@ -2193,13 +2272,13 @@ export async function loadConfirmOfflinePack(
     }
     const lots = [...lotById.values()];
 
-    type TxRow = KienLookupTx & { lot_id: string; id: string };
+    type TxRow = KienLookupTx & { lot_id: string; id: string; nap?: unknown };
     const txByLot = new Map<string, KienLookupTx[]>();
     for (const part of chunkIds(lots.map((l) => l.id))) {
       const rows = await fetchAllPaginated<TxRow>((from, to) =>
         supabase
           .from("lot_transactions")
-          .select("id,lot_id,kien_a,kien_b,kien_c,kien_d,boc,pallet,created_at")
+          .select("id,lot_id,kien_a,kien_b,kien_c,kien_d,boc,pallet,nap,created_at")
           .in("lot_id", part)
           .order("created_at", { ascending: true })
           .order("id", { ascending: true })
@@ -2212,11 +2291,11 @@ export async function loadConfirmOfflinePack(
       }
     }
 
-    type DraftRow = KienLookupDraft & { ma_lo: string };
+    type DraftRow = KienLookupDraft & { ma_lo: string; nap?: string | null };
     const draftRows = await fetchAllPaginated<DraftRow>((from, to) =>
       supabase
         .from("product_confirm_drafts")
-        .select("id,ma_lo,kien,so_banh,boc,pallet,created_by,loai_csr,loai_banh,created_at")
+        .select("id,ma_lo,kien,so_banh,boc,pallet,created_by,loai_csr,loai_banh,nap,created_at")
         .eq("factory_id", factoryId)
         .order("created_at", { ascending: true })
         .order("id", { ascending: true })
@@ -2303,6 +2382,18 @@ export async function loadConfirmOfflinePack(
     }
     const grade = await loadGradeConfigServer(factoryId);
 
+    const lotNap: Record<string, LotNapState> = {};
+    for (const l of lots) {
+      const sent = lotNapByKien((txByLot.get(l.id) || []) as Parameters<typeof lotNapByKien>[0]);
+      if (Object.keys(sent).length > 0) lotNap[l.ma_lo] = { sent, drafts: {} };
+    }
+    for (const d of draftRows) {
+      const code = String(d.nap || "").trim();
+      if (!code || !sources[d.ma_lo]) continue;
+      const st = (lotNap[d.ma_lo] ||= { sent: {}, drafts: {} });
+      st.drafts[String(d.kien).toLowerCase() as keyof NapMap] = code;
+    }
+
     return {
       success: true,
       pack: {
@@ -2315,6 +2406,8 @@ export async function loadConfirmOfflinePack(
         csrOptions: [...csrSet].sort(),
         packaging: await loadPackagingConfigServer(factoryId),
         grade,
+        palletComponents: await loadPalletComponentsServer(factoryId),
+        lotNap,
       },
     };
   } catch (error) {

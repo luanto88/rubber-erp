@@ -9,6 +9,9 @@ import { formatStorageDate } from "@/lib/storage-detail"
 import { getLoaiBanhConfig } from "@/lib/product-lot-config"
 import type { GradeConfig } from "@/lib/product-grade"
 import { loadGradeConfig } from "@/lib/product-grade-client"
+import { DEFAULT_PALLET_COMPONENTS, type PalletComponentsConfig } from "@/lib/pallet-components"
+import { loadPalletComponents } from "@/lib/pallet-components-client"
+import { formatNapMap, formatNapSuffix, lotNapByKien, parseNapMap } from "@/lib/pallet-nap"
 import { buildProductLabelLookupPath, type KienLetter } from "@/lib/product-label"
 import {
   buildProductLotPdfBytes,
@@ -48,6 +51,7 @@ type LotTx = {
   boc: string | null
   pallet: string[] | null
   chi_thi: string | null
+  nap?: unknown
   created_at: string | null
 }
 
@@ -103,6 +107,8 @@ export default function ProductLotDetailPage() {
   const [exportsList, setExportsList] = useState<ExportRow[]>([])
   const [factoryName, setFactoryName] = useState("")
   const [grade, setGrade] = useState<GradeConfig | null>(null)
+  // GĐ3B: thành phần pallet để hiển thị tên nắp.
+  const [palletComps, setPalletComps] = useState<PalletComponentsConfig>(DEFAULT_PALLET_COMPONENTS)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
@@ -138,6 +144,7 @@ export default function ProductLotDetailPage() {
       }
       const fid = user.factory_id
       if (fid) void loadGradeConfig(fid).then(setGrade)
+      if (fid) void loadPalletComponents(fid).then(setPalletComps)
       if (!fid) {
         setLoadError("Tài khoản chưa được gán nhà máy.")
         return
@@ -145,7 +152,7 @@ export default function ProductLotDetailPage() {
       const { data, error } = await supabase
         .from("lots")
         .select(
-          "id, factory_id, ma_lo, ngay_sx, ngay_ht, ca, ngan_id, day_chuyen, loai_csr, loai_banh, boc, tham, pallet, chi_thi, kien_a, kien_b, kien_c, kien_d, tong_banh, tong_kg, trang_thai, ghi_chu, lot_transactions(id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, boc, pallet, chi_thi, created_at)",
+          "id, factory_id, ma_lo, ngay_sx, ngay_ht, ca, ngan_id, day_chuyen, loai_csr, loai_banh, boc, tham, pallet, chi_thi, kien_a, kien_b, kien_c, kien_d, tong_banh, tong_kg, trang_thai, ghi_chu, lot_transactions(id, ngan_id, ca, ngay_nhap, kien_a, kien_b, kien_c, kien_d, so_banh, so_kg, boc, pallet, chi_thi, nap, created_at)",
         )
         .eq("factory_id", fid)
         .eq("id", lotId)
@@ -227,6 +234,8 @@ export default function ProductLotDetailPage() {
       ),
     [lot],
   )
+  // GĐ3B: kiện có nắp của lô, vd "A: Nắp sắt, C: Nắp sắt".
+  const lotNap = useMemo(() => formatNapMap(palletComps, lotNapByKien(txs)), [palletComps, txs])
 
   const detailUrl = origin && lot ? `${origin}/dashboard/product/lot/${lot.id}` : ""
   const cfg = getLoaiBanhConfig(lot?.loai_csr || "", lot?.loai_banh || undefined, grade)
@@ -342,7 +351,10 @@ export default function ProductLotDetailPage() {
               <td className="text-right font-semibold tabular-nums">{num(t.so_banh).toLocaleString("vi-VN")}</td>
               <td className="text-right tabular-nums">{Math.round(num(t.so_kg)).toLocaleString("vi-VN")}</td>
               <td className="max-w-[160px] truncate text-xs" title={t.boc || ""}>{t.boc || "—"}</td>
-              <td className="max-w-[160px] truncate text-xs" title={palletText(t.pallet)}>{palletText(t.pallet) || "—"}</td>
+              <td className="max-w-[160px] truncate text-xs" title={palletText(t.pallet)}>
+                {palletText(t.pallet) || "—"}
+                {formatNapSuffix(palletComps, parseNapMap(t.nap)) ? ` ${formatNapSuffix(palletComps, parseNapMap(t.nap))}` : ""}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -471,6 +483,7 @@ export default function ProductLotDetailPage() {
                 <MetaRow label="Bọc" value={lot.boc || "—"} />
                 <MetaRow label="Thảm" value={lot.tham || "—"} />
                 <MetaRow label="Pallet" value={palletText(lot.pallet) || "—"} />
+                {lotNap && <MetaRow label="Nắp" value={lotNap} />}
                 <MetaRow label="Ca" value={lot.ca ? `Ca ${lot.ca}` : "—"} />
                 <MetaRow label="Ngăn nguồn" value={nganLabel(lot.ngan_id)} />
                 {lot.chi_thi && <MetaRow label="Chỉ thị" value={lot.chi_thi} />}

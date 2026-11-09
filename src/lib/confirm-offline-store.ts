@@ -33,6 +33,8 @@ export type ConfirmQueueItem = {
   chiThi: string | null;
   tham: string | null;
   ghiChu: string | null;
+  /** GĐ3B: mã nắp của kiện (mục cũ không có ⇒ không nắp). */
+  nap?: string | null;
   /** Mã không có trong gói tải sẵn — người dùng tự chọn ngăn/CSR/bành, server đối chiếu lại. */
   unverified: boolean;
   scannedAt: string;

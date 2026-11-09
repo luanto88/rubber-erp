@@ -30,6 +30,7 @@ import {
   assertProductAccess,
   assertReportAccess,
   REPORT_DAILY_PERMISSIONS,
+  REPORT_SHIFT_PERMISSIONS,
 } from "@/app/dashboard/product/confirm/report-access";
 import { formatCaName, resolveShiftNamesAt } from "@/app/dashboard/product/confirm/shift-names";
 
@@ -701,4 +702,48 @@ export async function loadOpeningStockOptions(
       a.boc.localeCompare(b.boc) ||
       a.loaiBanh - b.loaiBanh,
   );
+}
+// ── Lũy kế chế biến tháng / năm cho Phiếu báo thành phẩm (F09) ──
+// Cùng nguồn với cột "Nhập" Mục 1 của F12 (computeStock, không dùng tồn đầu kỳ): bọc theo lúc sản xuất + sổ
+// cái Thay bọc, lô không giao dịch tính theo lots.tong_kg. Gộp MỌI BỌC theo (CSR, loại bành, nguồn): nguồn "Công ty"
+// = "Chế biến", nguồn khác (Thu mua, Gia công...) giữ nhãn riêng — người dùng chốt 2026-11-09.
+export type ProductionCumulativeRow = {
+  loaiCsr: string;
+  loaiBanh: number;
+  /** "Chế biến" (hàng công ty) | "Thu mua" | "Gia công" | ... */
+  nguon: string;
+  ngayKg: number;
+  thangKg: number;
+  namKg: number;
+};
+
+export async function loadProductionCumulative(
+  factoryId: string,
+  ngay: string,
+  accessToken: string | null,
+): Promise<ProductionCumulativeRow[]> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ngay)) throw new Error("Ngày báo cáo không hợp lệ.");
+  await assertReportAccess(
+    accessToken,
+    factoryId,
+    [...REPORT_SHIFT_PERMISSIONS, ...REPORT_DAILY_PERMISSIONS],
+    "lũy kế sản xuất",
+  );
+  const { stockRows } = await computeStock(factoryId, ngay, false);
+  const map = new Map<string, ProductionCumulativeRow>();
+  for (const r of stockRows) {
+    const nguon = r.nguonGoc === "Công ty" ? "Chế biến" : r.nguonGoc;
+    const k = `${r.loaiCsr}||${r.loaiBanh}||${nguon}`;
+    const acc = map.get(k) || { loaiCsr: r.loaiCsr, loaiBanh: r.loaiBanh, nguon, ngayKg: 0, thangKg: 0, namKg: 0 };
+    acc.ngayKg += r.nhapKg;
+    acc.thangKg += r.nhapThangKg;
+    acc.namKg += r.nhapNamKg;
+    map.set(k, acc);
+  }
+  return [...map.values()]
+    .map((r) => ({ ...r, ngayKg: round2(r.ngayKg), thangKg: round2(r.thangKg), namKg: round2(r.namKg) }))
+    .filter((r) => r.namKg !== 0 || r.thangKg !== 0)
+    .sort((a, b) =>
+      a.loaiCsr.localeCompare(b.loaiCsr) || a.loaiBanh - b.loaiBanh ||
+      (a.nguon === "Chế biến" ? -1 : b.nguon === "Chế biến" ? 1 : a.nguon.localeCompare(b.nguon, "vi")));
 }

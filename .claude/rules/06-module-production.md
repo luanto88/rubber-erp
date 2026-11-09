@@ -885,3 +885,8 @@ Thay bọc (server kiểm theo cấu hình), Xuất hàng đọc bảng `product
 Bảng `product_grade_types` thay hard-code `getLoaiBanhConfig/Options/getLoaiCSRByDayChuyen` (đã xoá bản sao trong
 `product/page.tsx` — nay là lớp bọc đọc `pageGradeConfig` nạp lúc bootstrap) và CASE 20→240/144 trong SQL. Lô tròn =
 4 × bành/kiện. Dòng đã có lô dùng không sửa số được. Chi tiết: rule 11 mục "GĐ2".
+
+## 4.24. Nắp pallet theo kiện + lũy kế trên F09 (GĐ3B, deploy 2026-11-09)
+Nắp ghi theo kiện ở `lot_transactions.nap` (chỉ pallet Sắt đế gỗ/nhựa), cảnh báo banner khi lô > 2 nắp — chi tiết rule 11 mục
+"GĐ3 phần B". F09 có khối "Lũy kế thành phẩm" (ghi chú, không kẻ bảng) góc phải dưới Tổng hợp: Chế biến / Thu mua / Tổng theo
+(CSR, bành), cùng nguồn cột Nhập F12 (`loadProductionCumulative`).

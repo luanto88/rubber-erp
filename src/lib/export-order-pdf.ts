@@ -33,6 +33,8 @@ export type ExportOrderPdfInput = {
   so_hop_dong: string
   chung_loai: string
   loai_pallet: string
+  /** GĐ3B: xuất kèm nắp (undefined = đơn cũ / không hiển thị). */
+  xuat_nap?: boolean | null
   loai_banh: number
   loai_boc: string
   vehicles: ExportOrderPdfVehicle[]
@@ -40,6 +42,9 @@ export type ExportOrderPdfInput = {
   tong_banh: number
   customerName?: string | null
 }
+
+// Loại pallet xuất "Rời" (tên) — không có nắp đi kèm nên không in dòng "Kèm nắp".
+const isRoiName = (s: string | null | undefined) => String(s || "").normalize("NFC").trim().toLowerCase() === "rời"
 
 const LOGO_PATH = "/logo-phk-moi.png"
 const LOGO_ASPECT = 631 / 809 // width / height gốc — xem product-label-pdf.ts
@@ -193,7 +198,14 @@ async function buildExportOrderDoc(order: ExportOrderPdfInput, factoryName?: str
     [`Khách hàng: ${order.customerName || "—"}`, `Mã đơn: ${order.ma_don}`],
     [`Số hóa đơn / Hợp đồng: ${order.so_hoa_don || "—"} / ${order.so_hop_dong || "—"}`, `Số thông báo: ${order.so_thong_bao || "—"}`],
     [`Chủng loại SP: ${order.chung_loai} · ${order.loai_banh}kg/bành`, `Tổng lượng: ${order.tong_banh.toLocaleString("vi-VN")} bành (${tanTotal} Tấn)`],
-    [`Loại bọc: ${order.loai_boc || "—"}`, `Pallet: ${order.loai_pallet || "—"}`],
+    [
+      `Loại bọc: ${order.loai_boc || "—"}`,
+      `Pallet: ${order.loai_pallet || "—"}${
+        order.xuat_nap !== undefined && order.xuat_nap !== null && !isRoiName(order.loai_pallet)
+          ? ` · Kèm nắp: ${order.xuat_nap ? "Có" : "Không"}`
+          : ""
+      }`,
+    ],
   ]
   doc.setFont(PDF_FONT_NAME, "normal")
   doc.setFontSize(9)

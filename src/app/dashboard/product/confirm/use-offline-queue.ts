@@ -124,6 +124,7 @@ export function useOfflineQueue(params: {
             chiThi: item.chiThi,
             tham: item.tham,
             ghiChu: item.ghiChu,
+            nap: item.nap ?? null,
             unverified: item.unverified,
           });
         } catch {

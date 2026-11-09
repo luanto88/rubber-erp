@@ -105,3 +105,94 @@ phần cho người dùng test nếu muốn.
    có. Tab Loại pallet xuất → bọc màng: thấy "Đế sắt". Xoá "Đế sắt" khi chưa gắn đâu ⇒ xoá được.
 5. Gắn "Đế sắt" vào 1 loại pallet rồi thử xoá ⇒ báo đang dùng, chỉ tắt được. Sửa thành phần: ô Mã nội bộ bị khoá.
 6. Sửa "Pallet sắt mỏng" bỏ MCH ⇒ ở Tồn, MCH tách ra thành vật tư thường (theo kho). Gắn lại MCH để trả về như cũ.
+
+## Phần B — ĐÃ CODE (2026-11-08), chờ chạy migration + test tay
+- Migration `supabase/migrations/20261118_lot_nap.sql` (**chạy tay TRƯỚC deploy**, sau 20261117): cột
+  `lot_transactions.nap`, `product_confirm_drafts.nap`, `export_orders.xuat_nap`; hàm `pallet_names_need_nap`,
+  `lot_nap_sanitize`; `pallet_component_usage_count` đếm thêm nắp; 3 RPC chép nguyên bản mới nhất (diff chỉ phần nắp):
+  `submit_confirm_draft_batch` (giữ v_touched_ngans), `admin_update_lot_transaction` (+ `p_nap JSONB DEFAULT NULL` cuối,
+  DROP bản 14 tham số), `perform_sang_kien_thay_boc` (tách dòng chuyển nắp theo kiện; Sang kiện sang pallet không cần
+  nắp ⇒ xoá nắp; Thay bọc giữ nắp).
+- Thư viện thuần `src/lib/pallet-nap.ts` (palletNeedsNap, sanitizeNapMap, lotNapByKien, lotNapTotalAfter, formatNapSuffix,
+  MAX_NAP_PER_LOT = 2). Component `product/_components/nap-kien-picker.tsx` (4 kiện) + `nap-select.tsx` (1 kiện).
+- Thành phẩm: block "Thêm phiếu" có ô Nắp A–D (áp mọi lô của block, chỉ kiện có bành nhập lần này); modal Sửa giao dịch
+  (admin) có ô Nắp. Cảnh báo `window.confirm` khi lô > 2 nắp (đã gửi + nháp + lần này, qua `loadLotNapStates`).
+- Màn quét QR: ô Nắp trong form Lưu tạm, sửa nháp, sửa hàng đợi trên máy, sửa Lịch sử ca (chỉ dòng 1 kiện); hàng đợi
+  offline mang `nap`; gói offline có `palletComponents` + `lotNap`; khoá gộp "Đang chờ gửi" có nắp. Chữ Khmer máy soạn.
+- Xuất hàng: ô "Xuất kèm nắp" khi loại pallet xuất ≠ Rời (theo `export_pallet_types.hinh_thuc`), lưu `xuat_nap`; hiện
+  ở dòng xổ, trang chi tiết, biên bản PDF ("Pallet: … · Kèm nắp: Có/Không").
+- Tồn (`pallet-flow-actions.ts`): nắp kiện tính như 1 thành phần (đang lưu / xuất lưu / trả về / mất do xuất khẩu).
+- Hiển thị: chi tiết lô (dòng "Nắp" + hậu tố ở bảng giao dịch), F11 cột Pallet "Sắt đế gỗ + NS A, C".
+- Kiểm: script gọi code thật 23/23 PASS (nhận diện pallet cần nắp, lọc nắp, nắp theo kiện qua nhiều lần quét, tổng nắp,
+  hậu tố F11). tsc sạch, eslint 0 lỗi. CHƯA chạy SQL thật.
+- Chưa làm: tự điền sẵn nắp khi quét bổ sung kiện đã có nắp (ô mặc định "Không nắp" — kiện vẫn giữ nắp cũ vì nắp tính
+  theo giao dịch có ghi); phần C.
+
+### Test tay phần B
+1. Chạy migration ⇒ chạy 4 câu kiểm chứng cuối file (cột có; admin_update chỉ 1 chữ ký kết thúc `p_nap jsonb`;
+   Sắt đế gỗ = true, Sắt mỏng = false; sanitize ra `{"a": "nap_sat"}`).
+2. Thành phẩm → Thêm phiếu: chọn pallet "Sắt đế gỗ" ⇒ hiện khung "Nắp pallet theo kiện"; đổi sang "Sắt mỏng" ⇒ khung mất.
+   Chọn A + C = Nắp sắt, lưu ⇒ không hỏi. Chọn A, B, C = Nắp sắt ⇒ hộp xác nhận "Lô X sẽ có 3 nắp…".
+3. Mở chi tiết lô vừa lưu ⇒ dòng "Nắp: A: Nắp sắt, C: Nắp sắt", bảng giao dịch có "+ NS A, C".
+4. Admin Sửa giao dịch đó ⇒ ô nắp điền sẵn; bỏ nắp C, lưu ⇒ chi tiết lô còn A.
+5. Màn quét QR: quét kiện D lô đã có 2 nắp, pallet Sắt đế gỗ, chọn Nắp gỗ ⇒ hỏi "3 nắp"; Lưu tạm ⇒ dòng "Đang chờ gửi"
+   tách riêng; Sửa nháp đổi nắp được; Gửi tất cả ⇒ giao dịch có nắp. Thử tắt mạng: lưu được, có mạng lại tự đồng bộ.
+6. Báo cáo ngày (F11) của ngày lô tròn ⇒ cột Pallet "Sắt đế gỗ + NS A, C".
+7. Xuất hàng: loại pallet "Rời" ⇒ không có ô; đổi "Pallet sắt đế gỗ" ⇒ ô "Xuất kèm nắp"; tick, lưu ⇒ dòng xổ / chi tiết /
+   PDF ghi "Kèm nắp: Có". Đổi lại "Rời" rồi lưu ⇒ xuat_nap = false.
+8. Kho vật tư → Tồn, phân loại "Pallet các loại": NS "Đang lưu dưới kiện TP" = số kiện có nắp sắt chưa xuất. Gán đủ bành
+   lô đó vào đơn có tick ⇒ chuyển sang "Mất do xuất khẩu"; không tick / Rời ⇒ "Trả về" (khi chọn kỳ).
+9. Sang kiện kiện A (đang có nắp) sang "Sắt mỏng" ⇒ nắp A mất; sang "Sắt đế nhựa" ⇒ nắp giữ nguyên. Thay bọc ⇒ nắp giữ.
+
+## Sau test tay phần B (2026-11-09)
+- Mục 2, 3, 7, 8 PASS. Mục 6: ô Nắp chỉ hiện với "Sắt đế gỗ/nhựa" — đúng ý người dùng.
+- Mục 1 + 4: cảnh báo > 2 nắp đổi từ hộp hỏi trình duyệt sang banner nổi `useNapLimitConfirm`
+  (`product/_components/nap-limit-banner.tsx`, portal, Esc = quay lại) ở Thêm phiếu, admin Sửa giao dịch, Lưu tạm màn quét
+  (song ngữ, khoá i18n `napOverLimitLine`, `napBannerTitle/Confirm/Back`).
+- F09 thêm khối "Lũy kế thành phẩm (tấn)" góc phải dưới bảng Tổng hợp: `loadProductionCumulative` (daily-report-actions.ts)
+  = cột Nhập tháng/năm của F12 (computeStock, không tồn đầu kỳ), GỘP MỌI BỌC theo (CSR, bành, nguồn): "Chế biến" (nguồn Công
+  ty) rồi Thu mua / Gia công. Chỉ (CSR, bành) có sản xuất trong ngày. Bản cứng F09 đã lưu trước đó không có khối này.
+
+### Đối soát lũy kế hết 08/11/2026 (phuochoa_kt, CSR10 bành 35) — LỆCH NĂM, ĐỂ XỬ LÝ SAU
+| | Hệ thống | Người dùng | Lệch |
+|---|---|---|---|
+| Tháng 11 (chế biến) | 109,130 t | 109,130 t | 0 |
+| Năm 2026 (chế biến + thu mua) | 10.140,725 t = chế biến 10.125,605 + thu mua 15,120 | 10.141,495 t (đã gồm thu mua 15,120) | −0,770 t = 22 bành × 35 kg |
+- Chế biến năm theo bọc: nhãn VRG 9.636,725 · trơn 483,840 · PE Green 5,040. Thu mua: nhãn VRG 15,120.
+- Chưa sửa dữ liệu, chưa nhập Tồn đầu kỳ (tồn đầu kỳ là số TỒN, không chỉnh được lũy kế sản xuất). Hướng điều tra 22 bành
+  thiếu: lô mồ côi / giao dịch ngay_nhap ghi sai năm / lô 2025 tròn 2026 — `scripts/reconcile-f12-stock.mjs`.
+
+## Sau test tay phần B (2026-11-09) — đã deploy
+- Migration `20261118_lot_nap.sql` ĐÃ CHẠY. Test localhost: mục 1–8 PASS. Mục 6: ô Nắp chỉ hiện với "Sắt đế gỗ/nhựa" — đúng ý.
+- Cảnh báo > 2 nắp: banner nổi `useNapLimitConfirm` (`product/_components/nap-limit-banner.tsx`, portal, Esc = quay lại)
+  thay `window.confirm` ở Thêm phiếu, admin Sửa giao dịch, Lưu tạm màn quét (song ngữ, i18n `napOverLimitLine`,
+  `napBannerTitle/Confirm/Back`). Test PASS.
+- F09 (Phiếu báo thành phẩm) thêm khối "Lũy kế thành phẩm" góc phải dưới bảng Tổng hợp, dạng GHI CHÚ không kẻ bảng, dòng
+  ngăn bằng nét đứt mờ (mẫu duyệt 2026-11-09): mỗi (CSR, bành) có sản xuất trong ngày ⇒ "– Chế biến" (nguồn Công ty, gộp
+  mọi bọc), "– Thu mua"/"– Gia công" nếu có, ≥ 2 dòng thì thêm "Tổng". Nguồn: `loadProductionCumulative`
+  (daily-report-actions.ts) = cột Nhập tháng/năm F12 (computeStock, không dùng tồn đầu kỳ). Bản cứng F09 cũ không có khối.
+
+### Đối soát lũy kế hết 08/11/2026 (phuochoa_kt, CSR10 bành 35) — LỆCH NĂM, CHƯA XỬ LÝ
+| | Hệ thống | Người dùng | Lệch |
+|---|---|---|---|
+| Tháng 11 (chế biến) | 109,130 t | 109,130 t | 0 |
+| Năm 2026 (chế biến + thu mua) | 10.140,725 t = chế biến 10.125,605 + thu mua 15,120 | 10.141,495 t (gồm thu mua 15,120) | hệ thống thiếu 0,770 t = 22 bành × 35 kg |
+- Chế biến năm theo bọc: nhãn VRG 9.636,725 · trơn 483,840 · PE Green 5,040. Thu mua: nhãn VRG 15,120.
+- Không sửa dữ liệu, không nhập Tồn đầu kỳ (tồn đầu kỳ là TỒN, không chỉnh được lũy kế sản xuất).
+
+## Prompt phiên sau
+```
+Đọc CLAUDE.md, rule 11 (mục GĐ2/GĐ3) và .claude/plans/quy-cach-thanh-pham-gd3-nap.md (mục "Sau test tay phần B").
+Việc 1 — Điều tra lệch lũy kế năm 2026 CSR10 bành 35: hệ thống 10.140,725 t, người dùng 10.141,495 t (đã gồm thu mua
+15,120 t) ⇒ thiếu 0,770 t = 22 bành. Chỉ ĐỌC dữ liệu: chạy scripts/reconcile-f12-stock.mjs --ngay=2026-11-08
+--factory=phuochoa_kt; tìm lô mồ côi (tong_banh > 0 không có lot_transactions), giao dịch ngay_nhap ngoài 2026 của lô tròn
+2026, lô 2025 tròn 2026, kiện thiếu bành (lô tròn 144 nhưng giao dịch < 144), giao dịch so_kg ≠ so_banh × loai_banh.
+Liệt kê lô nghi vấn + đề xuất cách sửa, KHÔNG ghi DB, hỏi tôi trước.
+Việc 2 — Test production phần B: Thêm phiếu có nắp, admin sửa nắp, màn quét QR (cả mất mạng) có nắp + banner > 2 nắp,
+Gửi tất cả, chi tiết lô + F11 hiện "+ NS A, C", Xuất hàng "Xuất kèm nắp" (dòng xổ/chi tiết/PDF), Kho vật tư → Tồn nhóm
+NS/NG, Sang kiện sang Sắt mỏng xoá nắp. F09 ngày có sản xuất: khối Lũy kế ghi chú đúng số với F12.
+Việc 3 — GĐ3 phần C (kế hoạch mục C): quality/page.tsx đọc tiền tố CSR/SVR từ factories.prefix (resolveFactoryPrefix),
+bỏ FACTORY_CODE; export/page.tsx (3 chỗ dayChuyenForCsr) + product/page.tsx (inferDc) truyền cấu hình chủng loại đã nạp.
+Lên plan từng bước cho tôi duyệt trước. Kiểm bằng npx tsc --noEmit + npx eslint, không npm run build. Hỏi trước khi commit.
+Việc còn treo nhỏ: khi quét bổ sung kiện đã có nắp, ô Nắp không tự điền sẵn (kiện vẫn giữ nắp cũ) — hỏi có cần làm.
+```

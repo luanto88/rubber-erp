@@ -13,7 +13,7 @@ import {
   normalizeLotStatus,
 } from "@/app/dashboard/product/shared";
 import { fetchAllPaginated } from "@/lib/supabase-helpers";
-import { DEFAULT_EXPORT_PALLET_TYPES } from "@/lib/pallet-usage";
+import { DEFAULT_EXPORT_PALLET_TYPES, normalizePalletTypeName, type ExportPalletForm } from "@/lib/pallet-usage";
 import {
   DEFAULT_PACKAGING,
   defaultBoc,
@@ -171,6 +171,8 @@ type ExportOrder = {
   customer_id: string | null;
   chung_loai: string;
   loai_pallet: string;
+  // GĐ3B: true = nắp đi theo kiện khi xuất (mất nắp). Chỉ có nghĩa khi loại pallet xuất ≠ Rời.
+  xuat_nap?: boolean | null;
   loai_banh: number;
   loai_boc: string;
   vehicles: Vehicle[];
@@ -312,6 +314,7 @@ const emptyForm = (prefix: "CSR" | "SVR" = "CSR") => ({
   customer_id: "",
   chung_loai: `${prefix}10`,
   loai_pallet: "Rời",
+  xuat_nap: false,
   loai_banh: 35,
   loai_boc: defaultBoc(DEFAULT_PACKAGING, "Mủ tạp", `${prefix}10`),
   vehicles: [emptyVehicle()] as Vehicle[],
@@ -470,6 +473,18 @@ export default function ExportPage() {
   const palletOpts = useMemo(
     () => [...palletTypes, ...palletExtra.filter((p) => !palletTypes.includes(p))],
     [palletTypes, palletExtra],
+  );
+  // GĐ3B: hình thức theo tên loại pallet xuất (bảng export_pallet_types) — để biết loại nào là "Rời".
+  const [palletFormByName, setPalletFormByName] = useState<Record<string, ExportPalletForm>>(() =>
+    Object.fromEntries(DEFAULT_EXPORT_PALLET_TYPES.map((t) => [normalizePalletTypeName(t.ten), t.hinh_thuc])),
+  );
+  const isRoiPallet = useCallback(
+    (name: string | null | undefined) => {
+      const k = normalizePalletTypeName(name);
+      if (!k) return true;
+      return (palletFormByName[k] ?? (k === "rời" ? "roi" : "kien")) === "roi";
+    },
+    [palletFormByName],
   );
 
   // Filters (list view)
@@ -634,14 +649,17 @@ export default function ExportPage() {
   const loadPalletTypes = useCallback(async (fid: string) => {
     const { data, error } = await supabase
       .from("export_pallet_types")
-      .select("ten")
+      .select("ten, hinh_thuc, is_active")
       .eq("factory_id", fid)
-      .eq("is_active", true)
       .order("sort_order")
       .order("ten");
     if (error) return; // bảng chưa có ⇒ giữ danh sách mặc định
     setPalletTypesFromDb(true);
-    setPalletTypes((data || []).map((r) => r.ten as string));
+    setPalletTypes((data || []).filter((r) => r.is_active !== false).map((r) => r.ten as string));
+    // Kể cả loại đã tắt — đơn cũ vẫn ghi tên đó.
+    setPalletFormByName(
+      Object.fromEntries((data || []).map((r) => [normalizePalletTypeName(r.ten as string), r.hinh_thuc as ExportPalletForm])),
+    );
   }, []);
 
   // Nút "+" thêm loại pallet xuất ⇒ ghi về Cài đặt (mặc định "xuất khẩu dạng kiện", sửa lại ở Cài đặt).
@@ -1117,6 +1135,7 @@ export default function ExportPage() {
       customer_id: order.customer_id || "",
       chung_loai: editCsr,
       loai_pallet: order.loai_pallet || "Rời",
+      xuat_nap: order.xuat_nap === true,
       loai_banh: order.loai_banh || 35,
       loai_boc: editBoc,
       vehicles: order.vehicles?.length
@@ -2145,6 +2164,8 @@ export default function ExportPage() {
         customer_id: form.customer_id || null,
         chung_loai: form.chung_loai,
         loai_pallet: form.loai_pallet,
+        // GĐ3B (cột của migration 20261118): Rời luôn false.
+        xuat_nap: !isRoiPallet(form.loai_pallet) && form.xuat_nap === true,
         vehicles: form.vehicles,
         assignments: form.assignments,
         yeu_cau_chi_tieu: form.yeu_cau_chi_tieu,
@@ -2703,6 +2724,12 @@ export default function ExportPage() {
                             <span className="w-24 text-slate-400">Loại pallet:</span>
                             <span className="font-semibold">{order.loai_pallet || "-"}</span>
                           </div>
+                          {!isRoiPallet(order.loai_pallet) && (
+                            <div className="flex gap-2">
+                              <span className="w-24 text-slate-400">Kèm nắp:</span>
+                              <span className="font-semibold">{order.xuat_nap ? "Có" : "Không"}</span>
+                            </div>
+                          )}
                         </div>
                         {(order.yeu_cau_chi_tieu || []).length > 0 && (
                           <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
@@ -3399,6 +3426,19 @@ export default function ExportPage() {
                       <option key={l}>{l}</option>
                     ))}
                   </select>
+                  {!isRoiPallet(form.loai_pallet) && (
+                    <label className="mt-1.5 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-800">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={form.xuat_nap === true}
+                        onChange={(e) => setForm((p) => ({ ...p, xuat_nap: e.target.checked }))}
+                      />
+                      <span>
+                        <strong>Xuất kèm nắp</strong> — nắp của kiện đi theo hàng (mất nắp). Không tick: nắp trả về kho.
+                      </span>
+                    </label>
+                  )}
                   <div className="flex gap-1.5 mt-1.5">
                     <input
                       value={newPalletInput}

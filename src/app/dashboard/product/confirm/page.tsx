@@ -49,6 +49,12 @@ import { getBocsForLoaiCSR, getLoaiBanhConfig, getLoaiBanhOptions, getLoaiCSRByD
 import { mergeWithLegacy, resolvePalletOptions } from "@/lib/product-packaging";
 import { usePackaging } from "@/app/dashboard/product/confirm/use-packaging";
 import { useGradeConfig } from "@/app/dashboard/product/confirm/use-grade";
+import type { PalletComponentsConfig } from "@/lib/pallet-components";
+import { usePalletComponents } from "@/app/dashboard/product/confirm/use-pallet-components";
+import { NapSelect } from "@/app/dashboard/product/_components/nap-select";
+import { useNapLimitConfirm } from "@/app/dashboard/product/_components/nap-limit-banner";
+import { lotNapTotalAfter, MAX_NAP_PER_LOT, palletNeedsNap, type LotNapState, type NapKien } from "@/lib/pallet-nap";
+import { loadLotNapStates } from "@/app/dashboard/product/actions";
 import type { ConfirmQueueItem } from "@/lib/confirm-offline-store";
 import {
   computeKienLookup,
@@ -298,6 +304,8 @@ export default function ConfirmKienProductionPage() {
   const [ca, setCa] = useState<string>("A");
   const [boc, setBoc] = useState("");
   const [pallet, setPallet] = useState<string[]>([]);
+  // GĐ3B: nắp của kiện đang quét (chỉ có nghĩa khi pallet cần nắp).
+  const [nap, setNap] = useState("");
   const [chiThi, setChiThi] = useState("");
 
   // Tên ca trưởng có ngày hiệu lực (bảng production_shift_names) — nạp lại theo đúng ngày sản xuất
@@ -307,6 +315,17 @@ export default function ConfirmKienProductionPage() {
   // Quy cách đóng gói theo nhà máy (bảng product_packaging_types; offline ⇒ lấy từ gói tải sẵn).
   const packaging = usePackaging(factoryId, offline.pack?.packaging);
   const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
+  // GĐ3B: thành phần pallet (nắp) — offline ⇒ lấy từ gói tải sẵn.
+  const palletComps = usePalletComponents(factoryId, offline.pack?.palletComponents);
+  // GĐ3B: banner cảnh báo lô quá 2 nắp (song ngữ).
+  const { confirmNap, napBanner } = useNapLimitConfirm({
+    title: tt("napBannerTitle"),
+    note: tt("napHint"),
+    confirm: tt("napBannerConfirm"),
+    back: tt("napBannerBack"),
+  });
+  const needsNap = palletNeedsNap(packaging, palletComps, pallet);
+  const effectiveNap = needsNap ? nap : "";
   // Quy cách chủng loại / loại bành theo nhà máy (product_grade_types; offline ⇒ lấy từ gói tải sẵn).
   const grade = useGradeConfig(factoryId, offline.pack?.grade);
   useEffect(() => {
@@ -647,6 +666,7 @@ export default function ConfirmKienProductionPage() {
           setCa(getDefaultCa());
           setBoc(result.existingLotBoc || result.boc || "");
           setPallet(result.pallet || []);
+          setNap("");
           setChiThi(result.chiThi || "");
           setGhiChu("");
           if (!result.nganId) {
@@ -770,6 +790,34 @@ export default function ConfirmKienProductionPage() {
       setDraftSaveError(tt("offlineShiftLocked", { ngay: ngaySx, ca }));
       return;
     }
+    // GĐ3B: cảnh báo (không chặn) lô sẽ có quá MAX_NAP_PER_LOT nắp — tính cả giao dịch đã gửi, nháp
+    // chưa gửi (mọi người) và kiện của chính máy này đang chờ đồng bộ.
+    if (effectiveNap) {
+      const code = maLo.trim();
+      let state: LotNapState | undefined;
+      if (navigator.onLine) {
+        try {
+          const res = await loadLotNapStates({
+            accessToken: (await getFreshAuthSession())?.access_token ?? null,
+            factoryId,
+            maLos: [code],
+          });
+          if (res.success) state = res.states[code];
+        } catch {
+          state = offline.pack?.lotNap?.[code];
+        }
+      } else {
+        state = offline.pack?.lotNap?.[code];
+      }
+      const merged: LotNapState = { sent: { ...(state?.sent || {}) }, drafts: { ...(state?.drafts || {}) } };
+      for (const q of offline.queue) {
+        if (q.maLo === code && q.nap) merged.drafts[q.kien.toLowerCase() as NapKien] = q.nap;
+      }
+      const total = lotNapTotalAfter(merged, { [kien.toLowerCase() as NapKien]: effectiveNap });
+      if (total > MAX_NAP_PER_LOT && !(await confirmNap([tt("napOverLimitLine", { lo: code, n: total })]))) {
+        return;
+      }
+    }
     setSavingDraft(true);
     setDraftSaveError(null);
     try {
@@ -805,6 +853,7 @@ export default function ConfirmKienProductionPage() {
           chiThi: chiThi || null,
           tham: lookup.tham,
           ghiChu: lookup.isNewLot ? (ghiChu || null) : null,
+          nap: effectiveNap || null,
           unverified: lookup.status === "offline_unknown",
         });
         if (item) {
@@ -853,6 +902,7 @@ export default function ConfirmKienProductionPage() {
         chiThi,
         tham: lookup.tham,
         ghiChu: lookup.isNewLot ? (ghiChu || null) : null,
+        nap: effectiveNap || null,
       });
       if (!result.success) {
         setDraftSaveError(result.error);
@@ -908,6 +958,7 @@ export default function ConfirmKienProductionPage() {
     boc: string;
     pallet: string[];
     chiThi: string;
+    nap: string;
   }) => {
     if (!factoryId || !currentUser || !editingDraft) return;
     setDraftEditSaving(true);
@@ -927,6 +978,7 @@ export default function ConfirmKienProductionPage() {
         chiThi: input.chiThi || null,
         tham: editingDraft.tham,
         ghiChu: editingDraft.ghiChu,
+        nap: input.nap || null,
       });
       if (!result.success) {
         setDraftEditError(result.error);
@@ -1013,6 +1065,7 @@ export default function ConfirmKienProductionPage() {
     pallet: string[];
     chiThi: string;
     lyDo: string;
+    nap?: string;
   }) => {
     if (!factoryId || !editingEntry) return;
     setEditSaving(true);
@@ -1031,6 +1084,7 @@ export default function ConfirmKienProductionPage() {
         pallet: input.pallet,
         chiThi: input.chiThi || null,
         lyDo: input.lyDo,
+        ...(input.nap !== undefined ? { nap: input.nap || null } : {}),
       });
       if (!result.success) {
         setEditError(result.error);
@@ -1244,6 +1298,7 @@ export default function ConfirmKienProductionPage() {
 
   return (
     <div className="min-h-screen bg-slate-100">
+      {napBanner}
       {toast && (
         <div
           className={`fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-xl px-4 py-2 text-sm font-bold text-white shadow-lg ${
@@ -1818,6 +1873,17 @@ export default function ConfirmKienProductionPage() {
                   </div>
                 </Field>
 
+                {needsNap && (
+                  <NapSelect
+                    components={palletComps}
+                    value={nap}
+                    onChange={setNap}
+                    label={`${tt("napPallet")} — ${tt("kienLabel")} ${kien}`}
+                    noneLabel={tt("khongNap")}
+                    hint={tt("napHint")}
+                  />
+                )}
+
                 {!lookup.isNewLot && (
                   <div className="text-xs text-slate-400">{tt("lotExistsNote")}</div>
                 )}
@@ -1944,9 +2010,11 @@ export default function ConfirmKienProductionPage() {
             chiThi: editingQueueItem.chiThi,
             tham: editingQueueItem.tham,
             ghiChu: editingQueueItem.ghiChu,
+            nap: editingQueueItem.nap ?? null,
             createdAt: editingQueueItem.scannedAt,
           }}
           nganOptionsOverride={offline.pack?.ngans || []}
+          palletCompsOverride={offline.pack?.palletComponents}
           saving={false}
           error={null}
           onCancel={() => setEditingQueueItem(null)}
@@ -2043,7 +2111,7 @@ function groupPendingDrafts(drafts: ConfirmDraftRow[]): PendingDraftGroup[] {
   >();
   for (const d of drafts) {
     const palletKey = [...(d.pallet || [])].sort().join(",");
-    const key = `${d.maLo}||${d.loaiCsr}||${d.loaiBanh}||${d.boc || ""}||${palletKey}||${d.nganId || d.nganMa || ""}`;
+    const key = `${d.maLo}||${d.loaiCsr}||${d.loaiBanh}||${d.boc || ""}||${palletKey}||${d.nganId || d.nganMa || ""}||${d.nap || ""}`;
     const existing = map.get(key);
     if (existing) {
       existing.draftIds.push(d.id);
@@ -2663,6 +2731,7 @@ function EditEntryModal({
     pallet: string[];
     chiThi: string;
     lyDo: string;
+    nap?: string;
   }) => void;
 }) {
   const [nganId, setNganId] = useState(entry.nganId || "");
@@ -2671,6 +2740,10 @@ function EditEntryModal({
   const [soBanh, setSoBanh] = useState(entry.soBanh);
   const [boc, setBoc] = useState(entry.boc || "");
   const [pallet, setPallet] = useState<string[]>(entry.pallet || []);
+  // GĐ3B: chỉ dòng 1 kiện mới sửa nắp ở đây (dòng nhiều kiện sửa ở trang Thành phẩm).
+  const entryKiens = (["a", "b", "c", "d"] as const).filter((k) => entry.kienLetters.toLowerCase().includes(k));
+  const singleKien = entryKiens.length === 1 ? entryKiens[0] : null;
+  const [nap, setNap] = useState<string>(singleKien ? entry.nap?.[singleKien] || "" : "");
   const [chiThi, setChiThi] = useState(entry.chiThi || "");
   const [lyDo, setLyDo] = useState("");
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -2705,6 +2778,7 @@ function EditEntryModal({
   const packaging = usePackaging(factoryId);
   const grade = useGradeConfig(factoryId);
   const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
+  const palletComps = usePalletComponents(factoryId);
   const bocOptions = useMemo(
     () => mergeWithLegacy(getBocsForLoaiCSR(entry.dayChuyen || "Mủ tạp", entry.loaiCsr, packaging), entry.boc),
     [entry.dayChuyen, entry.loaiCsr, entry.boc, packaging],
@@ -2807,6 +2881,16 @@ function EditEntryModal({
               })}
             </div>
           </Field>
+          {palletNeedsNap(packaging, palletComps, pallet) && !!singleKien && (
+            <NapSelect
+              components={palletComps}
+              value={nap}
+              onChange={setNap}
+              label={tt("napPallet")}
+              noneLabel={tt("khongNap")}
+              hint={tt("napHint")}
+            />
+          )}
           <Field label={tt("nganNguon")} icon={<Warehouse size={13} />}>
             <select
               value={nganId}
@@ -2834,7 +2918,19 @@ function EditEntryModal({
             <ReasonConfirmBanner
               value={lyDo}
               onChange={setLyDo}
-              onConfirm={() => onSave({ nganId, ca, ngaySx, soBanh, boc, pallet, chiThi, lyDo })}
+              onConfirm={() =>
+                onSave({
+                  nganId,
+                  ca,
+                  ngaySx,
+                  soBanh,
+                  boc,
+                  pallet,
+                  chiThi,
+                  lyDo,
+                  ...(singleKien ? { nap: palletNeedsNap(packaging, palletComps, pallet) ? nap : "" } : {}),
+                })
+              }
               onBack={() => setReasonOpen(false)}
               saving={saving}
               labels={{
@@ -2885,6 +2981,7 @@ function EditDraftModal({
   onCancel,
   onSave,
   nganOptionsOverride,
+  palletCompsOverride,
 }: {
   tt: (key: string, vars?: Record<string, string | number>) => string;
   lang: Lang;
@@ -2893,6 +2990,8 @@ function EditDraftModal({
   draft: ConfirmDraftRow;
   /** Danh sách ngăn có sẵn (gói tải sẵn) — có thì KHÔNG gọi server, dùng được khi mất mạng. */
   nganOptionsOverride?: ActiveNganOption[];
+  /** Mất mạng: thành phần pallet từ gói tải sẵn. */
+  palletCompsOverride?: PalletComponentsConfig | null;
   saving: boolean;
   error: string | null;
   onCancel: () => void;
@@ -2904,6 +3003,7 @@ function EditDraftModal({
     boc: string;
     pallet: string[];
     chiThi: string;
+    nap: string;
   }) => void;
 }) {
   const [nganId, setNganId] = useState(draft.nganId || "");
@@ -2912,6 +3012,7 @@ function EditDraftModal({
   const [soBanh, setSoBanh] = useState(draft.soBanh);
   const [boc, setBoc] = useState(draft.boc || "");
   const [pallet, setPallet] = useState<string[]>(draft.pallet || []);
+  const [nap, setNap] = useState<string>(draft.nap || "");
   const [chiThi, setChiThi] = useState(draft.chiThi || "");
   const [nganOptions, setNganOptions] = useState<ActiveNganOption[]>(() => {
     const current = draft.nganId
@@ -2944,6 +3045,7 @@ function EditDraftModal({
   const packaging = usePackaging(factoryId);
   const grade = useGradeConfig(factoryId);
   const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
+  const palletComps = usePalletComponents(factoryId, palletCompsOverride);
   const bocOptions = useMemo(
     () => mergeWithLegacy(getBocsForLoaiCSR(draft.dayChuyen || "Mủ tạp", draft.loaiCsr, packaging), draft.boc),
     [draft.dayChuyen, draft.loaiCsr, draft.boc, packaging],
@@ -3046,6 +3148,16 @@ function EditDraftModal({
               })}
             </div>
           </Field>
+          {palletNeedsNap(packaging, palletComps, pallet) && true && (
+            <NapSelect
+              components={palletComps}
+              value={nap}
+              onChange={setNap}
+              label={tt("napPallet")}
+              noneLabel={tt("khongNap")}
+              hint={tt("napHint")}
+            />
+          )}
           <Field label={tt("nganNguon")} icon={<Warehouse size={13} />}>
             <select
               value={nganId}
@@ -3080,7 +3192,9 @@ function EditDraftModal({
           <button
             type="button"
             disabled={!canSave || saving}
-            onClick={() => onSave({ nganId, ca, ngaySx, soBanh, boc, pallet, chiThi })}
+            onClick={() =>
+              onSave({ nganId, ca, ngaySx, soBanh, boc, pallet, chiThi, nap: palletNeedsNap(packaging, palletComps, pallet) ? nap : "" })
+            }
             className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             {saving && <Loader2 size={16} className="animate-spin" />}

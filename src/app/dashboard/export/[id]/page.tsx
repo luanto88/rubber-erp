@@ -42,6 +42,7 @@ type ExportOrderRow = {
   so_hop_dong: string
   chung_loai: string
   loai_pallet: string
+  xuat_nap?: boolean | null
   loai_banh: number
   loai_boc: string
   vehicles: ExportOrderPdfVehicle[] | null
@@ -133,6 +134,7 @@ export default function ExportOrderDetailPage() {
       so_hop_dong: order.so_hop_dong,
       chung_loai: order.chung_loai,
       loai_pallet: order.loai_pallet,
+      xuat_nap: order.xuat_nap,
       loai_banh: order.loai_banh,
       loai_boc: order.loai_boc,
       vehicles: order.vehicles ?? [],
@@ -352,6 +354,9 @@ export default function ExportOrderDetailPage() {
                 <MetaRow label="Loại bành" value={order.loai_banh ? `${order.loai_banh} kg` : "—"} />
                 <MetaRow label="Loại bọc" value={order.loai_boc || "—"} />
                 <MetaRow label="Pallet" value={order.loai_pallet || "—"} />
+                {(order.loai_pallet || "").normalize("NFC").trim().toLowerCase() !== "rời" && (
+                  <MetaRow label="Kèm nắp" value={order.xuat_nap ? "Có" : "Không"} />
+                )}
                 <MetaRow label="Số lô gán" value={`${new Set(assignments.map((a) => a.ma_lo)).size} lô`} />
               </MetaList>
             </InspectorCard>

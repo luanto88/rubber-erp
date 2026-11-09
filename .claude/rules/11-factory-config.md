@@ -206,3 +206,15 @@ Rule:
   được thành phần mới (vd Đế sắt). Nguồn logic: `src/lib/pallet-components.ts` + loader client/server; bảng lỗi/rỗng ⇒
   DEFAULT (gắn vật tư theo mã như bảng cứng cũ). Nắp không hiện trong chip thành phần của pallet SX / loại pallet xuất.
 - Kế hoạch đầy đủ + phần B (nắp theo kiện): `.claude/plans/quy-cach-thanh-pham-gd3-nap.md`.
+
+## Nắp pallet theo kiện + Xuất kèm nắp — GĐ3 phần B (2026-11-08, chờ chạy migration + test tay)
+- Migration `20261118_lot_nap.sql` (**chạy tay TRƯỚC deploy**): `lot_transactions.nap` JSONB {"a":"nap_sat"},
+  `product_confirm_drafts.nap`, `export_orders.xuat_nap`; hàm `pallet_names_need_nap` / `lot_nap_sanitize`. Mọi
+  `CREATE OR REPLACE` submit_confirm_draft_batch / admin_update_lot_transaction / perform_sang_kien_thay_boc về sau PHẢI
+  chép từ file này.
+- Ô Nắp chỉ hiện khi pallet có thành phần `co_nap` (Sắt đế gỗ/nhựa); lựa chọn = thành phần `la_nap`. Nguồn logic:
+  `src/lib/pallet-nap.ts`. Cảnh báo (không chặn) khi lô > `MAX_NAP_PER_LOT` = 2 nắp.
+- Nơi nhập: Thành phẩm (Thêm phiếu theo block, Sửa giao dịch admin), màn quét QR (Lưu tạm, sửa nháp, hàng đợi offline,
+  Lịch sử ca dòng 1 kiện). Hiển thị: chi tiết lô, F11. Xuất hàng: "Xuất kèm nắp" khi pallet xuất ≠ Rời.
+- Tồn nắp (Kho vật tư → Tồn): như pallet — rời kho bằng đơn khác Rời + tick ⇒ mất; còn lại ⇒ trả về.
+- Chi tiết + test tay: `.claude/plans/quy-cach-thanh-pham-gd3-nap.md` mục "Phần B".

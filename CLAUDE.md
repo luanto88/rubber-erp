@@ -391,6 +391,9 @@ Vi du:
 - Quy cách thành phẩm theo nhà máy: GĐ1 (bọc/pallet SX/thảm, `product_packaging_types`) test PASS 2026-11-08.
   GĐ2 (chủng loại × loại bành, lô tròn = 4 × bành/kiện, `product_grade_types`) đã code 2026-11-08 — chạy migration
   `20261116_product_grade_types.sql` TRƯỚC deploy + test tay; GĐ3 (pallet → mã vật tư) — `.claude/plans/quy-cach-thanh-pham-gd2.md`.
+  GĐ3A (thành phần pallet) test PASS 2026-11-08. GĐ3B (nắp theo kiện + Xuất kèm nắp + lũy kế F09) test localhost PASS,
+  deploy 2026-11-09 (migration `20261118_lot_nap.sql` đã chạy). Còn: lệch lũy kế năm 22 bành + phần C — prompt phiên sau ở
+  `.claude/plans/quy-cach-thanh-pham-gd3-nap.md` mục "Prompt phiên sau".
 
 ## Nhật ký các phiên cũ
 

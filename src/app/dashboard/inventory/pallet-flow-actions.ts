@@ -21,6 +21,7 @@ import { palletComponentsFromConfig } from "@/lib/product-packaging"
 import { loadPackagingConfigServer } from "@/lib/product-packaging-server"
 import { componentGroupCode, isPalletComponentCode, itemComponentMap } from "@/lib/pallet-components"
 import { loadPalletComponentsServer } from "@/lib/pallet-components-server"
+import { parseNapMap } from "@/lib/pallet-nap"
 
 export type PalletFlowCounts = {
   dangLuu: number
@@ -114,13 +115,15 @@ export async function loadPalletFlow(
     const produced = new Map<string, number>() // `${lotId}:${k}`
     const firstDay = new Map<string, string>()
     const kienPallet = new Map<string, KienPallet>()
+    // GĐ3B: nắp của kiện — giao dịch mới nhất có ghi nắp cho kiện đó.
+    const kienNap = new Map<string, string>()
     const ids = lots.map((l) => l.id)
     for (let i = 0; i < ids.length; i += 200) {
       const chunk = ids.slice(i, i + 200)
       for (let from = 0; ; from += 1000) {
         const { data, error } = await supabase
           .from("lot_transactions")
-          .select("id, lot_id, kien_a, kien_b, kien_c, kien_d, pallet, ngay_nhap, created_at")
+          .select("id, lot_id, kien_a, kien_b, kien_c, kien_d, pallet, nap, ngay_nhap, created_at")
           .in("lot_id", chunk)
           .order("created_at", { ascending: true })
           .order("id", { ascending: true })
@@ -137,18 +140,29 @@ export async function loadPalletFlow(
             if (day && (!prev || day < prev)) firstDay.set(key, day)
           }
           applyTxToKienPallet(kienPallet, t, lotSnap.get(t.lot_id))
+          const nap = parseNapMap(t.nap)
+          for (const k of KIEN_KEYS) {
+            const code = nap[k]
+            if (code && (Number(t[`kien_${k}`]) || 0) > 0) kienNap.set(`${t.lot_id}:${k}`, code)
+          }
         }
         if (!data || data.length < 1000) break
       }
     }
 
     // 3. Đơn xuất theo ngày tăng dần — đơn làm tổng gán đạt bành sản xuất là đơn "đưa kiện đi"
-    type OrderRow = { id: string; ngay: string | null; loai_pallet: string | null; assignments: unknown }
+    type OrderRow = {
+      id: string
+      ngay: string | null
+      loai_pallet: string | null
+      xuat_nap?: boolean | null
+      assignments: unknown
+    }
     const orders: OrderRow[] = []
     for (let from = 0; ; from += 1000) {
       const { data, error } = await supabase
         .from("export_orders")
-        .select("id, ngay, loai_pallet, assignments")
+        .select("id, ngay, loai_pallet, xuat_nap, assignments")
         .eq("factory_id", factoryId)
         .order("id", { ascending: true })
         .range(from, from + 999)
@@ -159,7 +173,7 @@ export async function loadPalletFlow(
     orders.sort((a, b) => String(a.ngay || "").localeCompare(String(b.ngay || "")))
 
     const assigned = new Map<string, number>()
-    const exitOf = new Map<string, { day: string | null; loaiPallet: string }>()
+    const exitOf = new Map<string, { day: string | null; loaiPallet: string; xuatNap: boolean }>()
     for (const o of orders) {
       const list = Array.isArray(o.assignments) ? (o.assignments as Record<string, unknown>[]) : []
       for (const a of list) {
@@ -175,7 +189,7 @@ export async function loadPalletFlow(
           assigned.set(key, total)
           const prod = produced.get(key) || 0
           if (prod > 0 && total >= prod && !exitOf.has(key)) {
-            exitOf.set(key, { day: o.ngay, loaiPallet: String(o.loai_pallet || "").trim() })
+            exitOf.set(key, { day: o.ngay, loaiPallet: String(o.loai_pallet || "").trim(), xuatNap: o.xuat_nap === true })
           }
         }
       }
@@ -274,6 +288,20 @@ export async function loadPalletFlow(
         else {
           if (counted) for (const c of comps) bump(c, "traVe")
           if (form === "boc_mang") for (const c of type?.lose || []) lose(c, exit.day, counted)
+        }
+      }
+
+      // GĐ3B: nắp của kiện — đang lưu khi kiện chưa rời kho; rời kho: Rời ⇒ trả về; khác Rời + "Xuất kèm nắp"
+      // ⇒ mất do xuất khẩu; khác Rời + không tick ⇒ trả về.
+      const napCode = kienNap.get(key)
+      if (napCode) {
+        if (!exit) bump(napCode, "dangLuu")
+        if (inPeriod(firstDay.get(key) || null)) bump(napCode, "xuatLuu")
+        if (exit) {
+          const napType = typeMap.get(normalizePalletTypeName(exit.loaiPallet))
+          const napForm: ExportPalletForm = napType?.form || "kien"
+          if (napForm !== "roi" && exit.xuatNap) lose(napCode, exit.day, inPeriod(exit.day))
+          else if (inPeriod(exit.day)) bump(napCode, "traVe")
         }
       }
     }
