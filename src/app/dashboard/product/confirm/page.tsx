@@ -55,6 +55,8 @@ import { NapSelect } from "@/app/dashboard/product/_components/nap-select";
 import { useNapLimitConfirm } from "@/app/dashboard/product/_components/nap-limit-banner";
 import { lotNapTotalAfter, MAX_NAP_PER_LOT, palletNeedsNap, type LotNapState, type NapKien } from "@/lib/pallet-nap";
 import { loadLotNapStates } from "@/app/dashboard/product/actions";
+import { supabase } from "@/lib/supabase";
+import { defaultLotNoteForMaLo, type LotSuffixRow } from "@/lib/lot-source";
 import type { ConfirmQueueItem } from "@/lib/confirm-offline-store";
 import {
   computeKienLookup,
@@ -220,6 +222,19 @@ export default function ConfirmKienProductionPage() {
 
   const [loading, setLoading] = useState(true);
   const [factoryId, setFactoryId] = useState<string | null>(null);
+  // Hậu tố lô (để biết lô thu mua ⇒ ghi chú "TM"). Mất mạng ⇒ rỗng: ô ghi chú bị ẩn, server tự điền.
+  const suffixRowsRef = useRef<LotSuffixRow[]>([]);
+  useEffect(() => {
+    if (!factoryId) return;
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    void supabase
+      .from("suffixes")
+      .select("code,nguon,name")
+      .eq("factory_id", factoryId)
+      .then(({ data }) => {
+        if (data) suffixRowsRef.current = data as LotSuffixRow[];
+      });
+  }, [factoryId]);
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [factoryMismatch, setFactoryMismatch] = useState(false);
@@ -326,6 +341,31 @@ export default function ConfirmKienProductionPage() {
   });
   const needsNap = palletNeedsNap(packaging, palletComps, pallet);
   const effectiveNap = needsNap ? nap : "";
+
+  // Nắp đã ghi của 1 lô = giao dịch đã gửi + nháp (mọi người) + mục đang chờ đồng bộ trên máy này.
+  // Có mạng ⇒ hỏi server; lỗi / mất mạng ⇒ gói tải sẵn. Dùng cho cảnh báo > 2 nắp và điền sẵn nắp kiện.
+  const loadMergedLotNapState = async (fid: string, code: string): Promise<LotNapState> => {
+    let state: LotNapState | undefined;
+    if (navigator.onLine) {
+      try {
+        const res = await loadLotNapStates({
+          accessToken: (await getFreshAuthSession())?.access_token ?? null,
+          factoryId: fid,
+          maLos: [code],
+        });
+        if (res.success) state = res.states[code];
+      } catch {
+        state = offline.pack?.lotNap?.[code];
+      }
+    } else {
+      state = offline.pack?.lotNap?.[code];
+    }
+    const merged: LotNapState = { sent: { ...(state?.sent || {}) }, drafts: { ...(state?.drafts || {}) } };
+    for (const q of offline.queue) {
+      if (q.maLo === code && q.nap) merged.drafts[q.kien.toLowerCase() as NapKien] = q.nap;
+    }
+    return merged;
+  };
   // Quy cách chủng loại / loại bành theo nhà máy (product_grade_types; offline ⇒ lấy từ gói tải sẵn).
   const grade = useGradeConfig(factoryId, offline.pack?.grade);
   useEffect(() => {
@@ -668,7 +708,18 @@ export default function ConfirmKienProductionPage() {
           setPallet(result.pallet || []);
           setNap("");
           setChiThi(result.chiThi || "");
-          setGhiChu("");
+          // Lô mới hậu tố thu mua ⇒ ký hiệu KT mặc định "TM" (server cũng tự điền nếu để trống).
+          setGhiChu(result.isNewLot ? defaultLotNoteForMaLo(maLo, suffixRowsRef.current) : "");
+          // Quét bổ sung kiện đã có nắp ⇒ điền sẵn nắp đang có của đúng kiện (vẫn đổi/bỏ được).
+          if (result.status === "partial_kien") {
+            const kienKey = kien.toLowerCase() as NapKien;
+            void loadMergedLotNapState(factoryId, maLo.trim())
+              .then((st) => {
+                const existing = st.sent[kienKey] || st.drafts[kienKey] || "";
+                if (alive && existing) setNap((cur) => cur || existing);
+              })
+              .catch(() => {});
+          }
           if (!result.nganId) {
             if (fromPack) {
               setActiveNgans(offline.pack?.ngans || []);
@@ -794,25 +845,7 @@ export default function ConfirmKienProductionPage() {
     // chưa gửi (mọi người) và kiện của chính máy này đang chờ đồng bộ.
     if (effectiveNap) {
       const code = maLo.trim();
-      let state: LotNapState | undefined;
-      if (navigator.onLine) {
-        try {
-          const res = await loadLotNapStates({
-            accessToken: (await getFreshAuthSession())?.access_token ?? null,
-            factoryId,
-            maLos: [code],
-          });
-          if (res.success) state = res.states[code];
-        } catch {
-          state = offline.pack?.lotNap?.[code];
-        }
-      } else {
-        state = offline.pack?.lotNap?.[code];
-      }
-      const merged: LotNapState = { sent: { ...(state?.sent || {}) }, drafts: { ...(state?.drafts || {}) } };
-      for (const q of offline.queue) {
-        if (q.maLo === code && q.nap) merged.drafts[q.kien.toLowerCase() as NapKien] = q.nap;
-      }
+      const merged = await loadMergedLotNapState(factoryId, code);
       const total = lotNapTotalAfter(merged, { [kien.toLowerCase() as NapKien]: effectiveNap });
       if (total > MAX_NAP_PER_LOT && !(await confirmNap([tt("napOverLimitLine", { lo: code, n: total })]))) {
         return;

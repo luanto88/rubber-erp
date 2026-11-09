@@ -1,4 +1,5 @@
 "use client"
+import { resolveFactoryPrefix, type CsrPrefix } from "@/lib/product-grade"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
@@ -103,7 +104,6 @@ type CreateForm = {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const FACTORY_CODE: Record<string, string> = { phuochoa_kt: "PHK", cuaparis: "CP" }
 
 const CHUNG_LOAI = ["10","20","L","3L","CV50","CV60","5"]
 
@@ -317,9 +317,9 @@ function normalizeQcResultDates<T extends { ngay_kn: string; ngay_sx: string }>(
   }
 }
 
-function getLoaiCSR(chungLoai: string, fCode: string): string {
-  const prefix = fCode === "CP" ? "SVR" : "CSR"
-  return prefix + chungLoai
+// Tiền tố CSR/SVR đọc từ factories.prefix (resolveFactoryPrefix) — không còn suy từ mã PKN của nhà máy.
+function getLoaiCSR(chungLoai: string, csrPrefix: CsrPrefix): string {
+  return csrPrefix + chungLoai
 }
 
 function matchesLotCode(candidateMaLo: string, qcMaLo?: string | null): boolean {
@@ -368,6 +368,7 @@ export default function QualityPage() {
   // ── Core state ──────────────────────────────────────────────────────────────
   const [factoryId,   setFactoryId]   = useState<string|null>(null)
   const [factoryCode, setFactoryCode] = useState("NM")
+  const [csrPrefix, setCsrPrefix] = useState<CsrPrefix>("CSR")
   const [results,      setResults]      = useState<QcResult[]>([])
   const [statsResults, setStatsResults] = useState<QcResult[]>([])
   const [customStds,  setCustomStds]  = useState<CustomStd[]>([])
@@ -691,7 +692,7 @@ export default function QualityPage() {
   // ── Load eligible lots ───────────────────────────────────────────────────────
   const loadEligibleLots = useCallback(async () => {
     if (!factoryId || !createForm.chung_loai) { setEligibleLots([]); return }
-    const loaiCsr = getLoaiCSR(createForm.chung_loai, factoryCode)
+    const loaiCsr = getLoaiCSR(createForm.chung_loai, csrPrefix)
     const reqId = ++eligibleLotsReqRef.current
     setLotsLoading(true)
     try {
@@ -904,7 +905,7 @@ export default function QualityPage() {
     } finally {
       if (reqId === eligibleLotsReqRef.current) setLotsLoading(false)
     }
-  }, [backfillQcLotLinks, factoryId, factoryCode, createForm.chung_loai, createForm.ngay_sx, createForm.loai_kn])
+  }, [backfillQcLotLinks, factoryId, csrPrefix, createForm.chung_loai, createForm.ngay_sx, createForm.loai_kn])
 
   // ── Giám sát: results that are re-tests (have parent_id) ────────────────────
   const gmsResults = useMemo(() => results.filter(r=>r.parent_id).filter(r=>{
@@ -962,6 +963,7 @@ export default function QualityPage() {
         const code = allVals.includes("phuoc")||allVals.includes("kampong") ? "PHK"
           : allVals.includes("cua")||allVals.includes("paris") ? "CP" : "NM"
         setFactoryCode(code)
+        setCsrPrefix(resolveFactoryPrefix(f.prefix as string | null, f.name as string | null))
       })
     }
     void bootstrap()
@@ -1059,7 +1061,7 @@ export default function QualityPage() {
         ...td.samples,
         [field]: td.samples[field].map((v,i) => i===idx ? val : v)
       }
-      const loaiCsr = getLoaiCSR(createForm.chung_loai, factoryCode)
+      const loaiCsr = getLoaiCSR(createForm.chung_loai, csrPrefix)
       const customLimits = customStds.find(s=>s.id===createForm.tieu_chuan)?.limits
       const preview = calcGrade(newSamples, loaiCsr, createForm.tieu_chuan, customLimits)
       return { ...prev, [lotId]: { samples:newSamples, preview } }
@@ -1133,7 +1135,7 @@ export default function QualityPage() {
     setSaving(true)
     try {
     const year = getDateParts(createForm.ngay_kn)?.yearNumber ?? new Date().getFullYear()
-    const loaiCsr = getLoaiCSR(createForm.chung_loai, factoryCode)
+    const loaiCsr = getLoaiCSR(createForm.chung_loai, csrPrefix)
     const customLimits = customStds.find(s=>s.id===createForm.tieu_chuan)?.limits
     const user = JSON.parse(localStorage.getItem("erp_user")||"{}")
     const returnTo = searchParams.get("returnTo") || ""
@@ -1484,7 +1486,7 @@ export default function QualityPage() {
       const soMau = colH.filter(h => /^TC_M\d+$/.test(h)).length || 6
       const loaiKN = soMau >= 14 ? "ngat" : "thuong"
 
-      const loaiCsr = getLoaiCSR(cl, factoryCode)
+      const loaiCsr = getLoaiCSR(cl, csrPrefix)
       const customLimits = customStds.find(s => s.id === tieuChuan)?.limits
       const fieldMap: [string, string][] = [
         ["TC","tap_chat"],["TRO","tro"],["BH","bay_hoi"],
@@ -1934,7 +1936,7 @@ export default function QualityPage() {
   }), [results])
 
   // Create view: loaiCsr derived from form
-  const createLoaiCSR = getLoaiCSR(createForm.chung_loai, factoryCode)
+  const createLoaiCSR = getLoaiCSR(createForm.chung_loai, csrPrefix)
   const createVisibleFields = ALL_FIELDS.filter(f=>getVisibleFields(createForm.chung_loai).includes(f.key))
 
   // ── Tiêu chuẩn options for dropdown ──────────────────────────────────────────
@@ -2435,7 +2437,7 @@ export default function QualityPage() {
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-mod-600"
                 >
                   <option value="">Tất cả loại</option>
-                  {CHUNG_LOAI.map(c=><option key={c} value={getLoaiCSR(c,factoryCode)}>{getLoaiCSR(c,factoryCode)}</option>)}
+                  {CHUNG_LOAI.map(c=><option key={c} value={getLoaiCSR(c,csrPrefix)}>{getLoaiCSR(c,csrPrefix)}</option>)}
                 </select>
                 <select
                   value={filterTT}
@@ -2855,7 +2857,7 @@ export default function QualityPage() {
                   <select value={gmsLoai} onChange={e=>setGmsLoai(e.target.value)}
                     className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 outline-none">
                     <option value="">Tất cả loại</option>
-                    {CHUNG_LOAI.map(c=><option key={c} value={getLoaiCSR(c,factoryCode)}>{getLoaiCSR(c,factoryCode)}</option>)}
+                    {CHUNG_LOAI.map(c=><option key={c} value={getLoaiCSR(c,csrPrefix)}>{getLoaiCSR(c,csrPrefix)}</option>)}
                   </select>
                 </div>
               </FilterBar>

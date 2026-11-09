@@ -176,6 +176,8 @@ export type PurchaseLineRow = PurchaseLineInput & {
   truoc_item_name?: string | null
   truoc_so_luong?: number | null
   truoc_don_gia?: number | null
+  /** Mã HIỆN HÀNH của vật tư (inventory_items.code) — API gắn thêm khi đọc; `item_code` là bản chụp lúc lập. */
+  current_item_code?: string | null
   /** Số liệu tồn kho/tiêu hao/lần mua trước CHỤP LẠI lúc gửi ký (GĐ2e) — bằng chứng bất biến cho người duyệt. */
   insight_snapshot?: PurchaseInsightSnapshot | null
 }

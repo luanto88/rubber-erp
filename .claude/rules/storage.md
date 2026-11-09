@@ -331,3 +331,9 @@ Chi tiết đầy đủ cơ chế + component dùng chung xem `.claude/rules/04-
     tham số 1 lần sau khi tải xong, tự chuyển dây chuyền Mủ nước nếu cần, rồi gọi `openEdit` (tự kiểm quyền).
   - `storage-pdf.ts`: tách `buildStorageDetailDoc` (nội bộ) → `buildStorageDetailPdfBytes` +
     `downloadStorageDetailPdf` (tên file không đổi).
+
+## 18. Bộ lọc chuyến điền sẵn Ký hiệu KT của ngăn (2026-11-09, chờ test tay)
+- Form Tạo/Sửa ngăn: bộ lọc "Chuyến xe từ Điều xe" còn ĐÚNG 1 ký hiệu (khác "Không có ký hiệu KT") và ký hiệu đó có trong
+  `required_notes` ⇒ ô Ký hiệu KT của ngăn tự thành ký hiệu đó + tải lại chuyến theo cách ly EUDR (`fetchTrips`).
+- Chỉ thay khi ô đang trống hoặc đang là giá trị do chính bộ lọc điền (`autoNoteRef`); người dùng tự chọn ký hiệu ⇒ không ghi
+  đè. Lọc 0 / ≥ 2 giá trị ⇒ không đổi. Mở form ⇒ reset. Hàm `handleTripNoteFilterChange` (`storage/page.tsx`).

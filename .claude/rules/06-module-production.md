@@ -890,3 +890,12 @@ Bảng `product_grade_types` thay hard-code `getLoaiBanhConfig/Options/getLoaiCS
 Nắp ghi theo kiện ở `lot_transactions.nap` (chỉ pallet Sắt đế gỗ/nhựa), cảnh báo banner khi lô > 2 nắp — chi tiết rule 11 mục
 "GĐ3 phần B". F09 có khối "Lũy kế thành phẩm" (ghi chú, không kẻ bảng) góc phải dưới Tổng hợp: Chế biến / Thu mua / Tổng theo
 (CSR, bành), cùng nguồn cột Nhập F12 (`loadProductionCumulative`).
+
+## 4.25. Ghi chú "TM" tự điền cho lô thu mua + điền sẵn nắp khi quét bổ sung (2026-11-09, chờ test tay)
+- Nguồn theo hậu tố dùng chung `src/lib/lot-source.ts` (`makeNguonResolver` — F12 cũng dùng, `suffixOfMaLo`,
+  `defaultLotNoteForMaLo`, `THU_MUA_NOTE = "TM"`). Hậu tố có `suffixes.nguon` M/TM/"Thu mua" = thu mua.
+- Lô MỚI hậu tố thu mua ⇒ ký hiệu KT (`lots.ghi_chu`) mặc định "TM": màn quét (ô Ghi chú chọn sẵn), Thêm phiếu tay (đổi hậu tố
+  chỉ thay ghi chú khi ô trống / đang là mặc định của hậu tố cũ), và server `saveDraftKien` (ghi chú trống ⇒ "TM", phủ cả hàng
+  đợi mất mạng vì ô ghi chú bị ẩn khi offline). Lô cũ 1m/2m/3m/26 đã có "TM", không backfill.
+- Quét bổ sung kiện đã có nắp (`partial_kien`) ⇒ ô Nắp chọn sẵn nắp đang có của kiện (đã gửi → nháp → hàng đợi máy này;
+  offline lấy `pack.lotNap`). Hàm gộp dùng chung `loadMergedLotNapState` trong `confirm/page.tsx` (cũng dùng cho banner > 2 nắp).

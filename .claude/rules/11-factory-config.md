@@ -194,7 +194,7 @@ Rule:
   tiết ngăn / báo cáo kỳ, chi tiết lô. Trang công khai `/storage` không đọc được bảng (RLS) ⇒ dùng quy tắc cũ.
 - Khác biệt duy nhất với hàm cũ khi đã có bảng: lô L/3L KHÔNG có loại bành ⇒ kg = 35 (cũ 33,33); bành/kiện, lô tròn
   không đổi. Kiểm 2026-11-08: 380/380 PASS; dữ liệu thật 2.030 lô (CSR10×35) ⇒ 0 lô đổi trạng thái.
-- CHƯA làm (GĐ3): ánh xạ thành phần pallet → mã vật tư kho (`PALLET_COMPONENT_ITEMS`), cột `quality/page.tsx`
+- GĐ3 phần C (2026-11-09, chờ test tay): quality/page.tsx dùng `resolveFactoryPrefix`; export + product (Thay bọc) truyền cấu hình chủng loại vào `dayChuyenForCsr`. (Dòng cũ:) cột `quality/page.tsx`
   vẫn suy tiền tố từ `FACTORY_CODE`. Bàn giao: `.claude/plans/quy-cach-thanh-pham-gd2.md`.
 
 ## Thành phần pallet theo nhà máy — GĐ3 phần A (2026-11-08, chờ chạy migration + test tay)

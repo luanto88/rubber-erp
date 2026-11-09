@@ -353,8 +353,8 @@ function getLoaiBanhOptions(chung_loai: string, grade?: GradeConfig | null, curr
 }
 
 // Bọc theo cấu hình nhà máy (bảng product_packaging_types); dây chuyền suy từ CSR.
-function getBocOpts(chung_loai: string, cfg: PackagingConfig): string[] {
-  return resolveBocOptions(cfg, dayChuyenForCsr(chung_loai), chung_loai);
+function getBocOpts(chung_loai: string, cfg: PackagingConfig, grade?: GradeConfig | null): string[] {
+  return resolveBocOptions(cfg, dayChuyenForCsr(chung_loai, grade), chung_loai);
 }
 
 function ddmmyy(dateStr: string) {
@@ -1125,7 +1125,7 @@ export default function ExportPage() {
     const editBoc =
       normalizeBocAlias(order.loai_boc, editCsr) ||
       (kienBocs.length === 1 ? kienBocs[0] : null) ||
-      defaultBoc(packaging, dayChuyenForCsr(editCsr), editCsr);
+      defaultBoc(packaging, dayChuyenForCsr(editCsr, grade), editCsr);
     setForm({
       ma_don: order.ma_don || "",
       ngay: order.ngay?.slice(0, 10) || new Date().toISOString().slice(0, 10),
@@ -3395,12 +3395,12 @@ export default function ExportPage() {
                     value={form.chung_loai}
                     onChange={(e) => {
                       const cl = e.target.value;
-                      const bOpts = getBocOpts(cl, packaging);
+                      const bOpts = getBocOpts(cl, packaging, grade);
                       setForm((p) => ({
                         ...p,
                         chung_loai: cl,
                         loai_banh: getLoaiBanhOptions(cl, grade)[0],
-                        loai_boc: defaultBoc(packaging, dayChuyenForCsr(cl), cl) || bOpts[0] || "",
+                        loai_boc: defaultBoc(packaging, dayChuyenForCsr(cl, grade), cl) || bOpts[0] || "",
                         assignments: [],
                       }));
                     }}
@@ -3521,7 +3521,7 @@ export default function ExportPage() {
                   }
                   className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
                 >
-                  {mergeWithLegacy(getBocOpts(form.chung_loai, packaging), form.loai_boc).map((b) => (
+                  {mergeWithLegacy(getBocOpts(form.chung_loai, packaging, grade), form.loai_boc).map((b) => (
                     <option key={b}>{b}</option>
                   ))}
                 </select>

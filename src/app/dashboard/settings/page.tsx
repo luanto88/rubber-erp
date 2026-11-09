@@ -47,6 +47,7 @@ import { KpiCriteriaTab } from "./_components/kpi-criteria-tab"
 import { KpiScoreWeightsTab } from "./_components/kpi-score-weights-tab"
 import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
 import { doiOfDoiNho } from "@/lib/dispatch-master"
+import { isFuelCategory } from "@/lib/inventory-fuel"
 import {
   DEFAULT_PERMISSION_CODES,
   ROLE_DEFAULTS,
@@ -1723,6 +1724,18 @@ export default function SettingsPage() {
     if (!(Number(invItemForm.don_gia) > 0)) { setConfigError("Vui lòng nhập Đơn giá (bắt buộc, dùng để tự điền khi chọn vật tư trong biên bản Bảo trì)"); return }
     const editingItem = configEditId ? invItems.find((it) => it.id === configEditId) : null
     const oilFlagChanged = !!editingItem && editingItem.uses_shared_oil_stock !== invItemForm.uses_shared_oil_stock
+    const newCode = invItemForm.code.trim().toUpperCase()
+    const codeChanged = !!editingItem && editingItem.code.toUpperCase() !== newCode
+    if (codeChanged && !canManageSettings) { setConfigError("Chỉ admin hoặc người có quyền cấu hình được đổi mã vật tư."); return }
+    const codeClash = invItems.find((it) => it.id !== configEditId && it.code.toUpperCase() === newCode)
+    if (codeClash) { setConfigError(`Mã ${newCode} đã thuộc vật tư "${codeClash.name}".`); return }
+    if (codeChanged && !window.confirm(`Đổi mã vật tư ${editingItem!.code} → ${newCode}?\nChứng từ cũ vẫn liên kết đúng vật tư; file PDF đã ký giữ mã cũ.`)) return
+    const selectedCategory = invCategories.find((c) => c.id === invItemForm.category_id)
+    // Chỉ nhóm nhiên liệu / dầu được bật bồn dầu. Mã cũ đã bật sẵn (dữ liệu lịch sử) thì giữ nguyên, không ép tắt.
+    if (invItemForm.uses_shared_oil_stock && !isFuelCategory(selectedCategory) && !editingItem?.uses_shared_oil_stock) {
+      setConfigError(`"Dùng chung bồn dầu" chỉ dành cho nhóm nhiên liệu / dầu — nhóm "${selectedCategory?.name || ""}" không áp dụng.`)
+      return
+    }
     setConfigSaving(true)
     setConfigError("")
     try {
@@ -6254,11 +6267,31 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Mã vật tư *</label>
-                      <input value={invItemForm.code} onChange={(e) => setInvItemForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))} disabled={!!configEditId} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
+                      <input value={invItemForm.code} onChange={(e) => setInvItemForm((p) => ({ ...p, code: e.target.value.toUpperCase().replace(/\s+/g, "") }))} disabled={!!configEditId && !canManageSettings} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 disabled:bg-slate-50" />
+                      {(() => {
+                        const code = invItemForm.code.trim().toUpperCase()
+                        const original = configEditId ? invItems.find((it) => it.id === configEditId)?.code || "" : ""
+                        const clash = code ? invItems.find((it) => it.id !== configEditId && it.code.toUpperCase() === code) : null
+                        if (clash) return <p className="mt-1 text-xs font-semibold text-rose-600">Mã đã thuộc vật tư &ldquo;{clash.name}&rdquo;.</p>
+                        if (configEditId && original && code && code !== original.toUpperCase()) {
+                          return <p className="mt-1 text-xs text-amber-700">Đổi mã {original} → {code}: phiếu kho / đề nghị mua / biên bản cũ vẫn liên kết đúng vật tư; màn hình và phiếu dựng mới hiện mã mới, file đã ký giữ mã cũ.</p>
+                        }
+                        return null
+                      })()}
                     </div>
                     <div>
                       <label className="text-xs font-bold text-slate-600 block mb-1.5">Nhóm vật tư *</label>
-                      <select value={invItemForm.category_id} onChange={(e) => setInvItemForm((p) => ({ ...p, category_id: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500">
+                      <select
+                        value={invItemForm.category_id}
+                        onChange={(e) => {
+                          const nextId = e.target.value
+                          const nextIsFuel = isFuelCategory(invCategories.find((c) => c.id === nextId))
+                          // Đổi sang nhóm không phải nhiên liệu ⇒ tự bỏ tick bồn dầu, trừ mã đã có phát sinh (giữ khoá như cũ).
+                          const keepOil = !!configEditId && invItemHasMovements
+                          setInvItemForm((p) => ({ ...p, category_id: nextId, uses_shared_oil_stock: nextIsFuel || keepOil ? p.uses_shared_oil_stock : false }))
+                        }}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                      >
                         <option value="">Chọn nhóm</option>
                         {invCategories.map((c) => <option key={c.id} value={c.id}>{c.code} - {c.name}</option>)}
                       </select>
@@ -6340,13 +6373,17 @@ export default function SettingsPage() {
                   </div>
                   {(() => {
                     const lockedOil = !!configEditId && invItemHasMovements
+                    const fuelCategory = isFuelCategory(invCategories.find((c) => c.id === invItemForm.category_id))
+                    // Mã cũ không phải nhóm nhiên liệu nhưng đã bật sẵn ⇒ vẫn cho tắt (không cho bật lại).
+                    const notFuelBlocked = !fuelCategory && !invItemForm.uses_shared_oil_stock
+                    const disabledOil = lockedOil || notFuelBlocked
                     return (
                       <div className={`rounded-xl border p-3 ${invItemForm.uses_shared_oil_stock ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
-                        <label className={`flex items-center gap-2 text-sm font-bold ${lockedOil ? "text-slate-400" : "text-slate-700"}`}>
+                        <label className={`flex items-center gap-2 text-sm font-bold ${disabledOil ? "text-slate-400" : "text-slate-700"}`}>
                           <input
                             type="checkbox"
                             checked={invItemForm.uses_shared_oil_stock}
-                            disabled={lockedOil}
+                            disabled={disabledOil}
                             onChange={(e) => setInvItemForm((p) => ({ ...p, uses_shared_oil_stock: e.target.checked }))}
                           />
                           Dùng chung bồn dầu
@@ -6356,6 +6393,9 @@ export default function SettingsPage() {
                         </p>
                         {lockedOil && (
                           <p className="mt-1 text-xs font-semibold text-rose-600">Mã đã có phát sinh kho — không đổi được tuỳ chọn này.</p>
+                        )}
+                        {!lockedOil && !fuelCategory && (
+                          <p className="mt-1 text-xs font-semibold text-slate-500">Chỉ áp dụng cho nhóm nhiên liệu / dầu (mã nhóm NL… hoặc tên có &ldquo;nhiên liệu&rdquo;, &ldquo;dầu&rdquo;).</p>
                         )}
                         {invItemForm.uses_shared_oil_stock && (
                           invItemForm.selected_warehouse_ids.length === 0 ? (

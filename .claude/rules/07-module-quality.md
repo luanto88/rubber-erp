@@ -244,3 +244,7 @@ ký qua `/api/signing/requests/{id}/file-url?view=1&name=Phiếu KQKN …`. Chi 
   `sx_unknown`: PDF không đọc được ngày SX ⇒ không tự chọn, banner đỏ. Kiểm "đã KN" nay chạy TRƯỚC kiểm ngày.
 - `getNextLoKN` (`quality/page.tsx`) = `lo_kn` lớn nhất + 1 (trước: số dòng + 1 ⇒ trùng sau khi xoá phiếu).
 - Khuyến nghị vận hành: KHÔNG sửa ngày trên PDF — upload bản gốc và dùng chức năng dời lô.
+
+## Tiền tố CSR/SVR theo factories.prefix (2026-11-09, chờ test tay)
+`getLoaiCSR(chungLoai, csrPrefix)` — `csrPrefix` = `resolveFactoryPrefix(f.prefix, f.name)` (src/lib/product-grade.ts). Đã bỏ
+`FACTORY_CODE` và việc đoán theo chữ "cua/paris". `factoryCode` (PHK/CP/NM) CHỈ còn dùng cho mã PKN và tên file KQKN.

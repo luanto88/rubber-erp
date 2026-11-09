@@ -117,7 +117,25 @@ export async function loadPurchaseLines(requestId: string): Promise<PurchaseLine
     .select("*")
     .eq("request_id", requestId)
     .order("sort_order")
-  return (data || []) as PurchaseLineRow[]
+  const lines = (data || []) as PurchaseLineRow[]
+  const codes = await loadCurrentItemCodes(lines.map((l) => l.item_id))
+  return lines.map((l) => ({ ...l, current_item_code: (l.item_id && codes.get(l.item_id)) ?? l.item_code }))
+}
+
+/**
+ * Mã hiện hành của vật tư (`inventory_items.code`) theo id. Dòng phiếu lưu bản chụp `item_code` lúc lập —
+ * mã đổi sau đó (vd PTXE-001 → mã chuẩn) thì màn hình + PDF dựng mới đọc mã hiện hành, PDF đã ký giữ nguyên.
+ */
+export async function loadCurrentItemCodes(itemIds: (string | null | undefined)[]): Promise<Map<string, string>> {
+  const ids = [...new Set(itemIds.filter((v): v is string => !!v))]
+  const out = new Map<string, string>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await getSupabaseAdmin().from("inventory_items").select("id, code").in("id", ids.slice(i, i + 200))
+    // Lỗi tra mã chỉ làm mất phần "mã hiện hành" (dùng lại bản chụp), không được chặn luồng gọi.
+    if (error) { console.error("[purchase] loadCurrentItemCodes:", error.message); return out }
+    for (const r of (data || []) as { id: string; code: string | null }[]) if (r.code) out.set(r.id, r.code)
+  }
+  return out
 }
 
 /**

@@ -47,6 +47,8 @@ import { PurchaseGuide } from "./_components/purchase-guide"
 type ListLine = {
   id: string
   item_code: string | null
+  /** Mã hiện hành của vật tư; `item_code` là bản chụp lúc lập phiếu. */
+  current_item_code?: string | null
   item_name: string
   unit: string | null
   so_luong: number
@@ -167,7 +169,7 @@ function PurchaseListInner() {
     return rows.filter((r) =>
       normalizeName(
         `${formatSoPhieuFull(r.so, r.nam)} ${r.nguoi_de_nghi_ten || ""} ${r.ghi_chu || ""} ${(r.lines || [])
-          .map((l) => `${l.item_code || ""} ${l.item_name}`)
+          .map((l) => `${l.current_item_code || ""} ${l.item_code || ""} ${l.item_name}`)
           .join(" ")}`,
       ).includes(q),
     )
@@ -391,7 +393,14 @@ function PurchaseListInner() {
                             <td className="tabular-nums text-slate-500">{i + 1}</td>
                             <td>
                               <div className="font-semibold text-slate-800">{l.item_name}</div>
-                              {l.item_code && <div className="font-code text-[11px] text-slate-500">{l.item_code}</div>}
+                              {(l.current_item_code || l.item_code) && (
+                                <div className="font-code text-[11px] text-slate-500">
+                                  {l.current_item_code || l.item_code}
+                                  {l.item_code && l.current_item_code && l.item_code !== l.current_item_code && (
+                                    <span className="ml-1 font-sans text-slate-400">(mã lúc lập: {l.item_code})</span>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             <td className="whitespace-nowrap">{l.unit || "—"}</td>
                             <td className="text-right tabular-nums">{formatQty(l.so_luong)}</td>

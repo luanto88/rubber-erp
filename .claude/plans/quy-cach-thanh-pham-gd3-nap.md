@@ -196,3 +196,11 @@ bỏ FACTORY_CODE; export/page.tsx (3 chỗ dayChuyenForCsr) + product/page.tsx 
 Lên plan từng bước cho tôi duyệt trước. Kiểm bằng npx tsc --noEmit + npx eslint, không npm run build. Hỏi trước khi commit.
 Việc còn treo nhỏ: khi quét bổ sung kiện đã có nắp, ô Nắp không tự điền sẵn (kiện vẫn giữ nắp cũ) — hỏi có cần làm.
 ```
+
+## Phiên 2026-11-09 (tiếp) — đã giải thích lệch 22 bành + phần C đã code (chờ test tay)
+- Lệch −0,770 t năm 2026 ĐÃ GIẢI THÍCH, không phải lỗi: = dòng `product_opening_stock` chốt 31/12/2025 (CSR10 · Công ty ·
+  Bọc nhãn VRG · 35, 770 kg, ghi chú "Sản xuất bù 22 bành lô 54m"). Người dùng xác nhận 22 bành sản xuất NĂM 2025 ⇒ đúng là
+  tồn đầu kỳ, không thuộc lũy kế 2026. Dữ liệu sạch: reconcile [1]–[5] = 0; 0 giao dịch sai năm / sai kg / thiếu kiện.
+- Phần C đã code: `quality/page.tsx` tiền tố theo `resolveFactoryPrefix` (state `csrPrefix`, bỏ `FACTORY_CODE`; `factoryCode`
+  PHK/CP vẫn chỉ cho mã PKN), `export/page.tsx` + `product/page.tsx` (inferDc Thay bọc) truyền cấu hình chủng loại.
+- Kèm: điền sẵn nắp kiện khi quét bổ sung; ghi chú "TM" tự điền cho lô thu mua (rule 06 mục 4.25).

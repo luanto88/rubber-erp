@@ -481,7 +481,10 @@ function PurchaseDetailInner() {
                       <td className="px-2 py-2 text-slate-500">{i + 1}</td>
                       <td className="px-2 py-2">
                         <p className="font-semibold text-slate-800">{l.item_name}</p>
-                        <p className="text-xs text-slate-500 font-mono">{l.item_code} · {l.unit}</p>
+                        <p className="text-xs text-slate-500 font-mono">{l.current_item_code || l.item_code} · {l.unit}</p>
+                        {l.item_code && l.current_item_code && l.item_code !== l.current_item_code && (
+                          <p className="text-[11px] text-slate-400">Mã lúc lập phiếu: <span className="font-mono">{l.item_code}</span></p>
+                        )}
                         {l.la_vat_tu_moi && <span className="inline-block mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Vật tư mới</span>}
                         {l.maintenance_record_id && l.maintenance_record_id !== req.maintenance_record_id && (
                           <Link href={`/dashboard/maintenance/records/${l.maintenance_record_id}`} className="block mt-0.5 text-[11px] font-semibold text-brand-700 hover:underline">

@@ -23,6 +23,7 @@
 //   dựng từ sk_history qua src/lib/sk-boc-ledger.ts (RPC ghi đè lot_transactions.boc tại chỗ nên giao
 //   dịch chỉ còn bọc hiện tại). Xuất kho vẫn theo bọc hiện tại của kiện. F12 không tách pallet ⇒ Sang
 //   kiện không ảnh hưởng.
+import { makeNguonResolver, type LotSuffixRow } from "@/lib/lot-source";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { applyTxToKienBoc, KIEN_KEYS, kienBocOf, type KienBoc } from "@/lib/lot-kien-boc";
 import { buildBocLedger, buildKienBocSets, shortBocLabel, type SkHistoryEvent } from "@/lib/sk-boc-ledger";
@@ -106,27 +107,8 @@ async function fetchAllPages<T>(
   return all;
 }
 
-type SuffixRow = { code: string | null; nguon: string | null; name: string | null };
-
-function makeNguonResolver(suffixes: SuffixRow[]) {
-  const byCode = new Map<string, SuffixRow>();
-  for (const s of suffixes) if (s.code) byCode.set(s.code.trim().toLowerCase(), s);
-  const fromNguon = (nguon: string): string | null => {
-    const n = nguon.trim().toUpperCase();
-    if (!n) return null;
-    if (n === "NT" || n === "CS") return "Công ty";
-    if (n === "M" || n === "TM") return "Thu mua";
-    if (n.startsWith("GC")) return "Gia công";
-    if (n === "TL") return "Thanh lý";
-    return null;
-  };
-  return (suffix: string | null | undefined): string => {
-    const code = (suffix || "").trim().toLowerCase();
-    if (!code) return "Công ty";
-    const s = byCode.get(code);
-    return fromNguon(s?.nguon || "") || fromNguon(code) || s?.name?.trim() || code;
-  };
-}
+// Nguồn gốc theo hậu tố: dùng chung src/lib/lot-source.ts (cùng quy tắc ghi chú "TM" tự điền cho lô thu mua).
+type SuffixRow = LotSuffixRow;
 
 // Giống loadShiftReportData: lô là nguồn chính cho bọc, giao dịch là dự phòng.
 type TxRow = {

@@ -185,6 +185,11 @@ src/app/dashboard/inventory/
   30/10) luôn tạo với cờ tắt ⇒ tồn = 0.
 - Đổi cờ khi mã đã có `inventory_stock_movements` bị chặn ở form + trigger `trg_inventory_items_guard_shared_oil_flag`
   (migration `20261105_inventory_shared_oil_flag_guard.sql`, **chạy tay**, lỗi chứa `INV_SHARED_OIL_LOCKED`).
+- (2026-11-09, chờ test tay) Ô chỉ bật được khi nhóm là nhiên liệu / dầu — `isFuelCategory` (`src/lib/inventory-fuel.ts`:
+  mã nhóm `NL…` hoặc tên chứa "nhiên liệu"/"dầu", "đầu" không khớp). Đổi sang nhóm khác ⇒ tự bỏ tick (trừ mã đã có phát
+  sinh — giữ khoá); Lưu chặn bật mới ở nhóm khác (mã cũ đã bật thì giữ). DB thật: chỉ NLCB khớp, 13/13 mã bồn đều ở NLCB.
+- Đổi MÃ vật tư khi sửa (2026-11-09, chờ test tay): chỉ admin / `settings.manage_config`, chặn trùng mã, hỏi xác nhận. Liên
+  kết theo `id` nên chứng từ cũ không gãy; đề nghị mua hiện mã hiện hành (rule 28).
 - Nhập Excel vật tư KHÔNG có cột cờ: `upsert` không gửi cột ⇒ mã cũ giữ nguyên cờ, mã mới = tắt.
 - Nhập Excel vật tư cũng không có cột Vị trí kho: trước khi xoá/tạo lại `inventory_item_warehouse_rules`, đọc
   `location_code` cũ theo kho và chép lại (trước đây bị xoá trắng mỗi lần import). Kho mới thêm ⇒ trống.
@@ -374,7 +379,7 @@ dùng chung bồn (`uses_shared_oil_stock`) gộp **1 nhãn/kho** (không phải
 
 **Kiểu nút (cập nhật 2026-11-03, thay quy ước viên thuốc nhiều màu)** — mọi nút của module kho dùng `HeaderButton` (`_components/doc-ui/detail-page-header.tsx`): trắng viền xám; mỗi cụm tối đa MỘT nút `tone="brand"` (hành động chính: Ghi sổ / Duyệt / Xuất Excel / In nhãn / Thêm phiếu); `tone="danger"` cho Hủy phiếu; link dùng `href` (render `<a>`). `InventoryActionButton`/`InventoryActionLink` trong `inventory-ui.tsx` không còn call site nào (giữ lại, chưa xoá) — code mới không dùng.
 
-Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng chung bộ lọc giữa 2 thẻ Báo cáo qua URL; `inventory/settings/page.tsx` (không có link nào trỏ tới) vẫn GIỮ — chỉ xóa khi người dùng xác nhận.
+Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng chung bộ lọc giữa 2 thẻ Báo cáo qua URL; `inventory/settings/page.tsx` ĐÃ XOÁ 2026-11-09 (người dùng xác nhận, không link nào trỏ tới) — chỉ còn `dashboard/settings/page.tsx`.
 
 **Cụm nút cân đối (cập nhật 2026-11-03)** — mọi cụm nút đặt trong `InventoryActionBar` (hoặc class `INVENTORY_ACTION_BAR_CLASS`): mobile lưới 2 cột (số nút lẻ thì nút cuối trải 2 cột, chữ dài xuống dòng trong nút); từ `md` các nút xếp ngang canh phải, rộng theo chữ, thiếu chỗ thì tự xuống hàng. **Không bao giờ cắt chữ "…"** trên `InventoryActionButton`/`InventoryActionLink` (nút `sm` trong bảng giữ 1 dòng, bảng cuộn ngang). `InventoryPageShell` tự bọc `action` bằng cụm này. Vẫn nên giữ nhãn nút ngắn: "Lưu", "Ghi sổ", "Ghi sổ N kho", "In nhãn (N)".
 

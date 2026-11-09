@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { BO_PHAN_LIST, isBoPhan } from "@/lib/bo-phan"
-import { insertPurchaseLog, isMaintenanceRecordTeam, loadEffectiveLines, syncPurchaseFromSigning } from "@/lib/purchase/server"
+import { insertPurchaseLog, isMaintenanceRecordTeam, loadCurrentItemCodes, loadEffectiveLines, syncPurchaseFromSigning } from "@/lib/purchase/server"
 import { syncMaintenanceExtPricesSafe } from "@/lib/maintenance-ext-price"
 import {
   isPriceDeviationExceeded, isPurchaseEditable, minIsoDate, normalizeIsoDate, priceDeviationPct, sanitizeImageUrls,
@@ -104,6 +104,8 @@ export async function GET(req: NextRequest) {
       id: string; request_id: string; sort_order: number; item_id: string | null; item_code: string | null; item_name: string
       unit: string | null; so_luong: number; don_gia: number; thanh_tien: number; sl_da_mua: number
       muc_dich: string | null; ngay_can_hang: string | null
+      /** Mã hiện hành (inventory_items.code); `item_code` là bản chụp lúc lập. */
+      current_item_code?: string | null
     }
     const linesByReq = new Map<string, ListLine[]>()
     const reqIds = rows.map((r) => r.id)
@@ -118,6 +120,12 @@ export async function GET(req: NextRequest) {
         const arr = linesByReq.get(l.request_id) || []
         arr.push(l)
         linesByReq.set(l.request_id, arr)
+      }
+    }
+    {
+      const codes = await loadCurrentItemCodes([...linesByReq.values()].flat().map((l) => l.item_id))
+      for (const arr of linesByReq.values()) {
+        for (const l of arr) l.current_item_code = (l.item_id && codes.get(l.item_id)) ?? l.item_code
       }
     }
 
@@ -289,6 +297,8 @@ export async function POST(req: NextRequest) {
     }
     if (errors.length) return NextResponse.json({ error: errors.join("\n") }, { status: 400 })
 
+    // Lưu (Nháp / Bị trả về) ⇒ bản chụp mã theo mã HIỆN HÀNH của vật tư (mã có thể đã đổi sau lần lưu trước).
+    const currentCodes = await loadCurrentItemCodes(lines.map((l) => l.item_id))
     const lineRows = lines.map((l, i) => {
       const soLuong = Number(l.so_luong)
       const donGia = Number(l.don_gia)
@@ -297,7 +307,7 @@ export async function POST(req: NextRequest) {
         factory_id: factoryId,
         sort_order: i,
         item_id: l.item_id,
-        item_code: l.item_code,
+        item_code: (l.item_id && currentCodes.get(l.item_id)) || l.item_code,
         item_name: String(l.item_name || "").trim(),
         unit: l.unit,
         so_luong: soLuong,

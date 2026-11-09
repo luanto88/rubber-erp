@@ -259,6 +259,8 @@ export default function StoragePage() {
   const [selectedTrips, setSelectedTrips]   = useState<Set<string>>(new Set())
   const [loadingTrips, setLoadingTrips]     = useState(false)
   const [tripNoteFilter, setTripNoteFilter] = useState<string[]>([]) // mặc định rỗng = hiển thị tất cả
+  // Ký hiệu KT của ngăn do bộ lọc chuyến tự điền (để biết được phép thay tiếp khi đổi lọc). null = người dùng tự chọn.
+  const autoNoteRef = useRef<string | null>(null)
   const dispatchTrips = useMemo(
     () => mergeTripsByUid(linkedTrips, availableTrips),
     [linkedTrips, availableTrips],
@@ -578,6 +580,22 @@ export default function StoragePage() {
   }, [selectedTrips, dispatchTrips, formLoaiNL])
 
   // ── Form helpers ──────────────────────────────────────────────────────────
+  // Lọc chuyến đúng 1 ký hiệu KT có trong danh mục ⇒ điền sẵn Ký hiệu KT của ngăn (khoá cách ly EUDR trong
+  // fetchTrips). Không ghi đè ký hiệu người dùng đã tự chọn; lọc 0 hoặc ≥ 2 giá trị ⇒ không đổi.
+  const handleTripNoteFilterChange = (next: string[]) => {
+    setTripNoteFilter(next)
+    if (next.length !== 1 || next[0] === EMPTY_NOTE_FILTER) return
+    const wanted = next[0].trim().toLowerCase()
+    const note = requiredNotes.find((n) => n.trim().toLowerCase() === wanted)
+    if (!note || note === form.ghi_chu) return
+    if (form.ghi_chu && form.ghi_chu !== autoNoteRef.current) return
+    autoNoteRef.current = note
+    updateForm({ ghi_chu: note })
+    void fetchTrips(form.ngay_bd, form.ngay_kt, form.loai_nl, modal === "add", editId, form.nguon_goc, form.chung_nhan, note).then((trips) => {
+      applyFetchedTrips(trips, modal === "add")
+    })
+  }
+
   const updateForm = (patch: Partial<StorageForm>) => {
     setForm(p => {
       const next = { ...p, ...patch }
@@ -819,6 +837,7 @@ export default function StoragePage() {
     setLinkedTrips([])
     setAvailableTrips([])
     setTripNoteFilter([])
+    autoNoteRef.current = null
     setModal("add")
   }
 
@@ -863,6 +882,7 @@ export default function StoragePage() {
     setLinkedTrips([])
     setAvailableTrips([])
     setTripNoteFilter([])
+    autoNoteRef.current = null
     setModal("edit")
     if (!factoryId) return
     void (async () => {
@@ -1994,7 +2014,7 @@ export default function StoragePage() {
                       <FilterMultiSelect
                         options={tripNoteOptions}
                         selected={tripNoteFilter}
-                        onChange={setTripNoteFilter}
+                        onChange={handleTripNoteFilterChange}
                         labels={{ [EMPTY_NOTE_FILTER]: "Không có ký hiệu KT" }}
                         placeholder="Tất cả ký hiệu KT"
                         searchPlaceholder="Tìm ký hiệu KT..."
@@ -2110,6 +2130,7 @@ export default function StoragePage() {
                     factoryId={factoryId}
                     value={form.ghi_chu}
                     onChange={(v) => {
+                      autoNoteRef.current = null
                       updateForm({ ghi_chu: v })
                       void fetchTrips(form.ngay_bd, form.ngay_kt, form.loai_nl, modal === "add", editId, form.nguon_goc, form.chung_nhan, v).then((trips) => {
                         applyFetchedTrips(trips, modal === "add")

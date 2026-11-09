@@ -363,3 +363,10 @@ Migration `20261103_purchase_actual_price.sql` (**chạy tay TRƯỚC deploy**).
   `huy_hoan_thanh_dich_vu`.
 - UI: nút "Sửa giá" trên từng dòng lịch sử nhập + lần gia công, "Huỷ xác nhận" trên lần gia công
   (`perms.canEditActualPrice`); `canAdjust` thêm nhánh phiếu Hoàn tất.
+
+## Mã vật tư: nhập khi tạo mới + hiện mã hiện hành (2026-11-09, chờ test tay)
+- Modal "Tạo vật tư mới" có ô Mã (tuỳ chọn, in hoa, bỏ khoảng trắng; trống ⇒ server tự sinh theo phân loại như cũ). Trùng
+  mã ⇒ báo đỏ ngay + nút "Dùng vật tư này"; server vẫn chặn 409.
+- `purchase_request_lines.item_code` là bản chụp. `loadCurrentItemCodes()` (`lib/purchase/server.ts`) gắn `current_item_code`
+  vào dòng ở GET danh sách + chi tiết; màn hình hiện mã hiện hành kèm "(mã lúc lập: …)" khi khác. PDF dựng mới (nháp/gửi
+  ký lại) in mã hiện hành; POST lưu phiếu ghi bản chụp theo mã hiện hành. PDF đã ký bất biến, không ghi đè dữ liệu cũ.

@@ -49,6 +49,7 @@ import {
   getLoaiBanhOptions as getLoaiBanhOptionsFromConfig,
   getLoaiCSRByDayChuyen as getLoaiCSRByDayChuyenFromConfig,
 } from "@/lib/product-lot-config";
+import { isThuMuaSuffix, THU_MUA_NOTE, type LotSuffixRow } from "@/lib/lot-source";
 import { resolveFactoryPrefix, type GradeConfig } from "@/lib/product-grade";
 import { loadGradeConfig } from "@/lib/product-grade-client";
 import { ReasonConfirmBanner } from "@/app/dashboard/product/_components/reason-confirm-banner";
@@ -1965,7 +1966,7 @@ export default function ProductPage() {
   // Bọc mới hợp lệ = giao getBocsForLoaiCSR theo (dây chuyền, CSR) của các lô đang chờ (chưa có lô → theo
   // lọc), trừ bọc nguồn (không thay nhãn → nhãn). Server cũng kiểm lại.
   const skNewBocOptions = useMemo(() => {
-    const inferDc = (csr: string) => dayChuyenForCsr(csr);
+    const inferDc = (csr: string) => dayChuyenForCsr(csr, gradeCfg);
     const pairs: Array<[string, string]> =
       skPending.length > 0
         ? skPending.map((p) => [normalizeDayChuyen(p.lot.day_chuyen), p.lot.loai_csr])
@@ -1978,7 +1979,7 @@ export default function ProductPage() {
       opts = opts ? opts.filter((b) => list.includes(b)) : list;
     }
     return (opts ?? skBocOptions).filter((b) => b !== skFilterBoc);
-  }, [skPending, skFilterLoai, skFilterDC, skBocOptions, skFilterBoc, getBocsForLoaiCSR]);
+  }, [skPending, skFilterLoai, skFilterDC, skBocOptions, skFilterBoc, getBocsForLoaiCSR, gradeCfg]);
   const skToBocValid = !!skToBoc && skNewBocOptions.includes(skToBoc);
   // Sang kiện: lô có kiện đang chọn mà tập pallet hiện tại trùng đúng tập pallet mới.
   const skPalletDupLots = useMemo(() => {
@@ -2687,6 +2688,12 @@ export default function ProductPage() {
         next.ngan_id = autoSelectNganId(patch.day_chuyen);
         next.so_ca = 2;
       }
+      if (patch.suffix !== undefined) {
+        // Hậu tố thu mua ⇒ ký hiệu KT mặc định "TM"; chỉ thay khi ô đang trống / đang là mặc định của hậu tố cũ.
+        const defOf = (suffix: string) =>
+          isThuMuaSuffix(suffix, suffixList as LotSuffixRow[]) ? THU_MUA_NOTE : "";
+        if (!prev.ghi_chu || prev.ghi_chu === defOf(prev.suffix)) next.ghi_chu = defOf(next.suffix);
+      }
       if (patch.loai_csr !== undefined || patch.loai_banh !== undefined) {
         const cfg = getLoaiBanhConfig(next.loai_csr, next.loai_banh);
         next.loai_banh = cfg.loai_banh;
@@ -3199,7 +3206,7 @@ export default function ProductPage() {
       tham: defaultTham(packaging),
       chi_thi: lastChiThi,
     pallet: [defaultPallet(packaging)],
-    ghi_chu: "",
+    ghi_chu: isThuMuaSuffix(defaultSuffix, suffixList as LotSuffixRow[]) ? THU_MUA_NOTE : "",
     image_url_1: "",
     image_url_2: "",
     image_code_1: "",

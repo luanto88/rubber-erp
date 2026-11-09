@@ -1,5 +1,6 @@
 "use server";
 
+import { defaultLotNoteForMaLo, type LotSuffixRow } from "@/lib/lot-source";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import type { KienLetter } from "@/lib/product-label";
 import {
@@ -1785,6 +1786,17 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
     const napCheck = await resolveDraftNap(input.factoryId, input.nap, input.pallet);
     if (!napCheck.ok) return { success: false, error: napCheck.error };
 
+    // Lô MỚI hậu tố thu mua (vd 4m/26) mà chưa có ghi chú ⇒ ghi "TM" để lọc Ký hiệu KT = TM ra được lô.
+    // Phủ cả mục lưu khi mất mạng (ô ghi chú bị ẩn, đồng bộ đi qua chính hàm này).
+    let ghiChuToSave = (input.ghiChu || "").trim() || null;
+    if (!existingLot && !ghiChuToSave) {
+      const { data: suffixRows } = await supabase
+        .from("suffixes")
+        .select("code,nguon,name")
+        .eq("factory_id", input.factoryId);
+      ghiChuToSave = defaultLotNoteForMaLo(maLo, (suffixRows || []) as LotSuffixRow[]) || null;
+    }
+
     const { data, error } = await supabase
       .from("product_confirm_drafts")
       .insert({
@@ -1809,7 +1821,7 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
         pallet: input.pallet,
         chi_thi: input.chiThi,
         tham: input.tham,
-        ghi_chu: input.ghiChu,
+        ghi_chu: ghiChuToSave,
       })
       .select("id")
       .single();

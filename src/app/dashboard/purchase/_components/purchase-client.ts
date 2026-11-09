@@ -251,7 +251,8 @@ function buildPurchasePdfInput(
       truoc: req.loai === "dieu_chinh"
         ? { item_code: l.truoc_item_code ?? null, item_name: l.truoc_item_name ?? null, so_luong: l.truoc_so_luong ?? null, don_gia: l.truoc_don_gia ?? null }
         : null,
-      item_code: l.item_code,
+      // PDF dựng mới (nháp / gửi ký lại) in mã HIỆN HÀNH; PDF đã ký giữ nguyên bản cũ.
+      item_code: l.current_item_code ?? l.item_code,
       item_name: l.item_name,
       unit: l.unit,
       so_luong: Number(l.so_luong),
