@@ -9,6 +9,7 @@ import {
   formatSoPhieuFull,
   type PurchaseAdjustmentSummary, type PurchaseApprover, type PurchaseInsightSnapshot, type PurchaseEffectiveLine, type PurchaseLineRow,
   type PurchaseReceiptRow, type PurchaseRequestRow, type PurchaseServiceCompletionRow, type PurchaseSigner, type PurchaseSignRole, type PurchaseMaintenanceSource,
+  type PurchaseRequestKind,
 } from "@/lib/purchase/types"
 
 export type ApproversResponse = {
@@ -35,6 +36,8 @@ export type PurchaseDetail = {
   serviceCompletions?: PurchaseServiceCompletionRow[]
   /** Id vật tư là dịch vụ (la_dich_vu) trong phiếu. */
   serviceItemIds?: string[]
+  /** Loại phiếu suy từ dòng (vật tư / gia công / hỗn hợp). */
+  requestKind?: PurchaseRequestKind
   adjustments: PurchaseAdjustmentSummary[]
   pendingAdjustmentId: string | null
   parent: { id: string; so: number; nam: number } | null
@@ -261,6 +264,7 @@ function buildPurchasePdfInput(
       muc_dich: l.muc_dich,
       ghi_chu: l.ghi_chu,
       la_vat_tu_moi: l.la_vat_tu_moi,
+      la_dich_vu: !!l.item_id && (detail.serviceItemIds || []).includes(l.item_id),
       lech_gia_pct: l.lech_gia_pct,
       ly_do_lech_gia: l.ly_do_lech_gia,
       mua_tai: l.mua_tai ?? null,

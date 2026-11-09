@@ -10,7 +10,7 @@ import { convertCurrency, CURRENCIES, setCurrencyRates } from "@/lib/currency"
 import { findSimilarNames, normalizeName } from "@/lib/similar-name"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
 import {
-  formatMoney, formatSoPhieuFull, isPriceDeviationExceeded, pickReferencePrice, priceDeviationPct,
+  formatMoney, formatSoPhieuFull, isPriceDeviationExceeded, isServiceItem, pickReferencePrice, priceDeviationPct,
   PRICE_DEVIATION_LIMIT_PCT, purchaseUrgency,
   type PurchaseItemInsight, type PurchaseLineInput, type PurchaseLineRow, type PurchaseRequestRow,
 } from "@/lib/purchase/types"
@@ -31,6 +31,8 @@ export type ItemOpt = {
   don_gia: number | null
   loai_tien: string | null
   nguon_tao: string | null
+  /** Dịch vụ gia công ngoài — nguồn sự thật; xem `isServiceItem`. */
+  la_dich_vu?: boolean | null
 }
 type CategoryOpt = { id: string; code: string; name: string }
 type WarehouseOpt = { id: string; code: string; name: string }
@@ -144,20 +146,23 @@ function computeSuggestion(line: DraftLine, item: ItemOpt | undefined, currency:
 // ── Chọn vật tư có tìm nhanh ────────────────────────────────────────────────
 
 export function ItemPicker({
-  items, value, onSelect, onCreateNew, disabledIds, categories,
+  items, value, onSelect, onCreateNew, disabledIds, categories, serviceDefault = false,
 }: {
   items: ItemOpt[]
   value: ItemOpt | null
   onSelect: (item: ItemOpt) => void
   /** categoryId = phân loại đang lọc trong dropdown ("" nếu Tất cả) — để điền sẵn khi tạo vật tư mới. */
-  onCreateNew?: (name: string, categoryId: string) => void
+  onCreateNew?: (name: string, categoryId: string, asService?: boolean) => void
   disabledIds: Set<string>
   /** Có truyền → hiện ô "Phân loại vật tư" trong dropdown để lọc nhanh (chỉ UI, không lưu). */
   categories?: { id: string; name: string }[]
+  /** Lập phiếu gia công (`?mode=gia_cong`): dropdown mở ra lọc sẵn "Chỉ dịch vụ" (bỏ được). */
+  serviceDefault?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState("")
   const [cat, setCat] = useState("")
+  const [svcOnly, setSvcOnly] = useState(serviceDefault)
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -174,12 +179,13 @@ export function ItemPicker({
 
   const filtered = useMemo(() => {
     const nq = normalizeName(q)
-    const byCat = cat ? items.filter((it) => it.category_id === cat) : items
+    const byKind = svcOnly ? items.filter((it) => isServiceItem(it)) : items
+    const byCat = cat ? byKind.filter((it) => it.category_id === cat) : byKind
     const list = nq
       ? byCat.filter((it) => normalizeName(`${it.code} ${it.name}`).includes(nq))
       : byCat
     return list.slice(0, 80)
-  }, [items, q, cat])
+  }, [items, q, cat, svcOnly])
 
   return (
     <div className="relative" ref={boxRef}>
@@ -187,7 +193,11 @@ export function ItemPicker({
         type="button"
         onClick={() => {
           // Mở dropdown: phân loại mặc định = nhóm của vật tư đang chọn (nếu có).
-          if (!open) setCat(value?.category_id || "")
+          if (!open) {
+            setCat(value?.category_id || "")
+            // Đang chọn vật tư thường thì bỏ lọc "Chỉ dịch vụ" để thấy được chính nó.
+            setSvcOnly(serviceDefault && (!value || isServiceItem(value)))
+          }
           setOpen((o) => !o)
         }}
         className="w-full flex items-center gap-2 px-3 py-2 border border-slate-300 rounded-xl text-sm text-left bg-white hover:border-emerald-500"
@@ -196,7 +206,7 @@ export function ItemPicker({
           <span className="flex-1 min-w-0 truncate">
             <span className="font-mono text-xs text-slate-500 mr-1.5">{value.code}</span>
             <span className="font-semibold text-slate-800">{value.name}</span>
-            {value.nguon_tao === "bao_tri_gia_cong" && <span className="ml-1.5 text-[10px] font-bold text-violet-700 bg-violet-50 rounded px-1.5">Dịch vụ</span>}
+            {isServiceItem(value) && <span className="ml-1.5 text-[10px] font-bold text-violet-700 bg-violet-50 rounded px-1.5">Dịch vụ</span>}
           </span>
         ) : (
           <span className="flex-1 text-slate-400">— Chọn vật tư trong kho —</span>
@@ -223,10 +233,19 @@ export function ItemPicker({
                 autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Tìm theo mã hoặc tên vật tư..."
+                placeholder={svcOnly ? "Tìm theo mã hoặc tên dịch vụ..." : "Tìm theo mã hoặc tên vật tư..."}
                 className="flex-1 text-sm outline-none"
               />
             </div>
+            <button
+              type="button"
+              aria-pressed={svcOnly}
+              onClick={() => setSvcOnly((v) => !v)}
+              title="Chỉ hiện dịch vụ gia công ngoài"
+              className={`shrink-0 px-2.5 py-1.5 rounded-lg border text-xs font-bold ${svcOnly ? "bg-violet-50 border-violet-400 text-violet-800" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+            >
+              Chỉ dịch vụ
+            </button>
           </div>
           <div className="max-h-64 overflow-y-auto py-1">
             {filtered.length === 0 && (
@@ -244,7 +263,7 @@ export function ItemPicker({
                 >
                   <span className="font-mono text-xs text-slate-500 w-20 shrink-0 truncate">{it.code}</span>
                   <span className="flex-1 min-w-0 truncate text-slate-800">{it.name}</span>
-                  {it.nguon_tao === "bao_tri_gia_cong" && <span className="text-[10px] font-bold text-violet-700 bg-violet-50 rounded px-1.5 shrink-0">Dịch vụ</span>}
+                  {isServiceItem(it) && <span className="text-[10px] font-bold text-violet-700 bg-violet-50 rounded px-1.5 shrink-0">Dịch vụ</span>}
                   <span className="text-xs text-slate-400 shrink-0">{it.unit}</span>
                   {dup && <span className="text-[10px] text-amber-600 shrink-0">đã có dòng</span>}
                 </button>
@@ -254,10 +273,10 @@ export function ItemPicker({
           {onCreateNew && <div className="p-2 border-t border-slate-100">
             <button
               type="button"
-              onClick={() => { setOpen(false); onCreateNew(q, cat) }}
+              onClick={() => { setOpen(false); onCreateNew(q, cat, svcOnly) }}
               className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg"
             >
-              <Plus size={13} /> Không có trong kho — tạo vật tư mới{q ? ` "${q}"` : ""}
+              <Plus size={13} /> {svcOnly ? "Chưa có — tạo dịch vụ gia công mới" : "Không có trong kho — tạo vật tư mới"}{q ? ` "${q}"` : ""}
             </button>
           </div>}
         </div>
@@ -274,12 +293,15 @@ export function PurchaseForm({
   existing,
   onSaved,
   onCancel,
+  mode,
 }: {
   factoryId: string
   userId: string
   existing?: { request: PurchaseRequestRow; lines: PurchaseLineRow[]; lineRecords?: Record<string, string | null> } | null
   onSaved: (id: string, submitAfter: boolean) => void | Promise<void>
   onCancel?: () => void
+  /** "gia_cong" = lập phiếu gia công ngoài: ô chọn lọc sẵn dịch vụ, "tạo mới" mặc định là dịch vụ. */
+  mode?: "gia_cong"
 }) {
   const [items, setItems] = useState<ItemOpt[]>([])
   const [categories, setCategories] = useState<CategoryOpt[]>([])
@@ -352,7 +374,7 @@ export function PurchaseForm({
         for (let from = 0; ; from += 1000) {
           const { data, error: e } = await supabase
             .from("inventory_items")
-            .select("id, code, name, unit, category_id, don_gia, loai_tien, nguon_tao")
+            .select("id, code, name, unit, category_id, don_gia, loai_tien, nguon_tao, la_dich_vu")
             .eq("factory_id", factoryId)
             .eq("is_active", true)
             .order("code")
@@ -444,9 +466,9 @@ export function PurchaseForm({
   const newItemCode = newItem.code.trim().toUpperCase()
   const codeClash = newItemCode ? items.find((i) => String(i.code || "").toUpperCase() === newItemCode) || null : null
 
-  const openNewItem = (key: string, name: string, categoryId = "") => {
+  const openNewItem = (key: string, name: string, categoryId = "", asService = false) => {
     setNewItemFor(key)
-    setNewItem({ code: "", name, unit: "", categoryId, warehouseId: warehouses[0]?.id || "", specification: "", laDichVu: false })
+    setNewItem({ code: "", name, unit: "", categoryId, warehouseId: warehouses[0]?.id || "", specification: "", laDichVu: asService })
     setNewItemConfirmed(false)
     setNewItemError(null)
   }
@@ -474,7 +496,11 @@ export function PurchaseForm({
         setNewItemError(json.error || "Không tạo được vật tư")
         return
       }
-      const created: ItemOpt = { ...json.item, nguon_tao: json.item.nguon_tao || (newItem.laDichVu ? "bao_tri_gia_cong" : "de_nghi_mua") }
+      const created: ItemOpt = {
+        ...json.item,
+        nguon_tao: json.item.nguon_tao || (newItem.laDichVu ? "bao_tri_gia_cong" : "de_nghi_mua"),
+        la_dich_vu: json.item.la_dich_vu ?? newItem.laDichVu,
+      }
       setItems((prev) => [...prev, created].sort((a, b) => a.code.localeCompare(b.code, "vi")))
       selectItem(newItemFor, created, true)
       setNewItemFor(null)
@@ -646,8 +672,9 @@ export function PurchaseForm({
                     categories={categories}
                     value={item || null}
                     onSelect={(it) => selectItem(l.key, it)}
-                    onCreateNew={(name, cat) => openNewItem(l.key, name, cat)}
+                    onCreateNew={(name, cat, asService) => openNewItem(l.key, name, cat, !!asService)}
                     disabledIds={usedIdsFor(l)}
+                    serviceDefault={mode === "gia_cong"}
                   />
                 </div>
                 <div className="md:col-span-1">
@@ -707,6 +734,8 @@ export function PurchaseForm({
                 const urg = purchaseUrgency(l.ngay_can_hang, today)
                 const urgTitle = urg ? `${urg.label}${urg.level === "gap" || urg.level === "qua_han" ? " — nên ưu tiên duyệt" : ""}` : undefined
                 const lateSupply = !!l.ngay_co_hang && !!l.ngay_can_hang && l.ngay_co_hang > l.ngay_can_hang
+                // Dòng dịch vụ gia công: đổi NHÃN 3 ô (cùng cột DB mua_tai / ngay_co_hang / ngay_can_hang).
+                const svc = !!l.item_id && isServiceItem(items.find((i) => i.id === l.item_id))
                 return (
                   <div className="mt-3 space-y-3">
                     {(() => {
@@ -745,12 +774,12 @@ export function PurchaseForm({
                         <input className={inputCls} value={l.muc_dich} onChange={(e) => patchLine(l.key, { muc_dich: e.target.value })} />
                       </div>
                       <div>
-                        <label className={labelCls}>Vật tư mua tại</label>
+                        <label className={labelCls}>{svc ? "Đơn vị nhận gia công" : "Vật tư mua tại"}</label>
                         <input
                           className={inputCls}
                           list="purchase-mua-tai-options"
                           value={l.mua_tai}
-                          placeholder="Cửa hàng / nhà cung cấp dự kiến"
+                          placeholder={svc ? "Xưởng / đơn vị gia công dự kiến" : "Cửa hàng / nhà cung cấp dự kiến"}
                           onChange={(e) => patchLine(l.key, { mua_tai: e.target.value })}
                         />
                       </div>
@@ -762,11 +791,11 @@ export function PurchaseForm({
                     {/* Dòng 2: Có hàng | Cần hàng (chip mức gấp nằm trong ô) | Ảnh đính kèm */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div>
-                        <label className={labelCls}>Thời gian có hàng</label>
+                        <label className={labelCls}>{svc ? "Ngày dự kiến xong" : "Thời gian có hàng"}</label>
                         <input type="date" className={inputCls} value={l.ngay_co_hang} onChange={(e) => patchLine(l.key, { ngay_co_hang: e.target.value })} />
                       </div>
                       <div>
-                        <label className={labelCls}>Thời gian cần hàng *</label>
+                        <label className={labelCls}>{svc ? "Ngày cần hoàn thành *" : "Thời gian cần hàng *"}</label>
                         <div className="relative" title={urgTitle}>
                           <input
                             type="date" min={today}
@@ -796,7 +825,7 @@ export function PurchaseForm({
                       <div className="flex flex-wrap items-center gap-2 text-xs">
                         {lateSupply && (
                           <span className="flex items-center gap-1 font-semibold text-amber-700" title="Kiểm tra lại ngày có hàng hoặc ghi rõ trong ghi chú">
-                            <AlertTriangle size={12} /> Có hàng sau ngày cần
+                            <AlertTriangle size={12} /> {svc ? "Dự kiến xong sau ngày cần" : "Có hàng sau ngày cần"}
                           </span>
                         )}
                         {lines.length > 1 && (l.mua_tai || l.ngay_co_hang || l.ngay_can_hang) && (
@@ -814,12 +843,12 @@ export function PurchaseForm({
                 )
               })()}
 
-              {l.item_id && items.find((i) => i.id === l.item_id)?.nguon_tao === "bao_tri_gia_cong" && (
+              {l.item_id && isServiceItem(items.find((i) => i.id === l.item_id)) && (
                 <p className="mt-3 px-3 py-2 rounded-lg bg-violet-50 text-xs text-violet-800">
                   Dịch vụ gia công ngoài — không qua kho, không có tồn kho. Sau khi duyệt, người đề nghị bấm “Xác nhận hoàn thành” thay cho nhập kho.
                 </p>
               )}
-              {l.item_id && items.find((i) => i.id === l.item_id)?.nguon_tao !== "bao_tri_gia_cong" && (
+              {l.item_id && !isServiceItem(items.find((i) => i.id === l.item_id)) && (
                 <div className="mt-3">
                   {/* Thanh tiêu đề panel THAM KHẢO — cố ý khác hẳn ô nhập liệu để không bị nhầm. */}
                   <button

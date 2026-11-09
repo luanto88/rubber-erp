@@ -6,7 +6,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { CheckCircle2, ExternalLink, Loader2, Lock, PackageCheck, Pencil, Wrench, XCircle } from "lucide-react"
+import { CheckCircle2, ExternalLink, Loader2, Lock, PackageCheck, Pencil, XCircle } from "lucide-react"
+import { GiaCongIcon } from "./gia-cong-icon"
 import { supabase } from "@/lib/supabase"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
@@ -172,7 +173,7 @@ export function PurchaseFulfillmentPanel({ detail, onChanged }: { detail: Purcha
             {completions.map((c) => (
               <li key={c.id} className="rounded-xl border border-violet-200 p-3">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Wrench size={15} className="text-violet-600" />
+                  <GiaCongIcon size={15} className="text-violet-600" />
                   <span className="font-semibold text-slate-800">{c.item_name}</span>
                   <span className="text-slate-500">· {fmtDate(c.ngay)}</span>
                   <span className="ml-auto font-semibold text-slate-800">

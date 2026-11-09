@@ -6,7 +6,8 @@ import { BO_PHAN_LIST, isBoPhan } from "@/lib/bo-phan"
 import { insertPurchaseLog, isMaintenanceRecordTeam, loadCurrentItemCodes, loadEffectiveLines, syncPurchaseFromSigning } from "@/lib/purchase/server"
 import { syncMaintenanceExtPricesSafe } from "@/lib/maintenance-ext-price"
 import {
-  isPriceDeviationExceeded, isPurchaseEditable, minIsoDate, normalizeIsoDate, priceDeviationPct, sanitizeImageUrls,
+  isPriceDeviationExceeded, isPurchaseEditable, isPurchaseRequestKind, minIsoDate, normalizeIsoDate, priceDeviationPct,
+  purchaseRequestKind, sanitizeImageUrls,
   type PurchaseEffectiveLine, type PurchaseLineInput, type PurchaseRequestRow, type PurchaseStatus,
 } from "@/lib/purchase/types"
 
@@ -24,13 +25,15 @@ export async function GET(req: NextRequest) {
   try {
     const actor = await resolveIsoActor(req)
     const sp = req.nextUrl.searchParams
-    const scope = sp.get("scope") || "mine"
+    const rawScope = sp.get("scope") || "mine"
     const from = sp.get("from")
     const to = sp.get("to")
     const status = sp.get("status")
     const boPhanFilter = (sp.get("bo_phan") || "").split(",").map((v) => v.trim()).filter(isBoPhan)
 
     const canAll = actor.isAdmin || (await isoActorHasPermission(actor, ["purchase.view_all"]))
+    // "visible" = toàn nhà máy nếu có quyền xem tất cả, ngược lại phiếu mình liên quan (tab Gia công ngoài).
+    const scope = rawScope === "visible" ? (canAll ? "all" : "mine") : rawScope
     if (scope === "all" && !canAll) {
       return NextResponse.json({ error: "Bạn không có quyền xem toàn bộ phiếu" }, { status: 403 })
     }
@@ -193,16 +196,23 @@ export async function GET(req: NextRequest) {
         // Người đề nghị (hoặc admin) là người phải ghi nhận mua / xác nhận hoàn thành.
         myFulfillTurn: !!nextStep && (r.nguoi_de_nghi_id === actor.userId || actor.isAdmin),
         file_hien_tai: r.yeu_cau_ky_id ? fileByYc.get(r.yeu_cau_ky_id) || null : null,
-        lines: (linesByReq.get(r.id) || []).sort((a, b) => a.sort_order - b.sort_order),
+        lines: (linesByReq.get(r.id) || [])
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((l) => ({ ...l, la_dich_vu: !!l.item_id && serviceIds.has(l.item_id) })),
+        // Loại phiếu (vật tư / gia công / hỗn hợp) suy từ dòng — không lưu DB.
+        requestKind: purchaseRequestKind((linesByReq.get(r.id) || []).map((l) => l.item_id), serviceIds),
       }
     })
 
     // "Chờ tôi xử lý": phiếu cần hàng sớm nhất lên trước (phiếu cũ không có ngày cần → cuối).
-    const filtered = scope === "todo"
+    const byScope = scope === "todo"
       ? result
           .filter((r) => r.myTurn || (r.trang_thai === "tra_ve" && r.nguoi_de_nghi_id === actor.userId) || (!!r.nextStep && r.nguoi_de_nghi_id === actor.userId))
           .sort((a, b) => (a.ngay_can_hang || "9999-12-31").localeCompare(b.ngay_can_hang || "9999-12-31"))
       : result
+    // ?kind=gia_cong,hon_hop — lọc theo loại phiếu (trống = mọi loại).
+    const kindFilter = (sp.get("kind") || "").split(",").map((v) => v.trim()).filter(isPurchaseRequestKind)
+    const filtered = kindFilter.length ? byScope.filter((r) => kindFilter.includes(r.requestKind)) : byScope
     return NextResponse.json({ rows: filtered, canAll })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: isoAuthErrorStatus(err) })

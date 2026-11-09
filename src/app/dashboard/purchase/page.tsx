@@ -5,7 +5,8 @@ import dynamic from "next/dynamic"
 import { createPortal } from "react-dom"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { AlertTriangle, Bell, ClipboardList, Clock, PackageCheck, PenTool, Plus, QrCode, Search, ShoppingCart, Wrench, X } from "lucide-react"
+import { AlertTriangle, Bell, ClipboardList, Clock, PackageCheck, PenTool, Plus, QrCode, Search, ShoppingCart, X } from "lucide-react"
+import { GiaCongIcon } from "./_components/gia-cong-icon"
 import { hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { authFetch } from "@/lib/auth-fetch"
 import { getFactoryTodayISO } from "@/lib/date-utils"
@@ -27,7 +28,8 @@ import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import {
   formatMoney, formatQty, formatSoPhieuFull, isPurchaseActive, purchaseDownloadBaseName, purchaseUrgency,
-  type PurchaseRequestRow,
+  PURCHASE_REQUEST_KIND_LABEL, PURCHASE_REQUEST_KINDS,
+  type PurchaseRequestKind, type PurchaseRequestRow,
 } from "@/lib/purchase/types"
 
 // html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client (mirror maintenance/history, dispatch)
@@ -57,6 +59,8 @@ type ListLine = {
   sl_da_mua: number
   muc_dich: string | null
   ngay_can_hang: string | null
+  /** Dòng là dịch vụ gia công ngoài (không qua kho). */
+  la_dich_vu?: boolean
 }
 
 type ListRow = PurchaseRequestRow & {
@@ -70,9 +74,20 @@ type ListRow = PurchaseRequestRow & {
   myFulfillTurn?: boolean
   file_hien_tai: string | null
   lines?: ListLine[]
+  requestKind?: PurchaseRequestKind
 }
 
+/** Loại phiếu được phép chọn ở tab Gia công ngoài (phiếu thuần vật tư không thuộc tab này). */
+const GC_KINDS: PurchaseRequestKind[] = ["gia_cong", "hon_hop"]
+
 type Tab = "todo" | "mine" | "all" | "gia_cong" | "huong_dan"
+/** Thẻ con của tab Gia công ngoài: danh sách phiếu (mọi trạng thái) / sổ các lần xác nhận hoàn thành. */
+type GcSub = "phieu" | "so"
+
+const GC_SUB_TABS: SegmentedTabItem<GcSub>[] = [
+  { key: "phieu", label: "Phiếu gia công" },
+  { key: "so", label: "Sổ hoàn thành" },
+]
 
 const NEXT_STEP_LABEL: Record<"nhap_kho" | "gia_cong" | "ca_hai", string> = {
   nhap_kho: "Chờ nhập kho",
@@ -98,6 +113,7 @@ function PurchaseListInner() {
   const searchParams = useSearchParams()
   const [user, setUser] = useState<SessionUser | null>(null)
   const [tab, setTab] = useState<Tab>((searchParams.get("tab") as Tab) || "mine")
+  const [gcSub, setGcSub] = useState<GcSub>(searchParams.get("sub") === "so" ? "so" : "phieu")
   const [rows, setRows] = useState<ListRow[]>([])
   const [canAll, setCanAll] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -106,6 +122,7 @@ function PurchaseListInner() {
   const [to, setTo] = useState("")
   const [search, setSearch] = useState("")
   const [boPhanFilter, setBoPhanFilter] = useState<string[]>([])
+  const [kindFilter, setKindFilter] = useState<string[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
@@ -136,11 +153,17 @@ function PurchaseListInner() {
   }, [])
 
   const load = useCallback(async () => {
-    if (tab === "gia_cong" || tab === "huong_dan") return // tab gia công tự tải; hướng dẫn không cần dữ liệu
+    // Hướng dẫn không cần dữ liệu; "Sổ hoàn thành" tự tải trong ServiceCompletionsView.
+    if (tab === "huong_dan" || (tab === "gia_cong" && gcSub === "so")) return
     setLoading(true)
     setError(null)
     try {
-      const qs = new URLSearchParams({ scope: tab })
+      const qs = new URLSearchParams({ scope: tab === "gia_cong" ? "visible" : tab })
+      // Tab Gia công: luôn giới hạn trong gia công + hỗn hợp; lựa chọn của người dùng chỉ thu hẹp thêm.
+      const allowed: readonly string[] = tab === "gia_cong" ? GC_KINDS : PURCHASE_REQUEST_KINDS
+      const chosen = kindFilter.filter((k) => allowed.includes(k))
+      const kinds = chosen.length ? chosen : tab === "gia_cong" ? GC_KINDS : []
+      if (kinds.length) qs.set("kind", kinds.join(","))
       if (from) qs.set("from", from)
       if (to) qs.set("to", to)
       if (boPhanFilter.length) qs.set("bo_phan", boPhanFilter.join(","))
@@ -152,7 +175,7 @@ function PurchaseListInner() {
     } finally {
       setLoading(false)
     }
-  }, [tab, from, to, boPhanFilter])
+  }, [tab, gcSub, from, to, boPhanFilter, kindFilter])
 
   useEffect(() => {
     if (user) void load()
@@ -220,16 +243,20 @@ function PurchaseListInner() {
         </div>
       )}
       <PageHeaderBanner
-        title="Đề nghị mua vật tư hàng hóa"
-        subtitle="Lập phiếu, ký số 3 bước: Người đề nghị → Giám đốc → Kế toán"
+        title={tab === "gia_cong" ? "Gia công ngoài" : "Đề nghị mua vật tư hàng hóa"}
+        subtitle={
+          tab === "gia_cong"
+            ? "Phiếu gia công dùng chung dãy số ĐNMVT, ký 3 bước, xác nhận hoàn thành sau khi duyệt"
+            : "Lập phiếu, ký số 3 bước: Người đề nghị → Giám đốc → Kế toán"
+        }
         theme="teal"
-        icon={ShoppingCart}
+        icon={tab === "gia_cong" ? GiaCongIcon : ShoppingCart}
         action={canCreate ? (
           <button
-            onClick={() => router.push("/dashboard/purchase/new")}
+            onClick={() => router.push(tab === "gia_cong" ? "/dashboard/purchase/new?mode=gia_cong" : "/dashboard/purchase/new")}
             className="flex items-center gap-2 rounded-xl bg-white px-4 py-2 font-bold text-brand-700 shadow-md hover:bg-brand-50"
           >
-            <Plus size={16} /> Lập phiếu
+            <Plus size={16} /> {tab === "gia_cong" ? "Lập phiếu gia công" : "Lập phiếu"}
           </button>
         ) : undefined}
       />
@@ -258,13 +285,23 @@ function PurchaseListInner() {
       <SegmentedTabs
         items={tabs}
         value={tab}
-        onChange={(k) => { setTab(k); setExpanded(new Set()) }}
+        onChange={(k) => { setTab(k); setRows([]); setExpanded(new Set()) }}
         ariaLabel="Phạm vi phiếu đề nghị mua"
       />
 
+      {tab === "gia_cong" && (
+        <SegmentedTabs
+          items={GC_SUB_TABS}
+          value={gcSub}
+          size="sm"
+          onChange={(k) => { setGcSub(k); setRows([]); setExpanded(new Set()) }}
+          ariaLabel="Gia công ngoài"
+        />
+      )}
+
       {tab === "huong_dan" ? (
         <PurchaseGuide />
-      ) : tab === "gia_cong" ? (
+      ) : tab === "gia_cong" && gcSub === "so" ? (
         <ServiceCompletionsView defaultFrom={from} defaultTo={to} />
       ) : (<>
       <StatGrid cols={4}>
@@ -274,7 +311,7 @@ function PurchaseListInner() {
         <StatCard icon={AlertTriangle} label="Cần hàng gấp / quá hạn" value={stats.gap} valueTone={stats.gap > 0 ? "danger" : "default"} />
       </StatGrid>
 
-      <FilterBar layout="grid" activeCount={[search, to].filter(Boolean).length + (boPhanFilter.length ? 1 : 0)}>
+      <FilterBar layout="grid" activeCount={[search, to].filter(Boolean).length + (boPhanFilter.length ? 1 : 0) + (kindFilter.length ? 1 : 0)}>
         <div className="flex h-10 w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-mod-600 sm:col-span-2 lg:col-span-2 xl:col-span-2">
           <Search size={15} className="shrink-0 text-slate-400" />
           <input
@@ -304,7 +341,7 @@ function PurchaseListInner() {
             <span className="hidden sm:inline">Quét QR</span>
           </button>
         </div>
-        <div className="h-10 w-full sm:col-span-1 lg:col-span-1 xl:col-span-2">
+        <div className="h-10 w-full sm:col-span-1 lg:col-span-1 xl:col-span-1">
           <FilterMultiSelect
             placeholder="Tất cả bộ phận"
             options={[...BO_PHAN_LIST]}
@@ -314,7 +351,18 @@ function PurchaseListInner() {
             fullWidth
           />
         </div>
-        <div className="grid h-10 grid-cols-[1fr_auto_1fr] items-center gap-2 sm:col-span-1 lg:col-span-1 xl:col-span-2">
+        <div className="h-10 w-full sm:col-span-1 lg:col-span-1 xl:col-span-1">
+          <FilterMultiSelect
+            placeholder="Tất cả loại phiếu"
+            options={tab === "gia_cong" ? GC_KINDS : [...PURCHASE_REQUEST_KINDS]}
+            labels={PURCHASE_REQUEST_KIND_LABEL}
+            selected={kindFilter.filter((k) => tab !== "gia_cong" || (GC_KINDS as string[]).includes(k))}
+            onChange={setKindFilter}
+            searchPlaceholder="Tìm loại phiếu..."
+            fullWidth
+          />
+        </div>
+        <div className="grid h-10 grid-cols-[1fr_auto_1fr] items-center gap-2 sm:col-span-2 lg:col-span-2 xl:col-span-2">
           <input
             type="date"
             value={from}
@@ -339,7 +387,10 @@ function PurchaseListInner() {
         ) : error ? (
           <ListState kind="error" message={error} onRetry={() => void load()} />
         ) : filtered.length === 0 ? (
-          <ListState kind="empty" message="Không có phiếu đề nghị mua nào" />
+          <ListState
+            kind="empty"
+            message={tab === "gia_cong" ? "Không có phiếu gia công nào trong khoảng ngày này" : "Không có phiếu đề nghị mua nào"}
+          />
         ) : (
           <>
             <div className="flex justify-end border-b border-slate-100 px-3 py-2">
@@ -392,7 +443,10 @@ function PurchaseListInner() {
                           <tr key={l.id}>
                             <td className="tabular-nums text-slate-500">{i + 1}</td>
                             <td>
-                              <div className="font-semibold text-slate-800">{l.item_name}</div>
+                              <div className="font-semibold text-slate-800">
+                                {l.item_name}
+                                {l.la_dich_vu && <StatusBadge tone="accent" label="Dịch vụ" size="xs" className="ml-1.5" />}
+                              </div>
                               {(l.current_item_code || l.item_code) && (
                                 <div className="font-code text-[11px] text-slate-500">
                                   {l.current_item_code || l.item_code}
@@ -432,7 +486,7 @@ function PurchaseListInner() {
                           onClick={(e) => e.stopPropagation()}
                           className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-brand-600 bg-brand-600 px-3 text-[12.5px] font-bold text-white transition-colors hover:bg-brand-700"
                         >
-                          {r.nextStep === "gia_cong" ? <Wrench size={14} /> : <PackageCheck size={14} />} {FULFILL_ACTION_LABEL[r.nextStep]}
+                          {r.nextStep === "gia_cong" ? <GiaCongIcon size={14} /> : <PackageCheck size={14} />} {FULFILL_ACTION_LABEL[r.nextStep]}
                         </Link>
                       )}
                       <RowAction kind="view" label="Xem chi tiết phiếu" onClick={openDetail} />
@@ -477,6 +531,10 @@ function PurchaseListInner() {
                           {soPhieu}
                         </button>
                         {r.loai === "dieu_chinh" && <StatusBadge tone="info" label="Điều chỉnh" size="xs" className="ml-1.5" />}
+                        {/* Phiếu thuần vật tư không gắn badge (Q3) — danh sách đỡ rối. */}
+                        {r.requestKind && r.requestKind !== "vat_tu" && (
+                          <StatusBadge tone="accent" label={PURCHASE_REQUEST_KIND_LABEL[r.requestKind]} size="xs" className="ml-1.5" />
+                        )}
                         <div className="text-[11px] text-slate-500">{lines.length} vật tư</div>
                       </td>
                       <td className="whitespace-nowrap">{fmtDate(r.ngay)}</td>

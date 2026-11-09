@@ -370,3 +370,26 @@ Migration `20261103_purchase_actual_price.sql` (**chạy tay TRƯỚC deploy**).
 - `purchase_request_lines.item_code` là bản chụp. `loadCurrentItemCodes()` (`lib/purchase/server.ts`) gắn `current_item_code`
   vào dòng ở GET danh sách + chi tiết; màn hình hiện mã hiện hành kèm "(mã lúc lập: …)" khi khác. PDF dựng mới (nháp/gửi
   ký lại) in mã hiện hành; POST lưu phiếu ghi bản chụp theo mã hiện hành. PDF đã ký bất biến, không ghi đè dữ liệu cũ.
+
+## Gia công ngoài B1–B4 (2026-11-09, B1–B3 test localhost PASS, B4 chờ test)
+Kế hoạch: `.claude/plans/gia-cong-ngoai-2026-11-09.md`. Không migration. Người dùng chốt Q1 giữ tiêu đề PDF + dòng phụ,
+Q2 chung dãy ĐNMVT, Q3 badge chỉ cho phiếu gia công / hỗn hợp.
+- Dịch vụ nhận diện bằng `isServiceItem` (`lib/purchase/types.ts`): `la_dich_vu` là nguồn sự thật, `nguon_tao` chỉ dự phòng.
+  Loại phiếu `purchaseRequestKind` = `vat_tu | gia_cong | hon_hop`, tính từ các dòng, KHÔNG lưu DB.
+- API danh sách: `requestKind` + `lines[].la_dich_vu`, lọc `?kind=a,b`, `scope=visible` (= all nếu có view_all, ngược lại mine).
+  API chi tiết: `requestKind`.
+- Tab "Gia công ngoài": thẻ con "Phiếu gia công" (bảng chung, `scope=visible&kind=gia_cong,hon_hop`) + "Sổ hoàn thành"
+  (`service-completions-view.tsx`). Link `?tab=gia_cong&sub=so`.
+- Badge `StatusBadge tone="accent"` (tông tím mới trong `status-registry.ts`, dành cho nhãn PHÂN LOẠI) ở danh sách, dòng xổ,
+  trang chi tiết; bộ lọc "Loại phiếu" (ở tab Gia công chỉ 2 lựa chọn).
+- PDF: `purchaseKindSubtitle` in "(Gia công ngoài)" / "(Gồm gia công ngoài)" dưới tiêu đề; dòng dịch vụ có "GC" ở Ghi chú.
+  Chỉ PDF dựng mới; PDF đã ký bất biến.
+- Form: dòng dịch vụ đổi nhãn 3 ô (Đơn vị nhận gia công / Ngày dự kiến xong / Ngày cần hoàn thành — cùng cột mua_tai /
+  ngay_co_hang / ngay_can_hang). `/dashboard/purchase/new?mode=gia_cong` (nút "Lập phiếu gia công" ở tab Gia công): banner
+  riêng, `ItemPicker serviceDefault` bật nút "Chỉ dịch vụ", "tạo mới" mặc định dịch vụ. Sửa phiếu loại gia công cũng mở mode này.
+- Sau test B4 (2026-11-09, chờ test): người đề nghị GIỮ như cũ (người dùng chốt). Giám đốc mặc định: `maintenance_staff.mac_dinh_ky`
+  (migration `20261119_maintenance_staff_mac_dinh_ky.sql`, **chạy tay**; tick ở Cài đặt → Nhân sự "Người ký mặc định khi trùng
+  chức vụ"). `/api/purchase/approvers` chọn người tick trong nhóm cùng chức vụ (Giám đốc / Kế toán), chưa tick ⇒ người đầu theo
+  tên (lý do: Chau Chók và Tô Thành Luân cùng chức vụ chính quyền "Giám đốc"). Form vẫn bỏ gợi ý nếu trùng người đang lập.
+- Icon gia công = `_components/gia-cong-icon.tsx` (bánh răng + tia lửa điện, kiểu `LucideIcon`): banner tab Gia công / lập / sửa
+  phiếu gia công, nút "Xác nhận gia công", lịch sử hoàn thành, thẻ hướng dẫn.

@@ -5,6 +5,7 @@ import {
   PackageCheck, Scale, Warehouse, Wrench,
 } from "lucide-react"
 import { InspectorCard } from "@/app/dashboard/_components/doc-ui/inspector-card"
+import { GiaCongIcon } from "./gia-cong-icon"
 
 // Tab "Hướng dẫn" — mô tả ĐÚNG hành vi code hiện tại của luồng Biên bản bảo trì ↔ Đề nghị mua ↔ Kho
 // (rule 14 + rule 28, src/lib/maintenance-kt.ts, maintenance-ext-price.ts, purchase/server.ts).
@@ -139,6 +140,16 @@ export function PurchaseGuide() {
           <li>Nhập kho: tự tạo + ghi sổ phiếu nhập <code>N-&lt;kho&gt;-…</code>; vật tư gắn biên bản phải nhập đúng <b>kho mặc định</b> của vật tư; không vượt số lượng còn lại; đơn giá lệch tối đa <b>10%</b> so với giá duyệt; vật tư quản lý lô phải có số lô.</li>
           <li>Gia công: nhập số lượng, đơn giá (lệch ≤ 10%), ngày, đơn vị gia công, ảnh. Không tạo phiếu kho.</li>
           <li>Nhập đủ mọi dòng ⇒ phiếu <b>Hoàn tất</b>; nhập một phần ⇒ <b>Đang mua</b>. Xong phần của biên bản ⇒ quay lại biên bản để gửi ký.</li>
+        </ul>
+      </InspectorCard>
+
+      <InspectorCard title="Phiếu gia công ngoài (không gắn biên bản)" icon={GiaCongIcon}>
+        <ul className="list-disc space-y-1.5 pl-5">
+          <li>Tab <b>“Gia công ngoài”</b> → nút <b>“Lập phiếu gia công”</b>: ô chọn lọc sẵn <b>“Chỉ dịch vụ”</b> (bấm để tắt nếu cần thêm vật tư); “tạo mới” mặc định là dịch vụ.</li>
+          <li>Dùng <b>chung dãy số ĐNMVT</b>, ký 3 bước như đề nghị mua. PDF giữ tiêu đề mẫu, thêm dòng “(Gia công ngoài)” hoặc “(Gồm gia công ngoài)”; dòng dịch vụ có “GC” ở cột Ghi chú.</li>
+          <li>Dòng dịch vụ đổi nhãn: <b>Đơn vị nhận gia công</b>, <b>Ngày dự kiến xong</b>, <b>Ngày cần hoàn thành</b>.</li>
+          <li>Danh sách: badge tím <b>“Gia công”</b> (chỉ dịch vụ) / <b>“VT + GC”</b> (lẫn vật tư); lọc bằng ô <b>“Loại phiếu”</b>.</li>
+          <li>Thẻ con <b>“Phiếu gia công”</b> = mọi trạng thái (Nháp → Hoàn tất); <b>“Sổ hoàn thành”</b> = các lần xác nhận hoàn thành + xuất Excel.</li>
         </ul>
       </InspectorCard>
 

@@ -4,7 +4,7 @@ import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState, 
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
-  AlertTriangle, Ban, BarChart3, Bell, CalendarClock, Download, FileCheck2, FilePen, History, ImagePlus, Images, Info, Loader2, Lock, PackageCheck, Wrench,
+  AlertTriangle, Ban, BarChart3, Bell, CalendarClock, Download, FileCheck2, FilePen, History, ImagePlus, Images, Info, Loader2, Lock, PackageCheck,
   Pencil, PenTool, Printer, Send, ShoppingCart, Workflow,
 } from "lucide-react"
 import { getActiveFactoryId, hydrateActiveSession, type SessionUser } from "@/lib/auth"
@@ -26,8 +26,10 @@ import { TimelineProgress, TimelineSteps, type TimelineStepItem } from "@/app/da
 import { useIsDesktop } from "@/app/dashboard/_components/doc-ui/use-is-desktop"
 import {
   formatMoney, formatQty, formatSoPhieuFull, isPurchaseActive, PURCHASE_SIGN_ORDER,
-  insightWarnings, purchaseUrgency, type PurchaseSignRole,
+  insightWarnings, purchaseUrgency, PURCHASE_REQUEST_KIND_LABEL, type PurchaseSignRole,
 } from "@/lib/purchase/types"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
+import { GiaCongIcon } from "../_components/gia-cong-icon"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { PurchaseForm } from "../_components/purchase-form"
 import {
@@ -344,12 +346,13 @@ function PurchaseDetailInner() {
   if (editing) {
     return (
       <div className="space-y-4">
-        <PageHeaderBanner title={`Sửa phiếu ${soPhieu}`} subtitle="Sửa xong bấm Lưu & gửi ký để gửi lại" theme="teal" icon={ShoppingCart} />
+        <PageHeaderBanner title={`Sửa phiếu ${soPhieu}`} subtitle="Sửa xong bấm Lưu & gửi ký để gửi lại" theme="teal" icon={detail?.requestKind === "gia_cong" ? GiaCongIcon : ShoppingCart} />
         {factoryId && user && existing && (
           <PurchaseForm
             factoryId={factoryId}
             userId={user.id}
             existing={existing}
+            mode={detail?.requestKind === "gia_cong" ? "gia_cong" : undefined}
             onCancel={() => setEditing(false)}
             onSaved={async (_id, submitAfter) => {
               // Tải lại TRƯỚC khi đóng form để nút "Gửi ký" / panel không đọc người ký cũ.
@@ -480,7 +483,12 @@ function PurchaseDetailInner() {
                     <tr className="border-t border-slate-100 align-top">
                       <td className="px-2 py-2 text-slate-500">{i + 1}</td>
                       <td className="px-2 py-2">
-                        <p className="font-semibold text-slate-800">{l.item_name}</p>
+                        <p className="font-semibold text-slate-800">
+                          {l.item_name}
+                          {l.item_id && detail.serviceItemIds?.includes(l.item_id) && (
+                            <StatusBadge tone="accent" label="Dịch vụ" size="xs" className="ml-1.5" />
+                          )}
+                        </p>
                         <p className="text-xs text-slate-500 font-mono">{l.current_item_code || l.item_code} · {l.unit}</p>
                         {l.item_code && l.current_item_code && l.item_code !== l.current_item_code && (
                           <p className="text-[11px] text-slate-400">Mã lúc lập phiếu: <span className="font-mono">{l.item_code}</span></p>
@@ -624,7 +632,7 @@ function PurchaseDetailInner() {
     actions.push({
       key: "fulfill",
       label: both ? "Ghi nhận mua & hoàn thành" : detail.perms.canReceive ? "Ghi nhận mua / Nhập kho" : "Xác nhận hoàn thành gia công",
-      icon: detail.perms.canReceive ? <PackageCheck size={16} /> : <Wrench size={16} />,
+      icon: detail.perms.canReceive ? <PackageCheck size={16} /> : <GiaCongIcon size={16} />,
       onClick: startFulfill,
     })
   }
@@ -770,6 +778,9 @@ function PurchaseDetailInner() {
             code={soPhieu}
             tags={
               <>
+                {detail.requestKind && detail.requestKind !== "vat_tu" && (
+                  <StatusBadge tone="accent" label={PURCHASE_REQUEST_KIND_LABEL[detail.requestKind]} size="xs" />
+                )}
                 <span className={headerChip}>Ngày {fmtDate(req.ngay)}</span>
                 <span className={headerChip}>{detail.lines.length} dòng vật tư</span>
                 <span className={headerChip}>Tổng: {formatMoney(req.tong_tien, req.loai_tien)} {req.loai_tien}</span>

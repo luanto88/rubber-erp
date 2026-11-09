@@ -270,6 +270,8 @@ type MaintenanceStaffRow = {
   gioi_tinh: string | null
   chuc_vu_chinh_quyen: string | null
   chuc_vu_kim_nhiem: string | null
+  /** Chọn sẵn làm người ký khi nhiều người cùng chức vụ (migration 20261119). */
+  mac_dinh_ky?: boolean | null
   email: string | null
   phong_ban?: string | null
   department_id?: string | null
@@ -1087,6 +1089,7 @@ export default function SettingsPage() {
     gioi_tinh: "",
     chuc_vu_chinh_quyen: "",
     chuc_vu_kim_nhiem: "",
+    mac_dinh_ky: false,
     email: "",
     phong_ban: "",
     department_id: "",
@@ -1476,6 +1479,7 @@ export default function SettingsPage() {
           gioi_tinh: staffForm.gioi_tinh || null,
           chuc_vu_chinh_quyen: staffForm.chuc_vu_chinh_quyen.trim() || null,
           chuc_vu_kim_nhiem: staffForm.chuc_vu_kim_nhiem.trim() || null,
+          mac_dinh_ky: staffForm.mac_dinh_ky,
           email: staffForm.email.trim() || null,
           phong_ban: staffForm.phong_ban?.trim() || null,
           department_id: staffForm.department_id || null,
@@ -1490,7 +1494,9 @@ export default function SettingsPage() {
           result.error.code === "PGRST204" ||
           /schema cache|does not exist|42703/i.test(result.error.message))
       ) {
-        const { phong_ban, department_id, ...fallbackPayload } = payload
+        // Cột mới chưa có (chưa chạy migration) ⇒ bỏ các cột tuỳ chọn rồi lưu lại.
+        const fallbackPayload = { ...payload }
+        for (const col of ["phong_ban", "department_id", "mac_dinh_ky"]) delete fallbackPayload[col]
         result = maintEditId
           ? await supabase.from("maintenance_staff").update(fallbackPayload).eq("id", maintEditId).eq("factory_id", factoryId).select("id").single()
           : await supabase.from("maintenance_staff").insert(fallbackPayload).select("id").single()
@@ -2593,6 +2599,7 @@ export default function SettingsPage() {
       gioi_tinh: "",
       chuc_vu_chinh_quyen: "",
       chuc_vu_kim_nhiem: "",
+      mac_dinh_ky: false,
       email: "",
       phong_ban: profile?.department || "",
       department_id: profile?.department_id || "",
@@ -2613,6 +2620,7 @@ export default function SettingsPage() {
       gioi_tinh: staff.gioi_tinh || "",
       chuc_vu_chinh_quyen: staff.chuc_vu_chinh_quyen || "",
       chuc_vu_kim_nhiem: staff.chuc_vu_kim_nhiem || "",
+      mac_dinh_ky: !!staff.mac_dinh_ky,
       email: staff.email || "",
       phong_ban: staff.phong_ban || "",
       department_id: staff.department_id || "",
@@ -5662,6 +5670,13 @@ export default function SettingsPage() {
               <div className="flex items-center gap-3">
                 <input type="checkbox" id="staff-active" checked={staffForm.active} onChange={e => setStaffForm(p => ({ ...p, active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
                 <label htmlFor="staff-active" className="text-sm font-bold text-slate-600">Đang làm việc</label>
+              </div>
+              <div className="flex items-start gap-3">
+                <input type="checkbox" id="staff-mac-dinh-ky" checked={staffForm.mac_dinh_ky} onChange={e => setStaffForm(p => ({ ...p, mac_dinh_ky: e.target.checked }))} className="mt-0.5 w-4 h-4 accent-emerald-600" />
+                <label htmlFor="staff-mac-dinh-ky" className="text-sm text-slate-600">
+                  <span className="font-bold">Người ký mặc định khi trùng chức vụ</span>
+                  <span className="block text-xs text-slate-400">Vd 2 người cùng là &quot;Giám đốc&quot;: người được tick được chọn sẵn ở phiếu Đề nghị mua.</span>
+                </label>
               </div>
             </div>
         </ModalShell>

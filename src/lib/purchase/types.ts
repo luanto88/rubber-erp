@@ -35,6 +35,49 @@ export function isPurchaseEditable(status: PurchaseStatus): boolean {
   return status === "nhap" || status === "tra_ve"
 }
 
+// ── Loại phiếu theo nội dung (2026-11-09, gia công ngoài) ──
+// Dùng chung 1 dãy số ĐNMVT; loại chỉ suy từ các dòng, KHÔNG lưu DB.
+export type PurchaseRequestKind = "vat_tu" | "gia_cong" | "hon_hop"
+
+export const PURCHASE_REQUEST_KINDS: PurchaseRequestKind[] = ["vat_tu", "gia_cong", "hon_hop"]
+
+export const PURCHASE_REQUEST_KIND_LABEL: Record<PurchaseRequestKind, string> = {
+  vat_tu: "Mua vật tư",
+  gia_cong: "Gia công",
+  hon_hop: "VT + GC",
+}
+
+export function isPurchaseRequestKind(v: unknown): v is PurchaseRequestKind {
+  return typeof v === "string" && (PURCHASE_REQUEST_KINDS as string[]).includes(v)
+}
+
+/**
+ * Vật tư là dịch vụ gia công ngoài? Nguồn sự thật là `inventory_items.la_dich_vu` (trigger kho + RPC dùng cờ
+ * này). Chỉ khi không đọc được cờ (null/undefined) mới suy theo `nguon_tao`.
+ */
+export function isServiceItem(it: { la_dich_vu?: boolean | null; nguon_tao?: string | null } | null | undefined): boolean {
+  if (!it) return false
+  if (it.la_dich_vu === true) return true
+  if (it.la_dich_vu === false) return false
+  return it.nguon_tao === "bao_tri_gia_cong"
+}
+
+/** Loại phiếu theo các dòng: toàn dịch vụ ⇒ gia công; có cả hai ⇒ hỗn hợp; còn lại ⇒ vật tư. */
+export function purchaseRequestKind(
+  itemIds: (string | null | undefined)[],
+  serviceIds: ReadonlySet<string>,
+): PurchaseRequestKind {
+  let service = 0
+  let goods = 0
+  for (const id of itemIds) {
+    if (id && serviceIds.has(id)) service++
+    else goods++
+  }
+  if (service > 0 && goods === 0) return "gia_cong"
+  if (service > 0) return "hon_hop"
+  return "vat_tu"
+}
+
 export const PURCHASE_LOAI_TAI_LIEU = "purchase_request"
 export const PURCHASE_MODUN = "purchase"
 

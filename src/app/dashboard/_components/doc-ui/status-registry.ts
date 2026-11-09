@@ -7,7 +7,7 @@
 // Màu tông theo mẫu previews/enterprise-iso-vanban-unified-preview.html (valid/pending/draft/
 // danger). Class viết literal để Tailwind quét được — KHÔNG ghép chuỗi động.
 
-export type StatusTone = "valid" | "pending" | "warn" | "draft" | "danger" | "returned" | "info"
+export type StatusTone = "valid" | "pending" | "warn" | "draft" | "danger" | "returned" | "info" | "accent"
 
 export type StatusDomain =
   | "doc"
@@ -35,6 +35,8 @@ export const TONE_CLASSES: Record<StatusTone, { badge: string; dot: string; puls
   // Trạng thái trung tính đang tiến (Đang mua, Xuất hàng…). Xanh dương — trước 2026-10-14 là
   // brand (xanh lá) dễ lẫn với "Đã duyệt".
   info: { badge: "bg-[#f0f9ff] text-[#075985] border-[#bae6fd]", dot: "bg-[#0284c7]", pulse: false },
+  // Nhãn PHÂN LOẠI (không phải trạng thái), vd loại phiếu "Gia công" — tím, trùng tông nhãn "Dịch vụ".
+  accent: { badge: "bg-[#f5f3ff] text-[#5b21b6] border-[#ddd6fe]", dot: "bg-[#7c3aed]", pulse: false },
 }
 
 type StatusEntry = { label: string; tone: StatusTone }

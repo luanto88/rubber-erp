@@ -15,6 +15,7 @@ import {
   Clock,
   FileDown,
   Hash,
+  History,
   Inbox,
   Layers,
   Loader2,
@@ -25,6 +26,7 @@ import {
   Package,
   Pencil,
   Plus,
+  Power,
   Save,
   ScanLine,
   Send,
@@ -32,6 +34,7 @@ import {
   Trash2,
   User,
   Warehouse,
+  Weight,
 } from "lucide-react";
 import { ReasonConfirmBanner } from "@/app/dashboard/product/_components/reason-confirm-banner";
 import {
@@ -2137,6 +2140,35 @@ type PendingDraftGroup = {
 // thị — mỗi kiện vẫn là 1 draft riêng trong DB (không đổi cách lưu/gửi), chỉ gộp ở tầng hiển thị.
 // Ca sản xuất được PHÉP khác nhau giữa các kiện cùng nhóm (đúng rule top-up), nên không nằm trong
 // khóa gộp — hiển thị gộp lại dạng "A/B" nếu có nhiều giá trị.
+// Giao diện Hub đơn sắc (2026-11-09): icon xám, nút Sửa/Xoá nền slate (Xoá KHÔNG đỏ); màu chỉ ở
+// Quét QR (brand), Gửi tất cả (amber), chip trạng thái và Kết thúc ca (rose).
+const HUB_ICON_BTN =
+  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700 disabled:opacity-50";
+const HUB_SECONDARY_BTN =
+  "flex min-w-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60";
+
+// Mã ngăn chuẩn rất dài ("N23-M-ĐC-X-10/10/26-27/10/26") ⇒ chỉ hiện đoạn đầu ("N23"); mã nhập tay
+// ngắn (BN, 10.2) giữ nguyên. Mã đầy đủ vẫn ở title của dòng.
+function shortNganCode(code: string): string {
+  const trimmed = code.trim();
+  if (!trimmed) return "—";
+  return trimmed.split("-")[0] || trimmed;
+}
+
+// Dòng phụ dưới mã kiện: icon xám + giá trị, xuống dòng gọn trên màn hẹp.
+function HubRowMeta({ items }: { items: { icon: React.ReactNode; label: string; text: string }[] }) {
+  return (
+    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+      {items.map((it, i) => (
+        <span key={i} title={it.label} className="inline-flex min-w-0 items-center gap-1">
+          <span className="shrink-0 text-slate-400">{it.icon}</span>
+          <span className="truncate">{it.text}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function groupPendingDrafts(drafts: ConfirmDraftRow[]): PendingDraftGroup[] {
   const map = new Map<
     string,
@@ -2275,7 +2307,7 @@ function HubView({
       <button
         type="button"
         onClick={onScan}
-        className="flex w-full items-center justify-center gap-3 rounded-2xl bg-emerald-600 py-6 text-lg font-extrabold text-white shadow-md transition-all hover:bg-emerald-700"
+        className="flex w-full items-center justify-center gap-3 rounded-2xl bg-brand-600 py-6 text-lg font-extrabold text-white shadow-md transition-all hover:bg-brand-700"
       >
         <ScanLine size={26} />
         {tt("scanQr")}
@@ -2283,10 +2315,17 @@ function HubView({
 
       {queueSlot}
 
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-amber-800">
-          <Inbox size={16} />
-          {tt("pendingDraftsTitle", { count: pendingDrafts.length })}
+      <section
+        aria-label={tt("pendingDraftsTitle", { count: pendingDrafts.length })}
+        className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 shadow-sm"
+      >
+        <div className="mb-3 flex items-center gap-2" title={tt("pendingDraftsTitle", { count: pendingDrafts.length })}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+            <Inbox size={16} />
+          </span>
+          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800">
+            {tt("pendingChip", { count: pendingDrafts.length })}
+          </span>
         </div>
 
         {pendingDraftsLoading ? (
@@ -2300,17 +2339,28 @@ function HubView({
             {pendingDraftGroups.map((g) => (
               <div
                 key={g.key}
-                className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2 text-sm shadow-sm"
+                className="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2.5 text-sm shadow-sm"
               >
                 <div className="min-w-0">
                   <div className="truncate font-bold text-slate-800">
-                    {g.maLo} - {tt("kienLabel")} {g.kienLetters}
+                    {g.maLo} · {tt("kienLabel")} {g.kienLetters}
                   </div>
-                  <div className="text-xs text-slate-500">
-                    {g.totalSoBanh} bành · {g.nganLabel} · {tt("caSanXuat")} {g.caLetters}
-                  </div>
+                  <HubRowMeta
+                    items={[
+                      { icon: <Weight size={13} />, label: tt("soBanh"), text: `${g.totalSoBanh} ${tt("banhUnit")}` },
+                      {
+                        icon: <Warehouse size={13} />,
+                        label: g.nganLabel,
+                        text: g.nganLabel
+                          .split(", ")
+                          .map((n) => shortNganCode(n))
+                          .join(", "),
+                      },
+                      { icon: <Sun size={13} />, label: tt("caSanXuat"), text: tt("plCaShort", { ca: g.caLetters }) },
+                    ]}
+                  />
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1.5">
                   {/* Sửa chỉ khả dụng khi nhóm hiển thị đúng 1 draft gốc — 1 nhóm gộp nhiều kiện
                       không có ý nghĩa 1 form sửa đơn (mỗi kiện có ngăn/số bành/ca riêng). */}
                   {g.draftIds.length === 1 && (
@@ -2320,18 +2370,22 @@ function HubView({
                         const draft = pendingDrafts.find((d) => d.id === g.draftIds[0]);
                         if (draft) onEditDraft(draft);
                       }}
-                      className="flex h-7 w-7 items-center justify-center rounded-full text-amber-600 hover:bg-amber-100"
+                      title={tt("editEntry")}
+                      aria-label={tt("editEntry")}
+                      className={HUB_ICON_BTN}
                     >
-                      <Pencil size={14} />
+                      <Pencil size={15} />
                     </button>
                   )}
                   <button
                     type="button"
                     disabled={!!deletingDraftId && g.draftIds.includes(deletingDraftId)}
                     onClick={() => onDeleteDraft(g.draftIds)}
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-red-500 hover:bg-red-50 disabled:opacity-50"
+                    title={tt("deleteEntry")}
+                    aria-label={tt("deleteEntry")}
+                    className={HUB_ICON_BTN}
                   >
-                    <Trash2 size={14} />
+                    <Trash2 size={15} />
                   </button>
                 </div>
               </div>
@@ -2357,34 +2411,42 @@ function HubView({
         {sendBlockedReason && pendingDrafts.length > 0 && (
           <p className="mt-1.5 text-center text-[11px] font-semibold text-amber-800">{sendBlockedReason}</p>
         )}
-      </div>
+      </section>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-sm font-extrabold text-emerald-700">
-          <Package size={16} />
-          {tt("sessionLogTitle")}
+      <section aria-label={tt("sessionLogTitle")} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2" title={tt("sessionLogTitle")}>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+            <History size={16} />
+          </span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-700">
+            {tt("sentChip", { count: history.length })}
+          </span>
         </div>
 
         <div className="mb-3 grid grid-cols-2 gap-2">
-          <div>
-            <div className="mb-1 flex items-center gap-1 text-[11px] font-bold text-slate-500">
-              <Calendar size={11} /> {tt("ngaySanXuat")}
-            </div>
+          <label
+            title={tt("ngaySanXuat")}
+            className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/70 px-2.5 focus-within:border-brand-600"
+          >
+            <Calendar size={15} className="shrink-0 text-slate-400" />
             <input
               type="date"
+              aria-label={tt("ngaySanXuat")}
               value={historyNgay}
               onChange={(e) => onChangeNgay(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs outline-none focus:border-emerald-500"
+              className="min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-slate-800 outline-none"
             />
-          </div>
-          <div>
-            <div className="mb-1 flex items-center gap-1 text-[11px] font-bold text-slate-500">
-              <Sun size={11} /> {tt("caSanXuat")}
-            </div>
+          </label>
+          <label
+            title={tt("caSanXuat")}
+            className="flex min-w-0 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/70 px-2.5 focus-within:border-brand-600"
+          >
+            <Sun size={15} className="shrink-0 text-slate-400" />
             <select
+              aria-label={tt("caSanXuat")}
               value={historyCa}
               onChange={(e) => onChangeCa(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs outline-none focus:border-emerald-500"
+              className="min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-slate-800 outline-none"
             >
               {CA_OPTS.map((c) => (
                 <option key={c} value={c}>
@@ -2392,7 +2454,7 @@ function HubView({
                 </option>
               ))}
             </select>
-          </div>
+          </label>
         </div>
 
         {shiftLock?.isActive && (
@@ -2416,16 +2478,20 @@ function HubView({
             {history.map((h) => (
               <div
                 key={h.transactionId}
-                className="rounded-xl border-l-4 border-emerald-500 bg-slate-50 px-3 py-2 text-sm shadow-sm"
+                className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2.5 text-sm"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="truncate font-bold text-slate-800">
-                      {h.maLo} - {tt("kienLabel")} {h.kienLetters || "—"}
+                      {h.maLo} · {tt("kienLabel")} {h.kienLetters || "—"}
                     </div>
-                    <div className="text-xs text-slate-500">
-                      {h.soBanh} bành · {h.nguoiNhap} · {formatHMS(h.createdAt)}
-                    </div>
+                    <HubRowMeta
+                      items={[
+                        { icon: <Weight size={13} />, label: tt("soBanh"), text: `${h.soBanh} ${tt("banhUnit")}` },
+                        { icon: <User size={13} />, label: h.nguoiNhap, text: h.nguoiNhap },
+                        { icon: <Clock size={13} />, label: formatHMS(h.createdAt), text: formatHMS(h.createdAt) },
+                      ]}
+                    />
                   </div>
                   {deleteConfirmId === h.transactionId ? (
                     <div className="flex shrink-0 items-center gap-1">
@@ -2451,20 +2517,22 @@ function HubView({
                         <button
                           type="button"
                           onClick={() => onEdit(h)}
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-blue-500 hover:bg-blue-50"
+                          className={HUB_ICON_BTN}
                           title={tt("editEntry")}
+                          aria-label={tt("editEntry")}
                         >
-                          <Pencil size={14} />
+                          <Pencil size={15} />
                         </button>
                       )}
                       {h.canDelete && (
                         <button
                           type="button"
                           onClick={() => onAskDelete(h.transactionId)}
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-red-500 hover:bg-red-50"
+                          className={HUB_ICON_BTN}
                           title={tt("deleteEntry")}
+                          aria-label={tt("deleteEntry")}
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={15} />
                         </button>
                       )}
                     </div>
@@ -2480,28 +2548,36 @@ function HubView({
             type="button"
             disabled={reportGenerating !== null}
             onClick={onGenerateReport}
-            className="flex items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-2 py-2.5 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+            title={tt("viewOrRegenerateReport")}
+            className={HUB_SECONDARY_BTN}
           >
-            {reportGenerating === "shift" ? <Loader2 size={16} className="animate-spin" /> : <FileDown size={16} />}
-            {tt("viewOrRegenerateReport")}
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+              {reportGenerating === "shift" ? <Loader2 size={15} className="animate-spin" /> : <FileDown size={15} />}
+            </span>
+            <span className="min-w-0 leading-tight">{tt("reportShiftShort")}</span>
           </button>
           {canReportDaily && (
             <button
               type="button"
               disabled={reportGenerating !== null}
               onClick={onGenerateDailyReport}
-              className="flex items-center justify-center gap-2 rounded-xl border border-indigo-300 bg-indigo-50 px-2 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+              title={tt("dailyReportButton")}
+              className={HUB_SECONDARY_BTN}
             >
-              {reportGenerating === "daily" && !reportDraft ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : (
-                <ClipboardList size={16} />
-              )}
-              {tt("dailyReportButton")}
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                {reportGenerating === "daily" && !reportDraft ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <ClipboardList size={15} />
+                )}
+              </span>
+              <span className="min-w-0 leading-tight">{tt("dailyReportShort")}</span>
             </button>
           )}
         </div>
-        <p className="mt-1.5 text-center text-[11px] text-slate-400">{tt("reportCoversWholeDayHint")}</p>
+        <p className="mt-1.5 text-center text-[11px] text-slate-400" title={tt("reportCoversWholeDayHint")}>
+          {tt("reportHintShort")}
+        </p>
         {reportError && <p className="mt-2 text-center text-xs font-semibold text-red-500">{reportError}</p>}
         {reportDraft && !dailyPreview && (
           <div className="mt-2">
@@ -2523,15 +2599,16 @@ function HubView({
             <DailyReportPreviewBar {...dailyPreview} />
           </div>
         )}
-      </div>
+      </section>
 
       <div className="border-t border-dashed border-slate-300 pt-4">
         <button
           type="button"
           disabled={!!sendBlockedReason}
           onClick={onEndShift}
-          className="w-full rounded-2xl bg-red-600 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-300 bg-rose-50 py-3.5 text-base font-extrabold text-rose-700 transition-all hover:bg-rose-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
         >
+          <Power size={18} />
           {tt("endShift")}
         </button>
         {sendBlockedReason && (

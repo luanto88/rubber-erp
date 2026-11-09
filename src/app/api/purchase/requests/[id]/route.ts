@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
 import { isMaintenanceRecordTeam, isPurchaseParticipant, loadEffectiveLines, loadPurchaseLines, loadPurchaseSigners, syncPurchaseFromSigning } from "@/lib/purchase/server"
 import {
-  isPurchaseBuying, isPurchaseEditable, remainingQty,
+  isPurchaseBuying, isPurchaseEditable, purchaseRequestKind, remainingQty,
   type PurchaseAdjustmentSummary, type PurchaseEffectiveLine, type PurchaseReceiptRow, type PurchaseServiceCompletionRow, type PurchaseRequestRow, type PurchaseStatus, type PurchaseMaintenanceSource,
 } from "@/lib/purchase/types"
 
@@ -206,6 +206,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       receipts,
       serviceCompletions,
       serviceItemIds: [...serviceItemIds],
+      requestKind: purchaseRequestKind(
+        lines.map((l) => (l as { item_id?: string | null }).item_id),
+        serviceItemIds,
+      ),
       adjustments,
       pendingAdjustmentId,
       parent,

@@ -33,6 +33,8 @@ export type PurchasePdfLine = {
   muc_dich: string | null
   ghi_chu: string | null
   la_vat_tu_moi: boolean
+  /** Dòng là dịch vụ gia công ngoài ⇒ cột Ghi chú có "GC"; quyết định dòng phụ dưới tiêu đề. */
+  la_dich_vu?: boolean
   lech_gia_pct: number | null
   ly_do_lech_gia: string | null
   /** Nơi mua dự kiến / ngày có hàng / ngày cần hàng — in thành dòng phụ dưới vật tư. */
@@ -77,8 +79,24 @@ function formatDateVN(iso: string): string {
   return y && m && d ? `${d}/${m}/${y}` : iso
 }
 
+/** Ghi chú cột cuối của phiếu điều chỉnh: "GC" (dòng dịch vụ) + ghi chú dòng. */
+function adjustNote(l: PurchasePdfLine): string {
+  return [l.la_dich_vu ? "GC" : "", l.ghi_chu?.trim() || ""].filter(Boolean).join("; ")
+}
+
+/**
+ * Dòng phụ dưới tiêu đề theo loại phiếu (Q1, 2026-11-09): giữ tiêu đề mẫu ISO, chỉ thêm
+ * "(Gia công ngoài)" khi mọi dòng là dịch vụ, "(Gồm gia công ngoài)" khi lẫn vật tư. Phiếu vật tư ⇒ rỗng.
+ */
+export function purchaseKindSubtitle(lines: PurchasePdfLine[]): string {
+  const svc = lines.filter((l) => l.la_dich_vu).length
+  if (!svc) return ""
+  return svc === lines.length ? "(Gia công ngoài)" : "(Gồm gia công ngoài)"
+}
+
 function lineNote(l: PurchasePdfLine): string {
   const parts: string[] = []
+  if (l.la_dich_vu) parts.push("GC")
   if (l.ghi_chu?.trim()) parts.push(l.ghi_chu.trim())
   if (l.la_vat_tu_moi) parts.push("Vật tư mới")
   if (l.lech_gia_pct !== null && l.lech_gia_pct !== undefined && Math.abs(l.lech_gia_pct) > 10) {
@@ -159,6 +177,11 @@ export async function buildPurchasePdfForSigning(input: PurchasePdfInput): Promi
   y += 4.5
   doc.setFont(PDF_FONT_NAME, "normal")
   doc.setFontSize(8.5)
+  const kindSubtitle = purchaseKindSubtitle(input.lines)
+  if (kindSubtitle) {
+    doc.text(kindSubtitle, PAGE_W / 2, y, { align: "center" })
+    y += 3.8
+  }
   doc.text(
     adj ? `Ngày: ${formatDateVN(input.ngay)} — Điều chỉnh phiếu số ${adj.parentSoPhieu}` : `Ngày: ${formatDateVN(input.ngay)}`,
     PAGE_W / 2, y, { align: "center" },
@@ -229,7 +252,7 @@ export async function buildPurchasePdfForSigning(input: PurchasePdfInput): Promi
         formatMoney(l.don_gia, input.loaiTien),
         formatMoney(l.thanh_tien, input.loaiTien),
         adj ? beforeText(l, input.loaiTien) : l.muc_dich || "",
-        adj ? (l.ghi_chu || "") : lineNote(l),
+        adj ? adjustNote(l) : lineNote(l),
       ]
       return [main, ...subRows] as never[]
     }),

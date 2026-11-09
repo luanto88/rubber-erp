@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic"
 const DEPT_CODE = "NMCB"
 
 type ProfileRow = { id: string; full_name: string | null; username: string | null; department: string | null; department_id: string | null }
-type StaffRow = { profile_id: string | null; chuc_vu: string | null; chuc_vu_chinh_quyen: string | null }
+type StaffRow = { profile_id: string | null; chuc_vu: string | null; chuc_vu_chinh_quyen: string | null; mac_dinh_ky?: boolean | null }
 type Approver = { id: string; full_name: string; chuc_vu: string }
 
 function lower(text: string | null | undefined): string {
@@ -55,14 +55,22 @@ export async function GET(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     const all = (profiles || []) as ProfileRow[]
-    const { data: staffRows } = await supabaseAdmin
-      .from("maintenance_staff")
-      .select("profile_id, chuc_vu, chuc_vu_chinh_quyen")
-      .eq("factory_id", factoryId)
-      .eq("active", true)
-      .in("profile_id", all.map((p) => p.id))
+    const loadStaff = (cols: string) =>
+      supabaseAdmin
+        .from("maintenance_staff")
+        .select(cols)
+        .eq("factory_id", factoryId)
+        .eq("active", true)
+        .in("profile_id", all.map((p) => p.id))
+    let staffRes = await loadStaff("profile_id, chuc_vu, chuc_vu_chinh_quyen, mac_dinh_ky")
+    // Migration 20261119 chưa chạy (thiếu cột mac_dinh_ky) ⇒ đọc như cũ, không ưu tiên ai.
+    if (staffRes.error) staffRes = await loadStaff("profile_id, chuc_vu, chuc_vu_chinh_quyen")
+    const staffRows = (staffRes.data || []) as unknown as StaffRow[]
     const staffById = new Map<string, StaffRow>()
-    for (const s of (staffRows || []) as StaffRow[]) if (s.profile_id) staffById.set(s.profile_id, s)
+    for (const s of staffRows) if (s.profile_id) staffById.set(s.profile_id, s)
+    const isPreferred = (a: Approver) => !!staffById.get(a.id)?.mac_dinh_ky
+    /** Trong nhóm cùng chức vụ: người tick "mặc định" (Cài đặt → Nhân sự) trước, rồi người đầu tiên theo tên. */
+    const pickDefault = (list: Approver[]) => list.find(isPreferred) || list[0]
 
     const inNmcb = (p: ProfileRow) => {
       if (deptRow?.id && p.department_id === deptRow.id) return true
@@ -99,8 +107,8 @@ export async function GET(req: NextRequest) {
       keToan: keToan.list,
       giamDocFallback: giamDoc.fallback,
       keToanFallback: keToan.fallback,
-      defaultGiamDocId: giamDoc.list.find((a) => isMainDirector(a.chuc_vu))?.id || giamDoc.list[0]?.id || null,
-      defaultKeToanId: keToan.list.find((a) => lower(a.chuc_vu).includes("kế toán"))?.id || null,
+      defaultGiamDocId: (pickDefault(giamDoc.list.filter((a) => isMainDirector(a.chuc_vu))) || pickDefault(giamDoc.list))?.id || null,
+      defaultKeToanId: pickDefault(keToan.list.filter((a) => lower(a.chuc_vu).includes("kế toán")))?.id || null,
       myChucVu,
     })
   } catch (err) {
