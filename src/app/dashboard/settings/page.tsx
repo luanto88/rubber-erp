@@ -37,6 +37,7 @@ import { ExportPalletTypesTab } from "./_components/export-pallet-types-tab"
 import { ProductPackagingTab } from "./_components/product-packaging-tab"
 import { PalletComponentsTab } from "./_components/pallet-components-tab"
 import { ProductGradeTab } from "./_components/product-grade-tab"
+import { NormsConfig } from "../norms/_components/norms-config"
 import { ListSearch, noSearchMatchText } from "./_components/list-search"
 import { matchesSearchQuery } from "@/lib/text-normalize"
 import { getErrorMessage } from "@/lib/error-message"
@@ -235,7 +236,7 @@ type VanBanDocumentTypeRow = {
   is_active: boolean
 }
 
-type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments" | "opening-stock" | "export-pallet-types" | "product-packaging" | "product-grade" | "pallet-components"
+type FactoryConfigTab = "warehouses" | "categories" | "items" | "delivery-points" | "forest-plots" | "quality-targets" | "shift-assignments" | "opening-stock" | "export-pallet-types" | "product-packaging" | "product-grade" | "pallet-components" | "norms"
 
 type MaintenanceTab = "assets" | "staff" | "vehicles" | "ext-materials"
 type ListSearchKey =
@@ -637,6 +638,7 @@ const PERMISSION_MODULE_LABELS: Record<string, string> = {
   kpi: "KPI & 5S",
   maintenance: "Bảo trì",
   notes: "Ghi chú nhanh",
+  norms: "Định mức KTKT",
   output: "Sản lượng",
   process: "Kiểm soát quá trình",
   product: "Thành phẩm",
@@ -741,6 +743,11 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "purchase.view": "vào module Đề nghị mua vật tư",
   "purchase.create": "lập phiếu đề nghị mua",
   "purchase.view_all": "xem tất cả phiếu đề nghị mua",
+  "norms.view": "vào module Định mức KTKT",
+  "norms.manage_config": "sửa danh mục chỉ tiêu / khung định mức",
+  "norms.approve": "áp dụng / hủy áp dụng khung định mức",
+  "norms.periodic_entry": "nhập kiểm kê tồn xưởng / chỉ số đồng hồ",
+  "norms.report": "lập & gửi ký báo cáo định mức",
 }
 
 // Mã quyền đã bỏ nhưng bản ghi `permissions` còn giữ tạm (migration 20261006 chỉ gỡ khỏi
@@ -872,6 +879,11 @@ function downloadConfigTemplate(tab: FactoryConfigTab) {
     "product-grade": {
       // Tab này không dùng nút "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry để thỏa mãn kiểu Record đầy đủ.
       filename: "quy_cach_chung_loai.csv",
+      rows: [],
+    },
+    norms: {
+      // Tab Định mức KTKT không dùng "Tải mẫu"/"Nhập CSV" (bị ẩn), giữ entry cho kiểu Record đầy đủ.
+      filename: "dinh_muc_ktkt.csv",
       rows: [],
     },
     "pallet-components": {
@@ -4066,7 +4078,7 @@ export default function SettingsPage() {
                 <SlidersHorizontal size={16} className="text-amber-600" />
                 <span className="font-extrabold text-slate-700">Cấu hình nhà máy</span>
               </div>
-              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && configTab !== "opening-stock" && configTab !== "export-pallet-types" && configTab !== "product-packaging" && configTab !== "product-grade" && configTab !== "pallet-components" && (
+              {canManageSettings && configTab !== "quality-targets" && configTab !== "shift-assignments" && configTab !== "opening-stock" && configTab !== "export-pallet-types" && configTab !== "product-packaging" && configTab !== "product-grade" && configTab !== "pallet-components" && configTab !== "norms" && (
                 <div className="flex flex-wrap items-center gap-2">
                   {configTab !== "forest-plots" && (
                     <>
@@ -4156,6 +4168,7 @@ export default function SettingsPage() {
                   { key: "product-packaging" as const, label: "Quy cách đóng gói TP" },
                   { key: "pallet-components" as const, label: "Thành phần pallet" },
                   { key: "export-pallet-types" as const, label: "Loại pallet xuất" },
+                  ...(hasPermission(user, "norms.view") ? [{ key: "norms" as const, label: "Định mức KTKT" }] : []),
                 ].map((item) => (
                   <button
                     key={item.key}
@@ -4496,6 +4509,8 @@ export default function SettingsPage() {
                 <ProductGradeTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "pallet-components" ? (
                 <PalletComponentsTab factoryId={factoryId} canManage={canManageSettings} />
+              ) : configTab === "norms" ? (
+                <NormsConfig factoryId={factoryId} user={user} />
               ) : configTab === "shift-assignments" ? (
                 <ShiftAssignmentsTab
                   factoryId={factoryId}

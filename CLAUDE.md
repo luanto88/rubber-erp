@@ -317,6 +317,7 @@ Vi du:
 - Ghi chu nhanh (rieng tu theo nguoi tao, admin thay tat ca, co the chia se, kem anh + widget Dashboard): `.claude/rules/26-operation-notes-module.md`
 - Quan ly cong viec & Danh gia KPI nhan vien (giao viec, tien do %, 5S theo QR, khung tieu chi KPI, bang diem thang): `.claude/rules/27-kpi-module.md`
 - Logic ngan luu chi tiet: `.claude/rules/storage.md`
+- Định mức Kinh tế Kỹ thuật (khung định mức theo dây chuyền × CSR × nguồn, ngày hiệu lực, ma trận gộp ô): `.claude/rules/30-norms-module.md`
 - Đề nghị mua vật tư hàng hóa (ký số 3 bước, số ĐNMVT theo năm, gợi ý giá/trùng vật tư): `.claude/rules/28-purchase-module.md`
 - ISO và hồ sơ con: đọc `.claude/rules/16-iso-vanban-module.md` và `.claude/rules/17-iso-soat-xet.md`; ưu tiên các mục "Cập nhật mới nhất (2026-05-28)" nếu có mâu thuẫn với logic cũ.
 - Kho thanh pham (so do kho): `.claude/rules/18-warehouse-tp-module.md`

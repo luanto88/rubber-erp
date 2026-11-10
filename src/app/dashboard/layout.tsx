@@ -19,6 +19,7 @@ import {
   Menu,
   NotebookPen,
   Package,
+  Scale,
   Settings,
   Shield,
   ShoppingCart,
@@ -148,6 +149,7 @@ const NAV: NavItem[] = [
       { key: "/dashboard/maintenance", label: "Bảo trì", icon: Wrench, permission: "maintenance.view" },
       { key: "/dashboard/purchase", label: "Đề nghị mua vật tư", icon: ShoppingCart, permission: "purchase.view" },
       { key: "/dashboard/process", label: "Kiểm soát quá trình", icon: Activity, permission: "process.view" },
+      { key: "/dashboard/norms", label: "Định mức KTKT", icon: Scale, permission: "norms.view" },
     ],
   },
   {

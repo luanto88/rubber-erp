@@ -591,6 +591,12 @@ export const DEFAULT_PERMISSION_CODES = [
   "purchase.view",
   "purchase.create",
   "purchase.view_all",
+  // Định mức KTKT (migration 20261121)
+  "norms.view",
+  "norms.manage_config",
+  "norms.approve",
+  "norms.periodic_entry",
+  "norms.report",
 ]
 
 export const ROLE_DEFAULTS: Record<AppRole, string[]> = {

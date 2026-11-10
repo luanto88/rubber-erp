@@ -1,7 +1,7 @@
 # Kế hoạch module "Định mức Kinh tế Kỹ thuật Chế biến" (`/dashboard/norms`) — 2026-11-10
 
 Nguồn yêu cầu: `cung_cap_dl/dinh_muc.txt` (prompt gốc) + `cung_cap_dl/dinh_muc_2026.pdf` (văn bản giao định mức).
-Trạng thái: CHƯA CODE. Đã đánh giá prompt, thăm dò DB thật (chỉ đọc) và chốt 4 câu với người dùng (mục 2).
+Trạng thái: GĐ1 XONG 2026-11-10 (migration 20261121 đã chạy, test localhost PASS, Bọc 0,13 đã tạo + gán, người dùng đã thêm cột "Dầu xe xúc nguyên liệu") — xem rule 30 + mục 9. Đã đánh giá prompt, thăm dò DB thật (chỉ đọc) và chốt 4 câu với người dùng (mục 2).
 
 ## 1. Đánh giá prompt gốc — các điểm SAI / THIẾU phải sửa khi làm
 
@@ -91,4 +91,31 @@ năm mới), sub-tab ở Cài đặt → Cấu hình nhà máy, menu sidebar gat
 inventory_consumption_norms* (0 dòng, lỗi thời). Chỉ npx tsc --noEmit + npx eslint, không npm run build.
 Không ghi/xoá DB khi chưa hỏi. Dừng cho tôi test sau GĐ1, hỏi trước khi commit. Sau đó GĐ2 → GĐ4 theo mục 5,
 mỗi GĐ dừng test.
+```
+
+## 9. Chốt phiên 2026-11-10 (thay các mục mâu thuẫn phía trên)
+- Định mức theo CSR **và nguồn gốc** (dm.png 2025: Formic CV50 NT 6,4 / TM 9,5). Mô hình GĐ1 thay bảng 2–3 của mục 4:
+  `tech_norm_version_items` (cột + cơ sở tính + đơn vị THEO KHUNG: tấn TP / tấn NL quy khô / tấn tươi / 100 km),
+  `tech_norm_rows` (dây chuyền + CSR[] + nguồn[]), `tech_norm_matrix_values` (ô + merge_key). Khung nhiều/năm, ngày hiệu lực chặt.
+- O1: tấn TP mọi nguồn, áp đúng dòng; GC theo NT; Thanh lý không tính. O2: LP152=`LP152`, Dầu cao su=`DCS`, Bọc 0,13 người
+  dùng tạo sau; DOX=Isuzu VC, DOCZVC=Cozon VC, DOCZNB=Cozon nội bộ. Bọc 0,04 định mức chung, thực tế cộng mọi mã bọc.
+- O3: thay bọc tiêu hao thêm 1 lần (cho phép += khối lượng thay × định mức bọc). O5: đã ký ⇒ khoá cứng, điều chỉnh kỳ sau.
+- O6: kỳ tính trọn F và T, kỳ sau từ T+1. O4: banner như biên bản bảo trì, GĐ mặc định `mac_dinh_ky`, bước thêm kiểu Văn bản
+  chèn giữa, Giám đốc ký cuối, mọi PDF có QR.
+- Seed: khung 2026 Nháp, dòng × NT/TM, số PDF chép vào cả NT và TM.
+
+## 10. Prompt mở đầu phiên sau (GĐ2)
+
+```
+Đọc CLAUDE.md, rule 29, rule 05, rule 30 và .claude/plans/dinh-muc-ktkt-2026-11-10.md (mục 3, 4, 5, 9). GĐ1 Cấu hình định mức
+đã xong (migration 20261121 đã chạy). Làm GĐ2 "Nhập liệu theo ngày": hỏi tôi trước bằng AskUserQuestion (ngôn ngữ nghiệp vụ,
+có ví dụ) các điểm: (1) vị trí kiểm kê tồn xưởng là danh mục (bồn/kho xưởng) hay tự do; (2) chỉ tiêu nào cần kiểm kê (hóa
+chất/dầu/bọc…); (3) đồng hồ Điện/Nước: danh sách đồng hồ theo dây chuyền, hệ số nhân, có đồng hồ tổng không; (4) driver tấn
+nguyên liệu quy khô / tấn tươi cho cột cơ sở tính tan_nl_kho / tan_nl_tuoi (vd cột "Dầu xe xúc nguyên liệu") lấy từ đâu
+(ngăn lưu / sản lượng / điều xe) và tách nguồn NT/TM thế nào. Rồi tạo migration 2026112x (tech_norm_floor_counts,
+tech_norm_meter_readings + danh mục đồng hồ nếu cần, RLS ghi theo norms.periodic_entry, khoá cứng dữ liệu ngày đã nằm trong
+báo cáo đã ký — GĐ4 sẽ gắn), tab "Nhập liệu" ở /dashboard/norms theo rule 29 (lưới theo ngày, ảnh bằng chứng qua
+prepareImageForUpload, ngày theo getFactoryTodayISO). Kỳ [F,T] tính trọn 2 đầu, đầu kỳ = kiểm kê cuối ngày F−1.
+Chỉ npx tsc --noEmit + npx eslint, không npm run build, không ghi/xoá DB khi chưa hỏi. Dừng cho tôi test, hỏi trước khi commit.
+Sau đó GĐ3 (đối soát động, lib thuần src/lib/norms/compute.ts dùng resolveNormValue) và GĐ4 (báo cáo kỳ + ký số), mỗi GĐ dừng test.
 ```

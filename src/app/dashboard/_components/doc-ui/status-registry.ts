@@ -23,6 +23,7 @@ export type StatusDomain =
   | "lot"
   | "storage"
   | "confirm_queue"
+  | "norms"
 
 export const TONE_CLASSES: Record<StatusTone, { badge: string; dot: string; pulse: boolean }> = {
   valid: { badge: "bg-[#ecfdf5] text-[#065f46] border-[#a7f3d0]", dot: "bg-[#15803d]", pulse: false },
@@ -142,6 +143,13 @@ export const CONFIRM_QUEUE_STATUS: Record<string, StatusEntry> = {
   loi: { label: "Lỗi", tone: "danger" },
 }
 
+/** tech_norm_versions.status — khung định mức KTKT (rule 30). */
+export const NORMS_VERSION_STATUS: Record<string, StatusEntry> = {
+  draft: { label: "Nháp", tone: "draft" },
+  active: { label: "Đang áp dụng", tone: "valid" },
+  locked: { label: "Đã khoá", tone: "info" },
+}
+
 const REGISTRY: Record<StatusDomain, Record<string, StatusEntry>> = {
   doc: DOC_STATUS,
   iso: ISO_STATUS,
@@ -155,6 +163,7 @@ const REGISTRY: Record<StatusDomain, Record<string, StatusEntry>> = {
   lot: LOT_STATUS,
   storage: STORAGE_STATUS,
   confirm_queue: CONFIRM_QUEUE_STATUS,
+  norms: NORMS_VERSION_STATUS,
 }
 
 export function resolveStatus(domain: StatusDomain, status: string | null | undefined): StatusEntry {
