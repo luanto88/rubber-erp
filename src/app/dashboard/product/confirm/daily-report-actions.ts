@@ -51,7 +51,14 @@ export type DailyStockRow = {
   // Tồn tới hết ngày báo cáo. CÓ THỂ ÂM (không ép 0 nữa — âm là dấu hiệu lệch dữ liệu, PDF tô đỏ).
   // Có mốc chốt: tồn chốt + nhập − xuất SAU ngày chốt; chưa có: toàn bộ nhập − toàn bộ xuất.
   tonKg: number;
+  // Sản lượng theo bọc LÚC SẢN XUẤT (không cộng/trừ Thay bọc) — cho lũy kế F09 (2026-11-10). Cột nhap* gồm cả Thay bọc.
+  sxKg: number;
+  sxThangKg: number;
+  sxNamKg: number;
 };
+
+/** Thay bọc trong năm báo cáo (≤ ngày), gộp theo (CSR, bành, bọc nguồn → bọc đích), đã bù trừ đi–về. */
+export type ThayBocYearRow = { loaiCsr: string; loaiBanh: number; from: string; to: string; bales: number; kg: number };
 
 // Đơn xuất đã duyệt trỏ tới lô không còn trong bảng lots — trước đây bị bỏ im lặng.
 export type UnmatchedExport = { bales: number; orderCount: number; lotCount: number };
@@ -206,6 +213,7 @@ type StockComputation = {
   shiftRows: DailyShiftRow[];
   ngayChotTon: string | null;
   unmatchedExport: UnmatchedExport;
+  thayBocYear: ThayBocYearRow[];
 };
 
 /**
@@ -310,12 +318,13 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
         loaiCsr, nguonGoc: nguon, boc, loaiBanh: banh, ghiChu: "",
         nhapBanh: 0, nhapKg: 0, nhapThangKg: 0, nhapNamKg: 0,
         xuatKg: 0, xuatThangKg: 0, xuatNamKg: 0, tonKg: 0,
+        sxKg: 0, sxThangKg: 0, sxNamKg: 0,
       };
       stock.set(k, row);
     }
     return row;
   };
-  const addNhap = (row: DailyStockRow, d: string, kg: number, bales: number) => {
+  const addNhap = (row: DailyStockRow, d: string, kg: number, bales: number, isTransfer = false) => {
     if (countsForTon(d)) row.tonKg += kg;
     if (d >= yearStart) row.nhapNamKg += kg;
     if (d >= monthStart) row.nhapThangKg += kg;
@@ -323,6 +332,10 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
       row.nhapKg += kg;
       row.nhapBanh += bales;
     }
+    if (isTransfer) return;
+    if (d >= yearStart) row.sxNamKg += kg;
+    if (d >= monthStart) row.sxThangKg += kg;
+    if (d === ngay) row.sxKg += kg;
   };
 
   // ── Mục 2 ──
@@ -406,6 +419,7 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
   // Thay bọc: −bọc nguồn / +bọc đích vào đúng ngày thao tác (≤ ngày báo cáo).
   type NoteAgg = { loaiCsr: string; nguon: string; banh: number; a: string; b: string; bales: number };
   const noteNet = new Map<string, NoteAgg>();
+  const thayBocYearNet = new Map<string, { loaiCsr: string; loaiBanh: number; a: string; b: string; bales: number; kg: number }>();
   for (const t of ledger.transfers) {
     if (t.ngay > ngay) continue;
     const lot = lotInfo.get(t.lotId);
@@ -417,8 +431,18 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
     const bales = real ? real.bales : t.bales;
     const kg = real ? real.kg : t.bales * banh;
     if (!bales && !kg) continue;
-    addNhap(getRow(loaiCsr, nguon, t.from, banh), t.ngay, -kg, -bales);
-    addNhap(getRow(loaiCsr, nguon, t.to, banh), t.ngay, kg, bales);
+    addNhap(getRow(loaiCsr, nguon, t.from, banh), t.ngay, -kg, -bales, true);
+    addNhap(getRow(loaiCsr, nguon, t.to, banh), t.ngay, kg, bales, true);
+    if (t.ngay >= yearStart) {
+      // Gộp theo cặp bọc không phân chiều (dương = a→b) để bù trừ đi–về trong năm.
+      const [ya, yb] = [t.from, t.to].sort();
+      const yk = `${loaiCsr}||${round2(banh)}||${ya}||${yb}`;
+      const yc = thayBocYearNet.get(yk) || { loaiCsr, loaiBanh: banh, a: ya, b: yb, bales: 0, kg: 0 };
+      const sign = t.from === ya ? 1 : -1;
+      yc.bales += sign * bales;
+      yc.kg += sign * kg;
+      thayBocYearNet.set(yk, yc);
+    }
     if (t.ngay !== ngay) continue;
     // Gộp theo cặp bọc (không phân chiều) để bù trừ đi–về trong cùng ngày.
     const [a, b] = [t.from, t.to].sort();
@@ -494,6 +518,9 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
       xuatThangKg: round2(r.xuatThangKg),
       xuatNamKg: round2(r.xuatNamKg),
       tonKg: round2(r.tonKg),
+      sxKg: round2(r.sxKg),
+      sxThangKg: round2(r.sxThangKg),
+      sxNamKg: round2(r.sxNamKg),
     }))
     .filter((r) => r.nhapNamKg !== 0 || r.xuatNamKg !== 0 || r.tonKg !== 0 || r.ghiChu !== "")
     .sort(
@@ -528,6 +555,11 @@ async function computeStock(factoryId: string, ngay: string, useOpening: boolean
     shiftRows,
     ngayChotTon,
     unmatchedExport: { bales: unmatchedBales, orderCount: unmatchedOrders.size, lotCount: unmatchedLots.size },
+    thayBocYear: [...thayBocYearNet.values()]
+      .filter((v) => v.bales !== 0 && v.a !== v.b)
+      .map((v) => (v.bales > 0
+        ? { loaiCsr: v.loaiCsr, loaiBanh: v.loaiBanh, from: v.a, to: v.b, bales: v.bales, kg: round2(v.kg) }
+        : { loaiCsr: v.loaiCsr, loaiBanh: v.loaiBanh, from: v.b, to: v.a, bales: -v.bales, kg: round2(-v.kg) })),
   };
 }
 
@@ -685,25 +717,43 @@ export async function loadOpeningStockOptions(
       a.loaiBanh - b.loaiBanh,
   );
 }
+
 // ── Lũy kế chế biến tháng / năm cho Phiếu báo thành phẩm (F09) ──
-// Cùng nguồn với cột "Nhập" Mục 1 của F12 (computeStock, không dùng tồn đầu kỳ): bọc theo lúc sản xuất + sổ
-// cái Thay bọc, lô không giao dịch tính theo lots.tong_kg. Gộp MỌI BỌC theo (CSR, loại bành, nguồn): nguồn "Công ty"
-// = "Chế biến", nguồn khác (Thu mua, Gia công...) giữ nhãn riêng — người dùng chốt 2026-11-09.
+// Theo bọc LÚC SẢN XUẤT (2026-11-10, người dùng chốt): computeStock.sx* — không cộng/trừ Thay bọc; Thay bọc chỉ in thành ghi
+// chú. Tách theo (CSR, loại bành, BỌC, nguồn); nguồn "Công ty" = "Chế biến". Lô không giao dịch tính theo lots.tong_kg.
+// Cộng thêm dòng Tồn đầu kỳ được tick "tính lũy kế SX năm sau" (product_opening_stock.tinh_luy_ke, ngay_chot thuộc năm
+// trước) — vd 31/12/2025 "Sản xuất bù 22 bành lô 54m" vào lũy kế 2026. Không tick ⇒ không cộng (kiểm kê toàn kho).
 export type ProductionCumulativeRow = {
   loaiCsr: string;
   loaiBanh: number;
-  /** "Chế biến" (hàng công ty) | "Thu mua" | "Gia công" | ... */
+  /** Bọc lúc sản xuất; "" = không ghi bọc. */
+  boc: string;
+  /** "Chế biến" (hàng công ty) | "Thu mua" | "Gia công" | "Tồn ĐK dd/mm/yy" */
   nguon: string;
   ngayKg: number;
   thangKg: number;
   namKg: number;
+  /** Dòng tồn đầu kỳ được tick (in kèm dấu * và ghi chú dưới khối). */
+  isOpening?: boolean;
+};
+
+/** Ghi chú dưới khối lũy kế, gắn (CSR, bành) để F09 chỉ in ghi chú của nhóm đang hiển thị. */
+export type ProductionCumulativeNote = { loaiCsr: string; loaiBanh: number; text: string };
+
+export type ProductionCumulative = { rows: ProductionCumulativeRow[]; notes: ProductionCumulativeNote[] };
+
+type OpeningLuyKeRow = { ngay_chot: string; loai_csr: string; nguon_goc: string; boc: string | null; loai_banh: number | string; ton_kg: number | string; ghi_chu: string | null };
+
+const fmtShortDay = (iso: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : iso;
 };
 
 export async function loadProductionCumulative(
   factoryId: string,
   ngay: string,
   accessToken: string | null,
-): Promise<ProductionCumulativeRow[]> {
+): Promise<ProductionCumulative> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(ngay)) throw new Error("Ngày báo cáo không hợp lệ.");
   await assertReportAccess(
     accessToken,
@@ -711,21 +761,64 @@ export async function loadProductionCumulative(
     [...REPORT_SHIFT_PERMISSIONS, ...REPORT_DAILY_PERMISSIONS],
     "lũy kế sản xuất",
   );
-  const { stockRows } = await computeStock(factoryId, ngay, false);
+  const { stockRows, thayBocYear } = await computeStock(factoryId, ngay, false);
   const map = new Map<string, ProductionCumulativeRow>();
   for (const r of stockRows) {
     const nguon = r.nguonGoc === "Công ty" ? "Chế biến" : r.nguonGoc;
-    const k = `${r.loaiCsr}||${r.loaiBanh}||${nguon}`;
-    const acc = map.get(k) || { loaiCsr: r.loaiCsr, loaiBanh: r.loaiBanh, nguon, ngayKg: 0, thangKg: 0, namKg: 0 };
-    acc.ngayKg += r.nhapKg;
-    acc.thangKg += r.nhapThangKg;
-    acc.namKg += r.nhapNamKg;
+    const boc = (r.boc || "").trim();
+    const k = `${r.loaiCsr}||${r.loaiBanh}||${boc}||${nguon}`;
+    const acc = map.get(k) || { loaiCsr: r.loaiCsr, loaiBanh: r.loaiBanh, boc, nguon, ngayKg: 0, thangKg: 0, namKg: 0 };
+    acc.ngayKg += r.sxKg;
+    acc.thangKg += r.sxThangKg;
+    acc.namKg += r.sxNamKg;
     map.set(k, acc);
   }
-  return [...map.values()]
+
+  const notes: ProductionCumulativeNote[] = [];
+  const year = Number(ngay.slice(0, 4));
+  for (const t of thayBocYear) {
+    notes.push({
+      loaiCsr: t.loaiCsr,
+      loaiBanh: t.loaiBanh,
+      text: `Thay bọc trong năm ${year}: ${t.bales.toLocaleString("vi-VN")} bành ${shortBocLabel(t.from)} → ${shortBocLabel(t.to)} (lũy kế tính theo bọc lúc sản xuất).`,
+    });
+  }
+
+  // Tồn đầu kỳ được tick, chốt trong năm trước. Thiếu cột / bảng (chưa chạy migration) ⇒ bỏ qua, không làm hỏng F09.
+  const { data: openRows, error: openErr } = await getSupabaseAdmin()
+    .from("product_opening_stock")
+    .select("ngay_chot,loai_csr,nguon_goc,boc,loai_banh,ton_kg,ghi_chu")
+    .eq("factory_id", factoryId)
+    .eq("tinh_luy_ke", true)
+    .gte("ngay_chot", `${year - 1}-01-01`)
+    .lte("ngay_chot", `${year - 1}-12-31`);
+  if (openErr && !/tinh_luy_ke|product_opening_stock|does not exist|schema cache/i.test(openErr.message)) {
+    throw new Error(openErr.message);
+  }
+  for (const o of (openErr ? [] : (openRows || [])) as OpeningLuyKeRow[]) {
+    const kg = Number(o.ton_kg) || 0;
+    if (!kg) continue;
+    const loaiCsr = (o.loai_csr || "").trim() || "—";
+    const loaiBanh = Number(o.loai_banh) || 0;
+    const boc = (o.boc || "").trim();
+    const nguon = `Tồn ĐK ${fmtShortDay(o.ngay_chot)}`;
+    const k = `${loaiCsr}||${loaiBanh}||${boc}||${nguon}`;
+    const acc = map.get(k) || { loaiCsr, loaiBanh, boc, nguon, ngayKg: 0, thangKg: 0, namKg: 0, isOpening: true };
+    acc.namKg += kg;
+    map.set(k, acc);
+    notes.push({
+      loaiCsr,
+      loaiBanh,
+      text: `(*) Tồn ĐK ${fmtShortDay(o.ngay_chot)} · ${shortBocLabel(boc)}: ${(kg / 1000).toLocaleString("vi-VN", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} tấn${o.ghi_chu?.trim() ? ` — ${o.ghi_chu.trim()}` : ""}.`,
+    });
+  }
+
+  const rank = (r: ProductionCumulativeRow) => (r.isOpening ? 2 : r.nguon === "Chế biến" ? 0 : 1);
+  const rows = [...map.values()]
     .map((r) => ({ ...r, ngayKg: round2(r.ngayKg), thangKg: round2(r.thangKg), namKg: round2(r.namKg) }))
     .filter((r) => r.namKg !== 0 || r.thangKg !== 0)
     .sort((a, b) =>
-      a.loaiCsr.localeCompare(b.loaiCsr) || a.loaiBanh - b.loaiBanh ||
-      (a.nguon === "Chế biến" ? -1 : b.nguon === "Chế biến" ? 1 : a.nguon.localeCompare(b.nguon, "vi")));
+      a.loaiCsr.localeCompare(b.loaiCsr) || a.loaiBanh - b.loaiBanh || a.boc.localeCompare(b.boc, "vi") ||
+      rank(a) - rank(b) || a.nguon.localeCompare(b.nguon, "vi"));
+  return { rows, notes };
 }

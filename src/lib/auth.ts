@@ -114,7 +114,12 @@ export function isBrowserOffline() {
 }
 
 export async function getAuthSession() {
-  const { data, error } = await supabase.auth.getSession()
+  // getSession() chờ SDK khởi tạo xong — với phiên cũ đã hết hạn, bước này làm mới token qua Web Lock và
+  // có lúc KHÔNG BAO GIỜ trả về (cùng lỗi SDK với refreshSession() ghi ở dưới). Bug thật 2026-11-10: mở link
+  // Telegram/email (trình duyệt trong app = tiến trình mới mang phiên cũ) ⇒ màn "Kết nối đang chậm…" treo mãi,
+  // F5 mới vào được /login. Bọc timeout: hết giờ ⇒ lỗi có chữ "session" ⇒ layout coi là lỗi phiên, thử lại 1 lần
+  // rồi chuyển về /login?next= (điều hướng tạo ngữ cảnh mới ⇒ khoá bị nhả; /login tự đưa về trang đích nếu phiên còn).
+  const { data, error } = await withTimeout(supabase.auth.getSession(), AUTH_OP_TIMEOUT_MS, "getSession()")
   if (error) throw error
   return data.session
 }

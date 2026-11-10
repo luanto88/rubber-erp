@@ -248,7 +248,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
      * nguồn refresh (interval, focus-listener, autoRefreshToken nền của SDK) có thể đụng độ
      * thoáng qua. Thử lại trước khi kết luận "unauthenticated" giúp tránh đăng xuất oan.
      */
-    const runSyncOnce = async (redirectBase: string, fullHydration: boolean, isRetry = false): Promise<void> => {
+    const runSyncOnce = async (redirectBase: string, fullHydrationArg: boolean, isRetry = false): Promise<void> => {
+      // Bootstrap chưa nạp được user (lỗi mạng / treo) ⇒ lượt interval/focus phải hydrate ĐẦY ĐỦ, nếu không
+      // bản nhẹ chỉ đặt "authenticated" mà user vẫn null ⇒ spinner quay mãi, mất cả nút "Tải lại trang".
+      const fullHydration = fullHydrationArg || !sessionSettled
       try {
         if (!fullHydration) {
           // Lightweight: chỉ verify token còn sống, không gọi DB

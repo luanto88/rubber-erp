@@ -359,10 +359,12 @@ const fmtTan = (kg: number) =>
   (kg / 1000).toLocaleString("vi-VN", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 
 // Lũy kế tháng / năm — dạng GHI CHÚ (không kẻ bảng) góc phải ngay dưới bảng "Tổng hợp", các dòng ngăn bằng nét đứt
-// mờ (mẫu người dùng duyệt 2026-11-09). Mỗi (CSR, loại bành) có sản xuất trong ngày: dòng "Chế biến" (hàng công ty,
-// gộp mọi bọc) rồi Thu mua / Gia công nếu có, có ≥ 2 dòng thì thêm dòng "Tổng". Không có dữ liệu ⇒ không vẽ.
+// mờ (mẫu người dùng duyệt 2026-11-09). Mỗi (CSR, loại bành) có sản xuất trong ngày: MỖI BỌC có trong năm là 1 nhóm
+// (2026-11-10, trước gộp mọi bọc) gồm "Chế biến" rồi Thu mua / Gia công nếu có, nhóm ≥ 2 dòng thì thêm "Tổng"; CSR/bành có
+// ≥ 2 bọc thì thêm dòng "Tổng các bọc". Không có dữ liệu ⇒ không vẽ.
 const CUM_WIDTH = 100;
 const CUM_ROW_H = 6.3;
+const CUM_NOTE_H = 3.1;
 
 function drawCumDash(doc: jsPDF, left: number, right: number, y: number) {
   doc.setDrawColor(203, 213, 225);
@@ -375,10 +377,14 @@ function drawCumDash(doc: jsPDF, left: number, right: number, y: number) {
 function renderCumulative(doc: jsPDF, startY: number, data: ShiftReportData) {
   const all = data.cumulative || [];
   const todayKeys = new Set(all.filter((r) => r.ngayKg > 0).map((r) => `${r.loaiCsr}||${r.loaiBanh}`));
-  const groups = new Map<string, typeof all>();
+  // (CSR, bành) → (bọc → các dòng nguồn); `all` đã sắp CSR → bành → bọc → nguồn nên giữ đúng thứ tự chèn.
+  const groups = new Map<string, Map<string, typeof all>>();
   for (const r of all) {
     const k = `${r.loaiCsr}||${r.loaiBanh}`;
-    if (todayKeys.has(k)) groups.set(k, [...(groups.get(k) || []), r]);
+    if (!todayKeys.has(k)) continue;
+    const byBoc = groups.get(k) || new Map<string, typeof all>();
+    byBoc.set(r.boc || "", [...(byBoc.get(r.boc || "") || []), r]);
+    groups.set(k, byBoc);
   }
   if (groups.size === 0) return;
   const monthLabel = `Tháng ${data.ngay.slice(5, 7)}/${data.ngay.slice(0, 4)}:`;
@@ -386,7 +392,17 @@ function renderCumulative(doc: jsPDF, startY: number, data: ShiftReportData) {
   const right = PAGE_LEFT + CONTENT_WIDTH;
   const left = right - CUM_WIDTH;
   let lineCount = 0;
-  for (const rows of groups.values()) lineCount += 1 + rows.length + (rows.length > 1 ? 1 : 0);
+  for (const byBoc of groups.values()) {
+    for (const rows of byBoc.values()) lineCount += 1 + rows.length + (rows.length > 1 ? 1 : 0);
+    if (byBoc.size > 1) lineCount += 1;
+  }
+  // Ghi chú (Thay bọc trong năm, tồn đầu kỳ được tick) — chỉ của các (CSR, bành) đang in.
+  doc.setFont(PDF_FONT_NAME, "normal");
+  doc.setFontSize(6.8);
+  const noteLines = (data.cumulativeNotes || [])
+    .filter((n) => groups.has(`${n.loaiCsr}||${n.loaiBanh}`))
+    .flatMap((n) => doc.splitTextToSize(n.text, CUM_WIDTH) as string[]);
+  if (noteLines.length) lineCount += Math.ceil((noteLines.length * CUM_NOTE_H + 2) / CUM_ROW_H);
 
   let y = ensurePageSpace(doc, startY, 10 + lineCount * CUM_ROW_H) + 7;
   doc.setTextColor(15, 23, 42);
@@ -415,20 +431,44 @@ function renderCumulative(doc: jsPDF, startY: number, data: ShiftReportData) {
     drawCumDash(doc, left, right, y);
   };
 
-  for (const rows of groups.values()) {
-    y += 4.3;
-    doc.setFont(PDF_FONT_NAME, "bold");
-    doc.setFontSize(7.8);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`${loaiCsrLabel(rows[0].loaiCsr)} · bành ${rows[0].loaiBanh || "—"} kg`, left, y);
-    for (const r of rows) drawLine(`– ${r.nguon || "—"}`, r.thangKg, r.namKg, false);
-    if (rows.length > 1) {
+  for (const byBoc of groups.values()) {
+    const first = [...byBoc.values()][0][0];
+    const csrBanh = `${loaiCsrLabel(first.loaiCsr)} · bành ${first.loaiBanh || "—"} kg`;
+    for (const [boc, rows] of byBoc) {
+      y += 4.3;
+      doc.setFont(PDF_FONT_NAME, "bold");
+      doc.setFontSize(7.8);
+      doc.setTextColor(15, 23, 42);
+      const header = doc.splitTextToSize(`${csrBanh} · ${boc || "Không ghi bọc"}`, CUM_WIDTH) as string[];
+      doc.text(header[0], left, y);
+      for (const r of rows) drawLine(r.isOpening ? `– ${r.nguon} *` : `– ${r.nguon || "—"}`, r.thangKg, r.namKg, false);
+      if (rows.length > 1) {
+        drawLine(
+          "Tổng",
+          rows.reduce((s, r) => s + r.thangKg, 0),
+          rows.reduce((s, r) => s + r.namKg, 0),
+          true,
+        );
+      }
+    }
+    if (byBoc.size > 1) {
+      const rowsAll = [...byBoc.values()].flat();
       drawLine(
-        "Tổng",
-        rows.reduce((s, r) => s + r.thangKg, 0),
-        rows.reduce((s, r) => s + r.namKg, 0),
+        "Tổng các bọc",
+        rowsAll.reduce((s, r) => s + r.thangKg, 0),
+        rowsAll.reduce((s, r) => s + r.namKg, 0),
         true,
       );
+    }
+  }
+  if (noteLines.length) {
+    y += 2;
+    doc.setFont(PDF_FONT_NAME, "normal");
+    doc.setFontSize(6.8);
+    doc.setTextColor(100, 116, 139);
+    for (const line of noteLines) {
+      y += CUM_NOTE_H;
+      doc.text(line, left, y);
     }
   }
   doc.setTextColor(15, 23, 42);

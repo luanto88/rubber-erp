@@ -26,7 +26,7 @@ import { getLoaiBanhConfig } from "@/lib/product-lot-config";
 import type { PackagingConfig } from "@/lib/product-packaging";
 import { loadPackagingConfigServer } from "@/lib/product-packaging-server";
 import { loadPalletComponentsServer } from "@/lib/pallet-components-server";
-import { loadProductionCumulative, type ProductionCumulativeRow } from "@/app/dashboard/product/confirm/daily-report-actions";
+import { loadProductionCumulative, type ProductionCumulativeNote, type ProductionCumulativeRow } from "@/app/dashboard/product/confirm/daily-report-actions";
 import { formatNapSuffix, isNapCode, lotNapByKien, palletNeedsNap, parseNapMap, type LotNapState, type NapMap } from "@/lib/pallet-nap";
 import type { PalletComponentsConfig } from "@/lib/pallet-components";
 import type { GradeConfig } from "@/lib/product-grade";
@@ -1220,6 +1220,8 @@ export type ShiftReportData = {
   completedLots: CompletedLotRow[];
   /** F09: lũy kế chế biến tháng/năm theo (CSR, loại bành, bọc) — cùng nguồn F12. Lỗi tính ⇒ undefined (không chặn phiếu). */
   cumulative?: ProductionCumulativeRow[];
+  /** Ghi chú dưới khối lũy kế (Thay bọc trong năm, dòng tồn đầu kỳ được tick). */
+  cumulativeNotes?: ProductionCumulativeNote[];
 };
 
 function joinUniqueSlash(values: (string | null | undefined)[]): string {
@@ -1560,9 +1562,12 @@ export async function loadShiftReportData(
 
   // F09: lũy kế tháng/năm (chỉ phiếu thành phẩm). Lỗi không chặn phiếu.
   let cumulative: ProductionCumulativeRow[] | undefined;
+  let cumulativeNotes: ProductionCumulativeNote[] | undefined;
   if (purpose === "shift") {
     try {
-      cumulative = await loadProductionCumulative(factoryId, ngaySx, accessToken);
+      const cum = await loadProductionCumulative(factoryId, ngaySx, accessToken);
+      cumulative = cum.rows;
+      cumulativeNotes = cum.notes;
     } catch (err) {
       console.warn("[F09] không tính được lũy kế:", err);
     }
@@ -1577,6 +1582,7 @@ export async function loadShiftReportData(
     byGroup: [...byGroupMap.values()].map((g) => ({ ...g, soKg: Math.round(g.soKg * 100) / 100 })),
     completedLots,
     cumulative,
+    cumulativeNotes,
   };
 }
 

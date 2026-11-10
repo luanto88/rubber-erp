@@ -393,3 +393,9 @@ Q2 chung dãy ĐNMVT, Q3 badge chỉ cho phiếu gia công / hỗn hợp.
   tên (lý do: Chau Chók và Tô Thành Luân cùng chức vụ chính quyền "Giám đốc"). Form vẫn bỏ gợi ý nếu trùng người đang lập.
 - Icon gia công = `_components/gia-cong-icon.tsx` (bánh răng + tia lửa điện, kiểu `LucideIcon`): banner tab Gia công / lập / sửa
   phiếu gia công, nút "Xác nhận gia công", lịch sử hoàn thành, thẻ hướng dẫn.
+
+## Mã bắt buộc + tin nhắn phân biệt loại phiếu (2026-11-10, chờ test tay)
+- Tạo vật tư / dịch vụ mới từ phiếu: Mã BẮT BUỘC (form + `/api/purchase/items` trả 400), đã bỏ `nextCode` tự sinh.
+- Telegram/email ký số: dòng nhãn "🛒 MUA VẬT TƯ" / "🛠️ GIA CÔNG NGOÀI" / "🛒🛠️ MUA VẬT TƯ + GIA CÔNG" dưới tiêu đề, tiêu đề email
+  "[Ký duyệt · Gia công] …"; phiếu gia công ghi "Cần hoàn thành", phiếu hỗn hợp đánh dấu "(gia công)" từng dòng dịch vụ
+  (`buildPurchaseSummary` trong `src/lib/signing/notify.ts`, dịch vụ theo `inventory_items.la_dich_vu`).

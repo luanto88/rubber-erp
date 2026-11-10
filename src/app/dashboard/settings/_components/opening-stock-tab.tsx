@@ -28,6 +28,8 @@ type DbRow = {
   loai_banh: number | string
   ton_kg: number | string
   ghi_chu: string | null
+  /** Cộng vào lũy kế sản xuất năm sau trên F09 (migration 20261120). */
+  tinh_luy_ke?: boolean | null
 }
 
 type GridRow = {
@@ -39,6 +41,7 @@ type GridRow = {
   loai_banh: string
   ton_kg: string
   ghi_chu: string
+  tinh_luy_ke: boolean
 }
 
 // Dropdown lọc xếp tầng CSR → Nguồn gốc → Bọc → Loại bành, chỉ gồm tổ hợp có thật trong dữ liệu
@@ -85,6 +88,7 @@ function fromDb(r: DbRow): GridRow {
     loai_banh: String(Number(r.loai_banh) || ""),
     ton_kg: String(Number(r.ton_kg) || 0),
     ghi_chu: r.ghi_chu || "",
+    tinh_luy_ke: !!r.tinh_luy_ke,
   }
 }
 
@@ -108,23 +112,36 @@ export function OpeningStockTab({ factoryId, canManage }: { factoryId: string | 
   const [info, setInfo] = useState("")
   const [delConfirm, setDelConfirm] = useState(false)
   const [combos, setCombos] = useState<Combo[]>([])
+  // Cột tinh_luy_ke có trên DB chưa (migration 20261120) — chưa có thì ẩn ô tick và không gửi cột khi lưu.
+  const [hasLuyKeCol, setHasLuyKeCol] = useState(true)
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
     try {
       // Phân trang thật: PostgREST cắt 1000 dòng dù xin range lớn hơn.
-      let data: DbRow[]
-      try {
-        data = await fetchAllPaginated<DbRow>((from, to) =>
+      const fetchWith = (cols: string) =>
+        fetchAllPaginated<DbRow>((from, to) =>
           supabase
             .from("product_opening_stock")
-            .select("id,ngay_chot,loai_csr,nguon_goc,boc,loai_banh,ton_kg,ghi_chu")
+            .select(cols)
             .eq("factory_id", fid)
             .order("ngay_chot", { ascending: false })
             .order("loai_csr", { ascending: true })
             .order("id", { ascending: true })
-            .range(from, to),
+            .range(from, to) as unknown as PromiseLike<{ data: DbRow[] | null; error: unknown }>,
         )
+      const BASE_COLS = "id,ngay_chot,loai_csr,nguon_goc,boc,loai_banh,ton_kg,ghi_chu"
+      let data: DbRow[]
+      try {
+        try {
+          data = await fetchWith(`${BASE_COLS},tinh_luy_ke`)
+          setHasLuyKeCol(true)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String((err as { message?: string })?.message ?? err)
+          if (!/tinh_luy_ke/i.test(msg)) throw err
+          data = await fetchWith(BASE_COLS)
+          setHasLuyKeCol(false)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String((err as { message?: string })?.message ?? err))
         return
@@ -190,6 +207,7 @@ export function OpeningStockTab({ factoryId, canManage }: { factoryId: string | 
         loai_banh: "",
         ton_kg: "0",
         ghi_chu: "",
+        tinh_luy_ke: false,
       }),
     ])
     setDirty(true)
@@ -221,6 +239,7 @@ export function OpeningStockTab({ factoryId, canManage }: { factoryId: string | 
             loai_banh: String(s.loaiBanh),
             ton_kg: String(s.tonKg),
             ghi_chu: old?.ghi_chu || "",
+            tinh_luy_ke: old?.tinh_luy_ke ?? false,
           })
         }
         return [...next, ...byKey.values()]
@@ -261,6 +280,7 @@ export function OpeningStockTab({ factoryId, canManage }: { factoryId: string | 
         loai_banh: Number(r.loai_banh),
         ton_kg: Math.round(Number(r.ton_kg) * 100) / 100,
         ghi_chu: r.ghi_chu.trim() || null,
+        ...(hasLuyKeCol ? { tinh_luy_ke: r.tinh_luy_ke } : {}),
         created_by: session?.user?.id ?? null,
       }))
       // Upsert trước, xóa dòng thừa sau — lỗi giữa chừng không làm mất số chốt cũ.
@@ -414,6 +434,14 @@ export function OpeningStockTab({ factoryId, canManage }: { factoryId: string | 
                 <th className="px-2 py-2 text-left w-24">Loại bành</th>
                 <th className="px-2 py-2 text-right w-32">Tồn (kg)</th>
                 <th className="px-2 py-2 text-left">Ghi chú</th>
+                {hasLuyKeCol && (
+                  <th
+                    className="px-2 py-2 text-center w-28"
+                    title="Tick cho dòng sản xuất bù / điều chỉnh để cộng vào lũy kế sản xuất NĂM SAU trên Phiếu báo thành phẩm (F09). KHÔNG tick khi nhập kiểm kê toàn kho."
+                  >
+                    Tính lũy kế SX năm sau
+                  </th>
+                )}
                 {canManage && <th className="w-10" />}
               </tr>
             </thead>
@@ -458,6 +486,18 @@ export function OpeningStockTab({ factoryId, canManage }: { factoryId: string | 
                     />
                   </td>
                   <td className="px-2 py-1.5"><input disabled={!canManage} value={r.ghi_chu} onChange={(e) => updateRow(r.key, { ghi_chu: e.target.value })} className={inputCls} /></td>
+                  {hasLuyKeCol && (
+                    <td className="px-2 py-1.5 text-center">
+                      <input
+                        type="checkbox"
+                        disabled={!canManage}
+                        checked={r.tinh_luy_ke}
+                        onChange={(e) => updateRow(r.key, { tinh_luy_ke: e.target.checked })}
+                        aria-label="Tính vào lũy kế sản xuất năm sau"
+                        className="h-4 w-4 accent-emerald-600"
+                      />
+                    </td>
+                  )}
                   {canManage && (
                     <td className="px-2 py-1.5">
                       <button
@@ -477,7 +517,7 @@ export function OpeningStockTab({ factoryId, canManage }: { factoryId: string | 
                 <td className={"px-2 py-2 text-right" + (totalKg < 0 ? " text-red-600" : "")}>
                   {totalKg.toLocaleString("vi-VN", { maximumFractionDigits: 2 })}
                 </td>
-                <td colSpan={canManage ? 2 : 1} />
+                <td colSpan={(canManage ? 2 : 1) + (hasLuyKeCol ? 1 : 0)} />
               </tr>
             </tbody>
           </table>

@@ -899,3 +899,14 @@ Nắp ghi theo kiện ở `lot_transactions.nap` (chỉ pallet Sắt đế gỗ/
   đợi mất mạng vì ô ghi chú bị ẩn khi offline). Lô cũ 1m/2m/3m/26 đã có "TM", không backfill.
 - Quét bổ sung kiện đã có nắp (`partial_kien`) ⇒ ô Nắp chọn sẵn nắp đang có của kiện (đã gửi → nháp → hàng đợi máy này;
   offline lấy `pack.lotNap`). Hàm gộp dùng chung `loadMergedLotNapState` trong `confirm/page.tsx` (cũng dùng cho banner > 2 nắp).
+
+## 4.26. Lũy kế F09 tách theo bọc (2026-11-10, chờ test tay)
+`loadProductionCumulative` nay gom theo (CSR, loại bành, BỌC, nguồn) — `ProductionCumulativeRow.boc`. F09: mỗi (CSR, bành) có
+sản xuất trong ngày in mỗi bọc có trong năm thành 1 nhóm ("CSR10 · bành 35 kg · Bọc nhãn 0,04 VRG CSR10"), ≥ 2 bọc thêm dòng
+"Tổng các bọc". Bản cứng F09 đã lưu trước đó giữ nguyên.
+- Cập nhật 2026-11-10 (chờ test tay): lũy kế F09 theo **bọc LÚC SẢN XUẤT** — `computeStock` thêm `sxKg/sxThangKg/sxNamKg` (không cộng/
+  trừ Thay bọc; `nhap*`/`tonKg` của F12 không đổi) + `thayBocYear`. `loadProductionCumulative` trả `{ rows, notes }`; F09 in ghi chú
+  "Thay bọc trong năm …" và dòng "– Tồn ĐK dd/mm/yy *" cho dòng `product_opening_stock.tinh_luy_ke = true` chốt NĂM TRƯỚC (migration
+  `20261120_product_opening_stock_luy_ke.sql`, chạy tay; tick ở Cài đặt → Tồn đầu kỳ thành phẩm, cột "Tính lũy kế SX năm sau").
+  Kiểm bằng code thật 31/10/2026: trơn lúc SX 732,060 t, nhãn chế biến 9.284,415, thay bọc 7.092 bành, tổng 10.031,595 (+0,770 khi tick
+  dòng 31/12/2025 "Sản xuất bù 22 bành lô 54m" ⇒ 10.032,365).

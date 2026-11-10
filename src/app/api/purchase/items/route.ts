@@ -22,20 +22,6 @@ type Body = {
   laDichVu?: boolean
 }
 
-async function nextCode(factoryId: string, prefix: string): Promise<string> {
-  const { data } = await supabaseAdmin
-    .from("inventory_items")
-    .select("code")
-    .eq("factory_id", factoryId)
-    .ilike("code", `${prefix}-%`)
-  let max = 0
-  for (const r of (data || []) as { code: string }[]) {
-    const m = r.code.slice(prefix.length + 1).match(/^(\d+)$/)
-    if (m) max = Math.max(max, Number(m[1]))
-  }
-  return `${prefix}-${String(max + 1).padStart(3, "0")}`
-}
-
 export async function POST(req: NextRequest) {
   try {
     const actor = await resolveIsoActor(req)
@@ -86,8 +72,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    let code = String(body.code || "").trim().toUpperCase()
-    if (!code) code = await nextCode(factoryId, String(category.code || "VT").toUpperCase())
+    // 2026-11-10: mã BẮT BUỘC do người lập nhập — không tự sinh nữa (người dùng chốt).
+    const code = String(body.code || "").trim().toUpperCase().replace(/\s+/g, "")
+    if (!code) {
+      return NextResponse.json({ error: laDichVu ? "Cần nhập Mã dịch vụ" : "Cần nhập Mã vật tư" }, { status: 400 })
+    }
     const { data: codeDup } = await supabaseAdmin
       .from("inventory_items").select("id").eq("factory_id", factoryId).eq("code", code).maybeSingle()
     if (codeDup) return NextResponse.json({ error: `Mã vật tư ${code} đã tồn tại` }, { status: 409 })

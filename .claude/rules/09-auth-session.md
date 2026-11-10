@@ -365,3 +365,9 @@ Migration se:
 - tao auth user bang email noi bo hop le
 - tao / upsert `profiles`
 - migrate permission cu sang `user_permissions`
+
+## getSession() có timeout (2026-11-10, chờ test tay)
+Bug thật: mở link Telegram/email (trình duyệt trong app, tiến trình mới mang phiên cũ) ⇒ màn "Kết nối đang chậm…" treo mãi,
+F5 mới ra /login. `getAuthSession()` (`src/lib/auth.ts`) bọc `withTimeout(getSession(), 8s)` như refreshSession — hết giờ ⇒ lỗi
+chứa "session" ⇒ layout thử lại 1 lần rồi về `/login?next=`. `runSyncOnce`: chưa nạp được user (`sessionSettled=false`) ⇒ lượt
+interval/focus chạy hydration ĐẦY ĐỦ (trước chỉ bản nhẹ ⇒ "authenticated" mà user null ⇒ spinner mãi).

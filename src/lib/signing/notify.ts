@@ -3,7 +3,7 @@ import { after } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { escapeHtml } from "@/lib/html-escape"
 import { getFactoryTodayISO } from "@/lib/date-utils"
-import { purchaseUrgency } from "@/lib/purchase/types"
+import { purchaseRequestKind, purchaseUrgency, type PurchaseRequestKind } from "@/lib/purchase/types"
 import { signingDocLabel, isUuid, buildMaintenanceDocLabel, formatMaHoSoDisplay } from "./labels"
 
 // Thông báo 3 kênh cho hệ thống ký số dùng chung (Chất lượng / Điều xe / Bảo trì).
@@ -74,17 +74,38 @@ type NotifyContext = {
   buoc?: number | null
   /** Dòng tóm tắt nghiệp vụ riêng theo module (chưa escape — escape lúc render). */
   extraLines?: string[]
+  /** Nhãn loại chứng từ nổi bật (vd "🛠️ GIA CÔNG NGOÀI") — in ngay dưới tiêu đề, kèm tiền tố tiêu đề email. */
+  kindBadge?: string | null
+  kindSubjectTag?: string | null
 }
 
-/** Tóm tắt phiếu đề nghị mua cho Telegram/email (số dòng, tổng tiền, cờ cảnh báo). */
-async function buildPurchaseSummary(requestId: string): Promise<string[]> {
+/** Nhãn loại phiếu đề nghị mua cho tin nhóm: phân biệt rõ mua vật tư / gia công / hỗn hợp. */
+const PURCHASE_KIND_BADGE: Record<PurchaseRequestKind, { badge: string; tag: string }> = {
+  vat_tu: { badge: "🛒 MUA VẬT TƯ", tag: "Mua vật tư" },
+  gia_cong: { badge: "🛠️ GIA CÔNG NGOÀI", tag: "Gia công" },
+  hon_hop: { badge: "🛒🛠️ MUA VẬT TƯ + GIA CÔNG", tag: "VT + Gia công" },
+}
+
+type PurchaseSummary = { lines: string[]; kind: PurchaseRequestKind | null }
+
+/** Tóm tắt phiếu đề nghị mua cho Telegram/email (loại phiếu, số dòng, tổng tiền, cờ cảnh báo). */
+async function buildPurchaseSummary(requestId: string): Promise<PurchaseSummary> {
   const supabase = getSupabaseAdmin()
   const [{ data: req }, { data: lines }] = await Promise.all([
     supabase.from("purchase_requests").select("tong_tien, loai_tien, nguoi_de_nghi_ten, bo_phan, ngay_can_hang").eq("id", requestId).maybeSingle(),
-    supabase.from("purchase_request_lines").select("item_name, so_luong, unit, la_vat_tu_moi, lech_gia_pct").eq("request_id", requestId).order("sort_order"),
+    supabase.from("purchase_request_lines").select("item_id, item_name, so_luong, unit, la_vat_tu_moi, lech_gia_pct").eq("request_id", requestId).order("sort_order"),
   ])
-  if (!req) return []
-  const rows = (lines || []) as { item_name: string; so_luong: number; unit: string | null; la_vat_tu_moi: boolean; lech_gia_pct: number | null }[]
+  if (!req) return { lines: [], kind: null }
+  const rows = (lines || []) as { item_id: string | null; item_name: string; so_luong: number; unit: string | null; la_vat_tu_moi: boolean; lech_gia_pct: number | null }[]
+  // Dịch vụ gia công = inventory_items.la_dich_vu (nguồn sự thật, cùng quy tắc API danh sách/chi tiết).
+  const itemIds = [...new Set(rows.map((r) => r.item_id).filter(Boolean) as string[])]
+  const serviceIds = new Set<string>()
+  if (itemIds.length) {
+    const { data: svc } = await supabase.from("inventory_items").select("id").in("id", itemIds).eq("la_dich_vu", true)
+    for (const s of (svc || []) as { id: string }[]) serviceIds.add(s.id)
+  }
+  const kind = rows.length ? purchaseRequestKind(rows.map((r) => r.item_id), serviceIds) : null
+  const isGiaCong = kind === "gia_cong"
   const loaiTien = (req.loai_tien as string) || "USD"
   const tong = Number(req.tong_tien || 0).toLocaleString("vi-VN", { maximumFractionDigits: loaiTien === "USD" ? 2 : 0 })
   const out = [
@@ -97,16 +118,19 @@ async function buildPurchaseSummary(requestId: string): Promise<string[]> {
     const urg = purchaseUrgency(canHang, getFactoryTodayISO())
     const [y, m, d] = canHang.slice(0, 10).split("-")
     const flag = urg && (urg.level === "qua_han" || urg.level === "gap") ? "🔥 " : ""
-    out.push(`${flag}Cần hàng: ${d}/${m}/${y}${urg ? ` (${urg.label})` : ""}`)
+    out.push(`${flag}${isGiaCong ? "Cần hoàn thành" : "Cần hàng"}: ${d}/${m}/${y}${urg ? ` (${urg.label})` : ""}`)
   }
-  const preview = rows.slice(0, 5).map((r) => `• ${r.item_name}: ${Number(r.so_luong).toLocaleString("vi-VN")} ${r.unit || ""}`.trim())
+  const preview = rows.slice(0, 5).map((r) => {
+    const svcTag = kind === "hon_hop" && r.item_id && serviceIds.has(r.item_id) ? " (gia công)" : ""
+    return `• ${r.item_name}${svcTag}: ${Number(r.so_luong).toLocaleString("vi-VN")} ${r.unit || ""}`.trim()
+  })
   out.push(...preview)
-  if (rows.length > 5) out.push(`… và ${rows.length - 5} vật tư khác`)
+  if (rows.length > 5) out.push(`… và ${rows.length - 5} ${isGiaCong ? "dịch vụ" : "vật tư"} khác`)
   const moi = rows.filter((r) => r.la_vat_tu_moi).length
   const lech = rows.filter((r) => r.lech_gia_pct !== null && Math.abs(Number(r.lech_gia_pct)) > 10).length
-  if (moi) out.push(`⚠️ ${moi} vật tư mới tạo từ đề nghị`)
+  if (moi) out.push(`⚠️ ${moi} ${isGiaCong ? "dịch vụ" : "vật tư"} mới tạo từ đề nghị`)
   if (lech) out.push(`⚠️ ${lech} dòng đơn giá lệch hơn 10% so với giá gợi ý`)
-  return out
+  return { lines: out, kind }
 }
 
 /**
@@ -186,6 +210,7 @@ async function sendTelegram(ctx: NotifyContext): Promise<void> {
   // HTTP 400 "can't parse entities" và mất trắng cả tin nhắn, không chỉ hỏng định dạng.
   const lines = [
     `🔔 <b>${escapeHtml(groupTitle(ctx))}</b>`,
+    ctx.kindBadge ? `<b>${escapeHtml(ctx.kindBadge)}</b>` : null,
     ``,
     `🏭 ${escapeHtml(ctx.factoryName)}`,
     `📄 ${escapeHtml(ctx.docLabel)}`,
@@ -249,6 +274,7 @@ async function sendEmail(ctx: NotifyContext): Promise<void> {
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
   <div style="background:${color};color:#fff;padding:16px 24px;border-radius:8px 8px 0 0">
     <h2 style="margin:0;font-size:18px">${escapeHtml(title)}</h2>
+    ${ctx.kindBadge ? `<p style="margin:6px 0 0;display:inline-block;background:rgba(255,255,255,.2);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:bold">${escapeHtml(ctx.kindBadge)}</p>` : ""}
     <p style="margin:4px 0 0;opacity:.9;font-size:13px">${escapeHtml(ctx.factoryName)}</p>
   </div>
   <div style="background:#f8fafc;padding:20px 24px;border:1px solid #e2e8f0;border-top:none">
@@ -275,7 +301,7 @@ async function sendEmail(ctx: NotifyContext): Promise<void> {
   await transporter.sendMail({
     from: `"Ký duyệt điện tử" <${gmailUser}>`,
     to: toEmails.join(", "),
-    subject: `[Ký duyệt] ${title}: ${ctx.docLabel}`,
+    subject: `[Ký duyệt${ctx.kindSubjectTag ? ` · ${ctx.kindSubjectTag}` : ""}] ${title}: ${ctx.docLabel}`,
     html,
   })
 }
@@ -357,6 +383,12 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
   // Giữ đúng thứ tự người nhận (thứ tự ký) khi ghép tên.
   const recipientNames = recipients.map((id) => recipientNameById.get(id)).filter(Boolean).join(", ")
 
+  const purchaseSummary: PurchaseSummary | null =
+    yeuCau.modun === "purchase" && yeuCau.ban_ghi_id
+      ? await buildPurchaseSummary(yeuCau.ban_ghi_id as string).catch(() => null)
+      : null
+  const purchaseKind = purchaseSummary?.kind ? PURCHASE_KIND_BADGE[purchaseSummary.kind] : null
+
   const ctx: NotifyContext = {
     event: plan.event,
     yeuCauId: plan.yeuCauId,
@@ -375,10 +407,9 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
     recipientNames,
     lyDo: plan.lyDo,
     buoc: plan.buoc,
-    extraLines:
-      yeuCau.modun === "purchase" && yeuCau.ban_ghi_id
-        ? await buildPurchaseSummary(yeuCau.ban_ghi_id as string).catch(() => [])
-        : undefined,
+    extraLines: purchaseSummary?.lines,
+    kindBadge: purchaseKind?.badge ?? null,
+    kindSubjectTag: purchaseKind?.tag ?? null,
   }
 
   // 3 kênh độc lập: lỗi 1 kênh không được chặn 2 kênh còn lại, và không kênh nào được ném ra

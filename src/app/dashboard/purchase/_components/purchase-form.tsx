@@ -475,6 +475,11 @@ export function PurchaseForm({
 
   const saveNewItem = async () => {
     if (!newItemFor) return
+    // 2026-11-10: mã bắt buộc nhập tay (không để hệ thống tự sinh) — server cũng chặn.
+    if (!newItemCode) {
+      setNewItemError(`Chưa nhập mã ${newItem.laDichVu ? "dịch vụ" : "vật tư"}.`)
+      return
+    }
     if (similar.length && !newItemConfirmed) {
       setNewItemError("Có vật tư tên gần giống — chọn vật tư có sẵn hoặc tick xác nhận không trùng.")
       return
@@ -962,11 +967,11 @@ export function PurchaseForm({
               </div>
             )}
             <div>
-              <label className={labelCls}>Mã {newItem.laDichVu ? "dịch vụ" : "vật tư"}</label>
+              <label className={labelCls}>Mã {newItem.laDichVu ? "dịch vụ" : "vật tư"} *</label>
               <input
                 className={`${inputCls} font-mono uppercase`}
                 value={newItem.code}
-                placeholder="Để trống ⇒ tự sinh theo phân loại"
+                placeholder={newItem.laDichVu ? "VD: GC-TIEN-001" : "VD: PTCB-019"}
                 onChange={(e) => setNewItem((v) => ({ ...v, code: e.target.value.toUpperCase().replace(/\s+/g, "") }))}
               />
               {codeClash && (
@@ -1002,7 +1007,7 @@ export function PurchaseForm({
                 <input className={inputCls} value={newItem.specification} onChange={(e) => setNewItem((v) => ({ ...v, specification: e.target.value }))} />
               </div>
             </div>
-            <p className="text-xs text-slate-500">Không nhập mã thì hệ thống tự sinh theo phân loại. Vật tư được gắn nhãn &quot;Vật tư mới&quot; để Kế toán rà khi ký.</p>
+            <p className="text-xs text-slate-500">Mã do người lập nhập theo quy ước mã của kho (in hoa, không dấu cách), không trùng mã đã có. Vật tư được gắn nhãn &quot;Vật tư mới&quot; để Kế toán rà khi ký.</p>
             {newItemError && <p className="text-sm font-semibold text-red-600">{newItemError}</p>}
           </div>
         </ModalShell>
