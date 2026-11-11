@@ -119,3 +119,54 @@ prepareImageForUpload, ngày theo getFactoryTodayISO). Kỳ [F,T] tính trọn 2
 Chỉ npx tsc --noEmit + npx eslint, không npm run build, không ghi/xoá DB khi chưa hỏi. Dừng cho tôi test, hỏi trước khi commit.
 Sau đó GĐ3 (đối soát động, lib thuần src/lib/norms/compute.ts dùng resolveNormValue) và GĐ4 (báo cáo kỳ + ký số), mỗi GĐ dừng test.
 ```
+
+## 11. Phiên 2026-11-11 — GĐ2 đã code
+Kế hoạch chi tiết GĐ2–4 + các câu đã chốt: `C:\Users\Software\.claude\plans\pasted-content-id-0c49-c-claude-md-silly-milner.md`;
+tóm tắt ở rule 30 mục "GĐ2" và "Chốt cho GĐ3–4". Mẫu tham chiếu: `cung_cap_dl/51-BC…` (Mẫu 09 điện nước), `54-BC…` (Mẫu 8A
+tháng), `55-BC…` (VT HC theo ngày), `46-BC…` (Mẫu 12B dầu).
+
+## 12. Chốt GĐ2–GĐ3b (2026-11-12) + Prompt mở đầu phiên GĐ4
+GĐ2 (nhập liệu đồng hồ / kiểm kê), GĐ3 (đối soát động), GĐ3b (mọi số đều hiển thị, chỉ số tick mới so sánh): người dùng test
+localhost PASS, migration 20261122 + 20261123 đã chạy. Chi tiết: rule 30.
+
+```
+Đọc CLAUDE.md, rule 29, rule 05, rule 30 (đủ các mục GĐ2/GĐ3/GĐ3b + "Chốt cho GĐ3–4"), rule 14 mục "Thông báo ký số dùng chung"
+và mục "Màn ký dùng chung", rule 22 mục "Bước ký đích danh", .claude/plans/dinh-muc-ktkt-2026-11-10.md (mục 3 R4/R11, 9, 12) và
+C:\Users\Software\.claude\plans\pasted-content-id-0c49-c-claude-md-silly-milner.md (mục "GĐ4" + "Chọn mẫu khi tạo báo cáo").
+Mẫu giấy tham chiếu: cung_cap_dl/54-BC… (Mẫu 8A tháng), 51-BC… (Mẫu 09 điện nước), 55-BC… (VT HC theo ngày), 46-BC… (Mẫu 12B dầu).
+
+Làm GĐ4 "Báo cáo kỳ + ký số" module Định mức KTKT. Trước khi code, hỏi tôi bằng AskUserQuestion (ngôn ngữ nghiệp vụ, có ví dụ,
+ưu/nhược, phương án khuyên dùng đứng đầu):
+ (1) số báo cáo: tự cấp theo năm như ĐNMVT (vd 54/BC-NMCB) hay nhập tay; mỗi mẫu 1 dãy số riêng hay chung;
+ (2) chuỗi người ký từng mẫu: mặc định Người lập (bước 1) → bước chèn kiểu Văn bản (0..n, đích danh) → Giám đốc
+     maintenance_staff.mac_dinh_ky ký cuối — có mẫu nào khác không (55/46 hiện chỉ GĐ + Lập bảng);
+ (3) Mẫu 8A mục 1 (NL tiếp nhận theo Đội × loại mủ, nguồn production_records), mục 2 (TP chế biến CSR × Công ty/Gia công/Thu mua),
+     mục 3 (TP xuất kho, nguồn export_orders như F12): có tái dùng đúng số F12/Sản lượng không; mục 8 CHỈ in tiêu đề; mục 10
+     giải trình BẮT BUỘC cho mọi dòng vượt; mục 11 kiến nghị tự do;
+ (4) Mẫu 12B: cột = nhóm mục đích cấp dầu → danh sách mã dầu (DOX+DOCZVC, DOXU12, DOXUNL, DON, DOCZNB, DOXU3…) — cấu hình ở đâu;
+     Mẫu 55: cột = chỉ tiêu/mã nào (mặc định mọi mã thuộc nhóm vật tư báo cáo có xuất trong kỳ);
+ (5) khi báo cáo ĐÃ KÝ: khoá ngày nhập liệu (thay STUB tech_norm_entry_locked) theo kỳ của MỌI mẫu hay chỉ Mẫu 8A; khung định mức
+     đã dùng chuyển `locked`?
+
+Sau khi chốt:
+ - Migration 20261124_tech_norms_reports.sql (chạy tay): tech_norm_report_templates (mã mẫu "Mẫu 8A-NMCB", tên, kiểu dựng
+   thang_8a | dong_ho | bang_ngay, cấu hình JSON cột, chuỗi ký mặc định, phien_ban, is_active, thứ tự; seed 4 mẫu),
+   tech_norm_report_batches (kỳ [F,T], bộ lọc NL, kỳ đồng hồ, snapshot JSON dùng chung, du_lieu_hash), tech_norm_reports
+   (batch_id, template_id + phien_ban + cấu hình đã dùng, số báo cáo, trạng thái nhap|cho_ky|da_ky|tra_ve|huy, giải trình JSON,
+   kiến nghị, yeu_cau_ky_id); thay tech_norm_entry_locked() bằng kiểm báo cáo cho_ky/da_ky phủ ngày (giữ chữ ký hàm, trigger GĐ2/GĐ3b
+   tự dùng); RLS theo current_profile_has_permission ('norms.report' tạo/sửa, 'norms.view' xem); không FOR ALL.
+ - Lib thuần src/lib/norms/report-templates/<kieu>.ts: buildData(snapshot, config) dùng ReconcileResult (lines + outside) của
+   computeReconciliation — CHỈ hiện dòng > 0; mục so sánh chỉ dòng tick; mục "Phát sinh ngoài định mức" in đủ.
+ - PDF (jsPDF, font NotoSans regular, không ✓ ⚠): QR GÓC PHẢI TRÊN trỏ /dashboard/norms/report/{id}, "Kỳ: dd/mm/yyyy – dd/mm/yyyy",
+   kỳ đồng hồ, danh sách khung định mức đã áp, cảnh báo dữ liệu thiếu. Bố cục bám đúng mẫu giấy.
+ - Ký qua yeu_cau_ky modun='norms' (loai_tai_lieu theo mẫu): thêm nhánh quyền trong api/signing/create-request, nhãn ở
+   src/lib/signing/labels.ts, fingerprint dữ liệu (src/lib/signing/data-fingerprint.ts), mẫu vị trí ký (templates.ts), chuông
+   my-pending + Telegram/email (notify.ts); đồng bộ trạng thái báo cáo sau ký/trả về (như syncPurchaseFromSigning).
+ - Tab "Báo cáo" ở /dashboard/norms: danh sách theo rule 29 (ExpandableRow, StatusBadge, SignStatusBadge, Quét QR), nút
+   "Lập bộ báo cáo kỳ": chọn kỳ + bộ lọc (dùng lại FilterBar của tab Đối soát), tick mẫu, nhập giải trình dòng vượt + kiến nghị,
+   xem trước PDF chưa ký (DocViewer loadBytes), "Gửi ký các mẫu đã chọn". Trang chi tiết /dashboard/norms/report/[id] 70/30 +
+   PDF nhúng + badge "Đã ký — dữ liệu đã đổi" khi hash lệch.
+Không đổi logic computeReconciliation ngoài phạm vi cần thiết. Kiểm bằng npx tsc --noEmit + npx eslint <file> (không npm run build);
+kiểm PDF bằng script gọi code thật (node --experimental-strip-types, cwd gốc repo, hook "@/" → src/, thay "@/lib/supabase" bằng client
+service-role CHỈ ĐỌC) trên tháng 10/2026, đối chiếu số với 54-BC. Không ghi/xoá DB khi chưa hỏi. Dừng cho tôi test, hỏi trước khi commit.
+```

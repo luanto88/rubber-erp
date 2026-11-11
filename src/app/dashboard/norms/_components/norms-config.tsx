@@ -1607,6 +1607,7 @@ type ItemForm = {
   ghi_chu: string
   sort_order: string
   is_active: boolean
+  kiem_ke_ton_xuong: boolean
 }
 
 function ItemsPanel(props: {
@@ -1652,12 +1653,12 @@ function ItemsPanel(props: {
         ? {
             id: it.id, code: it.code, name: it.name, norm_group: it.norm_group, actual_source: it.actual_source,
             inventory_item_ids: it.inventory_item_ids, vehicle_types: it.vehicle_types, ghi_chu: it.ghi_chu || "",
-            sort_order: String(it.sort_order), is_active: it.is_active,
+            sort_order: String(it.sort_order), is_active: it.is_active, kiem_ke_ton_xuong: !!it.kiem_ke_ton_xuong,
           }
         : {
             id: null, code: "", name: "", norm_group: "hoa_chat", actual_source: "kho", inventory_item_ids: [],
             vehicle_types: [], ghi_chu: "", sort_order: String((props.items.reduce((m, i) => Math.max(m, i.sort_order), 0) || 0) + 10),
-            is_active: true,
+            is_active: true, kiem_ke_ton_xuong: false,
           },
     )
 
@@ -1682,6 +1683,7 @@ function ItemsPanel(props: {
       ghi_chu: form.ghi_chu.trim() || null,
       sort_order: Number(form.sort_order) || 100,
       is_active: form.is_active,
+      kiem_ke_ton_xuong: form.actual_source === "kho" ? form.kiem_ke_ton_xuong : false,
     }
     setBusy(true)
     try {
@@ -1735,7 +1737,10 @@ function ItemsPanel(props: {
                 <td className="font-code text-xs">{it.code}</td>
                 <td className="font-semibold">{it.name}</td>
                 <td className="text-xs">{NORM_GROUP_LABEL[it.norm_group]}</td>
-                <td className="text-xs">{NORM_ACTUAL_SOURCE_LABEL[it.actual_source]}</td>
+                <td className="text-xs">
+                  {NORM_ACTUAL_SOURCE_LABEL[it.actual_source]}
+                  {it.kiem_ke_ton_xuong && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">+ kiểm kê</span>}
+                </td>
                 <td className="text-xs">
                   {it.actual_source === "kho" &&
                     (it.inventory_item_ids.length ? (
@@ -1821,6 +1826,22 @@ function ItemsPanel(props: {
                 <option value="dong_ho">{NORM_ACTUAL_SOURCE_LABEL.dong_ho}</option>
               </select>
             </Field>
+            {form.actual_source === "kho" && (
+              <label className="col-span-full flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={form.kiem_ke_ton_xuong}
+                  onChange={(e) => setForm({ ...form, kiem_ke_ton_xuong: e.target.checked })}
+                />
+                <span>
+                  <span className="font-semibold">Có kiểm kê tồn xưởng</span>
+                  <span className="block text-xs text-slate-500">
+                    Tick ⇒ Thực tế = Tồn xưởng đầu kỳ + Xuất kho − Tồn xưởng cuối kỳ (nhập ở tab Nhập liệu). Không tick ⇒ Thực tế = Xuất kho trong kỳ.
+                  </span>
+                </span>
+              </label>
+            )}
             {form.actual_source === "kho" && (
               <div className="col-span-full">
                 <Field label="Mã vật tư kho (chọn nhiều)">

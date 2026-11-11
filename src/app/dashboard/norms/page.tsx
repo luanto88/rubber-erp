@@ -1,18 +1,20 @@
 "use client"
 
-// Module Định mức Kinh tế Kỹ thuật chế biến (rule 30). GĐ1: tab "Cấu hình định mức".
-// GĐ2–GĐ4 (Nhập liệu theo ngày, Đối soát & cảnh báo, Báo cáo kỳ + ký số) thêm tab sau.
+// Module Định mức Kinh tế Kỹ thuật chế biến (rule 30). GĐ1: tab "Cấu hình định mức". GĐ2: tab "Nhập liệu"
+// (đồng hồ điện nước, kiểm kê tồn xưởng). GĐ3: tab "Đối soát". GĐ4 (Báo cáo kỳ + ký số) thêm sau.
 
 import { useEffect, useState } from "react"
-import { Scale, Settings2 } from "lucide-react"
+import { Calculator, NotebookPen, Scale, Settings2 } from "lucide-react"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { NormsConfig } from "./_components/norms-config"
+import { NormsEntry } from "./_components/norms-entry"
+import { NormsReconcile } from "./_components/norms-reconcile"
 
-type TabKey = "config"
+type TabKey = "config" | "entry" | "reconcile"
 
 function readCachedUser(): SessionUser | null {
   try {
@@ -37,6 +39,12 @@ export default function NormsPage() {
         return
       }
       setUser(cached)
+      try {
+        const t = new URLSearchParams(window.location.search).get("tab")
+        if (t === "entry" || t === "reconcile") setTab(t)
+      } catch {
+        /* bỏ qua */
+      }
       const fid = await getActiveFactoryId()
       setFactoryId(fid)
       setLoading(false)
@@ -56,9 +64,19 @@ export default function NormsPage() {
         ariaLabel="Định mức KTKT"
         value={tab}
         onChange={setTab}
-        items={[{ key: "config", label: "Cấu hình định mức", icon: Settings2 }]}
+        items={[
+          { key: "config", label: "Cấu hình định mức", icon: Settings2 },
+          { key: "entry", label: "Nhập liệu", icon: NotebookPen },
+          { key: "reconcile", label: "Đối soát", icon: Calculator },
+        ]}
       />
-      {loading ? <ListState kind="loading" /> : !factoryId ? <ListState kind="error" message="Không xác định được nhà máy." /> : <NormsConfig factoryId={factoryId} user={user} />}
+      {loading ? <ListState kind="loading" /> : !factoryId ? <ListState kind="error" message="Không xác định được nhà máy." /> : tab === "entry" ? (
+        <NormsEntry factoryId={factoryId} user={user} />
+      ) : tab === "reconcile" ? (
+        <NormsReconcile factoryId={factoryId} user={user} />
+      ) : (
+        <NormsConfig factoryId={factoryId} user={user} />
+      )}
     </div>
   )
 }

@@ -47,8 +47,19 @@ function fitOneLine(doc: jsPDF, text: string, maxWidth: number) {
   return `${s.trimEnd()}…`
 }
 
+/** Tem QR chung (mã + tên dưới QR) — dùng cho thiết bị và đồng hồ điện nước (Định mức KTKT). */
+export type QrLabelInput = { code: string; name: string; url: string }
+
 export async function buildEquipmentQrLabelsPdf(labels: EquipmentQrLabelInput[]): Promise<jsPDF> {
   if (labels.length === 0) throw new Error("Chưa chọn thiết bị nào để in tem QR.")
+  return buildQrLabelsPdf(
+    labels.map((l) => ({ code: l.ma_tb, name: l.ten_tb, url: buildEquipmentQrUrl(l.token) })),
+    "Tem QR thiết bị — cắt theo đường viền",
+  )
+}
+
+export async function buildQrLabelsPdf(labels: QrLabelInput[], pageTitle: string): Promise<jsPDF> {
+  if (labels.length === 0) throw new Error("Chưa chọn mục nào để in tem QR.")
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" })
   await ensurePdfFont(doc)
   const L = computeLayout(doc)
@@ -63,7 +74,7 @@ export async function buildEquipmentQrLabelsPdf(labels: EquipmentQrLabelInput[])
       doc.setFont(PDF_FONT_NAME, "normal")
       doc.setTextColor(15, 23, 42)
       doc.setFontSize(10)
-      doc.text("Tem QR thiết bị — cắt theo đường viền", MARGIN_MM, 8)
+      doc.text(pageTitle, MARGIN_MM, 8)
       doc.setFontSize(8)
       doc.text(`Trang ${pageNo}/${totalPages}`, pageW - MARGIN_MM, 8, { align: "right" })
     }
@@ -73,7 +84,7 @@ export async function buildEquipmentQrLabelsPdf(labels: EquipmentQrLabelInput[])
     const qrX = cellX + PAD_MM
     const qrY = cellY + PAD_MM
     const label = labels[i]
-    await addQrImage(doc, buildEquipmentQrUrl(label.token), qrX, qrY, QR_MM)
+    await addQrImage(doc, label.url, qrX, qrY, QR_MM)
 
     doc.setDrawColor(148, 163, 184)
     doc.setLineWidth(0.15)
@@ -88,9 +99,9 @@ export async function buildEquipmentQrLabelsPdf(labels: EquipmentQrLabelInput[])
     doc.setDrawColor(15, 23, 42)
     doc.setFontSize(9)
     doc.setLineWidth(9 * 0.016)
-    doc.text(fitOneLine(doc, label.ma_tb || "—", QR_MM), textX, codeY, { align: "center", renderingMode: "fillThenStroke" })
+    doc.text(fitOneLine(doc, label.code || "—", QR_MM), textX, codeY, { align: "center", renderingMode: "fillThenStroke" })
     doc.setFontSize(7)
-    doc.text(fitOneLine(doc, label.ten_tb || "", QR_MM), textX, codeY + NAME_LINE_MM, { align: "center" })
+    doc.text(fitOneLine(doc, label.name || "", QR_MM), textX, codeY + NAME_LINE_MM, { align: "center" })
   }
   return doc
 }
