@@ -22,7 +22,7 @@ import {
   syncDailyReportStatuses,
 } from "@/lib/inventory-daily-report/client"
 import { fmtNum } from "@/lib/inventory-daily-report/pdf"
-import { DAILY_REPORT_KIEU_LABEL, DAILY_REPORT_STATUS_LABEL, fmtDateVN, fmtDayShort, type DailyReport } from "@/lib/inventory-daily-report/types"
+import { DAILY_REPORT_KIEU_LABEL, DAILY_REPORT_STATUS_LABEL, fmtDateVN, fmtDayShort, maMauOf, type DailyReport } from "@/lib/inventory-daily-report/types"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { DetailPageHeader, HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { DetailSplitLayout } from "@/app/dashboard/_components/doc-ui/detail-split-layout"
@@ -172,7 +172,7 @@ export default function InventoryDailyReportDetailPage({ params }: { params: Pro
           <DetailPageHeader
             backHref="/dashboard/inventory/daily-reports"
             backLabel="Báo cáo sử dụng theo ngày"
-            eyebrow={`Kho vật tư · ${report.config?.maMau || "Báo cáo theo ngày"}`}
+            eyebrow={`Kho vật tư · ${maMauOf(report.template_kieu, report.config)}`}
             title={report.template_name}
             code={report.ma_bao_cao || "Chưa cấp số"}
             tags={

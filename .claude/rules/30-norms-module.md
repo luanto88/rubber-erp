@@ -132,3 +132,14 @@ mã mẫu trên QR, Thành phần chọn từ nhân sự thật (`/api/norms/sta
 quyền, in 2 cột), tiêu đề mục giữ cùng bảng + lặp tiêu đề bảng khi sang trang, xem trước chỉ dựng lại khi bấm "Cập nhật".
 Người ký dùng chung `src/app/api/_lib/report-approvers.ts`; số BC-NMCB nay tính cả báo cáo kho (migration 20261125).
 Còn: GĐ2b ghi đồng hồ offline. Báo cáo ngày 55/46 đã làm ở Kho vật tư (rule 13).
+
+## Xuất kho cũ (tháng 1–7/2026) trong đối soát (2026-11-15)
+- `reconcile-loader.ts`: sau xuất thật (đã bỏ phiếu điều chỉnh tồn) cộng thêm `inventory_legacy_movements` export trong kỳ,
+  BỎ dòng cũ ở ô (ngày, vật tư) đã có xuất thật — cùng quy tắc báo cáo 55/46 (`legacyExportsNotInReal`, rule 13). Dòng SL 0 bỏ.
+- `ExportMovement.legacy = true`, id `legacy:<uuid>`; checkbox "Tính ĐM" khoá (không ghi được `tech_norm_export_exclusions`);
+  trùng lệch ngày loại bằng `EXCLUDE` trong `scripts/import-inventory-legacy-nxt.mjs`. Cột "Phiếu xuất" = mã NX, ghi chú
+  "Phiếu cũ (AppSheet) — …", không link.
+- Kiểm code thật T7/2026: thật 50 dòng + cũ 128 dòng (32 dòng trùng ô bị bỏ) ⇒ TT 490, DCS 75, DOX 1.319, DOCZVC 485,
+  B004VC10 1.620, DO750K 8.233 (khớp 8A / 46-BC giấy).
+- Sản lượng tháng 1–7 trong DB (2026-11-15): TP giao dịch có T1–4, T7; **T5 = 0, T6 = 88** (thưa); NL Sản lượng **T3, T4 = 0**;
+  Km điều xe **T3, T4 = 0**; kiểm kê tồn xưởng và đồng hồ gần như chưa có ⇒ đối soát các tháng đó thiếu mẫu số (chờ người dùng).

@@ -1,6 +1,8 @@
 // Người ký báo cáo 2 bước (Người lập → Ban giám đốc), dùng chung: báo cáo định mức (norms.report) và báo cáo kho
 // theo ngày (inventory.daily_report). SERVER-ONLY (service role). Tách nguyên văn từ /api/norms/approvers (rule 30).
 //  - Người lập: tài khoản active có quyền `permission` (cấp tường minh thì chỉ dùng tập đó); luôn có người gọi.
+//    `nguoiLapScope: "nmcb"` (báo cáo kho theo ngày, người dùng chốt 2026-11-15): MỌI nhân viên active thuộc NMCB
+//    (không xét quyền — người lập chỉ ký, không thao tác dữ liệu); NMCB rỗng ⇒ toàn nhà máy.
 //  - Ban giám đốc: chức vụ chứa "giám đốc" (loại "tổng giám đốc"), ưu tiên NMCB; mặc định người tick "Người ký mặc
 //    định" (maintenance_staff.mac_dinh_ky), rồi người có chức vụ đúng "Giám đốc", rồi người đầu.
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
@@ -16,7 +18,11 @@ const lower = (t: string | null | undefined) => String(t || "").trim().toLowerCa
 const isDirector = (cv: string) => lower(cv).includes("giám đốc") && !lower(cv).includes("tổng giám đốc")
 const isMainDirector = (cv: string) => lower(cv).replace(/\s+nhà\s+máy$/u, "").trim() === "giám đốc"
 
-export async function loadReportApprovers(actor: IsoActor, permission: string): Promise<ReportApprovers> {
+export async function loadReportApprovers(
+  actor: IsoActor,
+  permission: string,
+  opts: { nguoiLapScope?: "permission" | "nmcb" } = {},
+): Promise<ReportApprovers> {
   const fid = actor.factoryId
   const [{ data: profiles, error }, { data: deptRow }] = await Promise.all([
     supabaseAdmin.from("profiles").select("id, full_name, username, role, department, department_id").eq("factory_id", fid).eq("status", "active"),
@@ -48,16 +54,22 @@ export async function loadReportApprovers(actor: IsoActor, permission: string): 
   }
   const roles = new Set(((roleRows || []) as { role: string }[]).map((r) => r.role))
   const canReport = (p: ProfileRow) => p.role === "admin" || (grantMap.has(p.id) ? grantMap.get(p.id)!.has(permission) : !!p.role && roles.has(p.role))
-  const nguoiLap: ReportPerson[] = all.filter(canReport).map((p) => ({ id: p.id, full_name: name(p), chuc_vu: chucVuOf(p.id) }))
-  if (!nguoiLap.some((p) => p.id === actor.userId)) {
-    const me = all.find((p) => p.id === actor.userId)
-    if (me) nguoiLap.push({ id: me.id, full_name: name(me), chuc_vu: chucVuOf(me.id) })
-  }
-
   const inNmcb = (p: ProfileRow) => {
     if (deptRow?.id && p.department_id === deptRow.id) return true
     const d = (p.department || "").trim()
     return d.toUpperCase() === DEPT_CODE || (!!deptRow?.name && d.toLowerCase() === String(deptRow.name).toLowerCase())
+  }
+  let lapPool: ProfileRow[]
+  if (opts.nguoiLapScope === "nmcb") {
+    const nmcb = all.filter(inNmcb)
+    lapPool = nmcb.length ? nmcb : all
+  } else {
+    lapPool = all.filter(canReport)
+  }
+  const nguoiLap: ReportPerson[] = lapPool.map((p) => ({ id: p.id, full_name: name(p), chuc_vu: chucVuOf(p.id) }))
+  if (!nguoiLap.some((p) => p.id === actor.userId)) {
+    const me = all.find((p) => p.id === actor.userId)
+    if (me) nguoiLap.push({ id: me.id, full_name: name(me), chuc_vu: chucVuOf(me.id) })
   }
   const directorOf = (p: ProfileRow): ReportPerson | null => {
     const s = staffById.get(p.id)

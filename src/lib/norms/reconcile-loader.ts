@@ -4,6 +4,7 @@
 import { supabase } from "@/lib/supabase"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { loadAdjustmentDocumentIds } from "@/lib/inventory-adjustment"
+import { LEGACY_LABEL, legacyExportsNotInReal, loadLegacyMovements } from "@/lib/inventory-legacy"
 import { addDaysISO } from "@/lib/date-utils"
 import { loadDispatchEntriesWithResolvedRows, toISODate } from "@/lib/dispatch-entry-rows"
 import { makeNguonResolver, type LotSuffixRow } from "@/lib/lot-source"
@@ -290,6 +291,17 @@ export async function loadReconcile(factoryId: string, f: ReconcileFilters): Pro
     qty: Number(m.quantity_out) || 0,
     excludedReason: exclByMv.get(m.id) ?? null,
   }))
+  // Xuất kho CŨ (AppSheet, tháng 1–7/2026): cùng quy tắc báo cáo sử dụng theo ngày — ô (ngày, vật tư) đã có xuất thật
+  // (không tính phiếu điều chỉnh) ⇒ dùng thật, bỏ dòng cũ. Người dùng chốt 2026-11-15.
+  const realKeys = new Set(usageRows.map((m) => `${String(m.movement_date).slice(0, 10)}|${m.item_id}`))
+  const legacyRaw = await loadLegacyMovements(supabase, factoryId, { from: f.from, to: f.to, movementType: "export" })
+  const legacyRows = legacyExportsNotInReal(
+    legacyRaw.map((r) => ({ ...r, ngay: String(r.ngay).slice(0, 10), itemId: r.item_id })),
+    realKeys,
+  ).filter((r) => Number(r.quantity) !== 0)
+  for (const r of legacyRows) {
+    exports.push({ id: `legacy:${r.id}`, ngay: r.ngay, inventoryItemId: r.item_id, qty: Number(r.quantity) || 0, excludedReason: null, legacy: true })
+  }
 
   // Số phiếu + ghi chú cho các dòng xuất của mã đã gắn chỉ tiêu (để người lập tick / bỏ tick).
   const mapped = new Set(items.flatMap((i) => i.inventory_item_ids))
@@ -302,6 +314,14 @@ export async function loadReconcile(factoryId: string, f: ReconcileFilters): Pro
       documentId: m.document_id,
       documentCode: doc?.documentCode || "",
       note: movementNoteText({ document_id: m.document_id, document_line_id: m.document_line_id, movement_type: "export" }, docInfo),
+    }
+  }
+  for (const r of legacyRows) {
+    if (!mapped.has(r.item_id)) continue
+    movementInfo[`legacy:${r.id}`] = {
+      documentId: "",
+      documentCode: (r.ma_nx || "").trim() || r.legacy_id,
+      note: [LEGACY_LABEL, (r.ghi_chu || "").trim()].filter(Boolean).join(" — "),
     }
   }
 

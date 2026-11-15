@@ -5,12 +5,12 @@ import { DAILY_REPORT_PERMISSION, requireDailyReport } from "../_lib/access"
 
 export const dynamic = "force-dynamic"
 
-// GET — người ký báo cáo kho theo ngày: Người lập (quyền inventory.daily_report) + Ban giám đốc (mặc định Giám đốc).
+// GET — người ký báo cáo kho theo ngày: Người lập (mọi nhân viên NMCB) + Ban giám đốc (mặc định Giám đốc).
 export async function GET(req: NextRequest) {
   try {
     const actor = await resolveIsoActor(req)
     await requireDailyReport(actor)
-    return NextResponse.json(await loadReportApprovers(actor, DAILY_REPORT_PERMISSION))
+    return NextResponse.json(await loadReportApprovers(actor, DAILY_REPORT_PERMISSION, { nguoiLapScope: "nmcb" }))
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: isoAuthErrorStatus(err) })
   }

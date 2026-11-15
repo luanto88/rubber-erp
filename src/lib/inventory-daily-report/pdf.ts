@@ -7,7 +7,7 @@ import autoTable, { type CellHookData, type RowInput } from "jspdf-autotable"
 import { addQrImage, ensurePdfFont, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
 import { COMPANY_HEADING_LINE_1, COMPANY_HEADING_LINE_2, COMPANY_HEADING_LINE_3 } from "@/lib/pdf-company-heading"
 import type { DailyReportConfig, DailyReportSignRole, DailyReportSnapshot } from "./types"
-import { fmtDayShort, periodLabel } from "./types"
+import { fmtDayShort, maMauOf, periodLabel } from "./types"
 
 const INK: [number, number, number] = [15, 23, 42]
 const RED: [number, number, number] = [185, 28, 28]
@@ -61,9 +61,10 @@ export async function buildDailyReportPdf(input: DailyReportPdfInput): Promise<D
   // ── Đầu trang ────────────────────────────────────────────────────────────
   doc.setFont(PDF_FONT_NAME, "normal")
   doc.setTextColor(...INK)
-  if (cfg.maMau) {
+  const maMau = maMauOf(snap.kieu, cfg)
+  if (maMau) {
     doc.setFontSize(7)
-    doc.text(cfg.maMau, W - M - QR / 2, QR_Y - 0.8, { align: "center" })
+    doc.text(maMau, W - M - QR / 2, QR_Y - 0.8, { align: "center" })
   }
   const leftW = 100
   const lx = M + leftW / 2

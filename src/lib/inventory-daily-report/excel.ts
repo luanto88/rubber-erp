@@ -3,7 +3,7 @@
 
 import { COMPANY_HEADING_LINE_1, COMPANY_HEADING_LINE_2, COMPANY_HEADING_LINE_3 } from "@/lib/pdf-company-heading"
 import type { DailyReportConfig, DailyReportSnapshot } from "./types"
-import { fmtDayShort, periodLabel } from "./types"
+import { fmtDayShort, maMauOf, periodLabel } from "./types"
 
 export async function buildDailyReportXlsx(input: {
   templateName: string
@@ -44,7 +44,8 @@ export async function buildDailyReportXlsx(input: {
   put(3, 1, half, COMPANY_HEADING_LINE_3, bold)
   put(1, half + 1, lastCol, "VƯƠNG QUỐC CAMPUCHIA", bold)
   put(2, half + 1, lastCol, "Dân tộc - Tôn giáo - Quốc vương", bold)
-  if (cfg.maMau) put(3, half + 1, lastCol, cfg.maMau, { ...font, size: 9 }, { horizontal: "right" as const, vertical: "middle" as const, wrapText: false })
+  const maMau = maMauOf(snap.kieu, cfg)
+  if (maMau) put(3, half + 1, lastCol, maMau,{ ...font, size: 9 }, { horizontal: "right" as const, vertical: "middle" as const, wrapText: false })
   const [y, m, d] = snap.to.split("-")
   put(4, 1, half, input.maBaoCao ? `Số: ${input.maBaoCao}` : `Số:      /${input.loaiKyHieu}-${input.phongBan}`)
   put(4, half + 1, lastCol, `Kampong Thom, ngày ${d} tháng ${m} năm ${y}`, { ...font, italic: true })

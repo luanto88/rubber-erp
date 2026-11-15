@@ -39,6 +39,8 @@ export type ExportMovement = {
   qty: number
   /** Dòng xuất được người lập báo cáo bỏ tick "Tính định mức" (tech_norm_export_exclusions). */
   excludedReason?: string | null
+  /** Xuất kho CŨ (inventory_legacy_movements, trước 31/07/2026) — id "legacy:<uuid>", không bỏ tick được. */
+  legacy?: boolean
 }
 /** Mã kho có xuất trong kỳ, thuộc nhóm vật tư báo cáo, nhưng chưa gắn chỉ tiêu định mức nào. */
 export type OtherExport = { inventoryItemId: string; code: string; name: string; unit: string | null; qty: number }

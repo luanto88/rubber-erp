@@ -9,6 +9,9 @@
  *
  * Trùng với dữ liệu thật: loader báo cáo gộp theo (ngày, vật tư) — có phát sinh thật thì dùng thật, không cộng lịch sử
  * (người dùng chốt 2026-11-15, kể cả ngày 24/07). Script vẫn nhập đủ để tra cứu; dry-run liệt kê các ô sẽ bị bỏ qua.
+ *
+ * Trùng LỆCH NGÀY (cùng lần cấp nhưng file cũ và app ghi 2 ngày khác nhau) thì quy tắc trên không bắt được ⇒ khai báo
+ * tay trong EXCLUDE (theo cột ID của file): không nhập, và --apply xoá dòng đã nhập trước đó.
  */
 import { createClient } from "@supabase/supabase-js"
 import XLSX from "xlsx"
@@ -56,12 +59,22 @@ const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: nul
 const items = await fetchAll(() => sb.from("inventory_items").select("id,code").eq("factory_id", fac.id).order("id"))
 const itemByCode = new Map(items.map((i) => [String(i.code).trim(), i.id]))
 
+/** legacy_id → lý do. Người dùng xác nhận theo số giấy. */
+const EXCLUDE = new Map([
+  ["0bdcd854", "DO750K 'Lần 24' 500 lít ghi 26/07 (X290726091857) — trùng phiếu xuất thật 500 lít ngày 27/07 trong app; 46-BC giấy T7 = 8.233 (xác nhận 2026-11-15)"],
+])
+
 const records = []
 const unknown = new Map()
 const bad = []
+const excluded = []
 for (const r of rows) {
   const ma = String(r["Mã NX"] || "").trim()
   if (!ma) continue
+  if (EXCLUDE.has(String(r["ID"]))) {
+    excluded.push({ legacy_id: String(r["ID"]), ma_nx: ma, ma_vt: r["Mã vật tư"], sl: r["Số lượng"], ly_do: EXCLUDE.get(String(r["ID"])) })
+    continue
+  }
   const ngay = excelDate(r["Ngày NX"])
   const code = String(r["Mã vật tư"] || "").trim()
   const qty = Number(r["Số lượng"])
@@ -100,6 +113,8 @@ for (const x of records) {
 console.log(`File: ${FILE}`)
 console.log(`Dòng hợp lệ: ${records.length} · mã không có trong danh mục: ${[...unknown].map(([c, n]) => `${c}(${n})`).join(", ") || "không"} · dòng lỗi: ${bad.length}`)
 console.table(byMonth)
+console.log(`Dòng bỏ qua theo danh sách EXCLUDE: ${excluded.length}`)
+if (excluded.length) console.table(excluded)
 
 // Ô (ngày, vật tư) xuất kho đã có dữ liệu thật ⇒ báo cáo sẽ dùng số thật, bỏ lịch sử.
 const days = records.filter((x) => x.movement_type === "export").map((x) => x.ngay).sort()
@@ -132,3 +147,8 @@ for (let i = 0; i < records.length; i += 200) {
   done += part.length
 }
 console.log(`Đã nhập / cập nhật ${done} dòng vào inventory_legacy_movements.`)
+if (EXCLUDE.size) {
+  const { data: del, error } = await sb.from("inventory_legacy_movements").delete().eq("factory_id", fac.id).in("legacy_id", [...EXCLUDE.keys()]).select("legacy_id,item_code,quantity")
+  if (error) throw error
+  console.log(`Đã xoá ${del.length} dòng thuộc danh sách EXCLUDE:`, del)
+}

@@ -13,6 +13,13 @@ export const DAILY_REPORT_KIEU_LABEL: Record<DailyReportKieu, string> = {
   vt_hc: "Sử dụng vật tư hóa chất theo ngày (mẫu 55-BC)",
   dau_12b: "Sử dụng dầu theo ngày (Mẫu 12B, mẫu 46-BC)",
 }
+/** Mã mẫu in trên QR khi mẫu báo cáo để trống (người dùng chốt 2026-11-15: VT HC = Mẫu 12C-NMCB). */
+export const DAILY_REPORT_DEFAULT_MA_MAU: Record<DailyReportKieu, string> = {
+  vt_hc: "Mẫu 12C-NMCB",
+  dau_12b: "Mẫu 12B-NMCB",
+}
+export const maMauOf = (kieu: DailyReportKieu, cfg: DailyReportConfig | null | undefined): string =>
+  (cfg?.maMau || "").trim() || DAILY_REPORT_DEFAULT_MA_MAU[kieu] || ""
 export const DAILY_REPORT_STATUS_LABEL: Record<DailyReportStatus, string> = {
   nhap: "Nháp",
   cho_ky: "Chờ ký",

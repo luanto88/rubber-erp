@@ -59,7 +59,7 @@ export function NormsReconcile({ factoryId, user }: { factoryId: string; user: S
 
   /** Tick lại "Tính định mức" (xoá loại trừ) hoặc mở hộp nhập lý do để bỏ tick. */
   const toggleExport = async (mv: ExportMovement, include: boolean) => {
-    if (!bundle || !canExclude) return
+    if (!bundle || !canExclude || mv.legacy) return
     if (!include) {
       setExclReason("")
       setExclTarget(mv)
@@ -417,8 +417,14 @@ function ExportLinesTable({
                 <input
                   type="checkbox"
                   checked={!mv.excludedReason}
-                  disabled={!canExclude}
-                  title={canExclude ? "Bỏ tick = không tính dòng xuất này vào định mức" : "Cần quyền lập báo cáo định mức"}
+                  disabled={!canExclude || !!mv.legacy}
+                  title={
+                    mv.legacy
+                      ? "Phiếu cũ (AppSheet) — luôn tính; dòng trùng phiếu app cần loại ở script import (EXCLUDE)"
+                      : canExclude
+                        ? "Bỏ tick = không tính dòng xuất này vào định mức"
+                        : "Cần quyền lập báo cáo định mức"
+                  }
                   onChange={(e) => onToggle(mv, e.target.checked)}
                 />
               </td>

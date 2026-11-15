@@ -16,7 +16,8 @@ import {
   saveDailyTemplate,
   type PickItem,
 } from "@/lib/inventory-daily-report/client"
-import { DAILY_REPORT_KIEU_LABEL, type DailyReportColumn, type DailyReportConfig, type DailyReportKieu, type DailyReportTemplate } from "@/lib/inventory-daily-report/types"
+import { duplicateItemColumns } from "@/lib/inventory-daily-report/compute"
+import { DAILY_REPORT_DEFAULT_MA_MAU, DAILY_REPORT_KIEU_LABEL, type DailyReportColumn, type DailyReportConfig, type DailyReportKieu, type DailyReportTemplate } from "@/lib/inventory-daily-report/types"
 import { btnCls, btnPrimaryCls, dailyErrText, inputCls } from "./daily-ui"
 
 const DEFAULT_TITLE: Record<DailyReportKieu, string> = {
@@ -111,7 +112,7 @@ function TemplateCard({ t, items, onSaved, onError }: { t: DailyReportTemplate; 
   const [name, setName] = useState(t.name)
   const [active, setActive] = useState(t.is_active)
   const [tieuDe, setTieuDe] = useState(cfg.tieuDe || DEFAULT_TITLE[t.kieu])
-  const [maMau, setMaMau] = useState(cfg.maMau || "")
+  const [maMau, setMaMau] = useState(cfg.maMau || DAILY_REPORT_DEFAULT_MA_MAU[t.kieu])
   const [nhanLap, setNhanLap] = useState(cfg.nhanLap || "LẬP BẢNG")
   const [chucVuLap, setChucVuLap] = useState(cfg.chucVuLap || "")
   const [hideZero, setHideZero] = useState(!!cfg.hideZero)
@@ -134,6 +135,14 @@ function TemplateCard({ t, items, onSaved, onError }: { t: DailyReportTemplate; 
   const save = async () => {
     const bad = cols.findIndex((c) => !c.label.trim())
     if (bad >= 0) return onError(`Cột ${bad + 1} chưa có tên.`)
+    const dup = [...duplicateItemColumns(cols)]
+    if (dup.length) {
+      return onError(
+        `Mỗi vật tư chỉ được nằm ở 1 cột (nếu không sẽ bị cộng trùng vào tổng): ${dup
+          .map(([id, cs]) => `${byId.get(id)?.code || id} ở cột ${cs.join(", ")}`)
+          .join("; ")}.`,
+      )
+    }
     setBusy(true)
     try {
       const config: DailyReportConfig = {
@@ -183,8 +192,8 @@ function TemplateCard({ t, items, onSaved, onError }: { t: DailyReportTemplate; 
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
         <label className="block space-y-1">
-          <span className="text-xs font-semibold text-slate-600">Mã mẫu in trên QR (vd Mẫu 12B-NMCB — để trống nếu không có)</span>
-          <input className={inputCls} value={maMau} onChange={(e) => setMaMau(e.target.value)} />
+          <span className="text-xs font-semibold text-slate-600">Mã mẫu in trên QR (để trống = {DAILY_REPORT_DEFAULT_MA_MAU[t.kieu]})</span>
+          <input className={inputCls} value={maMau} placeholder={DAILY_REPORT_DEFAULT_MA_MAU[t.kieu]} onChange={(e) => setMaMau(e.target.value)} />
         </label>
         <label className="block space-y-1 sm:col-span-2">
           <span className="text-xs font-semibold text-slate-600">Tiêu đề in trên báo cáo</span>
@@ -312,7 +321,7 @@ export function DailyTemplatesConfig({ factoryId, onToast }: { factoryId: string
     try {
       await createDailyTemplate(factoryId, kieu, code, kieu === "vt_hc" ? "Báo cáo sử dụng vật tư hóa chất" : "Báo cáo sử dụng dầu", {
         tieuDe: DEFAULT_TITLE[kieu],
-        maMau: kieu === "dau_12b" ? "Mẫu 12B-NMCB" : "",
+        maMau: DAILY_REPORT_DEFAULT_MA_MAU[kieu],
         nhanLap: "LẬP BẢNG",
         chucVuLap: "Nhân viên kỹ thuật",
         columns: [],

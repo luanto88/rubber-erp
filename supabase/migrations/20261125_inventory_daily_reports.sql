@@ -307,7 +307,7 @@ BEGIN
     ) AS c(ord, label, sub, codes);
     INSERT INTO inventory_daily_report_templates (factory_id, code, name, kieu, sort_order, config) VALUES
       (f.id, 'BC-VTHC', 'Báo cáo sử dụng vật tư hóa chất', 'vt_hc', 10,
-       jsonb_build_object('tieuDe', 'BÁO CÁO SỬ DỤNG VẬT TƯ HÓA CHẤT TRONG SẢN XUẤT CHẾ BIẾN', 'maMau', '',
+       jsonb_build_object('tieuDe', 'BÁO CÁO SỬ DỤNG VẬT TƯ HÓA CHẤT TRONG SẢN XUẤT CHẾ BIẾN', 'maMau', 'Mẫu 12C-NMCB',
                           'nhanLap', 'LẬP BẢNG', 'chucVuLap', 'Nhân viên kỹ thuật', 'hideZero', false, 'columns', coalesce(v_cols, '[]'::jsonb)));
 
     SELECT jsonb_agg(jsonb_build_object('label', c.label, 'subLabel', c.sub, 'itemIds',

@@ -18,7 +18,7 @@ import {
   dailyReportFileName,
   type DailyReportLite,
 } from "@/lib/inventory-daily-report/client"
-import { DAILY_REPORT_PATH, fmtDateVN, type DailyReportStatus } from "@/lib/inventory-daily-report/types"
+import { DAILY_REPORT_PATH, fmtDateVN, maMauOf, type DailyReportStatus } from "@/lib/inventory-daily-report/types"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
@@ -211,7 +211,7 @@ export default function InventoryDailyReportsPage() {
                             <td className="whitespace-nowrap font-code text-xs font-bold">{r.ma_bao_cao || "—"}</td>
                             <td>
                               <div className="font-semibold">{r.template_name}</div>
-                              <div className="text-xs text-slate-500">{r.config?.maMau || r.template_code}</div>
+                              <div className="text-xs text-slate-500">{maMauOf(r.template_kieu, r.config)}</div>
                             </td>
                             <td className="whitespace-nowrap">
                               {fmtDateVN(r.tu_ngay)} – {fmtDateVN(r.den_ngay)}

@@ -40,6 +40,17 @@ export function mergeRealAndLegacy(real: DayQty[], legacy: DayQty[]): { map: Map
   return { map, legacyCells }
 }
 
+/** Vật tư được tick ở >1 cột ⇒ bị cộng trùng vào tổng (vd 2026-11-15: MOCN ở cả "Mỡ chịu nhiệt SKF" và "Mỡ các loại"
+ *  làm 55-BC T10 = 3.819 thay vì 3.801). Trả itemId → danh sách số thứ tự cột (1-based). */
+export function duplicateItemColumns(columns: Array<{ itemIds: string[] }>): Map<string, number[]> {
+  const where = new Map<string, number[]>()
+  columns.forEach((c, j) => {
+    for (const id of new Set(c.itemIds || [])) where.set(id, [...(where.get(id) || []), j + 1])
+  })
+  for (const [id, cols] of where) if (cols.length < 2) where.delete(id)
+  return where
+}
+
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6
 
 export function buildDailyMatrix(args: {
@@ -55,6 +66,10 @@ export function buildDailyMatrix(args: {
   const days = daysBetween(from, to)
   const { map, legacyCells } = mergeRealAndLegacy(args.real, args.legacy)
   const warnings: string[] = []
+  for (const [id, cols] of duplicateItemColumns(config.columns || [])) {
+    const it = items.get(id)
+    warnings.push(`Vật tư ${it ? `${it.code} ${it.name}` : id} nằm ở nhiều cột (${cols.join(", ")}) ⇒ bị cộng trùng vào tổng — sửa Mẫu báo cáo.`)
+  }
 
   let columns: SnapColumn[] = (config.columns || []).map((c) => {
     const its = c.itemIds.map((id) => items.get(id)).filter((x): x is SnapItem => !!x)

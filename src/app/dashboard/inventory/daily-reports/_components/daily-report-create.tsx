@@ -21,7 +21,7 @@ import {
   type DailyReportLite,
 } from "@/lib/inventory-daily-report/client"
 import { fmtNum } from "@/lib/inventory-daily-report/pdf"
-import { DAILY_REPORT_PATH, fmtDateVN, fmtDayShort, type DailyReportSnapshot, type DailyReportTemplate } from "@/lib/inventory-daily-report/types"
+import { DAILY_REPORT_PATH, fmtDateVN, fmtDayShort, maMauOf, type DailyReportSnapshot, type DailyReportTemplate } from "@/lib/inventory-daily-report/types"
 import { btnCls, btnPrimaryCls, dailyErrText, inputCls, monthRange } from "./daily-ui"
 
 export function DailyReportCreate({ factoryId, existing }: { factoryId: string; existing: DailyReportLite[] }) {
@@ -105,7 +105,7 @@ export function DailyReportCreate({ factoryId, existing }: { factoryId: string; 
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
-                {t.config?.maMau ? ` (${t.config.maMau})` : ""}
+                {` (${maMauOf(t.kieu, t.config)})`}
               </option>
             ))}
           </select>

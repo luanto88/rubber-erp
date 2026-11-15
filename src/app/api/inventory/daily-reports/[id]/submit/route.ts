@@ -4,7 +4,8 @@ import { resolveIsoActor, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-acto
 import { cancelSigningRequest, createSigningRequest, type SigningFieldInput } from "@/lib/signing/requests"
 import { scheduleSigningNotify } from "@/lib/signing/notify"
 import { DAILY_REPORT_LOAI_TAI_LIEU, DAILY_REPORT_SIGN_ORDER, INVENTORY_REPORT_MODUN, type DailyReportSignRole } from "@/lib/inventory-daily-report/types"
-import { loadDailyReportForActor, requireDailyReport, userHasDailyReport } from "../../_lib/access"
+import { loadReportApprovers } from "@/app/api/_lib/report-approvers"
+import { DAILY_REPORT_PERMISSION, loadDailyReportForActor, requireDailyReport } from "../../_lib/access"
 
 export const dynamic = "force-dynamic"
 
@@ -27,8 +28,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!report.ma_bao_cao) return NextResponse.json({ error: "Chưa cấp số báo cáo" }, { status: 400 })
     if (!body.nguoiLapId || !body.bgdId) return NextResponse.json({ error: "Chưa chọn Người lập hoặc Ban giám đốc" }, { status: 400 })
     if (body.nguoiLapId === body.bgdId) return NextResponse.json({ error: "Người lập và Ban giám đốc phải là 2 người khác nhau" }, { status: 400 })
-    if (body.nguoiLapId !== actor.userId && !(await userHasDailyReport(actor.factoryId, body.nguoiLapId))) {
-      return NextResponse.json({ error: "Người lập được chọn chưa có quyền lập báo cáo kho theo ngày" }, { status: 400 })
+    // Cùng danh sách hộp Gửi ký hiển thị (nhân viên NMCB active + người gửi; BGD theo chức vụ) — chặn id ngoài danh sách.
+    const ap = await loadReportApprovers(actor, DAILY_REPORT_PERMISSION, { nguoiLapScope: "nmcb" })
+    if (!ap.nguoiLap.some((p) => p.id === body.nguoiLapId)) {
+      return NextResponse.json({ error: "Người lập được chọn không thuộc nhân viên Nhà máy chế biến (hoặc tài khoản đã khoá)" }, { status: 400 })
+    }
+    if (!ap.bgd.some((p) => p.id === body.bgdId)) {
+      return NextResponse.json({ error: "Người phê duyệt được chọn không thuộc Ban giám đốc" }, { status: 400 })
     }
     const fileBytes = Buffer.from(String(body.fileBase64 || ""), "base64")
     if (!fileBytes.length) return NextResponse.json({ error: "File PDF rỗng" }, { status: 400 })

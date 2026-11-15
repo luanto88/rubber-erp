@@ -18,13 +18,6 @@ export async function requireDailyReport(actor: IsoActor): Promise<void> {
   }
 }
 
-/** Người dùng (không phải người gọi) có quyền lập báo cáo kho theo ngày? */
-export async function userHasDailyReport(factoryId: string, userId: string): Promise<boolean> {
-  const { data: p } = await supabaseAdmin.from("profiles").select("id,role,status,factory_id").eq("id", userId).maybeSingle()
-  if (!p || p.status !== "active" || p.factory_id !== factoryId) return false
-  return isoActorHasPermission({ userId, factoryId, role: (p.role as string) || "", isAdmin: p.role === "admin" }, [DAILY_REPORT_PERMISSION])
-}
-
 export function dbErrorText(message: string): string {
   const m = message.match(/((?:INV|NORM)_[A-Z_]+):\s*([\s\S]*)$/)
   return m ? m[2] : message

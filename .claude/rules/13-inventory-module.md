@@ -576,6 +576,15 @@ lịch sử riêng, không đụng tồn / thẻ kho. Không khoá cứng phiế
   `/dashboard/inventory/daily-reports/[id]`: Gửi ký / Mở màn ký / Thu hồi / Tính lại số liệu / Excel / Huỷ.
 - Dữ liệu cũ: `scripts/import-inventory-legacy-nxt.mjs --dry-run | --apply` (upsert theo ID AppSheet). Dry-run 2026-11-15:
   772 dòng, 43 mã đều có, 31 ô trùng dữ liệu thật (26–31/07 khớp; 24/07 N50, B013H lệch ⇒ dùng DB).
+  **Đã `--apply` 2026-11-15: 771 dòng.** Trùng LỆCH NGÀY (cùng lần cấp, file cũ và app ghi khác ngày) quy tắc ô không bắt được
+  ⇒ khai báo `EXCLUDE` (legacy_id → lý do) trong script: không nhập + `--apply` xoá. Hiện có 1: `0bdcd854` DO750K "Lần 24"
+  500 lít (cũ 26/07, app 27/07) — 46-BC giấy T7 máy phát = 8.233 (người dùng xác nhận).
+- Mã mẫu trên QR: `maMauOf(kieu, config)` — để trống thì lấy `DAILY_REPORT_DEFAULT_MA_MAU` (VT HC = "Mẫu 12C-NMCB", dầu = "Mẫu
+  12B-NMCB"), dùng chung PDF / Excel / danh sách / chi tiết.
+- Người lập bảng (hộp Gửi ký): MỌI nhân viên active thuộc NMCB (`loadReportApprovers(..., { nguoiLapScope: "nmcb" })`, không
+  xét quyền — người dùng chốt 2026-11-15); submit kiểm lại cùng danh sách + BGD. Báo cáo định mức vẫn lọc theo quyền
+  `norms.report`. Nhân viên thiếu phòng ban NMCB trong hồ sơ sẽ không hiện.
+- Tên tab giữ "Sử dụng theo ngày" (người dùng chốt 2026-11-15, đã cân nhắc "theo kỳ").
 - Kiểm code thật tháng 10/2026: 12B 1.830 · 2.684 · 558 · 453 · 160 = 5.685; 55 Bọc 2.100, Thảm 400, Formic 770 (06/10 = 420,
   18/10 = 350), DCS 135, NaOH 100, N68 90, N140 90 … — khớp giấy. Tháng 7 (thật + lịch sử): DOX 1.319, DOCZVC 485, Bọc 1.620
   khớp 8A; Thảm / DCS lệch do lô CHỐT TỒN 24/07 — đã xử lý bằng "phiếu điều chỉnh tồn" (mục dưới) ⇒ Thảm 490, DCS 75 khớp 8A.
@@ -600,3 +609,18 @@ lịch sử riêng, không đụng tồn / thẻ kho. Không khoá cứng phiế
 - Bug "không lọc theo ngày": mỗi lần đổi ô ngày bắn 1 lượt tải; lượt cũ (khoảng rộng, nhiều dòng, chậm) về sau ghi đè lượt mới.
   Sửa trong `inventory-document-list.tsx`: số thứ tự lượt tải (`loadSeqRef`) bỏ kết quả cũ; chỉ tải khi ngày hợp lệ + ngừng
   gõ 350 ms (`loadRange`); lọc ngày thêm ở máy theo ô đang hiển thị.
+
+## Phiếu cũ tháng 1–7/2026 trong tab Nhập / Xuất + đối soát định mức (2026-11-15, không migration)
+
+Người dùng chốt: lồng vào tab Nhập / Xuất (không tab riêng); Kho A = Kho Vật Tư, Kho B = Kho Hóa Chất; đưa vào đối soát định mức.
+- Lib `src/lib/inventory-legacy.ts` (CHỈ ĐỌC `inventory_legacy_movements`): `loadLegacyMovements` (from > 31/07/2026 ⇒ không
+  gọi DB; bảng chưa có ⇒ rỗng), `groupLegacyDocuments` (1 mã NX = 1 phiếu: 1 ngày, 1 loại, 1 người; kho THEO DÒNG — 98 phiếu
+  nhiều kho), `makeLegacyWarehouseResolver` (alias Kho A/B + khớp tên không dấu), `normalizeLegacyPerson` ("Châu Nho." →
+  "Chau Nho"), `legacyCreatedDate` (ddmmyy trong mã NX = ngày lập AppSheet), `legacyExportsNotInReal`.
+- Tab Nhập / Xuất: phiếu cũ trộn theo ngày với phiếu thật, nhãn xám "Phiếu cũ", mã = mã NX, dòng xổ có cột Kho + Ghi chú (dòng
+  SL 0 làm mờ), con mắt mở hộp chi tiết read-only (ngày NX, ngày lập, người); KHÔNG sửa / in / huỷ / duyệt / đánh dấu. Bộ lọc
+  "Loại phiếu" (Nhập + Xuất) thêm "Phiếu cũ (AppSheet)"; lọc Trạng thái / Phê duyệt ⇒ ẩn phiếu cũ; thẻ thống kê CHỈ đếm phiếu
+  thật (dòng chú thích trên bảng nêu số phiếu cũ). Tab Chuyển không có phiếu cũ.
+- Sổ chi tiết KHÔNG lồng: là thẻ kho có tồn lũy kế + mẫu Excel thẻ kho, dữ liệu cũ không có balance.
+- Kiểm code thật: 739 dòng xuất → 352 phiếu, 32 dòng nhập → 20 phiếu (= 372 mã NX), 6 tên kho đều khớp (KA, KB, KDDX, KDMFL,
+  KNH, KBO).

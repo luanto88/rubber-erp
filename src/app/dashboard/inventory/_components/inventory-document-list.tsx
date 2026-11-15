@@ -11,6 +11,7 @@ import {
   Check,
   Clock,
   FilePen,
+  History,
   FileText,
   PackageMinus,
   PackagePlus,
@@ -33,6 +34,15 @@ import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
 import { IconAction, IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { ADJUSTMENT_LABEL } from "@/lib/inventory-adjustment"
+import {
+  LEGACY_LABEL,
+  LEGACY_LAST_DATE,
+  groupLegacyDocuments,
+  loadLegacyMovements,
+  makeLegacyWarehouseResolver,
+  type LegacyDocument,
+  type LegacyMovementRow,
+} from "@/lib/inventory-legacy"
 import { ExpandableRow, ExpandAllToggle, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { InventoryPageShell } from "./inventory-shell"
@@ -128,9 +138,11 @@ const APPROVAL_OPTIONS = [
   { value: "approved", label: "Đã phê duyệt" },
 ]
 
-const DOC_KIND_OPTIONS = [
-  { value: "usage", label: "Xuất sử dụng" },
+// Phiếu cũ (AppSheet, trước 31/07/2026) chỉ có ở Nhập / Xuất — chỉ xem, không có trạng thái / phê duyệt.
+const docKindOptions = (kind: InventoryDocumentKind) => [
+  { value: "usage", label: kind === "export" ? "Xuất sử dụng" : "Nhập thường" },
   { value: "adjustment", label: ADJUSTMENT_LABEL },
+  { value: "legacy", label: LEGACY_LABEL },
 ]
 
 // html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client.
@@ -241,6 +253,8 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
   const [items, setItems] = useState<InventoryItemOption[]>([])
   const [documents, setDocuments] = useState<DocumentRow[]>([])
   const [lines, setLines] = useState<LineRow[]>([])
+  const [legacyRows, setLegacyRows] = useState<LegacyMovementRow[]>([])
+  const [legacyTarget, setLegacyTarget] = useState<LegacyDocument | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<{ tone: "success" | "error"; text: string } | null>(null)
@@ -320,11 +334,17 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     setLoading(true)
     setError(null)
     try {
-      const docs = await fetchDocuments(factoryId, kind, loadRange.from, loadRange.to)
+      const [docs, legacy] = await Promise.all([
+        fetchDocuments(factoryId, kind, loadRange.from, loadRange.to),
+        kind === "transfer"
+          ? Promise.resolve([] as LegacyMovementRow[])
+          : loadLegacyMovements(supabase, factoryId, { from: loadRange.from || undefined, to: loadRange.to || undefined, movementType: kind }),
+      ])
       const docLines = await fetchLines(factoryId, docs.map((doc) => doc.id))
       if (seq !== loadSeqRef.current) return
       setDocuments(docs)
       setLines(docLines)
+      setLegacyRows(legacy)
     } catch (err) {
       if (seq !== loadSeqRef.current) return
       setError(getErrorMessage(err, "Không tải được danh sách phiếu."))
@@ -400,6 +420,46 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     })
   }, [documents, statuses, warehouseIds, approvalStates, itemIds, categoryIds, linesByDocument, itemById, config.supportsApproval, search, fromDate, toDate, docKinds])
 
+  const legacyDocuments = useMemo(() => groupLegacyDocuments(legacyRows, makeLegacyWarehouseResolver(warehouses)), [legacyRows, warehouses])
+
+  // Phiếu cũ: cùng bộ lọc ngày / tìm mã / kho / vật tư; lọc Trạng thái / Phê duyệt ⇒ ẩn (phiếu cũ không có hai thứ đó).
+  const filteredLegacy = useMemo(() => {
+    if (kind === "transfer") return []
+    if (docKinds.length > 0 && !docKinds.includes("legacy")) return []
+    if (statuses.length > 0 || approvalStates.length > 0) return []
+    const itemSet = new Set(itemIds)
+    const categorySet = new Set(categoryIds)
+    const keyword = search.trim().toLowerCase()
+    const from = isCompleteISODate(fromDate) ? fromDate : ""
+    const to = isCompleteISODate(toDate) ? toDate : ""
+    return legacyDocuments.filter((doc) => {
+      if (from && doc.ngay < from) return false
+      if (to && doc.ngay > to) return false
+      if (keyword && !doc.maNx.toLowerCase().includes(keyword)) return false
+      if (warehouseIds.length > 0 && !doc.warehouseIds.some((id) => warehouseIds.includes(id))) return false
+      if (itemSet.size > 0 || categorySet.size > 0) {
+        const matched = doc.lines.some((line) =>
+          itemSet.size > 0 ? itemSet.has(line.itemId) : categorySet.has(itemById.get(line.itemId)?.category_id || ""),
+        )
+        if (!matched) return false
+      }
+      return true
+    })
+  }, [kind, legacyDocuments, docKinds, statuses, approvalStates, itemIds, categoryIds, search, fromDate, toDate, warehouseIds, itemById])
+
+  // Danh sách hiển thị: phiếu thật + phiếu cũ, mới nhất trước (phiếu thật đã sắp sẵn; trộn theo ngày, giữ thứ tự cùng ngày).
+  const displayRows = useMemo(() => {
+    const out: Array<{ type: "doc"; doc: DocumentRow } | { type: "legacy"; doc: LegacyDocument }> = []
+    let j = 0
+    for (const doc of filteredDocuments) {
+      const day = String(doc.document_date || "").slice(0, 10)
+      while (j < filteredLegacy.length && filteredLegacy[j].ngay > day) out.push({ type: "legacy", doc: filteredLegacy[j++] })
+      out.push({ type: "doc", doc })
+    }
+    while (j < filteredLegacy.length) out.push({ type: "legacy", doc: filteredLegacy[j++] })
+    return out
+  }, [filteredDocuments, filteredLegacy])
+
   const counts = useMemo(() => {
     const result = { total: filteredDocuments.length, draft: 0, posted: 0, cancelled: 0, pending: 0 }
     for (const doc of filteredDocuments) {
@@ -410,9 +470,25 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
   }, [filteredDocuments])
 
   const expandableIds = useMemo(
-    () => filteredDocuments.filter((doc) => (linesByDocument.get(doc.id) || []).length > 0).map((doc) => doc.id),
-    [filteredDocuments, linesByDocument],
+    () => [
+      ...filteredDocuments.filter((doc) => (linesByDocument.get(doc.id) || []).length > 0).map((doc) => doc.id),
+      ...filteredLegacy.map((doc) => doc.key),
+    ],
+    [filteredDocuments, filteredLegacy, linesByDocument],
   )
+
+  const legacyWarehouseLabel = (doc: LegacyDocument) =>
+    doc.warehouseIds.length
+      ? doc.warehouseIds.map((id) => warehouseById.get(id)?.code || "?").join(", ")
+      : doc.warehouseNames.join(", ") || "—"
+
+  const legacySummary = (doc: LegacyDocument) => {
+    const codes = Array.from(new Set(doc.lines.map((line) => line.itemCode)))
+    const text = codes.length <= 2 ? codes.join(", ") : `${codes.slice(0, 2).join(", ")} +${codes.length - 2}`
+    const units = new Set(doc.lines.map((line) => itemById.get(line.itemId)?.unit || ""))
+    const total = doc.lines.reduce((sum, line) => sum + line.quantity, 0)
+    return { text, total: units.size === 1 ? `${total.toLocaleString("vi-VN")} ${[...units][0]}`.trim() : `${doc.lines.length} dòng` }
+  }
 
   const toggleExpanded = (id: string) =>
     setExpanded((current) => {
@@ -658,7 +734,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
               <span className="hidden sm:inline">Quét QR</span>
             </button>
           </div>
-          <div className={`grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 ${kind === "export" ? "xl:grid-cols-8" : "xl:grid-cols-7"}`}>
+          <div className={`grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 ${kind === "transfer" ? "xl:grid-cols-7" : "xl:grid-cols-8"}`}>
             <div>
               <label className="mb-1.5 block text-xs font-bold text-slate-600">Từ ngày</label>
               <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={INPUT_CLASS} />
@@ -710,10 +786,10 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
                 placeholder="Tất cả"
               />
             ) : null}
-            {kind === "export" ? (
+            {kind !== "transfer" ? (
               <MultiSelectField
                 label="Loại phiếu"
-                options={DOC_KIND_OPTIONS}
+                options={docKindOptions(kind)}
                 selectedValues={docKinds}
                 onChange={setDocKinds}
                 placeholder="Tất cả"
@@ -757,11 +833,16 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
           <ListState kind="error" message={error} onRetry={() => void loadDocuments()} />
         ) : loading ? (
           <ListState kind="loading" message="Đang tải danh sách phiếu..." />
-        ) : filteredDocuments.length === 0 ? (
+        ) : displayRows.length === 0 ? (
           <ListState kind="empty" message="Không có phiếu phù hợp bộ lọc." />
         ) : (
           <>
-            <div className="flex justify-end border-b border-slate-100 px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+              <span className="text-xs text-slate-500">
+                {filteredLegacy.length > 0
+                  ? `Gồm ${filteredLegacy.length.toLocaleString("vi-VN")} phiếu cũ (AppSheet, đến ${formatDate(LEGACY_LAST_DATE)}) — chỉ xem, không tính tồn / thẻ kho; không đếm trong thẻ thống kê.`
+                  : ""}
+              </span>
               <ExpandAllToggle
                 allExpanded={expandableIds.length > 0 && expandableIds.every((id) => expanded.has(id))}
                 onExpandAll={() => setExpanded(new Set(expandableIds))}
@@ -783,7 +864,46 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
                 </tr>
               </thead>
               <tbody>
-                {filteredDocuments.map((doc) => {
+                {displayRows.map((row) => {
+                  if (row.type === "legacy") {
+                    const ldoc = row.doc
+                    const lsum = legacySummary(ldoc)
+                    return (
+                      <ExpandableRow
+                        key={ldoc.key}
+                        expanded={expanded.has(ldoc.key)}
+                        onToggle={() => toggleExpanded(ldoc.key)}
+                        canExpand
+                        colSpan={8}
+                        label="Xem dòng vật tư"
+                        detail={<LegacyLinesTable doc={ldoc} itemById={itemById} warehouseById={warehouseById} />}
+                        endCell={
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <IconActionGroup>
+                              <RowAction kind="view" label="Xem chi tiết phiếu cũ" onClick={() => setLegacyTarget(ldoc)} />
+                            </IconActionGroup>
+                          </div>
+                        }
+                      >
+                        <td className="whitespace-nowrap font-code font-semibold text-slate-600">{ldoc.maNx}</td>
+                        <td className="whitespace-nowrap text-slate-600">{formatDate(ldoc.ngay)}</td>
+                        <td className="whitespace-nowrap font-semibold text-slate-700">{legacyWarehouseLabel(ldoc)}</td>
+                        <td className="max-w-[180px] truncate text-slate-600" title={ldoc.nguoi}>
+                          {ldoc.nguoi || "—"}
+                        </td>
+                        <td className="max-w-[220px] truncate text-slate-600" title={lsum.text}>
+                          {lsum.text}
+                        </td>
+                        <td className="whitespace-nowrap text-right font-semibold text-slate-700">{lsum.total}</td>
+                        <td>
+                          <span title="Dữ liệu cũ nhập từ file NXT AppSheet — chỉ xem">
+                            <StatusBadge tone="draft" label="Phiếu cũ" size="xs" />
+                          </span>
+                        </td>
+                      </ExpandableRow>
+                    )
+                  }
+                  const doc = row.doc
                   const summary = itemSummary(doc)
                   const docLines = linesByDocument.get(doc.id) || []
                   const openHref = inventoryDocumentDetailHref(kind, doc.id)
@@ -956,6 +1076,36 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
         </ModalShell>
       ) : null}
 
+      {legacyTarget ? (
+        <ModalShell
+          title={`Phiếu cũ ${legacyTarget.maNx}`}
+          onClose={() => setLegacyTarget(null)}
+          maxWidth="lg"
+          footer={<HeaderButton icon={<X size={15} />} label="Đóng" onClick={() => setLegacyTarget(null)} />}
+        >
+          <div className="space-y-3 text-sm">
+            <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <History size={15} className="mt-0.5 shrink-0 text-slate-500" />
+              <span>
+                Dữ liệu cũ nhập từ file NXT AppSheet (01/01–{formatDate(LEGACY_LAST_DATE)}) — chỉ xem. Không tính tồn / thẻ kho; được
+                dùng cho báo cáo sử dụng theo ngày và đối soát định mức ở những ngày chưa có phiếu trong app.
+              </span>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4">
+              <dt className="text-xs text-slate-500">Loại</dt>
+              <dd className="font-semibold text-slate-800">{legacyTarget.movementType === "export" ? "Xuất kho" : "Nhập kho"}</dd>
+              <dt className="text-xs text-slate-500">Ngày {legacyTarget.movementType === "export" ? "xuất" : "nhập"}</dt>
+              <dd className="font-semibold text-slate-800">{formatDate(legacyTarget.ngay)}</dd>
+              <dt className="text-xs text-slate-500">Ngày lập (AppSheet)</dt>
+              <dd className="font-semibold text-slate-800">{formatDate(legacyTarget.ngayLap)}</dd>
+              <dt className="text-xs text-slate-500">Người nhập / xuất</dt>
+              <dd className="font-semibold text-slate-800">{legacyTarget.nguoi || "—"}</dd>
+            </dl>
+            <LegacyLinesTable doc={legacyTarget} itemById={itemById} warehouseById={warehouseById} />
+          </div>
+        </ModalShell>
+      ) : null}
+
       {cancelTarget ? (
         <ModalShell
           title="Hủy phiếu"
@@ -988,5 +1138,51 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
       ) : null}
       </div>
     </InventoryPageShell>
+  )
+}
+
+/** Dòng vật tư của 1 phiếu cũ (dòng xổ + hộp chi tiết). Dòng số lượng 0 = dòng trống AppSheet ⇒ làm mờ. */
+function LegacyLinesTable({
+  doc,
+  itemById,
+  warehouseById,
+}: {
+  doc: LegacyDocument
+  itemById: Map<string, InventoryItemOption>
+  warehouseById: Map<string, InventoryWarehouseOption>
+}) {
+  return (
+    <table className="enterprise-table dense">
+      <thead>
+        <tr>
+          <th className="w-10">#</th>
+          <th>Mã vật tư</th>
+          <th>Tên vật tư</th>
+          <th>Kho</th>
+          <th className="text-right">Số lượng</th>
+          <th>ĐVT</th>
+          <th>Ghi chú</th>
+        </tr>
+      </thead>
+      <tbody>
+        {doc.lines.map((line, index) => {
+          const item = itemById.get(line.itemId)
+          const wh = line.warehouseId ? warehouseById.get(line.warehouseId) : null
+          return (
+            <tr key={line.id} className={line.quantity === 0 ? "text-slate-400" : undefined}>
+              <td className="text-slate-500">{index + 1}</td>
+              <td className="font-code font-semibold text-slate-800">{line.itemCode}</td>
+              <td className="text-slate-600">{item?.name || "—"}</td>
+              <td className="text-slate-600" title={line.warehouseName}>
+                {wh ? wh.code : line.warehouseName || "—"}
+              </td>
+              <td className="text-right font-semibold text-slate-700">{line.quantity.toLocaleString("vi-VN")}</td>
+              <td className="text-slate-600">{item?.unit || "—"}</td>
+              <td className="max-w-[260px] text-xs text-slate-500">{line.note}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
   )
 }
