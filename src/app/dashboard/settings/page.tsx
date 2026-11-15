@@ -712,6 +712,7 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "export.quick_add_customer": "thêm nhanh khách hàng",
   "export.view_own": "xem đơn được cấp",
   "inventory.cancel": "hủy phiếu đã ghi sổ (hoàn tồn)",
+  "inventory.daily_report": "lập & gửi ký báo cáo sử dụng theo ngày (55-BC, 46-BC)",
   "maintenance.qr_lookup": "tra cứu lý lịch thiết bị bằng QR",
   "maintenance.view_cost": "xem giá / chi phí bảo trì",
   "settings.manage_config": "quản trị cấu hình hệ thống",

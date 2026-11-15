@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { escapeHtml } from "@/lib/html-escape"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { purchaseRequestKind, purchaseUrgency, type PurchaseRequestKind } from "@/lib/purchase/types"
+import { buildInventoryReportSummary } from "@/lib/inventory-daily-report/server"
 import { signingDocLabel, isUuid, buildMaintenanceDocLabel, formatMaHoSoDisplay } from "./labels"
 
 // Thông báo 3 kênh cho hệ thống ký số dùng chung (Chất lượng / Điều xe / Bảo trì).
@@ -405,7 +406,11 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
       : null
   const purchaseKind = purchaseSummary?.kind ? PURCHASE_KIND_BADGE[purchaseSummary.kind] : null
   const normsLines: string[] | null =
-    yeuCau.modun === "norms" && yeuCau.ban_ghi_id ? await buildNormsSummary(yeuCau.ban_ghi_id as string).catch(() => null) : null
+    yeuCau.modun === "norms" && yeuCau.ban_ghi_id
+      ? await buildNormsSummary(yeuCau.ban_ghi_id as string).catch(() => null)
+      : yeuCau.modun === "inventory_report" && yeuCau.ban_ghi_id
+        ? await buildInventoryReportSummary(yeuCau.ban_ghi_id as string).catch(() => null)
+        : null
 
   const ctx: NotifyContext = {
     event: plan.event,

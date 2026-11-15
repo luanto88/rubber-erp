@@ -479,6 +479,7 @@ export const DEFAULT_PERMISSION_CODES = [
   "inventory.cancel",
   "inventory.analytics",
   "inventory.settings",
+  "inventory.daily_report",
   "product.view",
   "product.create",
   "product.edit",

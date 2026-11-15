@@ -127,4 +127,8 @@ khung định mức đã áp → `locked`. Mẫu 55 / 46 (bảng ngày) chuyển
   hồ khác chưa nhập lần ghi).
 
 ## Còn lại
-Test tay GĐ4 · GĐ2b ghi đồng hồ offline · báo cáo ngày 55/46 ở Kho vật tư (kế hoạch trên).
+GĐ4 test PASS 2026-11-15; sau test: header 3 dòng (dòng 3 đậm, `src/lib/pdf-company-heading.ts`), biểu ngữ đậm, QR 12,8 mm +
+mã mẫu trên QR, Thành phần chọn từ nhân sự thật (`/api/norms/staff-options`, config `thanhPhanList`, chức vụ mặc định chính
+quyền, in 2 cột), tiêu đề mục giữ cùng bảng + lặp tiêu đề bảng khi sang trang, xem trước chỉ dựng lại khi bấm "Cập nhật".
+Người ký dùng chung `src/app/api/_lib/report-approvers.ts`; số BC-NMCB nay tính cả báo cáo kho (migration 20261125).
+Còn: GĐ2b ghi đồng hồ offline. Báo cáo ngày 55/46 đã làm ở Kho vật tư (rule 13).

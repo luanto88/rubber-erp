@@ -133,6 +133,13 @@ export async function fetchNormApprovers(): Promise<NormApprovers> {
   return readJson<NormApprovers>(await authFetch("/api/norms/approvers"))
 }
 
+export type NormStaffOption = { id: string; ten: string; gioiTinh: string; chucVuChinhQuyen: string; chucVuKiemNhiem: string; chucVu: string }
+
+/** Nhân sự thật (maintenance_staff) để chọn "Thành phần nhà máy" của Mẫu 8A. */
+export async function fetchNormStaffOptions(): Promise<NormStaffOption[]> {
+  return (await readJson<{ staff: NormStaffOption[] }>(await authFetch("/api/norms/staff-options"))).staff || []
+}
+
 export async function syncReportStatuses(ids: string[]): Promise<void> {
   if (!ids.length) return
   await authFetch("/api/norms/reports/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).catch(() => null)

@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { ArrowRightLeft, BarChart3, Boxes, Layers, LayoutDashboard, PackageMinus, PackagePlus, ScrollText, type LucideIcon } from "lucide-react"
+import { ArrowRightLeft, BarChart3, Boxes, CalendarDays, Layers, LayoutDashboard, PackageMinus, PackagePlus, ScrollText, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner"
@@ -36,7 +36,7 @@ type InventoryPageShellProps = {
 
 // Cấu trúc 2 nhóm (2026-10-03):
 //  - "Nhập xuất tồn": 4 thẻ nghiệp vụ, mỗi thẻ là 1 danh sách có bộ lọc + nút Thêm.
-//  - "Báo cáo": Tổng quan (thống kê, cảnh báo) + Sổ chi tiết (tra cứu phát sinh, xuất file).
+//  - "Báo cáo": Tổng quan (thống kê, cảnh báo) + Sổ chi tiết (tra cứu phát sinh, xuất file) + Sử dụng theo ngày.
 // "Thẻ kho" (in nhãn QR) không còn là thẻ — mở từ nút "In nhãn QR" trên thẻ Tồn.
 const TAB_GROUPS: TabGroup[] = [
   {
@@ -57,6 +57,8 @@ const TAB_GROUPS: TabGroup[] = [
     tabs: [
       { href: "/dashboard/inventory/analytics", label: "Tổng quan", icon: LayoutDashboard },
       { href: "/dashboard/inventory/lookup", label: "Sổ chi tiết", icon: ScrollText },
+      // Báo cáo sử dụng theo ngày (55-BC VT HC, 46-BC Mẫu 12B dầu) + ký số — quyền inventory.daily_report.
+      { href: "/dashboard/inventory/daily-reports", label: "Sử dụng theo ngày", icon: CalendarDays },
     ],
   },
 ]

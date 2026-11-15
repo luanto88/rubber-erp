@@ -732,7 +732,9 @@ export default function SignScreenPage() {
               ? (banGhiId ? `/dashboard/purchase/${banGhiId}` : "/dashboard/purchase")
               : yeuCau.modun === "norms"
                 ? (banGhiId ? `/dashboard/norms/report/${banGhiId}` : "/dashboard/norms?tab=reports")
-                : "/dashboard"
+                : yeuCau.modun === "inventory_report"
+                  ? (banGhiId ? `/dashboard/inventory/daily-reports/${banGhiId}` : "/dashboard/inventory/daily-reports")
+                  : "/dashboard"
     router.push(returnUrl)
   }
 

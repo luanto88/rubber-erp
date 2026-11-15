@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import dynamic from "next/dynamic"
 import { useRouter } from "next/navigation"
@@ -18,6 +18,7 @@ import {
   Search,
   X,
   RotateCcw,
+  Scale,
   type LucideIcon,
 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
@@ -30,7 +31,8 @@ import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
-import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { IconAction, IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { ADJUSTMENT_LABEL } from "@/lib/inventory-adjustment"
 import { ExpandableRow, ExpandAllToggle, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { InventoryPageShell } from "./inventory-shell"
@@ -62,6 +64,9 @@ type DocumentRow = {
   approved_at: string | null
   approved_by_name: string | null
   created_at: string | null
+  /** Phiếu điều chỉnh tồn (migration 20261126) — không tính báo cáo sử dụng / định mức. */
+  la_dieu_chinh?: boolean | null
+  ly_do_dieu_chinh?: string | null
 }
 
 type LineRow = {
@@ -123,6 +128,11 @@ const APPROVAL_OPTIONS = [
   { value: "approved", label: "Đã phê duyệt" },
 ]
 
+const DOC_KIND_OPTIONS = [
+  { value: "usage", label: "Xuất sử dụng" },
+  { value: "adjustment", label: ADJUSTMENT_LABEL },
+]
+
 // html5-qrcode đụng navigator.mediaDevices ⇒ chỉ chạy ở client.
 const QrScanner = dynamic(
   () => import("@/app/dashboard/product/confirm/qr-scanner").then((m) => m.QrScanner),
@@ -151,14 +161,36 @@ function formatDate(value: string | null) {
   return y && m && d ? `${d}/${m}/${y}` : value
 }
 
-async function fetchDocuments(factoryId: string, kind: InventoryDocumentKind, from: string, to: string) {
+const BASE_DOC_COLUMNS =
+  "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, approved_at, approved_by_name, created_at"
+const ADJUSTMENT_DOC_COLUMNS = ", la_dieu_chinh, ly_do_dieu_chinh"
+// Chưa chạy migration 20261126 ⇒ cột chưa có: tự rơi về bộ cột cũ (nhớ cho các lần tải sau).
+let adjustmentColumnsAvailable = true
+
+/** Ngày ISO hoàn chỉnh (ô date đang gõ dở trả "" hoặc năm 0002…) — chỉ lọc / tải khi hợp lệ. */
+function isCompleteISODate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number(value.slice(0, 4)) >= 2000
+}
+
+async function fetchDocuments(factoryId: string, kind: InventoryDocumentKind, from: string, to: string): Promise<DocumentRow[]> {
+  try {
+    return await fetchDocumentsWith(factoryId, kind, from, to, adjustmentColumnsAvailable ? BASE_DOC_COLUMNS + ADJUSTMENT_DOC_COLUMNS : BASE_DOC_COLUMNS)
+  } catch (err) {
+    const e = err as { code?: string; message?: string }
+    if (adjustmentColumnsAvailable && (e?.code === "42703" || /la_dieu_chinh|ly_do_dieu_chinh/.test(String(e?.message || "")))) {
+      adjustmentColumnsAvailable = false
+      return fetchDocumentsWith(factoryId, kind, from, to, BASE_DOC_COLUMNS)
+    }
+    throw err
+  }
+}
+
+async function fetchDocumentsWith(factoryId: string, kind: InventoryDocumentKind, from: string, to: string, columns: string) {
   const all: DocumentRow[] = []
   for (let offset = 0; ; offset += PAGE_SIZE) {
     let query = supabase
       .from("inventory_documents")
-      .select(
-        "id, document_code, document_date, source_warehouse_id, target_warehouse_id, source_name, recipient_name, requester_name, status, approved_at, approved_by_name, created_at",
-      )
+      .select(columns)
       .eq("factory_id", factoryId)
       .eq("document_type", kind)
       .order("document_date", { ascending: false })
@@ -169,7 +201,7 @@ async function fetchDocuments(factoryId: string, kind: InventoryDocumentKind, fr
     if (to) query = query.lte("document_date", to)
     const { data, error } = await query
     if (error) throw error
-    all.push(...((data || []) as DocumentRow[]))
+    all.push(...((data || []) as unknown as DocumentRow[]))
     if (!data || data.length < PAGE_SIZE) break
   }
   return all
@@ -221,7 +253,15 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
   const [statuses, setStatuses] = useState<string[]>([])
   const [approvalStates, setApprovalStates] = useState<string[]>([])
 
+  const [docKinds, setDocKinds] = useState<string[]>([])
+  // Khoảng ngày dùng để TẢI: chỉ cập nhật khi ô ngày hợp lệ và người dùng ngừng gõ 350ms (ô date gõ tay sinh nhiều giá trị dở).
+  const [loadRange, setLoadRange] = useState(() => ({ from: getFirstDayOfMonthISO(getFactoryTodayISO()), to: getFactoryTodayISO() }))
+  // Mỗi lượt tải có số thứ tự — kết quả của lượt cũ về muộn bị bỏ (trước đây ghi đè danh sách ⇒ trông như "không lọc ngày").
+  const loadSeqRef = useRef(0)
+
   const [approveTarget, setApproveTarget] = useState<DocumentRow | null>(null)
+  const [adjustTarget, setAdjustTarget] = useState<DocumentRow | null>(null)
+  const [adjustReason, setAdjustReason] = useState("")
   const [cancelTarget, setCancelTarget] = useState<DocumentRow | null>(null)
   const [cancelReason, setCancelReason] = useState("")
   const [busy, setBusy] = useState(false)
@@ -264,21 +304,34 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     }
   }, [config.supportsApproval])
 
+  useEffect(() => {
+    const from = fromDate === "" || isCompleteISODate(fromDate) ? fromDate : null
+    const to = toDate === "" || isCompleteISODate(toDate) ? toDate : null
+    if (from === null || to === null) return
+    const timer = window.setTimeout(() => {
+      setLoadRange((current) => (current.from === from && current.to === to ? current : { from, to }))
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [fromDate, toDate])
+
   const loadDocuments = useCallback(async () => {
     if (!factoryId) return
+    const seq = ++loadSeqRef.current
     setLoading(true)
     setError(null)
     try {
-      const docs = await fetchDocuments(factoryId, kind, fromDate, toDate)
+      const docs = await fetchDocuments(factoryId, kind, loadRange.from, loadRange.to)
       const docLines = await fetchLines(factoryId, docs.map((doc) => doc.id))
+      if (seq !== loadSeqRef.current) return
       setDocuments(docs)
       setLines(docLines)
     } catch (err) {
+      if (seq !== loadSeqRef.current) return
       setError(getErrorMessage(err, "Không tải được danh sách phiếu."))
     } finally {
-      setLoading(false)
+      if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [factoryId, kind, fromDate, toDate])
+  }, [factoryId, kind, loadRange])
 
   useEffect(() => {
     if (factoryId) void loadDocuments()
@@ -316,7 +369,14 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     const itemSet = new Set(itemIds)
     const categorySet = new Set(categoryIds)
     const keyword = search.trim().toLowerCase()
+    // Lọc ngày cả ở máy (theo ô đang hiển thị) — không phụ thuộc lượt tải nào về sau cùng.
+    const from = isCompleteISODate(fromDate) ? fromDate : ""
+    const to = isCompleteISODate(toDate) ? toDate : ""
     return documents.filter((doc) => {
+      const day = String(doc.document_date || "").slice(0, 10)
+      if (from && day < from) return false
+      if (to && day > to) return false
+      if (docKinds.length > 0 && !docKinds.includes(doc.la_dieu_chinh ? "adjustment" : "usage")) return false
       if (keyword && !doc.document_code.toLowerCase().includes(keyword)) return false
       if (statuses.length > 0 && !statuses.includes(doc.status)) return false
       if (warehouseIds.length > 0) {
@@ -338,7 +398,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
       }
       return true
     })
-  }, [documents, statuses, warehouseIds, approvalStates, itemIds, categoryIds, linesByDocument, itemById, config.supportsApproval, search])
+  }, [documents, statuses, warehouseIds, approvalStates, itemIds, categoryIds, linesByDocument, itemById, config.supportsApproval, search, fromDate, toDate, docKinds])
 
   const counts = useMemo(() => {
     const result = { total: filteredDocuments.length, draft: 0, posted: 0, cancelled: 0, pending: 0 }
@@ -363,7 +423,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     })
 
   const activeFilterCount =
-    [warehouseIds, categoryIds, itemIds, statuses, approvalStates].filter((value) => value.length > 0).length +
+    [warehouseIds, categoryIds, itemIds, statuses, approvalStates, docKinds].filter((value) => value.length > 0).length +
     (search.trim() ? 1 : 0)
 
   const warehouseLabel = (doc: DocumentRow) => {
@@ -448,7 +508,36 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
     setItemIds([])
     setStatuses([])
     setApprovalStates([])
+    setDocKinds([])
     setSearch("")
+  }
+
+  const handleAdjust = async () => {
+    if (!adjustTarget) return
+    const flag = !adjustTarget.la_dieu_chinh
+    if (flag && !adjustReason.trim()) return
+    setBusy(true)
+    try {
+      const { error: rpcError } = await supabase.rpc("inventory_document_set_adjustment", {
+        p_document_id: adjustTarget.id,
+        p_flag: flag,
+        p_ly_do: flag ? adjustReason.trim() : null,
+      })
+      if (rpcError) throw rpcError
+      setToast({
+        tone: "success",
+        text: flag
+          ? `Đã đánh dấu ${adjustTarget.document_code} là phiếu điều chỉnh tồn — không tính báo cáo sử dụng / định mức.`
+          : `Đã bỏ đánh dấu điều chỉnh của ${adjustTarget.document_code}.`,
+      })
+      setAdjustTarget(null)
+      setAdjustReason("")
+      void loadDocuments()
+    } catch (err) {
+      setToast({ tone: "error", text: getErrorMessage(err, "Không đổi được đánh dấu điều chỉnh.") })
+    } finally {
+      setBusy(false)
+    }
   }
 
   // QR phiếu: trang chi tiết mới `/dashboard/inventory/document/{type}/{id}`, hoặc URL cũ
@@ -483,6 +572,9 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
 
   const canCreate = hasPermission(user, "inventory.create") || hasPermission(user, "inventory.edit") || user?.role === "admin"
   const canCancel = hasPermission(user, "inventory.cancel")
+  // Đánh dấu điều chỉnh: chỉ phiếu xuất (ảnh hưởng báo cáo sử dụng / định mức); RPC kiểm lại quyền.
+  const canMarkAdjustment =
+    kind === "export" && adjustmentColumnsAvailable && (user?.role === "admin" || hasPermission(user, "inventory.settings"))
 
   return (
     <InventoryPageShell
@@ -566,7 +658,7 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
               <span className="hidden sm:inline">Quét QR</span>
             </button>
           </div>
-          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          <div className={`grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 ${kind === "export" ? "xl:grid-cols-8" : "xl:grid-cols-7"}`}>
             <div>
               <label className="mb-1.5 block text-xs font-bold text-slate-600">Từ ngày</label>
               <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className={INPUT_CLASS} />
@@ -617,7 +709,17 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
                 onChange={setApprovalStates}
                 placeholder="Tất cả"
               />
-            ) : (
+            ) : null}
+            {kind === "export" ? (
+              <MultiSelectField
+                label="Loại phiếu"
+                options={DOC_KIND_OPTIONS}
+                selectedValues={docKinds}
+                onChange={setDocKinds}
+                placeholder="Tất cả"
+              />
+            ) : null}
+            {config.supportsApproval ? null : (
               <div className="flex items-end">
                 <HeaderButton icon={<RotateCcw size={15} />} label="Xóa lọc" onClick={resetFilters} />
               </div>
@@ -737,6 +839,17 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
                               label="In phiếu"
                               href={`/dashboard/inventory/print?type=${kind}&documentId=${encodeURIComponent(doc.id)}`}
                             />
+                            {doc.status === "posted" && canMarkAdjustment ? (
+                              <IconAction
+                                icon={Scale}
+                                tone="amber"
+                                label={doc.la_dieu_chinh ? "Bỏ đánh dấu phiếu điều chỉnh tồn" : "Đánh dấu phiếu điều chỉnh tồn (không tính báo cáo / định mức)"}
+                                onClick={() => {
+                                  setAdjustReason("")
+                                  setAdjustTarget(doc)
+                                }}
+                              />
+                            ) : null}
                             {doc.status === "posted" && canCancel ? (
                               <RowAction kind="cancel" label="Hủy phiếu" onClick={() => setCancelTarget(doc)} />
                             ) : null}
@@ -766,6 +879,11 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
                               <StatusBadge tone="info" label="Đã phê duyệt" size="xs" />
                             </span>
                           ) : null}
+                          {doc.la_dieu_chinh ? (
+                            <span title={doc.ly_do_dieu_chinh || "Không tính báo cáo sử dụng / định mức"}>
+                              <StatusBadge tone="warn" label={ADJUSTMENT_LABEL} size="xs" />
+                            </span>
+                          ) : null}
                         </div>
                       </td>
                     </ExpandableRow>
@@ -792,6 +910,49 @@ export function InventoryDocumentList({ kind }: { kind: InventoryDocumentKind })
           <p className="text-sm text-slate-600">
             Xác nhận phê duyệt phiếu <strong>{approveTarget.document_code}</strong> ngày {formatDate(approveTarget.document_date)}?
           </p>
+        </ModalShell>
+      ) : null}
+
+      {adjustTarget ? (
+        <ModalShell
+          title={adjustTarget.la_dieu_chinh ? "Bỏ đánh dấu điều chỉnh tồn" : "Đánh dấu phiếu điều chỉnh tồn"}
+          onClose={() => (busy ? undefined : setAdjustTarget(null))}
+          maxWidth="md"
+          footer={
+            <>
+              <HeaderButton icon={<RotateCcw size={15} />} label="Đóng" onClick={() => setAdjustTarget(null)} disabled={busy} />
+              <HeaderButton
+                tone="brand"
+                icon={<Scale size={15} />}
+                label={busy ? "Đang lưu..." : adjustTarget.la_dieu_chinh ? "Bỏ đánh dấu" : "Đánh dấu điều chỉnh"}
+                onClick={() => void handleAdjust()}
+                disabled={busy || (!adjustTarget.la_dieu_chinh && !adjustReason.trim())}
+              />
+            </>
+          }
+        >
+          {adjustTarget.la_dieu_chinh ? (
+            <p className="text-sm text-slate-600">
+              Phiếu <strong>{adjustTarget.document_code}</strong> sẽ được tính lại như xuất sử dụng bình thường trong báo cáo sử
+              dụng theo ngày và đối soát định mức.
+              {adjustTarget.ly_do_dieu_chinh ? <span className="mt-2 block text-xs">Lý do cũ: {adjustTarget.ly_do_dieu_chinh}</span> : null}
+            </p>
+          ) : (
+            <>
+              <p className="mb-3 text-sm text-slate-600">
+                Phiếu <strong>{adjustTarget.document_code}</strong> ngày {formatDate(adjustTarget.document_date)} là bút toán điều
+                chỉnh tồn, không phải sử dụng thật. Tồn kho và thẻ kho <strong>không đổi</strong>; chỉ báo cáo sử dụng theo ngày
+                (55-BC / 46-BC) và đối soát định mức bỏ phiếu này. Bắt buộc nhập lý do.
+              </p>
+              <textarea
+                value={adjustReason}
+                onChange={(e) => setAdjustReason(e.target.value)}
+                rows={3}
+                placeholder="Lý do (vd: chốt tồn khi kiểm kê)"
+                className={INPUT_CLASS}
+              />
+            </>
+          )}
         </ModalShell>
       ) : null}
 

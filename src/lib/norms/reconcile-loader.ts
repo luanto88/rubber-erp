@@ -3,6 +3,7 @@
 
 import { supabase } from "@/lib/supabase"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
+import { loadAdjustmentDocumentIds } from "@/lib/inventory-adjustment"
 import { addDaysISO } from "@/lib/date-utils"
 import { loadDispatchEntriesWithResolvedRows, toISODate } from "@/lib/dispatch-entry-rows"
 import { makeNguonResolver, type LotSuffixRow } from "@/lib/lot-source"
@@ -279,7 +280,10 @@ export async function loadReconcile(factoryId: string, f: ReconcileFilters): Pro
     }),
   ])
   const exclByMv = new Map(exclRows.map((x) => [x.movement_id, x.ly_do]))
-  const exports: ExportMovement[] = mvRows.map((m) => ({
+  // Phiếu điều chỉnh tồn (vd lô chốt tồn 24/07/2026) không phải tiêu hao ⇒ bỏ hẳn, không hiện thành "loại trừ".
+  const adjustmentDocs = await loadAdjustmentDocumentIds(supabase, factoryId)
+  const usageRows = mvRows.filter((m) => !(m.document_id && adjustmentDocs.has(m.document_id)))
+  const exports: ExportMovement[] = usageRows.map((m) => ({
     id: m.id,
     ngay: m.movement_date,
     inventoryItemId: m.item_id,
@@ -289,7 +293,7 @@ export async function loadReconcile(factoryId: string, f: ReconcileFilters): Pro
 
   // Số phiếu + ghi chú cho các dòng xuất của mã đã gắn chỉ tiêu (để người lập tick / bỏ tick).
   const mapped = new Set(items.flatMap((i) => i.inventory_item_ids))
-  const mappedMv = mvRows.filter((m) => mapped.has(m.item_id))
+  const mappedMv = usageRows.filter((m) => mapped.has(m.item_id))
   const docInfo = mappedMv.length ? await loadMovementDocumentInfo(factoryId, mappedMv) : { lineNotes: {}, documents: {} }
   const movementInfo: Record<string, MovementDisplay> = {}
   for (const m of mappedMv) {

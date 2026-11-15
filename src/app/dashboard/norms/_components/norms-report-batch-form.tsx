@@ -5,7 +5,7 @@
 // lưu bộ rồi gửi ký các mẫu. Rule 30.
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Calculator, Save } from "lucide-react"
+import { AlertTriangle, Calculator, RefreshCw, Save } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getFactoryTodayISO, getFirstDayOfMonthISO, addDaysISO } from "@/lib/date-utils"
 import { loadRequiredNotes } from "@/lib/required-notes"
@@ -85,6 +85,8 @@ export function NormsReportBatchForm({ factoryId, onSaved }: { factoryId: string
   const [snapshot, setSnapshot] = useState<NormReportSnapshot | null>(null)
   const [giaiTrinh, setGiaiTrinh] = useState<Record<string, string>>({})
   const [kienNghi, setKienNghi] = useState("")
+  // Bản xem trước PDF chỉ dựng lại khi bấm "Cập nhật" (gõ từng phím không dựng lại ⇒ hết nhấp nháy).
+  const [applied, setApplied] = useState<{ giaiTrinh: Record<string, string>; kienNghi: string; nonce: number }>({ giaiTrinh: {}, kienNghi: "", nonce: 0 })
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -146,6 +148,8 @@ export function NormsReportBatchForm({ factoryId, onSaved }: { factoryId: string
   const over = useMemo(() => (snapshot ? overLines(snapshot) : []), [snapshot])
   const missing = has8a ? over.filter((l) => !String(giaiTrinh[l.key] || "").trim()) : []
   const preview = chosen.find((t) => t.id === previewId) || chosen[0] || null
+  const textsDirty = kienNghi !== applied.kienNghi || JSON.stringify(giaiTrinh) !== JSON.stringify(applied.giaiTrinh)
+  const applyTexts = () => setApplied((a) => ({ giaiTrinh: { ...giaiTrinh }, kienNghi, nonce: a.nonce + 1 }))
 
   const save = async () => {
     if (!snapshot || !chosen.length) return
@@ -156,6 +160,7 @@ export function NormsReportBatchForm({ factoryId, onSaved }: { factoryId: string
     setBusy(true)
     setError(null)
     try {
+      if (textsDirty) applyTexts()
       const { batchId } = await createReportBatch(factoryId, snapshot, chosen, { giaiTrinh, kienNghi })
       const { reports } = await loadReportList(factoryId)
       setSaved(reports.filter((r) => r.batch_id === batchId))
@@ -300,6 +305,18 @@ export function NormsReportBatchForm({ factoryId, onSaved }: { factoryId: string
               <textarea className={`${inputCls} h-20 py-2`} value={kienNghi} onChange={(e) => setKienNghi(e.target.value)} />
             </label>
           )}
+          {has8a && (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {textsDirty ? (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Có thay đổi chưa cập nhật vào bản xem trước</span>
+              ) : (
+                <span className="text-xs text-slate-500">Bản xem trước đã khớp nội dung giải trình / kiến nghị.</span>
+              )}
+              <button type="button" className={btnPrimaryCls} disabled={!textsDirty} onClick={applyTexts}>
+                <RefreshCw size={15} /> Cập nhật
+              </button>
+            </div>
+          )}
 
           {chosen.length > 0 && preview && (
             <div className="space-y-2">
@@ -313,8 +330,8 @@ export function NormsReportBatchForm({ factoryId, onSaved }: { factoryId: string
                 active
                 kind="pdf"
                 label={`Bản xem trước (chưa ký) · ${preview.code}`}
-                sourceKey={`${preview.id}|${snapshot.from}|${snapshot.to}|${Object.values(giaiTrinh).join("|").length}|${kienNghi.length}`}
-                loadBytes={async () => (await buildReportPdf(previewReport(preview, factoryId, giaiTrinh, kienNghi), snapshot)).bytes}
+                sourceKey={`${preview.id}|${snapshot.from}|${snapshot.to}|${applied.nonce}`}
+                loadBytes={async () => (await buildReportPdf(previewReport(preview, factoryId, applied.giaiTrinh, applied.kienNghi), snapshot)).bytes}
                 heightClass="h-[70vh]"
               />
             </div>

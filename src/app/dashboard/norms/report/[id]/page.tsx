@@ -329,7 +329,7 @@ function EditTextsDialog({ report, batch, onClose, onSaved }: { report: NormRepo
             Huỷ
           </button>
           <button type="button" className={btnPrimaryCls} disabled={busy} onClick={() => void save()}>
-            {busy ? "Đang lưu…" : "Lưu"}
+            {busy ? "Đang cập nhật…" : "Cập nhật"}
           </button>
         </div>
       }

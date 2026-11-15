@@ -1,12 +1,13 @@
 "use client"
 
-// Định mức KTKT GĐ4 — "Mẫu báo cáo": bật/tắt, đổi tên; Mẫu 8A: thành phần nhà máy (in đầu báo cáo) + mã chỉ tiêu in
+// Định mức KTKT GĐ4 — "Mẫu báo cáo": bật/tắt, đổi tên; Mẫu 8A: thành phần nhà máy (chọn từ nhân sự thật, in đầu báo cáo) + mã chỉ tiêu in
 // ở mục 7 (xử lý nước thải). Đổi cấu hình ⇒ phiên bản +1, báo cáo đã lập giữ cấu hình cũ. Rule 30.
 
 import { useEffect, useState } from "react"
 import { Save } from "lucide-react"
 import { loadReportTemplates, saveReportTemplate } from "@/lib/norms/report-client"
-import type { NormReportTemplate, Thang8aConfig } from "@/lib/norms/report-types"
+import { thanhPhanRows, type NormReportTemplate, type Thang8aConfig, type ThanhPhanMember } from "@/lib/norms/report-types"
+import { ThanhPhanEditor, cleanThanhPhan } from "./norms-thanh-phan-editor"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { btnPrimaryCls, errText, inputCls, useToast } from "./norms-ui"
 
@@ -17,7 +18,15 @@ function TemplateCard({ t, onSaved }: { t: NormReportTemplate; onSaved: (msg: st
   const cfg = (t.config || {}) as Thang8aConfig
   const [name, setName] = useState(t.name)
   const [active, setActive] = useState(t.is_active)
-  const [thanhPhan, setThanhPhan] = useState(cfg.thanhPhan || "")
+  // Danh sách đã chọn; mẫu cũ chỉ có text ⇒ tách thành dòng (chưa gắn nhân sự, editor tự khớp theo tên).
+  const [members, setMembers] = useState<ThanhPhanMember[]>(() =>
+    cfg.thanhPhanList?.length
+      ? cfg.thanhPhanList
+      : thanhPhanRows(cfg).map((r) => {
+          const m = r.left.match(/^(Ông|Bà|Anh|Chị)\s*:?\s*(.*)$/u)
+          return { staffId: null, danhXung: m ? m[1] : "Ông", ten: (m ? m[2] : r.left).trim(), chucVu: r.chucVu }
+        }),
+  )
   const [xlnt, setXlnt] = useState((cfg.xlntItemCodes || []).join(", "))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -26,7 +35,7 @@ function TemplateCard({ t, onSaved }: { t: NormReportTemplate; onSaved: (msg: st
     setBusy(true)
     setErr(null)
     try {
-      const config = t.kieu === "thang_8a" ? { ...(t.config || {}), thanhPhan: thanhPhan.trim(), xlntItemCodes: splitCodes(xlnt) } : t.config || {}
+      const config = t.kieu === "thang_8a" ? { ...(t.config || {}), thanhPhan: "", thanhPhanList: cleanThanhPhan(members), xlntItemCodes: splitCodes(xlnt) } : t.config || {}
       await saveReportTemplate(t.id, { name: name.trim() || t.name, is_active: active, config })
       onSaved(`Đã lưu ${t.code}`)
     } catch (e) {
@@ -55,15 +64,10 @@ function TemplateCard({ t, onSaved }: { t: NormReportTemplate; onSaved: (msg: st
       </label>
       {t.kieu === "thang_8a" && (
         <>
-          <label className="block space-y-1">
-            <span className="text-xs font-semibold text-slate-600">Thành phần nhà máy (mỗi dòng 1 người — in đầu báo cáo)</span>
-            <textarea
-              className={`${inputCls} h-32 py-2`}
-              value={thanhPhan}
-              onChange={(e) => setThanhPhan(e.target.value)}
-              placeholder={"Ông: Tô Thành Luân — Chức vụ: Phó giám đốc phụ trách Nhà máy\nÔng: Nguyễn Hữu Thọ — Chức vụ: Nhân viên Kỹ thuật"}
-            />
-          </label>
+          <div className="space-y-1">
+            <span className="text-xs font-semibold text-slate-600">Thành phần nhà máy (in đầu báo cáo — chọn người, chức vụ mặc định = chức vụ chính quyền)</span>
+            <ThanhPhanEditor value={members} onChange={setMembers} />
+          </div>
           <label className="block space-y-1">
             <span className="text-xs font-semibold text-slate-600">Mã chỉ tiêu in ở mục 7 (xử lý nước thải) — ngoài các chỉ tiêu tên có “nước thải”</span>
             <input className={inputCls} value={xlnt} onChange={(e) => setXlnt(e.target.value)} placeholder="vd PAC, POLY_A" />

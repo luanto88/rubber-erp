@@ -4,6 +4,7 @@ import { returnSigningRequest } from "@/lib/signing/requests"
 import { scheduleSigningNotify } from "@/lib/signing/notify"
 import { syncPurchaseFromSigning } from "@/lib/purchase/server"
 import { syncNormReportFromSigning } from "@/lib/norms/server"
+import { syncInventoryDailyReportFromSigning } from "@/lib/inventory-daily-report/server"
 
 export const dynamic = "force-dynamic"
 
@@ -37,6 +38,8 @@ export async function POST(req: NextRequest) {
     await syncPurchaseFromSigning(yeuCauId)
     // Module Định mức KTKT: báo cáo kỳ Đã ký / Bị trả về. No-op với module khác.
     await syncNormReportFromSigning(yeuCauId)
+    // Kho vật tư: báo cáo sử dụng theo ngày Đã ký / Bị trả về. No-op với module khác.
+    await syncInventoryDailyReportFromSigning(yeuCauId)
 
     return NextResponse.json(result)
   } catch (err) {

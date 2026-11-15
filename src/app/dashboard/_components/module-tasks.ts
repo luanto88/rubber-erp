@@ -356,12 +356,15 @@ export async function getInventoryTasks(factoryId: string): Promise<ModuleTaskSu
     if (days !== null && days <= 30) expiryCount++
   }
 
+  const reportPending = await getMySigningPending("inventory_report", "/dashboard/inventory/daily-reports")
   return {
     moduleLabel: "Kho vật tư",
     items: [
       { label: "Phiếu chưa ghi sổ", count: draftCount || 0, link: "/dashboard/inventory/receipts" },
       { label: "Vật tư tồn thấp", count: lowStockCount, link: "/dashboard/inventory/analytics" },
       { label: "Lô sắp/đã hết hạn", count: expiryCount, link: "/dashboard/inventory/analytics" },
+      // Báo cáo sử dụng theo ngày (55-BC, 46-BC) chờ bạn ký — ký số modun inventory_report.
+      { label: "Báo cáo kho chờ bạn ký", count: reportPending.count, link: reportPending.link },
     ],
   }
 }

@@ -6,8 +6,9 @@ import jsPDF from "jspdf"
 import autoTable, { type CellHookData, type RowInput } from "jspdf-autotable"
 import { addQrImage, ensurePdfFont, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
 import { addDaysISO } from "@/lib/date-utils"
+import { COMPANY_HEADING_LINE_1, COMPANY_HEADING_LINE_2, COMPANY_HEADING_LINE_3 } from "@/lib/pdf-company-heading"
 import type { NormReportKieu, NormReportSignRole, NormReportSnapshot, SnapLine, SnapOutside, Thang8aConfig } from "./report-types"
-import { TP_NGUON_KEYS, TP_NGUON_LABEL, fmtDateVN } from "./report-types"
+import { TP_NGUON_KEYS, TP_NGUON_LABEL, fmtDateVN, thanhPhanRows } from "./report-types"
 import { build8a, buildDongHo, isOverSnapLine, lineTitle, lineUnit } from "./report-templates"
 import { OUTSIDE_KIND_LABEL } from "./compute"
 import { NORM_METER_UNIT, shortCsr } from "./types"
@@ -17,7 +18,10 @@ const GRAY: [number, number, number] = [100, 116, 139]
 const RED: [number, number, number] = [185, 28, 28]
 const HEAD_FILL: [number, number, number] = [241, 245, 249]
 const M = 10
-const QR = 16
+const QR = 12.8 // nhỏ hơn bản đầu 20% (16 → 12,8 mm)
+const QR_Y = M - 2 // chừa 1 dòng phía trên QR cho mã mẫu
+// Tiêu đề mục + hàng tiêu đề bảng + ~2 dòng đầu phải cùng trang (không để tiêu đề "mồ côi" cuối trang).
+const KEEP_SECTION = 24
 
 export type NormReportPdfInput = {
   kieu: NormReportKieu
@@ -44,12 +48,6 @@ const nf = (v: number | null | undefined, d = 2) =>
   v === null || v === undefined || !Number.isFinite(v) ? "" : v.toLocaleString("vi-VN", { maximumFractionDigits: d, minimumFractionDigits: 0 })
 const tons = (kg: number | undefined) => (kg ? kg / 1000 : 0)
 
-function companyHeading(name: string): string {
-  const n = (name || "").trim().toUpperCase()
-  if (!n) return "CÔNG TY"
-  return n.startsWith("CÔNG TY") ? n : `CÔNG TY TNHH PTCS ${n}`
-}
-
 function periodTitle(from: string, to: string): string {
   const [fy, fm, fd] = from.split("-")
   const [ty, tm] = to.split("-")
@@ -68,7 +66,21 @@ function ensureSpace(ctx: Ctx, need: number) {
   }
 }
 
-function text(ctx: Ctx, s: string, opts: { size?: number; bold?: boolean; color?: [number, number, number]; x?: number; align?: "left" | "center" | "right"; gap?: number } = {}) {
+// Chữ đậm giả tại toạ độ tuyệt đối (NotoSans chỉ có Regular ⇒ tô + viền nét mảnh).
+function boldAt(doc: jsPDF, s: string | string[], x: number, y: number, size: number, align: "left" | "center" | "right" = "left") {
+  doc.setFont(PDF_FONT_NAME, "normal")
+  doc.setFontSize(size)
+  doc.setLineWidth(size * 0.016)
+  doc.setDrawColor(...INK)
+  doc.setTextColor(...INK)
+  doc.text(s, x, y, { align, renderingMode: "fillThenStroke" })
+}
+
+function text(
+  ctx: Ctx,
+  s: string,
+  opts: { size?: number; bold?: boolean; color?: [number, number, number]; x?: number; align?: "left" | "center" | "right"; gap?: number; keepWithNext?: number } = {},
+) {
   const { doc } = ctx
   doc.setFont(PDF_FONT_NAME, opts.bold ? "bold" : "normal")
   doc.setFontSize(opts.size ?? 9)
@@ -76,7 +88,7 @@ function text(ctx: Ctx, s: string, opts: { size?: number; bold?: boolean; color?
   const maxW = ctx.W - M * 2
   const lines = doc.splitTextToSize(s, maxW) as string[]
   const lh = (opts.size ?? 9) * 0.42
-  ensureSpace(ctx, lines.length * lh + 1)
+  ensureSpace(ctx, lines.length * lh + 1 + (opts.keepWithNext ?? 0))
   const x = opts.x ?? (opts.align === "center" ? ctx.W / 2 : opts.align === "right" ? ctx.W - M : M)
   // ctx.y là mép TRÊN dòng chữ ⇒ đường chân chữ = ctx.y + ~0.8 lh (không đè bảng phía trên).
   const base = ctx.y + lh * 0.8
@@ -91,12 +103,16 @@ function text(ctx: Ctx, s: string, opts: { size?: number; bold?: boolean; color?
 }
 
 function table(ctx: Ctx, head: RowInput[], body: RowInput[], opts: { redRows?: Set<number>; boldRows?: Set<number>; fontSize?: number; colStyles?: Record<number, { halign?: "left" | "right" | "center"; cellWidth?: number | "auto" | "wrap" }> } = {}) {
+  // Không bắt đầu bảng sát đáy trang (chỉ kịp vẽ hàng tiêu đề rồi sang trang).
+  ensureSpace(ctx, 7 * head.length + 8)
   autoTable(ctx.doc, {
     startY: ctx.y,
-    margin: { left: M, right: M },
+    margin: { left: M, right: M, top: M + 4 },
     head,
     body,
     theme: "grid",
+    showHead: "everyPage", // bảng sang trang ⇒ lặp lại hàng tiêu đề
+    rowPageBreak: "avoid",
     styles: { font: PDF_FONT_NAME, fontStyle: "normal", fontSize: opts.fontSize ?? 7.5, cellPadding: 1, textColor: INK, lineColor: [148, 163, 184], lineWidth: 0.15, valign: "middle" },
     headStyles: { fillColor: HEAD_FILL, textColor: INK, fontStyle: "normal", halign: "center" },
     columnStyles: opts.colStyles,
@@ -141,7 +157,7 @@ function compareTable(ctx: Ctx, lines: SnapLine[]) {
 
 function outsideTable(ctx: Ctx, rows: SnapOutside[]) {
   if (!rows.length) return
-  text(ctx, "Phát sinh ngoài định mức (chỉ hiển thị, không so sánh)", { bold: true, size: 9 })
+  text(ctx, "Phát sinh ngoài định mức (chỉ hiển thị, không so sánh)", { bold: true, size: 9, keepWithNext: KEEP_SECTION })
   table(
     ctx,
     [["STT", "Loại", "Mã", "Tên", "Số lượng", "ĐVT", "Ghi chú / lý do"]],
@@ -152,22 +168,24 @@ function outsideTable(ctx: Ctx, rows: SnapOutside[]) {
 
 function drawHeader(ctx: Ctx, input: NormReportPdfInput, title: string, subtitle: string, ngayLap: string) {
   const { doc, W } = ctx
+  // Mã mẫu (vd "Mẫu 8A-NMCB") canh giữa NGAY TRÊN QR góc phải trên (QR vẽ ở drawQr).
   doc.setFont(PDF_FONT_NAME, "normal")
-  doc.setFontSize(7.5)
-  doc.setTextColor(...GRAY)
-  doc.text(input.templateCode, M, M - 3)
+  doc.setFontSize(7)
   doc.setTextColor(...INK)
+  doc.text(input.templateCode, W - M - QR / 2, QR_Y - 0.8, { align: "center" })
   const leftW = (W - M * 2 - QR - 4) / 2
-  doc.setFont(PDF_FONT_NAME, "bold")
+  const lx = M + leftW / 2
+  // Góc trái 3 dòng: 2 dòng tên công ty chữ thường, "NHÀ MÁY CHẾ BIẾN" in đậm.
   doc.setFontSize(8.5)
-  const comp = doc.splitTextToSize(companyHeading(input.factoryName), leftW) as string[]
-  doc.text(comp, M + leftW / 2, M + 1, { align: "center" })
-  doc.text("NHÀ MÁY CHẾ BIẾN", M + leftW / 2, M + 1 + comp.length * 3.6, { align: "center" })
+  doc.text(COMPANY_HEADING_LINE_1, lx, M + 1, { align: "center" })
+  doc.text(COMPANY_HEADING_LINE_2, lx, M + 4.6, { align: "center" })
+  boldAt(doc, COMPANY_HEADING_LINE_3, lx, M + 8.2, 8.5, "center")
+  // Biểu ngữ phải: cả 2 dòng in đậm.
   const rx = M + leftW + leftW / 2
-  doc.text("VƯƠNG QUỐC CAMPUCHIA", rx, M + 1, { align: "center" })
+  boldAt(doc, "VƯƠNG QUỐC CAMPUCHIA", rx, M + 1, 8.5, "center")
+  boldAt(doc, "Dân tộc - Tôn giáo - Quốc vương", rx, M + 4.6, 8.5, "center")
   doc.setFont(PDF_FONT_NAME, "normal")
-  doc.text("Dân tộc - Tôn giáo - Quốc vương", rx, M + 4.6, { align: "center" })
-  ctx.y = M + 1 + (comp.length + 1) * 3.6 + 3
+  ctx.y = M + 8.2 + 5
   const [y, m, d] = ngayLap.split("-")
   doc.setFontSize(8.5)
   doc.text(input.maBaoCao ? `Số: ${input.maBaoCao}` : `Số:      /${input.loaiKyHieu}-${input.phongBan}`, M + leftW / 2, ctx.y, { align: "center" })
@@ -179,7 +197,7 @@ function drawHeader(ctx: Ctx, input: NormReportPdfInput, title: string, subtitle
 
 async function drawQr(doc: jsPDF, W: number, url: string) {
   doc.setPage(1)
-  await addQrImage(doc, url, W - M - QR, M - 6, QR)
+  await addQrImage(doc, url, W - M - QR, QR_Y, QR)
 }
 
 function drawMeta(ctx: Ctx, snap: NormReportSnapshot, showMeter: boolean, extra: string[] = []) {
@@ -234,19 +252,33 @@ function body8a(ctx: Ctx, input: NormReportPdfInput) {
   const cfg = (input.config || {}) as Thang8aConfig
   const d = build8a(snap, cfg)
 
-  const thanhPhan = String(cfg.thanhPhan || "")
-    .split(/\r?\n/)
-    .map((x) => x.trim())
-    .filter(Boolean)
+  // Thành phần nhà máy: 2 cột như mẫu giấy — "- Ông: Tên" | "Chức vụ: …" (cột chức vụ thẳng hàng).
+  const thanhPhan = thanhPhanRows(cfg)
   if (thanhPhan.length) {
-    text(ctx, "Thành phần nhà máy:", { size: 8.5, bold: true })
-    for (const tp of thanhPhan) text(ctx, `- ${tp.replace(/^-\s*/, "")}`, { size: 8.5, gap: 0.3 })
-    ctx.y += 1
+    text(ctx, "Thành phần nhà máy:", { size: 8.5, bold: true, keepWithNext: Math.min(thanhPhan.length, 3) * 3.9 })
+    const { doc } = ctx
+    doc.setFont(PDF_FONT_NAME, "normal")
+    doc.setFontSize(8.5)
+    const leftX = M + 4
+    const nameW = Math.max(...thanhPhan.map((r) => doc.getTextWidth(`- ${r.left}`)))
+    const cvX = Math.min(leftX + Math.max(nameW + 8, 55), ctx.W / 2)
+    const lh = 8.5 * 0.42
+    for (const r of thanhPhan) {
+      ensureSpace(ctx, lh + 0.5)
+      const base = ctx.y + lh * 0.8
+      doc.setFont(PDF_FONT_NAME, "normal")
+      doc.setFontSize(8.5)
+      doc.setTextColor(...INK)
+      doc.text(`- ${r.left}`, leftX, base)
+      if (r.chucVu) doc.text(`Chức vụ: ${r.chucVu}`, cvX, base, { maxWidth: ctx.W - M - cvX })
+      ctx.y += lh + 0.4
+    }
+    ctx.y += 1.5
   }
   text(ctx, "Căn cứ kết quả tổng hợp của các bộ phận, Nhà máy chế biến thống nhất kết quả sản xuất trong kỳ như sau:", { size: 8.5, gap: 2 })
 
   // 1. NL tiếp nhận
-  text(ctx, "1. KHỐI LƯỢNG NGUYÊN LIỆU TIẾP NHẬN (tấn, mọi nguồn)", { bold: true, size: 9.5 })
+  text(ctx, "1. KHỐI LƯỢNG NGUYÊN LIỆU TIẾP NHẬN (tấn, mọi nguồn)", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
   if (!d.nlUnits.length) text(ctx, "Không có nguyên liệu tiếp nhận trong kỳ.", { size: 8, color: GRAY })
   else {
     const body: RowInput[] = d.nlUnits.map((u, i) => {
@@ -280,34 +312,34 @@ function body8a(ctx: Ctx, input: NormReportPdfInput) {
     table(ctx, [["STT", "Chủng loại", ...keys.map((k) => TP_NGUON_LABEL[k]), "Tổng"]], body, { boldRows: new Set([body.length - 1]), colStyles: { 0: { halign: "center", cellWidth: 8 }, ...cs } })
   }
 
-  text(ctx, "2. THÀNH PHẨM CHẾ BIẾN (tấn)", { bold: true, size: 9.5 })
+  text(ctx, "2. THÀNH PHẨM CHẾ BIẾN (tấn)", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
   tpTable(d.tpByCsr, "Không có thành phẩm nhập trong kỳ.")
-  text(ctx, "3. THÀNH PHẨM XUẤT KHO (tấn)", { bold: true, size: 9.5 })
+  text(ctx, "3. THÀNH PHẨM XUẤT KHO (tấn)", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
   tpTable(d.tpExport, "Không có đơn xuất đã duyệt trong kỳ.")
   for (const w of snap.tpExportWarnings) text(ctx, `(!) ${w}`, { size: 7.5, color: RED })
 
-  text(ctx, "4. SỬ DỤNG VẬT TƯ HÓA CHẤT CHẾ BIẾN", { bold: true, size: 9.5 })
+  text(ctx, "4. SỬ DỤNG VẬT TƯ HÓA CHẤT CHẾ BIẾN", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION + 8 })
   const ng = (k: string) => nf(tons(d.tpByNguon[k]), 3)
   text(ctx, `4.1 Thành phẩm Công ty: ${ng("cong_ty")} tấn   ·   4.2 Gia công: ${ng("gia_cong")} tấn   ·   4.3 Thu mua: ${ng("thu_mua")} tấn`, { size: 8 })
   text(ctx, "Định mức cho phép đã cộng theo từng nguồn; thực tế xuất kho không tách được theo nguồn nên ghi ở tổng.", { size: 7.5, color: GRAY })
   compareTable(ctx, d.sec4)
 
-  text(ctx, "5. TIÊU THỤ ĐIỆN NƯỚC", { bold: true, size: 9.5 })
+  text(ctx, "5. TIÊU THỤ ĐIỆN NƯỚC", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
   compareTable(ctx, d.sec5)
 
-  text(ctx, "6. TIÊU THỤ NHIÊN LIỆU", { bold: true, size: 9.5 })
+  text(ctx, "6. TIÊU THỤ NHIÊN LIỆU", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION + 8 })
   const km = d.kmByType.filter((k) => k.km > 0).map((k) => `${k.vehicleType} ${nf(k.km, 0)} km`).join(" · ")
   text(ctx, `- Số km vận chuyển: ${km || "không có"}`, { size: 8 })
   text(ctx, `- Quy khô nguyên liệu nông trường (theo bộ lọc ký hiệu KT của kỳ): ${nf(d.nlKhoTons, 4)} tấn`, { size: 8 })
   compareTable(ctx, d.sec6)
 
-  text(ctx, "7. HỆ THỐNG XỬ LÝ NƯỚC THẢI VÀ CHỈ TIÊU KHÁC", { bold: true, size: 9.5 })
+  text(ctx, "7. HỆ THỐNG XỬ LÝ NƯỚC THẢI VÀ CHỈ TIÊU KHÁC", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
   compareTable(ctx, d.sec7)
   outsideTable(ctx, d.outside)
 
   text(ctx, "8. CÁC CHI PHÍ TRONG THÁNG", { bold: true, size: 9.5, gap: 2 })
 
-  text(ctx, "9. TỔNG HỢP", { bold: true, size: 9.5 })
+  text(ctx, "9. TỔNG HỢP", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
   if (d.summary.length) {
     const red = new Set<number>()
     table(
@@ -321,12 +353,12 @@ function body8a(ctx: Ctx, input: NormReportPdfInput) {
     )
   }
 
-  text(ctx, "10. BẢNG GIẢI TRÌNH", { bold: true, size: 9.5 })
-  text(ctx, "10.1 Vật tư, hóa chất vượt định mức", { bold: true, size: 8.5 })
+  text(ctx, "10. BẢNG GIẢI TRÌNH", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
+  text(ctx, "10.1 Vật tư, hóa chất vượt định mức", { bold: true, size: 8.5, keepWithNext: KEEP_SECTION })
   if (!d.over.length) text(ctx, "Không có chỉ tiêu vượt định mức.", { size: 8, color: GRAY })
   else compareTable(ctx, d.over)
   if (d.over.length) {
-    text(ctx, "10.2 Nguyên nhân vượt định mức như sau:", { bold: true, size: 8.5 })
+    text(ctx, "10.2 Nguyên nhân vượt định mức như sau:", { bold: true, size: 8.5, keepWithNext: KEEP_SECTION })
     const csrText = d.tpByCsr.map((r) => `CSR ${shortCsr(r.csr)}`).join(", ")
     const nlKhoAll = Object.values(d.nlTotalKho).reduce((a, b) => a + b, 0)
     text(
@@ -337,7 +369,7 @@ function body8a(ctx: Ctx, input: NormReportPdfInput) {
     for (const l of d.over) text(ctx, `- ${lineTitle(l)}: ${(input.giaiTrinh[l.key] || "").trim() || "(chưa giải trình)"}`, { size: 8.5 })
   }
 
-  text(ctx, "11. KIẾN NGHỊ", { bold: true, size: 9.5 })
+  text(ctx, "11. KIẾN NGHỊ", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
   const kn = (input.kienNghi || "").trim()
   text(ctx, kn || "Không có.", { size: 8.5, color: kn ? INK : GRAY, gap: 2 })
 }

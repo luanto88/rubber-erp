@@ -1,5 +1,6 @@
 import jsPDF from "jspdf"
 import { ensurePdfFont, addQrImage, safeName, PDF_FONT_NAME } from "@/lib/pdf-qr-shared"
+import { COMPANY_HEADING_LINE_1, COMPANY_HEADING_LINE_2, COMPANY_HEADING_LINE_3 } from "@/lib/pdf-company-heading"
 import { buildProductLabelLookupUrl, type KienLetter } from "@/lib/product-label"
 import { buildShortLotLabel } from "@/lib/product-lot-config"
 import {
@@ -40,9 +41,9 @@ export type ProductLabelPdfOptions = {
 // vòng tròn không méo, vừa giữ nguyên dòng chữ viết tắt (dù nhỏ do khung header thấp).
 const LOGO_PATH = "/logo-phk-moi.png"
 const LOGO_ASPECT = 631 / 809 // width / height gốc
-const DEFAULT_COMPANY_LINE_1 = "CÔNG TY TNHH PHÁT TRIỂN CAO SU"
-const DEFAULT_COMPANY_LINE_2 = "PHƯỚC HÒA KAMPONG THOM"
-const DEFAULT_COMPANY_LINE_3 = "NHÀ MÁY CHẾ BIẾN"
+const DEFAULT_COMPANY_LINE_1 = COMPANY_HEADING_LINE_1
+const DEFAULT_COMPANY_LINE_2 = COMPANY_HEADING_LINE_2
+const DEFAULT_COMPANY_LINE_3 = COMPANY_HEADING_LINE_3
 
 let logoBase64Promise: Promise<string> | null = null
 

@@ -549,3 +549,54 @@ Chưa làm: chuyển cấu hình ngưỡng cảnh báo sang Cài đặt; dùng c
   - Câu SQL đầu kỳ (cuối file migration) liệt kê người có quyền tạo mà thiếu quyền ghi sổ — admin tick trước khi chạy.
 - Test: khối 11 trong `scripts/test-inventory-rls.mjs`; các lượt ghi sổ trong test dùng `poster` (htho nếu có
   `inventory.post`, ngược lại admin).
+
+## Báo cáo sử dụng theo ngày — 55-BC VT HC, 46-BC Mẫu 12B dầu (2026-11-15, chờ chạy `20261125` + test tay)
+Người dùng chốt: ký số 2 người (Lập bảng → Giám đốc `mac_dinh_ky`), số BC-NMCB chung dãy Văn bản nội bộ + báo cáo định
+mức; mẫu cấu hình NGAY trong Kho, cột = tick vật tư; có Excel bám mẫu; dữ liệu cũ (file NXT 01/01–31/07/2026) vào bảng
+lịch sử riêng, không đụng tồn / thẻ kho. Không khoá cứng phiếu kho — chi tiết kiểm "Đã ký — dữ liệu đã đổi" bằng hash.
+- Migration `20261125_inventory_daily_reports.sql` (**chạy tay TRƯỚC deploy**, sau 20261124): `inventory_daily_report_templates`
+  (kieu `vt_hc` | `dau_12b`, config `{tieuDe, maMau, nhanLap, chucVuLap, hideZero, columns:[{label, subLabel, itemIds}]}`,
+  phiên bản +1 khi đổi config), `inventory_daily_reports` (snapshot ngày × cột + hash, số, trạng thái nhap|cho_ky|da_ky|
+  tra_ve|huy), `inventory_legacy_movements` (chỉ đọc, ghi bằng script). Hàm số dùng chung `report_number_max_used` /
+  `report_number_taken`; `tech_norm_report_reserve_number` + `tech_norm_report_used_numbers` CREATE OR REPLACE để tính cả
+  báo cáo kho; `inventory_daily_report_reserve_number`. Quyền mới `inventory.daily_report` (seed admin); sửa mẫu =
+  `inventory.settings`. Seed 2 mẫu cho `phuochoa_kt` theo giấy tháng 10/2026 (55: 14 cột; 12B: 9 cột DOX+DOCZVC ·
+  DOXU12+DOXUNL · DON · DOCZNB · DOXU3 · DOFORD · DOFAT · DOVS · DO750K).
+- Lib `src/lib/inventory-daily-report/`: `types.ts`, `compute.ts` (`buildDailyMatrix`, gộp theo (ngày, vật tư): có phát sinh
+  thật ⇒ dùng thật, không thì lịch sử — không cộng trùng), `loader.ts` (nhận client Supabase; `.range()`/`.in()` 200; bảng
+  lịch sử chưa có ⇒ rỗng), `pdf.ts` (A4 ngang, header 3 dòng + biểu ngữ đậm + mã mẫu trên QR 12,8 mm, cột đều, `showHead`
+  everyPage, khối ký trả `boxesByRole`), `excel.ts` (exceljs nạp động), `client.ts`, `server.ts` (sync trạng thái +
+  tóm tắt thông báo).
+- API `/api/inventory/daily-reports/{approvers, sync, [id]/reserve-number, [id]/submit, [id]/cancel}`; người ký dùng chung
+  `src/app/api/_lib/report-approvers.ts` (Định mức cũng gọi). Modun ký `inventory_report` (loai `inventory_daily_vt_hc` /
+  `inventory_daily_dau_12b`): labels, notify, file-url (`inventory.daily_report`), hook sign-field / return-request, nút Đóng
+  màn ký, chuông Kho "Báo cáo kho chờ bạn ký". Trạng thái dùng domain `norms_report`.
+- UI: tab "Sử dụng theo ngày" (nhóm Báo cáo) `/dashboard/inventory/daily-reports` — Danh sách · Lập báo cáo (mẫu + tháng →
+  Tính dữ liệu → bảng + PDF + Excel → Lưu Nháp) · Mẫu báo cáo (tick vật tư, "Thêm cột từ vật tư" cho 55). Chi tiết 70/30
+  `/dashboard/inventory/daily-reports/[id]`: Gửi ký / Mở màn ký / Thu hồi / Tính lại số liệu / Excel / Huỷ.
+- Dữ liệu cũ: `scripts/import-inventory-legacy-nxt.mjs --dry-run | --apply` (upsert theo ID AppSheet). Dry-run 2026-11-15:
+  772 dòng, 43 mã đều có, 31 ô trùng dữ liệu thật (26–31/07 khớp; 24/07 N50, B013H lệch ⇒ dùng DB).
+- Kiểm code thật tháng 10/2026: 12B 1.830 · 2.684 · 558 · 453 · 160 = 5.685; 55 Bọc 2.100, Thảm 400, Formic 770 (06/10 = 420,
+  18/10 = 350), DCS 135, NaOH 100, N68 90, N140 90 … — khớp giấy. Tháng 7 (thật + lịch sử): DOX 1.319, DOCZVC 485, Bọc 1.620
+  khớp 8A; Thảm / DCS lệch do lô CHỐT TỒN 24/07 — đã xử lý bằng "phiếu điều chỉnh tồn" (mục dưới) ⇒ Thảm 490, DCS 75 khớp 8A.
+
+## Phiếu điều chỉnh tồn (2026-11-15, migration `20261126_inventory_adjustment_documents.sql`)
+
+- Lô chốt tồn khi bắt đầu dùng app: 19 phiếu ghi ngày 24/07/2026, lập 30/07 (ghi chú "tính tồn kho ngày 25/07/2026"; vd
+  X-KA-240726/001..003: B013H 87, TT 380, DCS 74; X-KDDX-240726/001: N50 266). Là bút toán đưa tồn app = tồn thực tế, KHÔNG
+  phải sử dụng. **Không xoá**: chúng tạo nên tồn hiện tại (balance_after các phát sinh sau) — người dùng đồng ý "xoá nếu không
+  ảnh hưởng dữ liệu", nhưng có ảnh hưởng ⇒ đánh dấu thay vì xoá.
+- `inventory_documents.la_dieu_chinh` (+ `ly_do_dieu_chinh`, `dieu_chinh_boi`, `dieu_chinh_luc`). Tồn / thẻ kho tính bình
+  thường. Đổi cờ CHỈ qua RPC `inventory_document_set_adjustment(id, flag, ly_do)` (admin hoặc `inventory.settings`, phiếu
+  posted, bắt lý do khi đánh dấu); trigger chặn UPDATE trực tiếp cột cờ (policy update phiếu đang mở cho phê duyệt).
+- Bỏ dòng xuất của phiếu điều chỉnh ở: báo cáo sử dụng theo ngày (`inventory-daily-report/loader.ts` ⇒ ngày đó rơi về số lịch
+  sử) và đối soát định mức (`norms/reconcile-loader.ts` — bỏ hẳn, KHÔNG hiện thành "loại trừ" để khỏi lọt mục 6 của 8A).
+  Helper chung `src/lib/inventory-adjustment.ts` `loadAdjustmentDocumentIds` (chưa chạy migration ⇒ tập rỗng).
+- Tab Xuất: nhãn vàng "Điều chỉnh tồn", lọc "Loại phiếu" (Xuất sử dụng / Điều chỉnh tồn), nút cân (Scale) đánh dấu / bỏ.
+- Kiểm tháng 7/2026 (giả lập cờ): TT 490, DCS 75, N50 17, B013H 30, DOX+DOCZVC 1.804 — khớp 8A giấy.
+
+## Tab Nhập / Xuất / Chuyển — lọc ngày (2026-11-15)
+
+- Bug "không lọc theo ngày": mỗi lần đổi ô ngày bắn 1 lượt tải; lượt cũ (khoảng rộng, nhiều dòng, chậm) về sau ghi đè lượt mới.
+  Sửa trong `inventory-document-list.tsx`: số thứ tự lượt tải (`loadSeqRef`) bỏ kết quả cũ; chỉ tải khi ngày hợp lệ + ngừng
+  gõ 350 ms (`loadRange`); lọc ngày thêm ở máy theo ô đang hiển thị.

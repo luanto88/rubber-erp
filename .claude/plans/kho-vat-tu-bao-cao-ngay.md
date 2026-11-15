@@ -1,4 +1,7 @@
-# Kho vật tư — tab "Báo cáo": báo cáo sử dụng theo ngày (mẫu 55-BC VT HC, 46-BC Mẫu 12B dầu) — KẾ HOẠCH (2026-11-15)
+# Kho vật tư — tab "Báo cáo": báo cáo sử dụng theo ngày (mẫu 55-BC VT HC, 46-BC Mẫu 12B dầu) — ĐÃ CODE 2026-11-15
+
+> Đã chốt + đã làm: xem rule 13 mục "Báo cáo sử dụng theo ngày". Ký số 2 người; mẫu tick vật tư trong Kho; có Excel;
+> dữ liệu cũ vào `inventory_legacy_movements`. Phần dưới giữ làm lịch sử thiết kế.
 
 ## Bối cảnh
 Người dùng chốt (2026-11-15): 2 báo cáo theo ngày KHÔNG làm trong module Định mức KTKT (GĐ4 chỉ giữ Mẫu 8A + Mẫu 09),

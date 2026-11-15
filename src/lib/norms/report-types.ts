@@ -35,7 +35,23 @@ export const NORM_REPORT_SIGN_ORDER: Record<NormReportSignRole, { thuTu: number;
 }
 
 /** Cấu hình Mẫu 8A: thành phần nhà máy (mỗi dòng 1 người) + mã chỉ tiêu in ở mục 7 (xử lý nước thải). */
-export type Thang8aConfig = { thanhPhan?: string; xlntItemCodes?: string[] }
+// Thành phần nhà máy in đầu 8A: chọn từ nhân sự thật (maintenance_staff) — lưu SNAPSHOT tên + chức vụ lúc lưu mẫu.
+export type ThanhPhanMember = { staffId: string | null; danhXung: string; ten: string; chucVu: string }
+export type Thang8aConfig = { thanhPhan?: string; thanhPhanList?: ThanhPhanMember[]; xlntItemCodes?: string[] }
+
+// Dòng thành phần để in: ưu tiên danh sách chọn; không có ⇒ tách text cũ ("Ông: X — Chức vụ: Y" / "Ông: X  Chức vụ: Y").
+export function thanhPhanRows(cfg: Thang8aConfig): Array<{ left: string; chucVu: string }> {
+  const list = (cfg.thanhPhanList || []).filter((m) => (m.ten || "").trim())
+  if (list.length) return list.map((m) => ({ left: `${(m.danhXung || "Ông").trim()}: ${m.ten.trim()}`, chucVu: (m.chucVu || "").trim() }))
+  return String(cfg.thanhPhan || "")
+    .split(/\r?\n/)
+    .map((x) => x.trim().replace(/^-\s*/, ""))
+    .filter(Boolean)
+    .map((line) => {
+      const m = line.match(/^(.*?)\s*(?:[—–-]\s*|\s{2,}|,\s*)?chức\s*vụ\s*:?\s*(.*)$/iu)
+      return m ? { left: m[1].trim().replace(/[—–,-]\s*$/, "").trim(), chucVu: m[2].trim() } : { left: line, chucVu: "" }
+    })
+}
 
 export type NormReportTemplate = {
   id: string
