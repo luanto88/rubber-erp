@@ -3,6 +3,7 @@ import { jwtVerify } from "jose"
 import { signField, type SigningPlacementOverride } from "@/lib/signing/requests"
 import { scheduleSigningNotify } from "@/lib/signing/notify"
 import { syncPurchaseFromSigning } from "@/lib/purchase/server"
+import { syncNormReportFromSigning } from "@/lib/norms/server"
 
 export const dynamic = "force-dynamic"
 
@@ -55,6 +56,8 @@ export async function POST(req: NextRequest) {
 
     // Module Đề nghị mua: đồng bộ trạng thái phiếu (đã duyệt / hết trả về). No-op với module khác.
     await syncPurchaseFromSigning(yeuCauId)
+    // Module Định mức KTKT: báo cáo kỳ Đã ký / Bị trả về. No-op với module khác.
+    await syncNormReportFromSigning(yeuCauId)
 
     return NextResponse.json(result)
   } catch (err) {

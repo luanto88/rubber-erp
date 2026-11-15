@@ -171,6 +171,15 @@ export function normDbErrorText(message: string): string {
   return message
 }
 
+/** 5 loại mủ của Sản lượng (mirror OUTPUT_MATERIALS ở output-types.ts). Mủ nước ⇒ dây chuyền Mủ nước. */
+export const NL_MATERIALS = [
+  { key: "mn", label: "Mủ nước", tuoi: "mn_tuoi", kho: "mn_kho", dayChuyen: "Mủ nước" },
+  { key: "ct", label: "Mủ chén", tuoi: "ct_tuoi", kho: "ct_kho", dayChuyen: "Mủ tạp" },
+  { key: "dct", label: "Mủ đông chén", tuoi: "dct_tuoi", kho: "dct_kho", dayChuyen: "Mủ tạp" },
+  { key: "dkt", label: "Mủ đông khối", tuoi: "dkt_tuoi", kho: "dkt_kho", dayChuyen: "Mủ tạp" },
+  { key: "dt", label: "Mủ dây", tuoi: "dt_tuoi", kho: "dt_kho", dayChuyen: "Mủ tạp" },
+] as const
+
 // ─── GĐ2: Nhập liệu theo ngày (đồng hồ điện nước + kiểm kê tồn xưởng) ────────
 
 export type NormMeterLoai = "dien" | "nuoc" | "nuoc_thai"

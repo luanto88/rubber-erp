@@ -3,6 +3,7 @@ import { requireAuthUser } from "@/app/api/account/_lib/security"
 import { returnSigningRequest } from "@/lib/signing/requests"
 import { scheduleSigningNotify } from "@/lib/signing/notify"
 import { syncPurchaseFromSigning } from "@/lib/purchase/server"
+import { syncNormReportFromSigning } from "@/lib/norms/server"
 
 export const dynamic = "force-dynamic"
 
@@ -34,6 +35,8 @@ export async function POST(req: NextRequest) {
 
     // Module Đề nghị mua: phiếu chuyển "Bị trả về" để người đề nghị sửa & gửi lại.
     await syncPurchaseFromSigning(yeuCauId)
+    // Module Định mức KTKT: báo cáo kỳ Đã ký / Bị trả về. No-op với module khác.
+    await syncNormReportFromSigning(yeuCauId)
 
     return NextResponse.json(result)
   } catch (err) {

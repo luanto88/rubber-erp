@@ -1231,3 +1231,8 @@ mọi hàm vẽ text im lặng bỏ qua ⇒ test "pass" giả.
 ## Trả về: lý do bắt buộc (2026-10-13)
 
 Modal Trả về khoá nút khi lý do rỗng; route `api/documents/sign` action `tra_ve` trả 400 nếu `ly_do` rỗng. Bước ký đích danh (`user_id`/`mat_recipient_user_id`) chỉ đúng người được chỉ định mới trả về được (mirror `canSignStep`). Không cần PIN.
+
+## Dãy số chung với báo cáo định mức (2026-11-15)
+`computeNextVanBanSo` = max(`so_van_ban` của văn bản cùng loại/phòng/năm, số báo cáo định mức qua RPC
+`tech_norm_report_used_numbers`) + 1; `checkMaExists` (Soạn thảo) cũng chặn mã đã cấp cho báo cáo định mức (rule 30 GĐ4).
+Báo cáo định mức "Ký nhiều bước qua Văn bản nội bộ" tạo văn bản NHÁP đúng số (loại BC, NMCB) — sửa bước ký bằng "Sửa thông tin".

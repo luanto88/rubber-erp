@@ -271,7 +271,32 @@ export async function computeNextVanBanSo(
     const n = parseInt(m[1], 10)
     if (!isNaN(n) && n > max) max = n
   }
+  // Báo cáo định mức KTKT (rule 30 GĐ4) dùng CHUNG dãy số này (vd 54/BC-NMCB) — cộng vào để không cấp trùng.
+  // Migration 20261124 chưa chạy ⇒ RPC lỗi, bỏ qua.
+  for (const n of await normReportUsedNumbers(loaiVanBan, phongBan, nam)) if (n > max) max = n
   return max + 1
+}
+
+/** Mã báo cáo định mức đã dùng (mọi loại) của phòng ban + năm — để chặn trùng mã. Lỗi ⇒ []. */
+export async function normReportUsedMas(phongBan: string, nam: number): Promise<string[]> {
+  try {
+    const { data, error } = await supabase.rpc("tech_norm_report_used_numbers", { p_loai: null, p_phong_ban: phongBan, p_nam: nam })
+    if (error) return []
+    return ((data || []) as { ma_bao_cao: string | null }[]).map((r) => r.ma_bao_cao || "").filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+/** Số báo cáo định mức đã dùng (loại, phòng ban, năm). Lỗi / chưa có migration ⇒ []. */
+export async function normReportUsedNumbers(loaiVanBan: string, phongBan: string, nam: number): Promise<number[]> {
+  try {
+    const { data, error } = await supabase.rpc("tech_norm_report_used_numbers", { p_loai: loaiVanBan, p_phong_ban: phongBan, p_nam: nam })
+    if (error) return []
+    return ((data || []) as { so: number | null }[]).map((r) => Number(r.so) || 0).filter((n) => n > 0)
+  } catch {
+    return []
+  }
 }
 
 // ── Parser tên file "01/ĐN-NMCB Tên văn bản" (nhiều biến thể không dấu "/") ─────

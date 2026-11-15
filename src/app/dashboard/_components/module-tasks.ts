@@ -434,6 +434,22 @@ export async function getMaintenanceTasks(factoryId: string, user: SessionUser):
   return { moduleLabel: "Bảo trì", items }
 }
 
+// ── Định mức KTKT — báo cáo kỳ ───────────────────────────────────────────────
+export async function getNormsTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
+  const items: ModuleTaskItem[] = []
+  const pending = await getMySigningPending("norms", "/dashboard/norms?tab=reports")
+  items.push({ label: "Báo cáo định mức chờ bạn ký", count: pending.count, link: pending.link })
+  if (hasPermission(user, "norms.report")) {
+    const { count, error } = await supabase
+      .from("tech_norm_reports")
+      .select("id", { count: "exact", head: true })
+      .eq("factory_id", factoryId)
+      .eq("trang_thai", "tra_ve")
+    items.push({ label: "Báo cáo định mức bị trả về", count: error ? 0 : count || 0, link: "/dashboard/norms?tab=reports" })
+  }
+  return { moduleLabel: "Định mức KTKT", items }
+}
+
 // ── Đề nghị mua vật tư ───────────────────────────────────────────────────────
 export async function getPurchaseTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
   const items: ModuleTaskItem[] = []
@@ -635,5 +651,6 @@ export async function getModuleTasks(
   if (isUnderRoute(pathname, "/dashboard/maintenance")) return getMaintenanceTasks(factoryId, user)
   if (isUnderRoute(pathname, "/dashboard/kpi")) return getKpiTasks(factoryId, user)
   if (isUnderRoute(pathname, "/dashboard/purchase")) return getPurchaseTasks(factoryId, user)
+  if (isUnderRoute(pathname, "/dashboard/norms")) return getNormsTasks(factoryId, user)
   return null
 }

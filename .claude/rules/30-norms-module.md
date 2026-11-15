@@ -102,5 +102,29 @@ Người dùng chốt: tick 2 mức + phạm vi theo nhóm vật tư chọn sẵ
 - Kiểm code thật: tháng 10 bỏ tick 1 dòng Bọc 0,04 (60) ⇒ thực tế 2.100 → 2.040, dòng sang `loai_tru`; tháng 8 kỳ đồng hồ 27/07 →
   27/08 ⇒ Điện XLNT (ĐH-06) 23.603 kWh khớp 51-BC.
 
+## GĐ4 — Báo cáo kỳ + ký số, CHỈ Mẫu 8A (54-BC) + Mẫu 09 (51-BC) (2026-11-15, chờ chạy migration + test tay)
+Người dùng chốt: số báo cáo = dãy Văn bản nội bộ (BC-NMCB, năm, thời gian thực); ký 2 người Người lập → BGĐ (`mac_dinh_ky`), cần
+nhiều người ⇒ "Ký nhiều bước qua Văn bản nội bộ" (tạo văn bản nháp đúng số + PDF); 8A dùng đúng nguồn Sản lượng / F12; mục 1 = MỌI
+NL (kể cả TM), mục 6 = NL khô nông trường (lọc ký hiệu KT mặc định bỏ "TM"); khoá ngày chỉ khi 8A/09 Chờ ký / Đã ký; 8A đã ký ⇒
+khung định mức đã áp → `locked`. Mẫu 55 / 46 (bảng ngày) chuyển sang Kho vật tư — `.claude/plans/kho-vat-tu-bao-cao-ngay.md`.
+- Migration `20261124_tech_norms_reports.sql` (**chạy tay TRƯỚC test**): `tech_norm_report_templates` (seed 8A + 09, config 8A
+  `thanhPhan` + `xlntItemCodes`), `tech_norm_report_batches` (snapshot JSON dùng chung + `du_lieu_hash`), `tech_norm_reports`
+  (số, trạng thái nhap|cho_ky|da_ky|tra_ve|huy, giải trình, kiến nghị, `yeu_cau_ky_id` | `van_ban_document_id`, `khoa_tu/den`).
+  RPC `tech_norm_report_reserve_number` (service role, advisory lock, max(van_ban BC-NMCB năm, báo cáo) + 1, chặn trùng),
+  `tech_norm_report_used_numbers` (cho Văn bản nội bộ không cấp trùng), `tech_norm_entry_locked()` thay STUB. RLS tách 4 policy.
+- Lib: `report-types.ts` (snapshot, hash sha256 canonical), `report-loader.ts` (`buildReportSnapshot` từ bundle đối soát + NL theo
+  Đội × loại mủ, TP xuất kho từ `export_orders` đã duyệt, chỉ số cũ/mới đồng hồ), `report-templates.ts` (`build8a`, `buildDongHo`,
+  `overLines`; mục 7 = mã cấu hình + tên có "nước thải"/"XLNT" + nhóm Khác), `report-pdf.ts` (A4 dọc, QR góc phải trên, khối ký
+  GIÁM ĐỐC NHÀ MÁY | LẬP BIỂU), `report-client.ts`, `server.ts` (đồng bộ trạng thái từ ký số / văn bản, khoá khung).
+- API `/api/norms/approvers`, `/api/norms/reports/[id]/{reserve-number,submit,to-van-ban,cancel}`, `/api/norms/reports/sync`.
+  Hook: `sign-field`, `return-request` (`syncNormReportFromSigning`), `api/documents/sign` gui_ky/phe_duyet/tra_ve
+  (`syncNormReportFromVanBan`). Modun `norms`: labels, notify (tóm tắt mẫu/kỳ/số dòng vượt), file-url (`norms.view`), màn ký nút Đóng,
+  chuông (`getNormsTasks`), registry `norms_report`.
+- UI tab "Báo cáo" (`norms-reports.tsx`: Danh sách · Lập bộ báo cáo kỳ · Mẫu báo cáo), hộp gửi ký `norms-report-send.tsx`,
+  trang chi tiết `/dashboard/norms/report/[id]` (70/30, PDF đã ký / bản chưa ký, kiểm "Đã ký — dữ liệu đã đổi" bằng tính lại hash).
+- Kiểm code thật: 8A tháng 10/2026 TP 1.485,19 · NL khô mọi nguồn 1.440,981 · NL khô NT 1.342,792 · xuất kho 814,8 · Dầu CS 135/148,5 ·
+  Bọc 2.100/2.227,8 · Xe nâng 558/668,3 · Isuzu 1.030/1.100,2 (khớp 54-BC); 09 kỳ 27/07→27/08 ĐH-06 23.603 kWh (khớp 51-BC, các đồng
+  hồ khác chưa nhập lần ghi).
+
 ## Còn lại
-GĐ4 báo cáo kỳ + ký số — prompt mở đầu ở `.claude/plans/dinh-muc-ktkt-2026-11-10.md` mục 12 · GĐ2b ghi đồng hồ offline.
+Test tay GĐ4 · GĐ2b ghi đồng hồ offline · báo cáo ngày 55/46 ở Kho vật tư (kế hoạch trên).

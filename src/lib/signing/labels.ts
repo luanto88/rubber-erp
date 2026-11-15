@@ -13,6 +13,7 @@ export const MODUN_LABEL: Record<string, string> = {
   output: "Sản lượng",
   storage: "Kho nguyên liệu",
   purchase: "Mua vật tư",
+  norms: "Định mức KTKT",
 }
 
 // Nhãn tiếng Việt cho yeu_cau_ky.loai_tai_lieu — trước đây in thẳng mã snake_case nội bộ
@@ -26,6 +27,8 @@ export const LOAI_TAI_LIEU_LABEL: Record<string, string> = {
   bao_duong_xe: "Biên bản bảo dưỡng xe",
   sua_chua_nho_xe: "Biên bản sửa chữa nhỏ xe",
   purchase_request: "Phiếu đề nghị mua VTHH",
+  norm_report_8a: "Báo cáo kết quả sản xuất (Mẫu 8A)",
+  norm_report_09: "Báo cáo điện nước (Mẫu 09)",
 }
 
 export function modunLabel(modun: string): string {

@@ -389,6 +389,8 @@ Vi du:
 - Lộ trình đồng bộ UI U8–U14: cùng file kế hoạch trên.
 - RLS UPDATE/DELETE `qc_results`/`dispatch_entries` theo trạng thái ký (hiện chặn ở UI).
 - Root CA PAdES cần xoay vòng theo kế hoạch Multi-Root CA (xem memory `security_pades_root_ca_key_exposure`).
+- Định mức KTKT GĐ4 (báo cáo Mẫu 8A + Mẫu 09 + ký số): code xong 2026-11-15 — chạy migration `20261124_tech_norms_reports.sql`
+  rồi test tay (rule 30 mục GĐ4). Báo cáo ngày 55/46 → Kho vật tư: `.claude/plans/kho-vat-tu-bao-cao-ngay.md` (chờ chốt).
 - Quy cách thành phẩm theo nhà máy: GĐ1 (bọc/pallet SX/thảm, `product_packaging_types`) test PASS 2026-11-08.
   GĐ2 (chủng loại × loại bành, lô tròn = 4 × bành/kiện, `product_grade_types`) đã code 2026-11-08 — chạy migration
   `20261116_product_grade_types.sql` TRƯỚC deploy + test tay; GĐ3 (pallet → mã vật tư) — `.claude/plans/quy-cach-thanh-pham-gd2.md`.

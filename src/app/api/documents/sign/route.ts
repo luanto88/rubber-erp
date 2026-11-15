@@ -14,6 +14,7 @@ import JSZip from "jszip"
 import QRCode from "qrcode"
 import { randomUUID } from "crypto"
 import { computeIntegrityHash } from "@/lib/signing/hash"
+import { syncNormReportFromVanBan } from "@/lib/norms/server"
 import { hasPadesRootCa, applyPadesSignatureToDoc } from "@/lib/signing/pades"
 // Link "xem bằng chứng xác minh" dùng chung với module ISO (tách ra lib 2026-09-08) — trước đây
 // là hàm private của chính file này.
@@ -1036,6 +1037,7 @@ export async function POST(req: NextRequest) {
       const { recipientUserIds, targetDeptCode } = getNextRecipients(d, "gui_ky", 0)
       fireNotify({ docId, factoryId, action: "gui_ky", recipientUserIds, targetDeptCode, actorUserId: userId })
 
+      await syncNormReportFromVanBan(docId)
       return NextResponse.json({ ok: true, trang_thai: nextStatus })
     }
 
@@ -1304,6 +1306,7 @@ export async function POST(req: NextRequest) {
         actorUserId: userId,
       })
 
+      await syncNormReportFromVanBan(docId) // báo cáo định mức ký qua Văn bản (no-op nếu không liên kết)
       return NextResponse.json({ ok: true, trang_thai: "da_phe_duyet" })
     }
 
@@ -1367,6 +1370,7 @@ export async function POST(req: NextRequest) {
         actorUserId: userId,
       })
 
+      await syncNormReportFromVanBan(docId)
       return NextResponse.json({ ok: true, trang_thai: "tra_ve" })
     }
 

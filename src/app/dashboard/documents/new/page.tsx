@@ -13,6 +13,7 @@ import {
   PHONG_BAN_VAN_BAN_OPTIONS,
   buildMaVanBan,
   computeNextVanBanSo,
+  normReportUsedMas,
   parseVanBanFileName,
   sanitizeStorageFileName,
   type VanBanDocumentType,
@@ -225,7 +226,11 @@ export default function NewDocumentPage() {
         .eq("factory_id", fid)
         .eq("ma_van_ban", ma.trim())
         .maybeSingle()
-      setMaVanBanExists(!!data)
+      // Số đã cấp cho báo cáo định mức KTKT cùng dãy (vd 54/BC-NMCB) cũng tính là trùng.
+      let usedByNorms = false
+      const pb = ma.trim().split("-").pop() || ""
+      if (!data && pb) usedByNorms = (await normReportUsedMas(pb, new Date().getFullYear())).includes(ma.trim())
+      setMaVanBanExists(!!data || usedByNorms)
     } finally {
       setMaVanBanChecking(false)
     }

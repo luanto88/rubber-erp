@@ -133,6 +133,22 @@ async function buildPurchaseSummary(requestId: string): Promise<PurchaseSummary>
   return { lines: out, kind }
 }
 
+/** Tóm tắt báo cáo định mức KTKT (rule 30 GĐ4) cho Telegram/email: mẫu, kỳ, số chỉ tiêu vượt. */
+async function buildNormsSummary(reportId: string): Promise<string[]> {
+  const supabase = getSupabaseAdmin()
+  const { data: r } = await supabase.from("tech_norm_reports").select("template_code, template_name, batch_id").eq("id", reportId).maybeSingle()
+  if (!r) return []
+  const { data: b } = await supabase.from("tech_norm_report_batches").select("tu_ngay, den_ngay, snapshot").eq("id", r.batch_id).maybeSingle()
+  const d = (iso: string | null | undefined) => (iso ? iso.slice(0, 10).split("-").reverse().join("/") : "")
+  const lines = ((b?.snapshot as { lines?: Array<{ diff: number | null; allowed: number }> } | null)?.lines || [])
+  const over = lines.filter((l) => l.diff !== null && l.diff > 1e-9 && l.allowed > 0).length
+  return [
+    `${r.template_code} — ${r.template_name}`,
+    ...(b ? [`Kỳ: ${d(b.tu_ngay)} – ${d(b.den_ngay)}`] : []),
+    ...(over ? [`⚠️ ${over} chỉ tiêu vượt định mức (có giải trình)`] : []),
+  ]
+}
+
 /**
  * Tiêu đề cho kênh gửi CHUNG (Telegram nhóm, email nhiều người nhận): nêu đích danh người phải
  * ký thay vì "bạn" — tin vào nhóm chung mà ghi "Đến lượt bạn" thì không ai biết tới lượt ai.
@@ -388,6 +404,8 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
       ? await buildPurchaseSummary(yeuCau.ban_ghi_id as string).catch(() => null)
       : null
   const purchaseKind = purchaseSummary?.kind ? PURCHASE_KIND_BADGE[purchaseSummary.kind] : null
+  const normsLines: string[] | null =
+    yeuCau.modun === "norms" && yeuCau.ban_ghi_id ? await buildNormsSummary(yeuCau.ban_ghi_id as string).catch(() => null) : null
 
   const ctx: NotifyContext = {
     event: plan.event,
@@ -407,7 +425,7 @@ export async function sendSigningNotifications(plan: SigningNotifyPlan): Promise
     recipientNames,
     lyDo: plan.lyDo,
     buoc: plan.buoc,
-    extraLines: purchaseSummary?.lines,
+    extraLines: purchaseSummary?.lines ?? normsLines ?? undefined,
     kindBadge: purchaseKind?.badge ?? null,
     kindSubjectTag: purchaseKind?.tag ?? null,
   }

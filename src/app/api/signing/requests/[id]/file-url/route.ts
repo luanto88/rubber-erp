@@ -22,6 +22,7 @@ const MODULE_VIEW_PERMISSION: Record<string, string> = {
   dispatch: "dispatch.view",
   quality: "quality.view",
   purchase: "purchase.view_all",
+  norms: "norms.view",
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -24,6 +24,7 @@ export type StatusDomain =
   | "storage"
   | "confirm_queue"
   | "norms"
+  | "norms_report"
 
 export const TONE_CLASSES: Record<StatusTone, { badge: string; dot: string; pulse: boolean }> = {
   valid: { badge: "bg-[#ecfdf5] text-[#065f46] border-[#a7f3d0]", dot: "bg-[#15803d]", pulse: false },
@@ -150,6 +151,15 @@ export const NORMS_VERSION_STATUS: Record<string, StatusEntry> = {
   locked: { label: "Đã khoá", tone: "info" },
 }
 
+/** tech_norm_reports.trang_thai — báo cáo định mức kỳ (rule 30 GĐ4). */
+export const NORMS_REPORT_STATUS: Record<string, StatusEntry> = {
+  nhap: { label: "Nháp", tone: "draft" },
+  cho_ky: { label: "Chờ ký", tone: "pending" },
+  da_ky: { label: "Đã ký", tone: "valid" },
+  tra_ve: { label: "Bị trả về", tone: "returned" },
+  huy: { label: "Đã huỷ", tone: "danger" },
+}
+
 const REGISTRY: Record<StatusDomain, Record<string, StatusEntry>> = {
   doc: DOC_STATUS,
   iso: ISO_STATUS,
@@ -164,6 +174,7 @@ const REGISTRY: Record<StatusDomain, Record<string, StatusEntry>> = {
   storage: STORAGE_STATUS,
   confirm_queue: CONFIRM_QUEUE_STATUS,
   norms: NORMS_VERSION_STATUS,
+  norms_report: NORMS_REPORT_STATUS,
 }
 
 export function resolveStatus(domain: StatusDomain, status: string | null | undefined): StatusEntry {
