@@ -161,3 +161,44 @@ export async function loadNormFloorCountDates(factoryId: string): Promise<string
   )
   return [...new Set(rows.map((r) => r.ngay))]
 }
+
+export type NormExportExtra = {
+  id: string
+  ngay: string
+  loai_csr: string
+  nguon: "cong_ty" | "gia_cong" | "thu_mua"
+  kg: number
+  ghi_chu: string | null
+  created_at: string
+}
+
+/** Xuất kho bù (lô ngoài hệ thống) — mọi dòng của nhà máy, mới nhất trước. Ít dòng ⇒ tải hết. */
+export async function loadNormExportExtra(factoryId: string): Promise<NormExportExtra[]> {
+  const rows = await fetchAllPaginated<NormExportExtra>((from, to) =>
+    supabase
+      .from("tech_norm_export_extra")
+      .select("id,ngay,loai_csr,nguon,kg,ghi_chu,created_at")
+      .eq("factory_id", factoryId)
+      .order("ngay", { ascending: false })
+      .order("id")
+      .range(from, to),
+  )
+  return rows.map((r) => ({ ...r, kg: Number(r.kg) }))
+}
+
+export async function saveNormExportExtra(
+  factoryId: string,
+  id: string | null,
+  row: Pick<NormExportExtra, "ngay" | "loai_csr" | "nguon" | "kg" | "ghi_chu">,
+): Promise<void> {
+  const q = id
+    ? supabase.from("tech_norm_export_extra").update(row).eq("id", id).eq("factory_id", factoryId)
+    : supabase.from("tech_norm_export_extra").insert({ ...row, factory_id: factoryId })
+  const { error } = await q
+  if (error) throw error
+}
+
+export async function deleteNormExportExtra(factoryId: string, id: string): Promise<void> {
+  const { error } = await supabase.from("tech_norm_export_extra").delete().eq("id", id).eq("factory_id", factoryId)
+  if (error) throw error
+}

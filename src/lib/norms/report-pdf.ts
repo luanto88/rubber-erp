@@ -317,6 +317,8 @@ function body8a(ctx: Ctx, input: NormReportPdfInput) {
   text(ctx, "3. THÀNH PHẨM XUẤT KHO (tấn)", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION })
   tpTable(d.tpExport, "Không có đơn xuất đã duyệt trong kỳ.")
   for (const w of snap.tpExportWarnings) text(ctx, `(!) ${w}`, { size: 7.5, color: RED })
+  for (const e of snap.tpExportExtra || [])
+    text(ctx, `Đã gồm xuất kho bù ngày ${fmtDateVN(e.ngay)}: ${nf(tons(e.kg), 3)} tấn ${e.csr} (${TP_NGUON_LABEL[e.nguon as keyof typeof TP_NGUON_LABEL] || e.nguon})${e.ghiChu ? ` — ${e.ghiChu}` : ""}.`, { size: 7.5, color: GRAY })
 
   text(ctx, "4. SỬ DỤNG VẬT TƯ HÓA CHẤT CHẾ BIẾN", { bold: true, size: 9.5, keepWithNext: KEEP_SECTION + 8 })
   const ng = (k: string) => nf(tons(d.tpByNguon[k]), 3)

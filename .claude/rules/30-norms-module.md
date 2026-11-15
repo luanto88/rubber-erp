@@ -141,5 +141,31 @@ Còn: GĐ2b ghi đồng hồ offline. Báo cáo ngày 55/46 đã làm ở Kho v�
   "Phiếu cũ (AppSheet) — …", không link.
 - Kiểm code thật T7/2026: thật 50 dòng + cũ 128 dòng (32 dòng trùng ô bị bỏ) ⇒ TT 490, DCS 75, DOX 1.319, DOCZVC 485,
   B004VC10 1.620, DO750K 8.233 (khớp 8A / 46-BC giấy).
-- Sản lượng tháng 1–7 trong DB (2026-11-15): TP giao dịch có T1–4, T7; **T5 = 0, T6 = 88** (thưa); NL Sản lượng **T3, T4 = 0**;
-  Km điều xe **T3, T4 = 0**; kiểm kê tồn xưởng và đồng hồ gần như chưa có ⇒ đối soát các tháng đó thiếu mẫu số (chờ người dùng).
+- Sản lượng tháng 1–7 trong DB (2026-11-15): TP giao dịch có T1–4, T7; T5 = 0, T6 = 88; NL Sản lượng T3, T4 = 0; Km điều
+  xe T3, T4 = 0. **ĐÚNG THỰC TẾ** (người dùng xác nhận 2026-11-15): T3–T4 không thu gom nguyên liệu, T5 bắt đầu thu gom, T6 mới
+  sản xuất lại ⇒ không phải thiếu dữ liệu, không cần bổ sung. Kiểm kê tồn xưởng / đồng hồ T1–7 gần như chưa có (không bắt buộc).
+- Test tay phiếu cũ (tab Nhập/Xuất + Định mức T7) PASS 2026-11-15.
+- File 8A/M9 tháng 5 ban đầu đưa nhầm bản 2025; bản đúng `cung_cap_dl/du_lieu_cu/T05-2026 …` (bổ sung 2026-11-15). Không
+  code/script nào đọc PDF 8A ⇒ không ảnh hưởng. 8A T5/2026 giấy: TP chế biến 0, NL khô 291,706 t, xuất kho 467,880, Isuzu 1.397 km.
+- TP chế biến (mục 2) dùng SỐ THỰC TẾ trên app — người dùng chốt 2026-11-16, không đối chiếu giấy (`tp_xk.png` bảng I).
+
+## Xuất kho bù — lô ngoài hệ thống (2026-11-16)
+- Vấn đề: module Xuất hàng chỉ có đơn gán lô 2026; lô sản xuất 2025 không có nhập TP nên đơn xuất của chúng không vào app
+  ⇒ mục 3 8A hụt. Đối chiếu `cung_cap_dl/du_lieu_cu/tp_xk.png` bảng II: T3, T5–T10 KHỚP; thiếu T1 1.527,120 (app không có
+  đơn), T2 243,600 (app 1.338,120), T4 114,905 (app 1.288,735) — tất cả CSR10 Công ty.
+- Giải pháp (người dùng chốt): bảng `tech_norm_export_extra` (migration `20261127_tech_norm_export_extra.sql`, chạy tay):
+  ngay (= ngày cuối tháng), loai_csr, nguon (cong_ty/gia_cong/thu_mua), kg, ghi_chu; khoá ngày bằng `tech_norm_entry_locked`
+  (trigger riêng `tech_norm_export_extra_guard`); RLS xem `norms.view`, ghi `norms.periodic_entry`. KHÔNG đụng tồn TP, đơn xuất, EUDR.
+- `report-loader.ts` cộng các dòng có ngày trong kỳ vào `tpExport` + `snapshot.tpExportExtra` (CHỈ thêm khi có dòng ⇒ hash
+  snapshot cũ không đổi; bảng chưa có ⇒ coi như rỗng). PDF in dòng xám "Đã gồm xuất kho bù ngày … — ghi chú" dưới bảng mục 3.
+- UI: Định mức → Nhập liệu → "Xuất kho bù" (`norms-export-extra.tsx`, nhập theo tháng, tấn dấu phẩy thập phân).
+- Migration 20261127 ĐÃ CHẠY + người dùng đã nhập 3 dòng bù, test PASS 2026-11-16.
+
+## Chỉ số đồng hồ T1–T10/2026 nhập từ file M9 (2026-11-16)
+- `scripts/import-norm-meter-readings-m9.mjs` (mặc định chạy thử; `--apply` ghi, upsert theo (meter_id, ngay) ⇒ ĐÈ — người dùng
+  cho phép). Nguồn `cung_cap_dl/du_lieu_cu/Tổng hợp Điện - Nước M9 (T01 - T10-2026).xlsx` sheet "Chỉ số chốt ngày 27"
+  (15 đồng hồ × 11 mốc 27/12/2025 → 27/10/2026); tự kiểm tiêu thụ với sheet "Tổng hợp tiêu thụ 2026" (khớp 15 × 10 kỳ).
+- Thay đồng hồ khai trong `REPLACEMENTS`: ĐHN-01 ngày 27/09/2026 ⇒ thay_dong_ho, chi_so_chot_cu 358.697, chi_so 0.
+- Đã ghi 133 (có ghi đè ĐH-01 27/07, 27/08 đang = 0). **Còn 28 lần ghi ngày 27/09 + 27/10 BỊ KHOÁ** do báo cáo
+  Mẫu 09 56/BC-NMCB (kỳ 27/09→27/10, batch T10, có vẻ là báo cáo test GĐ4) đang Chờ ký ⇒ trả về / huỷ báo cáo đó rồi chạy
+  lại `--apply` (script bỏ qua dòng đã đúng).

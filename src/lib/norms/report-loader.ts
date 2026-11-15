@@ -2,7 +2,8 @@
 // Không đổi logic computeReconciliation; chỉ gom thêm số liệu riêng của các mẫu:
 //   - Mục 1 Mẫu 8A: NL tiếp nhận theo Đội × loại mủ — production_records, KHÔNG theo bộ lọc ký hiệu KT (đã chốt).
 //   - Mục 2: thành phẩm theo CSR × nguồn — từ chính driver tấn TP của đối soát (mọi nguồn).
-//   - Mục 3: thành phẩm xuất kho — đơn xuất đã duyệt theo export_orders.ngay (cùng quy tắc F12).
+//   - Mục 3: thành phẩm xuất kho — đơn xuất đã duyệt theo export_orders.ngay (cùng quy tắc F12)
+//     + "Xuất kho bù" tech_norm_export_extra (lô 2025 ngoài hệ thống) có ngày trong kỳ.
 //   - Mẫu 09: chỉ số cũ / mới từng đồng hồ của kỳ đồng hồ.
 // Rule 30.
 
@@ -12,7 +13,7 @@ import { makeNguonResolver, type LotSuffixRow } from "@/lib/lot-source"
 import { consumptionBetween, sortReadings } from "./meters"
 import type { ReconcileBundle, ReconcileFilters } from "./reconcile-loader"
 import { NL_MATERIALS, nguonCodeFromLabel } from "./types"
-import type { NormReportSnapshot, SnapMeter, SnapNlUnit, SnapTpRow } from "./report-types"
+import type { NormReportSnapshot, SnapExportExtra, SnapMeter, SnapNlUnit, SnapTpRow } from "./report-types"
 
 type Page<T> = PromiseLike<{ data: T[] | null; error: unknown }>
 
@@ -134,6 +135,23 @@ export async function buildReportSnapshot(factoryId: string, f: ReconcileFilters
   }
   const tpExportWarnings = missingBales ? [`${missingBales} bành trong đơn xuất trỏ tới lô không còn tồn tại — không tính vào mục 3.`] : []
 
+  // Xuất kho bù — lô ngoài hệ thống (lô 2025 không có nhập TP nên không có trong đơn xuất). Cộng thẳng vào mục 3.
+  const { data: extraRows, error: extraErr } = await supabase
+    .from("tech_norm_export_extra")
+    .select("ngay,loai_csr,nguon,kg,ghi_chu")
+    .eq("factory_id", factoryId)
+    .gte("ngay", f.from)
+    .lte("ngay", f.to)
+    .order("ngay")
+    .order("id")
+  // Chưa chạy migration 20261127 (bảng chưa có) ⇒ coi như không có dòng bù, không chặn lập báo cáo.
+  const extraMissing = !!extraErr && /tech_norm_export_extra|42P01|PGRST205/.test(`${(extraErr as { code?: string }).code ?? ""} ${extraErr.message}`)
+  if (extraErr && !extraMissing) throw extraErr
+  const tpExportExtra: SnapExportExtra[] = ((extraRows || []) as Array<{ ngay: string; loai_csr: string; nguon: string; kg: number | string; ghi_chu: string | null }>)
+    .map((r) => ({ ngay: r.ngay, csr: r.loai_csr, nguon: r.nguon, kg: Number(r.kg) || 0, ghiChu: r.ghi_chu?.trim() || null }))
+    .filter((r) => r.kg > 0)
+  for (const r of tpExportExtra) addTp(expMap, r.csr, tpKey(nguonLabelByCode[r.nguon]), r.kg)
+
   // ── Đồng hồ (Mẫu 09) ──
   const meters: SnapMeter[] = input.meters.map(({ meter, readings }) => {
     const sorted = sortReadings(readings)
@@ -198,6 +216,7 @@ export async function buildReportSnapshot(factoryId: string, f: ReconcileFilters
     tpByCsr: sortTp(tpMap),
     tpExport: sortTp(expMap),
     tpExportWarnings,
+    ...(tpExportExtra.length ? { tpExportExtra } : {}),
     meters,
   }
 }

@@ -162,6 +162,8 @@ export type SnapMeter = {
   note: string
 }
 
+export type SnapExportExtra = { ngay: string; csr: string; nguon: string; kg: number; ghiChu: string | null }
+
 export type NormReportSnapshot = {
   v: 1
   from: string
@@ -187,6 +189,9 @@ export type NormReportSnapshot = {
   tpByCsr: SnapTpRow[]
   tpExport: SnapTpRow[]
   tpExportWarnings: string[]
+  /** Xuất kho bù (lô ngoài hệ thống, bảng tech_norm_export_extra) — ĐÃ cộng vào tpExport. Chỉ có khi kỳ có dòng bù
+   *  (vắng ⇒ snapshot cũ / không có bù, giữ nguyên hash các báo cáo đã ký). */
+  tpExportExtra?: SnapExportExtra[]
   meters: SnapMeter[]
 }
 
