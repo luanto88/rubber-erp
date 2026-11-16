@@ -32,7 +32,7 @@ import { QualityTargetsTab } from "./_components/quality-targets-tab"
 import { RepairThresholdCard } from "./_components/repair-threshold-card"
 import { ShiftAssignmentsTab } from "./_components/shift-assignments-tab"
 import { ShiftNamesTab } from "./_components/shift-names-tab"
-import { OpeningStockTab } from "./_components/opening-stock-tab"
+import { FinishedProductTab } from "./_components/finished-product-tab"
 import { ExportPalletTypesTab } from "./_components/export-pallet-types-tab"
 import { ProductPackagingTab } from "./_components/product-packaging-tab"
 import { PalletComponentsTab } from "./_components/pallet-components-tab"
@@ -4164,7 +4164,7 @@ export default function SettingsPage() {
                   { key: "forest-plots" as const, label: "Lô vườn" },
                   { key: "quality-targets" as const, label: "Mục tiêu chất lượng" },
                   { key: "shift-assignments" as const, label: "Phân công trực ca" },
-                  { key: "opening-stock" as const, label: "Tồn đầu kỳ thành phẩm" },
+                  { key: "opening-stock" as const, label: "Thành phẩm" },
                   { key: "product-grade" as const, label: "Quy cách chủng loại" },
                   { key: "product-packaging" as const, label: "Quy cách đóng gói TP" },
                   { key: "pallet-components" as const, label: "Thành phần pallet" },
@@ -4501,7 +4501,7 @@ export default function SettingsPage() {
               ) : configTab === "quality-targets" ? (
                 <QualityTargetsTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "opening-stock" ? (
-                <OpeningStockTab factoryId={factoryId} canManage={canManageSettings} />
+                <FinishedProductTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "export-pallet-types" ? (
                 <ExportPalletTypesTab factoryId={factoryId} canManage={canManageSettings} />
               ) : configTab === "product-packaging" ? (

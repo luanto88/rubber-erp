@@ -158,14 +158,23 @@ Còn: GĐ2b ghi đồng hồ offline. Báo cáo ngày 55/46 đã làm ở Kho v�
   (trigger riêng `tech_norm_export_extra_guard`); RLS xem `norms.view`, ghi `norms.periodic_entry`. KHÔNG đụng tồn TP, đơn xuất, EUDR.
 - `report-loader.ts` cộng các dòng có ngày trong kỳ vào `tpExport` + `snapshot.tpExportExtra` (CHỈ thêm khi có dòng ⇒ hash
   snapshot cũ không đổi; bảng chưa có ⇒ coi như rỗng). PDF in dòng xám "Đã gồm xuất kho bù ngày … — ghi chú" dưới bảng mục 3.
-- UI: Định mức → Nhập liệu → "Xuất kho bù" (`norms-export-extra.tsx`, nhập theo tháng, tấn dấu phẩy thập phân).
 - Migration 20261127 ĐÃ CHẠY + người dùng đã nhập 3 dòng bù, test PASS 2026-11-16.
+- **Chuyển chỗ 2026-11-16 (sau):** UI cũ Định mức → Nhập liệu → "Xuất kho bù" (`norms-export-extra.tsx`) ĐÃ XOÁ. Nay ở
+  Cài đặt → Cấu hình nhà máy → **"Thành phẩm"** (tab cũ "Tồn đầu kỳ thành phẩm" đổi tên) gồm 2 bảng con:
+  "Tồn thành phẩm đầu kỳ" (`opening-stock-tab.tsx`) + "Xuất bù kho" (`settings/_components/export-extra-tab.tsx`, bọc bởi
+  `finished-product-tab.tsx`). Xuất bù kho thiết kế như Tồn đầu kỳ: chọn NGÀY cụ thể (người dùng chốt, dòng cũ giữ ngày cuối
+  tháng), lưới nhiều dòng, dropdown xếp tầng dùng chung `optionsFor`/`cascade` (export từ opening-stock-tab, nguồn lọc còn
+  Công ty/Gia công/Thu mua) — Loại CSR · Nguồn gốc · Bọc · Loại bành · Số lượng (kg) · Ghi chú; lưu cả ngày bằng
+  `saveNormExportExtraDay` (sửa → thêm → xoá). Migration `20261128_tech_norm_export_extra_fields.sql`: cột `boc` ('' = không
+  bọc), `loai_banh` (NULL ở dòng cũ ⇒ phải chọn khi sửa ngày đó), RLS ghi `norms.periodic_entry` HOẶC `settings.manage_config`.
+  Chưa chạy migration ⇒ tab chỉ xem + cảnh báo. Người dùng chốt: VẪN KHÔNG trừ tồn F12.
+  Migration 20261128 ĐÃ CHẠY, test tay PASS 2026-11-17; 3 dòng cũ đã điền loại bành 35 (mọi bành trong app = 35).
 
 ## Chỉ số đồng hồ T1–T10/2026 nhập từ file M9 (2026-11-16)
 - `scripts/import-norm-meter-readings-m9.mjs` (mặc định chạy thử; `--apply` ghi, upsert theo (meter_id, ngay) ⇒ ĐÈ — người dùng
   cho phép). Nguồn `cung_cap_dl/du_lieu_cu/Tổng hợp Điện - Nước M9 (T01 - T10-2026).xlsx` sheet "Chỉ số chốt ngày 27"
   (15 đồng hồ × 11 mốc 27/12/2025 → 27/10/2026); tự kiểm tiêu thụ với sheet "Tổng hợp tiêu thụ 2026" (khớp 15 × 10 kỳ).
 - Thay đồng hồ khai trong `REPLACEMENTS`: ĐHN-01 ngày 27/09/2026 ⇒ thay_dong_ho, chi_so_chot_cu 358.697, chi_so 0.
-- Đã ghi 133 (có ghi đè ĐH-01 27/07, 27/08 đang = 0). **Còn 28 lần ghi ngày 27/09 + 27/10 BỊ KHOÁ** do báo cáo
-  Mẫu 09 56/BC-NMCB (kỳ 27/09→27/10, batch T10, có vẻ là báo cáo test GĐ4) đang Chờ ký ⇒ trả về / huỷ báo cáo đó rồi chạy
-  lại `--apply` (script bỏ qua dòng đã đúng).
+- Đã ghi 133 (có ghi đè ĐH-01 27/07, 27/08 đang = 0). 28 lần ghi 27/09 + 27/10 từng bị khoá bởi báo cáo test 56/BC-NMCB;
+  người dùng đã xoá báo cáo đó 2026-11-16 ⇒ `--apply` ghi 28/28, chạy thử lại "mới 0, giữ nguyên 165". Kiểm bằng
+  `consumptionBetween` thật: 09 T5 điện 19.509; T9 điện 217.927; T10 điện 286.821 / nước 17.379 / nước thải 18.607 — KHỚP giấy.

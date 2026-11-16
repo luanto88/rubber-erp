@@ -46,11 +46,13 @@ type GridRow = {
 
 // Dropdown lọc xếp tầng CSR → Nguồn gốc → Bọc → Loại bành, chỉ gồm tổ hợp có thật trong dữ liệu
 // (loadOpeningStockOptions). Giá trị cũ không còn trong danh sách vẫn hiện để không mất dữ liệu.
-type Combo = OpeningStockSuggestion
-const banhKey = (v: string | number) => String(Math.round((Number(v) || 0) * 100) / 100)
+// Dùng chung với bảng Xuất bù kho (export-extra-tab.tsx).
+export type Combo = OpeningStockSuggestion
+type ComboRow = { loai_csr: string; nguon_goc: string; boc: string; loai_banh: string }
+export const banhKey = (v: string | number) => String(Math.round((Number(v) || 0) * 100) / 100)
 const uniq = (arr: string[]) => [...new Set(arr)]
 
-function optionsFor(combos: Combo[], r: { loai_csr: string; nguon_goc: string; boc: string }) {
+export function optionsFor(combos: Combo[], r: { loai_csr: string; nguon_goc: string; boc: string }) {
   const byCsr = combos.filter((c) => c.loaiCsr === r.loai_csr)
   const byNguon = byCsr.filter((c) => c.nguonGoc === r.nguon_goc)
   const byBoc = byNguon.filter((c) => c.boc === r.boc)
@@ -63,7 +65,7 @@ function optionsFor(combos: Combo[], r: { loai_csr: string; nguon_goc: string; b
 }
 
 // Sau khi đổi 1 cột: cột sau không còn hợp lệ → tự chọn nếu chỉ còn 1 lựa chọn, ngược lại để trống.
-function cascade(combos: Combo[], r: GridRow): GridRow {
+export function cascade<T extends ComboRow>(combos: Combo[], r: T): T {
   const next = { ...r }
   const fix = (field: "nguon_goc" | "boc" | "loai_banh", opts: string[]) => {
     const cur = field === "loai_banh" ? (next.loai_banh ? banhKey(next.loai_banh) : "") : next[field]

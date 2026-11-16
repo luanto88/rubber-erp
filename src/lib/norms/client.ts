@@ -167,38 +167,88 @@ export type NormExportExtra = {
   ngay: string
   loai_csr: string
   nguon: "cong_ty" | "gia_cong" | "thu_mua"
+  /** '' = không bọc. Có từ migration 20261128. */
+  boc: string
+  /** NULL ở dòng nhập trước migration 20261128. */
+  loai_banh: number | null
   kg: number
   ghi_chu: string | null
   created_at: string
 }
 
-/** Xuất kho bù (lô ngoài hệ thống) — mọi dòng của nhà máy, mới nhất trước. Ít dòng ⇒ tải hết. */
-export async function loadNormExportExtra(factoryId: string): Promise<NormExportExtra[]> {
-  const rows = await fetchAllPaginated<NormExportExtra>((from, to) =>
-    supabase
-      .from("tech_norm_export_extra")
-      .select("id,ngay,loai_csr,nguon,kg,ghi_chu,created_at")
-      .eq("factory_id", factoryId)
-      .order("ngay", { ascending: false })
-      .order("id")
-      .range(from, to),
-  )
-  return rows.map((r) => ({ ...r, kg: Number(r.kg) }))
+export type NormExportExtraLoad = {
+  rows: NormExportExtra[]
+  /** false ⇒ chưa chạy migration 20261128 (thiếu cột boc / loai_banh). */
+  hasFieldCols: boolean
 }
 
-export async function saveNormExportExtra(
+/** Xuất bù kho (lô ngoài hệ thống) — mọi dòng của nhà máy, mới nhất trước. Ít dòng ⇒ tải hết. */
+export async function loadNormExportExtra(factoryId: string): Promise<NormExportExtraLoad> {
+  const fetchWith = (cols: string) =>
+    fetchAllPaginated<NormExportExtra>((from, to) =>
+      supabase
+        .from("tech_norm_export_extra")
+        .select(cols)
+        .eq("factory_id", factoryId)
+        .order("ngay", { ascending: false })
+        .order("id")
+        .range(from, to) as unknown as PromiseLike<{ data: NormExportExtra[] | null; error: unknown }>,
+    )
+  const BASE = "id,ngay,loai_csr,nguon,kg,ghi_chu,created_at"
+  let rows: NormExportExtra[]
+  let hasFieldCols = true
+  try {
+    rows = await fetchWith(`${BASE},boc,loai_banh`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String((err as { message?: string })?.message ?? err)
+    if (!/boc|loai_banh/i.test(msg)) throw err
+    rows = await fetchWith(BASE)
+    hasFieldCols = false
+  }
+  return {
+    hasFieldCols,
+    rows: rows.map((r) => ({
+      ...r,
+      boc: r.boc ?? "",
+      loai_banh: r.loai_banh == null ? null : Number(r.loai_banh),
+      kg: Number(r.kg),
+    })),
+  }
+}
+
+export type NormExportExtraInput = {
+  id: string | null
+  loai_csr: string
+  nguon: NormExportExtra["nguon"]
+  boc: string
+  loai_banh: number
+  kg: number
+  ghi_chu: string | null
+}
+
+/**
+ * Lưu cả lưới của 1 ngày: sửa dòng có id, thêm dòng mới, xoá dòng `removeIds`.
+ * Thứ tự sửa → thêm → xoá: lỗi giữa chừng không làm mất số cũ. Khoá ngày ⇒ trigger báo NORM_DAY_LOCKED.
+ */
+export async function saveNormExportExtraDay(
   factoryId: string,
-  id: string | null,
-  row: Pick<NormExportExtra, "ngay" | "loai_csr" | "nguon" | "kg" | "ghi_chu">,
+  ngay: string,
+  rows: NormExportExtraInput[],
+  removeIds: string[],
 ): Promise<void> {
-  const q = id
-    ? supabase.from("tech_norm_export_extra").update(row).eq("id", id).eq("factory_id", factoryId)
-    : supabase.from("tech_norm_export_extra").insert({ ...row, factory_id: factoryId })
-  const { error } = await q
-  if (error) throw error
-}
-
-export async function deleteNormExportExtra(factoryId: string, id: string): Promise<void> {
-  const { error } = await supabase.from("tech_norm_export_extra").delete().eq("id", id).eq("factory_id", factoryId)
-  if (error) throw error
+  for (const { id, ...row } of rows.filter((r) => r.id)) {
+    const { error } = await supabase.from("tech_norm_export_extra").update({ ...row, ngay }).eq("id", id as string).eq("factory_id", factoryId)
+    if (error) throw error
+  }
+  const inserts = rows
+    .filter((r) => !r.id)
+    .map((r) => ({ loai_csr: r.loai_csr, nguon: r.nguon, boc: r.boc, loai_banh: r.loai_banh, kg: r.kg, ghi_chu: r.ghi_chu, ngay, factory_id: factoryId }))
+  if (inserts.length) {
+    const { error } = await supabase.from("tech_norm_export_extra").insert(inserts)
+    if (error) throw error
+  }
+  if (removeIds.length) {
+    const { error } = await supabase.from("tech_norm_export_extra").delete().in("id", removeIds).eq("factory_id", factoryId)
+    if (error) throw error
+  }
 }

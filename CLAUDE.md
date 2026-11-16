@@ -399,10 +399,11 @@ Vi du:
   đối soát định mức (rule 13/30), test tay PASS. Sản lượng T3–T6 "trống" là đúng thực tế (không thu gom T3–T4, sản xuất lại
   từ T6). Còn: kho rà soát tài liệu tháng 7 (dòng "Trùng" ⇒ thêm EXCLUDE).
 - Định mức 8A mục 3 "Xuất kho bù" (lô 2025 ngoài hệ thống, bảng `tech_norm_export_extra`): code xong 2026-11-16 —
-  migration ĐÃ CHẠY, đã nhập số bù, test PASS 2026-11-16 (rule 30).
-- Chỉ số đồng hồ T1–T10/2026 nhập từ file M9 (`scripts/import-norm-meter-readings-m9.mjs`) 2026-11-16: 133 lần ghi xong;
-  28 lần ghi 27/09 + 27/10 bị khoá bởi báo cáo 09 56/BC-NMCB Chờ ký ⇒ trả về / huỷ rồi chạy lại `--apply`.
-  Bàn giao: `.claude/plans/ban-giao-dinh-muc-2026-11-16.md`.
+  migration ĐÃ CHẠY, đã nhập số bù, test PASS 2026-11-16 (rule 30). 2026-11-16 (sau): chuyển sang Cài đặt → Thành phẩm →
+  "Xuất bù kho" (nhập theo ngày, đủ trường như Tồn đầu kỳ); migration 20261128 ĐÃ CHẠY, test PASS, đã push 2026-11-17.
+- Chỉ số đồng hồ T1–T10/2026 nhập từ file M9 (`scripts/import-norm-meter-readings-m9.mjs`) 2026-11-16: đủ 165 lần ghi
+  (28 dòng 27/09 + 27/10 ghi sau khi xoá báo cáo test 56); Mẫu 09 T5/T9/T10 khớp giấy.
+  Bàn giao: `.claude/plans/ban-giao-dinh-muc-2026-11-17.md`.
 - Quy cách thành phẩm theo nhà máy: GĐ1 (bọc/pallet SX/thảm, `product_packaging_types`) test PASS 2026-11-08.
   GĐ2 (chủng loại × loại bành, lô tròn = 4 × bành/kiện, `product_grade_types`) đã code 2026-11-08 — chạy migration
   `20261116_product_grade_types.sql` TRƯỚC deploy + test tay; GĐ3 (pallet → mã vật tư) — `.claude/plans/quy-cach-thanh-pham-gd2.md`.
