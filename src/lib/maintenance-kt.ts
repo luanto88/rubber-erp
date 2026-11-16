@@ -48,12 +48,16 @@ export type KtItemStatus = {
   pendingRequested: number
   /** Phiếu đề nghị (gốc, còn hiệu lực) đang chờ nhập kho / chờ xác nhận gia công cho vật tư này + SL còn chờ. */
   pendingRequests: { id: string; so: number; nam: number; qty: number }[]
+  /** Phân bổ từ dòng đề nghị đã duyệt (lập riêng) cho biên bản này. */
+  allocations: KtItemAllocation[]
   /** Đơn giá + loại tiền lấy từ dòng vật tư biên bản (gợi ý khi lập đề nghị). */
   donGia: number
   loaiTien: string
 }
 
-export type KtLinkedRequest = { id: string; so: number; nam: number; trangThai: string; loai: string }
+export type KtItemAllocation = { id: string; lineId: string; requestId: string; so: number; nam: number; qty: number }
+
+export type KtLinkedRequest ={ id: string; so: number; nam: number; trangThai: string; loai: string }
 
 export type KtRecordStatus = {
   recordId: string
@@ -85,6 +89,15 @@ type MatRow = {
   loai_tien: string | null
 }
 type LinkedLine = { id: string; request_id: string; item_id: string | null; maintenance_record_id: string }
+/** Phân bổ dòng đề nghị (không thuộc biên bản nào) cho 1 biên bản theo SL — bảng purchase_line_record_allocations. */
+export type LineAllocation = {
+  id: string
+  line_id: string
+  request_id: string
+  maintenance_record_id: string
+  so_luong: number
+  created_at: string
+}
 type RequestRow = { id: string; so: number; nam: number; trang_thai: string; loai: string; maintenance_record_id: string | null }
 type WarehouseInfo = { id: string; code: string; name: string }
 
@@ -110,16 +123,110 @@ async function loadLinkedLines(factoryId: string, recordIds: string[]): Promise<
 }
 
 /**
- * Hàng ĐÃ NHẬP (phiếu nhập posted) từ các dòng gắn biên bản:
- *  - `earmark` `${rec}:${wh}:${item}` → SL (giữ chỗ tầng 1);
- *  - `latest` `${rec}:${item}` → kho của lần nhập gần nhất.
+ * Phân bổ còn hiệu lực (phiếu chưa huỷ) liên quan các biên bản: lấy các dòng có phân bổ cho biên bản
+ * trong danh sách, rồi nạp MỌI phân bổ của các dòng đó (kể cả cho biên bản đã duyệt) để rót hàng theo
+ * đúng thứ tự tạo phân bổ. Bảng chưa tồn tại (chưa chạy migration) ⇒ rỗng.
  */
-async function loadLinkedReceipts(factoryId: string, lines: LinkedLine[]) {
+export async function loadAllocations(factoryId: string, recordIds: string[]): Promise<LineAllocation[]> {
+  const sb = getSupabaseAdmin()
+  const cols = "id, line_id, request_id, maintenance_record_id, so_luong, created_at"
+  const lineIds = new Set<string>()
+  for (let i = 0; i < recordIds.length; i += CHUNK) {
+    const { data, error } = await sb
+      .from("purchase_line_record_allocations")
+      .select("line_id")
+      .eq("factory_id", factoryId)
+      .in("maintenance_record_id", recordIds.slice(i, i + CHUNK))
+    if (error) {
+      if (/purchase_line_record_allocations/.test(error.message)) return []
+      throw new Error(error.message)
+    }
+    for (const r of (data || []) as { line_id: string }[]) lineIds.add(r.line_id)
+  }
+  const ids = Array.from(lineIds)
+  const rows: LineAllocation[] = []
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const { data, error } = await sb
+      .from("purchase_line_record_allocations")
+      .select(cols)
+      .eq("factory_id", factoryId)
+      .in("line_id", ids.slice(i, i + CHUNK))
+    if (error) throw new Error(error.message)
+    rows.push(...((data || []) as LineAllocation[]).map((a) => ({ ...a, so_luong: Number(a.so_luong) || 0 })))
+  }
+  const reqIds = Array.from(new Set(rows.map((r) => r.request_id)))
+  const cancelled = new Set<string>()
+  for (let i = 0; i < reqIds.length; i += CHUNK) {
+    const { data, error } = await sb.from("purchase_requests").select("id, trang_thai").in("id", reqIds.slice(i, i + CHUNK))
+    if (error) throw new Error(error.message)
+    for (const r of (data || []) as { id: string; trang_thai: string }[]) if (r.trang_thai === "huy") cancelled.add(r.id)
+  }
+  // Biên bản đã huỷ: phân bổ không còn hiệu lực (không chiếm hàng / phần hoàn thành của dòng).
+  const recIds = Array.from(new Set(rows.map((r) => r.maintenance_record_id)))
+  const huyRecords = new Set<string>()
+  for (let i = 0; i < recIds.length; i += CHUNK) {
+    const { data, error } = await sb.from("maintenance_records").select("id, trang_thai").in("id", recIds.slice(i, i + CHUNK))
+    if (error) throw new Error(error.message)
+    for (const r of (data || []) as { id: string; trang_thai: string | null }[]) if (r.trang_thai === "huy") huyRecords.add(r.id)
+  }
+  return rows.filter((r) => !cancelled.has(r.request_id) && !huyRecords.has(r.maintenance_record_id))
+}
+
+/** Thứ tự rót hàng cho phân bổ: tạo trước nhận trước. */
+function allocOrder(a: LineAllocation, b: LineAllocation) {
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1
+  return a.id < b.id ? -1 : 1
+}
+
+/**
+ * Rót các "mẩu" hàng (theo thứ tự) vào các phân bổ (theo thứ tự) — hàm THUẦN. Mỗi phân bổ nhận tối đa SL
+ * của nó; hàng dư sau cùng không thuộc ai. Trả về `allocKey → [{ tag, qty }]` (tag = kho / mẩu).
+ */
+export function distributeByAllocation<T>(
+  chunks: { tag: T; qty: number }[],
+  allocs: { key: string; qty: number }[],
+): Map<string, { tag: T; qty: number }[]> {
+  const out = new Map<string, { tag: T; qty: number }[]>()
+  const rest = chunks.map((c) => ({ tag: c.tag, qty: Math.max(0, Number(c.qty) || 0) }))
+  let ci = 0
+  for (const a of allocs) {
+    let need = Math.max(0, Number(a.qty) || 0)
+    const got: { tag: T; qty: number }[] = []
+    while (need > 0 && ci < rest.length) {
+      const take = Math.min(need, rest[ci].qty)
+      if (take > 0) {
+        got.push({ tag: rest[ci].tag, qty: take })
+        rest[ci].qty -= take
+        need -= take
+      }
+      if (rest[ci].qty <= 0) ci++
+    }
+    out.set(a.key, got)
+  }
+  return out
+}
+
+/**
+ * Hàng ĐÃ NHẬP (phiếu nhập posted) từ các dòng gắn biên bản + dòng phân bổ:
+ *  - `earmark` `${rec}:${wh}:${item}` → SL (giữ chỗ tầng 1);
+ *  - `latest` `${rec}:${item}` → kho của lần nhập gần nhất;
+ *  - `allocReceived` id phân bổ → SL hàng đã nhập rót vào phân bổ đó.
+ */
+async function loadLinkedReceipts(factoryId: string, lines: LinkedLine[], allocs: LineAllocation[] = []) {
   const sb = getSupabaseAdmin()
   const earmark = new Map<string, number>()
   const latest = new Map<string, { warehouseId: string; at: string }>()
+  const allocReceived = new Map<string, number>()
   const recByLine = new Map(lines.map((l) => [l.id, l.maintenance_record_id]))
-  const lineIds = lines.map((l) => l.id)
+  const allocsByLine = new Map<string, LineAllocation[]>()
+  for (const a of allocs) {
+    const list = allocsByLine.get(a.line_id) || []
+    list.push(a)
+    allocsByLine.set(a.line_id, list)
+  }
+  // Mẩu hàng nhập của dòng phân bổ, rót sau khi đọc xong.
+  const allocChunks = new Map<string, { wh: string; item: string; qty: number; at: string }[]>()
+  const lineIds = Array.from(new Set([...lines.map((l) => l.id), ...allocsByLine.keys()]))
   for (let i = 0; i < lineIds.length; i += CHUNK) {
     const { data: docLines, error } = await sb
       .from("inventory_document_lines")
@@ -141,8 +248,16 @@ async function loadLinkedReceipts(factoryId: string, lines: LinkedLine[]) {
     )
     for (const d of dl) {
       const rcpt = receiptByDoc.get(d.document_id)
+      if (!d.item_id || !rcpt?.warehouse_id || !posted.has(d.document_id)) continue
       const rec = recByLine.get(d.purchase_request_line_id)
-      if (!d.item_id || !rec || !rcpt?.warehouse_id || !posted.has(d.document_id)) continue
+      if (!rec) {
+        if (allocsByLine.has(d.purchase_request_line_id)) {
+          const list = allocChunks.get(d.purchase_request_line_id) || []
+          list.push({ wh: rcpt.warehouse_id, item: d.item_id, qty: Number(d.quantity) || 0, at: rcpt.created_at })
+          allocChunks.set(d.purchase_request_line_id, list)
+        }
+        continue
+      }
       const ek = `${rec}:${rcpt.warehouse_id}:${d.item_id}`
       earmark.set(ek, (earmark.get(ek) || 0) + (Number(d.quantity) || 0))
       const lk = `${rec}:${d.item_id}`
@@ -150,7 +265,25 @@ async function loadLinkedReceipts(factoryId: string, lines: LinkedLine[]) {
       if (!cur || rcpt.created_at > cur.at) latest.set(lk, { warehouseId: rcpt.warehouse_id, at: rcpt.created_at })
     }
   }
-  return { earmark, latest }
+  for (const [lineId, list] of allocsByLine) {
+    const chunks = (allocChunks.get(lineId) || [])
+      .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+      .map((c) => ({ tag: c, qty: c.qty }))
+    const ordered = [...list].sort(allocOrder)
+    const dist = distributeByAllocation(chunks, ordered.map((a) => ({ key: a.id, qty: a.so_luong })))
+    for (const a of ordered) {
+      const got = dist.get(a.id) || []
+      allocReceived.set(a.id, got.reduce((s, g) => s + g.qty, 0))
+      for (const g of got) {
+        const ek = `${a.maintenance_record_id}:${g.tag.wh}:${g.tag.item}`
+        earmark.set(ek, (earmark.get(ek) || 0) + g.qty)
+        const lk = `${a.maintenance_record_id}:${g.tag.item}`
+        const cur = latest.get(lk)
+        if (!cur || g.tag.at > cur.at) latest.set(lk, { warehouseId: g.tag.wh, at: g.tag.at })
+      }
+    }
+  }
+  return { earmark, latest, allocReceived }
 }
 
 /** Kho chính của vật tư: rule is_primary → default_warehouse_ids[0] (mirror maintenance-stock-issuance). */
@@ -192,8 +325,8 @@ export async function resolveExternalWarehouses(
     return { map: new Map(), warehouses }
   }
   const recordIds = Array.from(new Set(pairs.map((p) => p.recordId)))
-  const lines = await loadLinkedLines(factoryId, recordIds)
-  const { latest } = await loadLinkedReceipts(factoryId, lines)
+  const [lines, allocs] = await Promise.all([loadLinkedLines(factoryId, recordIds), loadAllocations(factoryId, recordIds)])
+  const { latest } = await loadLinkedReceipts(factoryId, lines, allocs)
   return resolveWithLatest(factoryId, pairs, latest, ktWh)
 }
 
@@ -353,8 +486,8 @@ async function computeKtCore(factoryId: string, recordId?: string, reservedOut?:
   if (!target.length && !reservedOut) return []
 
   // 3. Dòng đề nghị gắn biên bản + hàng đã nhập từ các dòng đó.
-  const linkedLines = await loadLinkedLines(factoryId, scopeIds)
-  const { earmark, latest } = await loadLinkedReceipts(factoryId, linkedLines)
+  const [linkedLines, allocs] = await Promise.all([loadLinkedLines(factoryId, scopeIds), loadAllocations(factoryId, scopeIds)])
+  const { earmark, latest, allocReceived } = await loadLinkedReceipts(factoryId, linkedLines, allocs)
 
   // 4. Kho: mua ngoài theo resolveExternalWarehouses, "Trong kho" theo kho chính.
   const extPairs: { recordId: string; itemId: string }[] = []
@@ -459,7 +592,7 @@ async function computeKtCore(factoryId: string, recordId?: string, reservedOut?:
   }
 
   // 8. Phiếu đề nghị liên kết: đang đề nghị (SL hiệu lực − đã nhận), gia công đã xong.
-  const reqIds = Array.from(new Set(linkedLines.map((l) => l.request_id)))
+  const reqIds = Array.from(new Set([...linkedLines.map((l) => l.request_id), ...allocs.map((a) => a.request_id)]))
   const ownReqIds: string[] = []
   const targetIds = target.map((r) => r.id)
   for (let i = 0; i < targetIds.length; i += CHUNK) {
@@ -485,20 +618,23 @@ async function computeKtCore(factoryId: string, recordId?: string, reservedOut?:
   const activeReqIds = Array.from(new Set(rootLines.map((l) => l.request_id))).filter((id) =>
     PURCHASE_ACTIVE_FOR_KT.includes(requests.get(id)?.trang_thai || ""),
   )
-  const effective = await loadEffectiveByLine(activeReqIds)
+  const allocReqIds = Array.from(new Set(allocs.map((a) => a.request_id))).filter((id) => !activeReqIds.includes(id))
+  const effective = await loadEffectiveByLine([...activeReqIds, ...allocReqIds])
   const pendingByKey = new Map<string, number>() // `${rec}:${item hiệu lực}`
   const pendingReqByKey = new Map<string, Map<string, number>>() // key → request_id → SL còn chờ
-  for (const l of rootLines) {
-    const eff = effective.get(l.id)
-    if (!eff?.itemId) continue
-    const key = `${l.maintenance_record_id}:${eff.itemId}`
-    const rest = Math.max(0, eff.soLuong - eff.received)
+  const addPending = (key: string, requestId: string, rest: number) => {
     pendingByKey.set(key, (pendingByKey.get(key) || 0) + rest)
     if (rest > 0) {
       const m = pendingReqByKey.get(key) || new Map<string, number>()
-      m.set(l.request_id, (m.get(l.request_id) || 0) + rest)
+      m.set(requestId, (m.get(requestId) || 0) + rest)
       pendingReqByKey.set(key, m)
     }
+  }
+  for (const l of rootLines) {
+    if (!PURCHASE_ACTIVE_FOR_KT.includes(requests.get(l.request_id)?.trang_thai || "")) continue
+    const eff = effective.get(l.id)
+    if (!eff?.itemId) continue
+    addPending(`${l.maintenance_record_id}:${eff.itemId}`, l.request_id, Math.max(0, eff.soLuong - eff.received))
   }
   const pendingReqsOf = (key: string) =>
     Array.from(pendingReqByKey.get(key)?.entries() || [])
@@ -519,6 +655,48 @@ async function computeKtCore(factoryId: string, recordId?: string, reservedOut?:
       completedByKey.set(key, (completedByKey.get(key) || 0) + (Number(c.so_luong) || 0))
     }
   }
+  // 8b. Phân bổ dòng đề nghị cho biên bản: gia công rót phần đã hoàn thành, vật tư rót phần đã nhập
+  //     (đã tính trong loadLinkedReceipts → earmark). Phần chưa có ⇒ "đang đề nghị".
+  if (allocs.length) {
+    const allocLineIds = Array.from(new Set(allocs.map((a) => a.line_id)))
+    const doneByLine = new Map<string, { qty: number; at: string }[]>()
+    for (let i = 0; i < allocLineIds.length; i += CHUNK) {
+      const { data, error } = await sb
+        .from("purchase_service_completions")
+        .select("line_id, so_luong, created_at")
+        .in("line_id", allocLineIds.slice(i, i + CHUNK))
+      if (error) throw new Error(error.message)
+      for (const c of (data || []) as { line_id: string; so_luong: number | null; created_at: string }[]) {
+        const list = doneByLine.get(c.line_id) || []
+        list.push({ qty: Number(c.so_luong) || 0, at: c.created_at })
+        doneByLine.set(c.line_id, list)
+      }
+    }
+    const byLine = new Map<string, LineAllocation[]>()
+    for (const a of allocs) {
+      const list = byLine.get(a.line_id) || []
+      list.push(a)
+      byLine.set(a.line_id, list)
+    }
+    for (const [lineId, list] of byLine) {
+      const itemId = effective.get(lineId)?.itemId
+      if (!itemId) continue
+      const ordered = [...list].sort(allocOrder)
+      const done = (doneByLine.get(lineId) || []).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+      const dist = distributeByAllocation(done.map((d) => ({ tag: d.at, qty: d.qty })), ordered.map((a) => ({ key: a.id, qty: a.so_luong })))
+      for (const a of ordered) {
+        const key = `${a.maintenance_record_id}:${itemId}`
+        if (serviceNeed.has(key)) {
+          const got = (dist.get(a.id) || []).reduce((s, g) => s + g.qty, 0)
+          completedByKey.set(key, (completedByKey.get(key) || 0) + got)
+          addPending(key, a.request_id, Math.max(0, a.so_luong - got))
+        } else if (extNeed.has(key)) {
+          addPending(key, a.request_id, Math.max(0, a.so_luong - (allocReceived.get(a.id) || 0)))
+        }
+      }
+    }
+  }
+
   const linkedByRecord = new Map<string, Map<string, KtLinkedRequest>>()
   const addLinked = (rec: string, r: RequestRow) => {
     const m = linkedByRecord.get(rec) || new Map<string, KtLinkedRequest>()
@@ -530,6 +708,22 @@ async function computeKtCore(factoryId: string, recordId?: string, reservedOut?:
     if (r) addLinked(l.maintenance_record_id, r)
   }
   for (const r of requests.values()) if (r.maintenance_record_id) addLinked(r.maintenance_record_id, r)
+  for (const a of allocs) {
+    const r = requests.get(a.request_id)
+    if (r) addLinked(a.maintenance_record_id, r)
+  }
+
+  const allocsByKey = new Map<string, KtItemAllocation[]>()
+  for (const a of allocs) {
+    const itemId = effective.get(a.line_id)?.itemId
+    const r = requests.get(a.request_id)
+    if (!itemId || !r) continue
+    const key = `${a.maintenance_record_id}:${itemId}`
+    const list = allocsByKey.get(key) || []
+    list.push({ id: a.id, lineId: a.line_id, requestId: a.request_id, so: r.so, nam: r.nam, qty: a.so_luong })
+    allocsByKey.set(key, list)
+  }
+  const allocsOf = (key: string) => allocsByKey.get(key) || []
 
   // 9. Kết quả.
   const result: KtRecordStatus[] = []
@@ -551,6 +745,7 @@ async function computeKtCore(factoryId: string, recordId?: string, reservedOut?:
         shortage: Math.max(0, qty - completed),
         pendingRequested: pendingByKey.get(key) || 0,
         pendingRequests: pendingReqsOf(key),
+        allocations: allocsOf(key),
         donGia: Number(mat?.don_gia) || 0, loaiTien: mat?.loai_tien || "USD",
       })
     }
@@ -579,6 +774,7 @@ async function computeKtCore(factoryId: string, recordId?: string, reservedOut?:
         shortage: Math.max(0, qty - available),
         pendingRequested: pendingByKey.get(key) || 0,
         pendingRequests: pendingReqsOf(key),
+        allocations: allocsOf(key),
         donGia: Number(mat?.don_gia) || 0, loaiTien: mat?.loai_tien || "USD",
       })
     }

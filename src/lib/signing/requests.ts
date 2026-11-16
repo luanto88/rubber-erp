@@ -273,6 +273,21 @@ export async function signField(params: {
   // tồn kho TRƯỚC khi đóng dấu. Thiếu hàng ⇒ từ chối ký: chưa ghi chữ ký, yêu cầu ký vẫn đang luân
   // chuyển, biên bản không bị kẹt "đã ký xong nhưng chưa xuất kho".
   const maintenanceRecordId = (yeuCau.ban_ghi_id as string | null) || (yeuCau.ma_ho_so as string | null)
+  // Biên bản đã HUỶ / đã XOÁ trong lúc hồ sơ đang luân chuyển ⇒ không ký tiếp (trước đây ký xong vẫn tự
+  // xuất kho và đổi biên bản "Đã hủy" thành "Đã duyệt").
+  if (yeuCau.modun === "maintenance" && yeuCau.ban_ghi_id) {
+    const { data: recState } = await supabase
+      .from("maintenance_records")
+      .select("trang_thai, ma_bb")
+      .eq("id", yeuCau.ban_ghi_id as string)
+      .maybeSingle()
+    if (!recState) throw new Error("Biên bản của hồ sơ này đã bị xoá — không ký tiếp được.")
+    if (recState.trang_thai === "huy" || recState.trang_thai === "da_duyet") {
+      throw new Error(
+        `Biên bản ${recState.ma_bb || ""} đã ${recState.trang_thai === "huy" ? "bị huỷ" : "được duyệt"} — không ký tiếp hồ sơ này được.`,
+      )
+    }
+  }
   const willComplete = ((signersBeforeStamp || []) as { id: string; trang_thai: string }[]).every(
     (s) => s.id === nguoiKy.id || s.trang_thai === "da_ky",
   )

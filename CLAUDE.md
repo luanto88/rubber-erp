@@ -411,6 +411,11 @@ Vi du:
   deploy 2026-11-09 (migration `20261118_lot_nap.sql` đã chạy). Còn: lệch lũy kế năm 22 bành + phần C — prompt phiên sau ở
   `.claude/plans/quy-cach-thanh-pham-gd3-nap.md` mục "Prompt phiên sau".
 
+- Gắn phiếu đề nghị ĐÃ DUYỆT (lập riêng) cho biên bản bảo trì theo SL (gia công + vật tư): code xong 2026-11-17 — chạy
+  migration `20261129_purchase_line_record_allocations.sql` TRƯỚC deploy rồi test tay (rule 28 mục cuối).
+- Vá liên kết Biên bản ↔ Kho ↔ Ký số (huỷ/xoá biên bản ở server, chặn ký biên bản đã huỷ, Kho không huỷ được X-BT): code
+  xong 2026-11-17 — chạy migration `20261130_maintenance_issue_doc_cancel_guard.sql` rồi test tay (rule 14 mục cuối).
+
 ## Nhật ký các phiên cũ
 
 Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguyên văn sang

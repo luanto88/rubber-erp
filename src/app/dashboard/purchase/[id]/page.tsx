@@ -38,6 +38,7 @@ import {
 import { PurchaseApproverModal } from "../_components/purchase-approver-modal"
 import { ImageLightbox, PurchaseImagePicker } from "../_components/purchase-image-picker"
 import { PurchaseInsightPanel } from "../_components/purchase-insight-panel"
+import { LineAllocationBlock } from "../_components/line-allocation"
 import { AdjustModal, ClosePurchaseModal, CompleteServiceModal, PurchaseFulfillmentPanel, ReceiveModal } from "../_components/purchase-fulfillment"
 
 type FulfillStep = "receive" | "service"
@@ -499,6 +500,23 @@ function PurchaseDetailInner() {
                             Cho biên bản {detail.lineRecords?.[l.maintenance_record_id] || "(chưa có mã)"}
                           </Link>
                         )}
+                        {!isAdjustment && !l.maintenance_record_id && (() => {
+                          const eff = detail.effectiveLines.find((e) => e.root_line_id === l.id)
+                          const allocs = (detail.allocations || []).filter((a) => a.lineId === l.id)
+                          if (!eff || (!allocs.length && !detail.perms.canAllocate)) return null
+                          return (
+                            <LineAllocationBlock
+                              lineId={l.id}
+                              itemId={eff.item_id}
+                              itemName={eff.item_name || l.item_name}
+                              unit={eff.unit || l.unit}
+                              capacity={req.trang_thai === "dong" ? Number(eff.received) || 0 : Number(eff.so_luong) || 0}
+                              allocations={allocs}
+                              canAllocate={!!detail.perms.canAllocate}
+                              onChanged={() => void load()}
+                            />
+                          )
+                        })()}
                         {req.trang_thai !== "nhap" && (
                           <button
                             type="button"

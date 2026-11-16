@@ -244,13 +244,49 @@ async function applyAdjustedPricesToActuals(factoryId: string, adjustmentId: str
 
 /** Đồng bộ giá vào các biên bản có dòng của phiếu `requestId` (lỗi chỉ log). */
 export async function syncMaintenanceExtPricesForRequest(factoryId: string, requestId: string): Promise<void> {
-  const { data } = await getSupabaseAdmin()
-    .from("purchase_request_lines")
-    .select("maintenance_record_id")
-    .eq("request_id", requestId)
-    .not("maintenance_record_id", "is", null)
-  await syncMaintenanceExtPricesSafe(factoryId, ((data || []) as { maintenance_record_id: string | null }[]).map((l) => l.maintenance_record_id))
+  const sb = getSupabaseAdmin()
+  const [{ data }, { data: allocs }] = await Promise.all([
+    sb.from("purchase_request_lines").select("maintenance_record_id").eq("request_id", requestId).not("maintenance_record_id", "is", null),
+    // Bảng phân bổ chưa có (chưa chạy migration) ⇒ data null, bỏ qua.
+    sb.from("purchase_line_record_allocations").select("maintenance_record_id").eq("request_id", requestId),
+  ])
+  await syncMaintenanceExtPricesSafe(factoryId, [
+    ...((data || []) as { maintenance_record_id: string | null }[]).map((l) => l.maintenance_record_id),
+    ...((allocs || []) as { maintenance_record_id: string }[]).map((l) => l.maintenance_record_id),
+  ])
 }
+
+/**
+ * Phân bổ dòng đề nghị cho biên bản bảo trì (bảng purchase_line_record_allocations), kèm mã biên bản.
+ * Bảng chưa có ⇒ [].
+ */
+export async function loadRequestAllocations(factoryId: string, requestId: string) {
+  const sb = getSupabaseAdmin()
+  const { data, error } = await sb
+    .from("purchase_line_record_allocations")
+    .select("id, line_id, maintenance_record_id, so_luong, created_at")
+    .eq("factory_id", factoryId)
+    .eq("request_id", requestId)
+    .order("created_at")
+  if (error) return []
+  const rows = (data || []) as { id: string; line_id: string; maintenance_record_id: string; so_luong: number; created_at: string }[]
+  const recIds = Array.from(new Set(rows.map((r) => r.maintenance_record_id)))
+  const recs = new Map<string, { ma_bb: string | null; trang_thai: string | null }>()
+  if (recIds.length) {
+    const { data: rr } = await sb.from("maintenance_records").select("id, ma_bb, trang_thai").in("id", recIds)
+    for (const r of (rr || []) as { id: string; ma_bb: string | null; trang_thai: string | null }[]) recs.set(r.id, r)
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    lineId: r.line_id,
+    recordId: r.maintenance_record_id,
+    maBb: recs.get(r.maintenance_record_id)?.ma_bb || null,
+    recordTrangThai: recs.get(r.maintenance_record_id)?.trang_thai || null,
+    qty: Number(r.so_luong) || 0,
+  }))
+}
+
+export type PurchaseLineAllocationView = Awaited<ReturnType<typeof loadRequestAllocations>>[number]
 
 // ── Thông tin hỗ trợ chọn vật tư / bằng chứng cho người duyệt ────────────────
 // Dùng chung cho GET /api/purchase/item-insight (form) và bước chụp số liệu lúc gửi ký

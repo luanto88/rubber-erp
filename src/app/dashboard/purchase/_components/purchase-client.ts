@@ -1,6 +1,7 @@
 // Helper phía trình duyệt cho module Đề nghị mua vật tư.
 import { supabase } from "@/lib/supabase"
 import { authFetch } from "@/lib/auth-fetch"
+import type { PurchaseLineAllocation } from "./allocation-client"
 import { buildPurchasePdfForSigning } from "@/lib/purchase-pdf"
 import { jsPdfBoxToPt } from "@/lib/signing/coords"
 import type { SigningFieldInput } from "@/lib/signing/requests"
@@ -45,8 +46,12 @@ export type PurchaseDetail = {
   maintenanceSource: PurchaseMaintenanceSource | null
   /** GĐ3: id biên bản → mã biên bản của các dòng gắn biên bản. */
   lineRecords?: Record<string, string | null>
+  /** Phân bổ dòng (lập riêng) cho biên bản bảo trì. */
+  allocations?: PurchaseLineAllocation[]
 
   perms: {
+    /** Gắn dòng lập riêng cho biên bản bảo trì (người đề nghị / admin, phiếu đã duyệt trở đi). */
+    canAllocate?: boolean
     canEdit: boolean; canSubmit: boolean; canCancel: boolean; isAdmin: boolean
     /** Người NGOÀI nhóm phụ trách biên bản, có purchase.create, chưa là người đề nghị: Lưu = nhận xử lý. */
     canTakeOver?: boolean

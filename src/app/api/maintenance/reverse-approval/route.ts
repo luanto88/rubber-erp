@@ -27,9 +27,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Vui lòng nhập lý do hủy sau khi hoàn tất." }, { status: 400 })
     }
 
-    const { data: profile } = await supabaseAdmin.from("profiles").select("role").eq("id", authUser.id).single()
+    const { data: profile } = await supabaseAdmin.from("profiles").select("role, factory_id").eq("id", authUser.id).single()
     if (profile?.role !== "admin") {
       return NextResponse.json({ error: "Chỉ admin mới được hủy biên bản đã hoàn tất ký duyệt." }, { status: 403 })
+    }
+    if (profile.factory_id !== factoryId) {
+      return NextResponse.json({ error: "Không được thao tác biên bản của nhà máy khác." }, { status: 403 })
     }
 
     const { data: record, error: recordErr } = await supabaseAdmin

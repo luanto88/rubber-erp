@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { findKtWarehouse, KT_WAREHOUSE_CODE } from "@/lib/maintenance-kt"
 import { supabaseAdmin } from "@/app/api/account/_lib/security"
 import { resolveIsoActor, isoActorHasPermission, isoAuthErrorStatus } from "@/app/api/iso/_lib/iso-actor"
-import { isMaintenanceRecordTeam, isPurchaseParticipant, loadEffectiveLines, loadPurchaseLines, loadPurchaseSigners, syncPurchaseFromSigning } from "@/lib/purchase/server"
+import { isMaintenanceRecordTeam, isPurchaseParticipant, loadEffectiveLines, loadRequestAllocations, loadPurchaseLines, loadPurchaseSigners, syncPurchaseFromSigning } from "@/lib/purchase/server"
 import {
   isPurchaseBuying, isPurchaseEditable, purchaseRequestKind, remainingQty,
   type PurchaseAdjustmentSummary, type PurchaseEffectiveLine, type PurchaseReceiptRow, type PurchaseServiceCompletionRow, type PurchaseRequestRow, type PurchaseStatus, type PurchaseMaintenanceSource,
@@ -192,9 +192,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       for (const r of (data || []) as { id: string; ma_bb: string | null }[]) lineRecords[r.id] = r.ma_bb
     }
 
+    // Phân bổ dòng (lập riêng) cho biên bản bảo trì — chỉ phiếu gốc đã duyệt trở đi.
+    const allocations =
+      !isAdjustment && ["da_duyet", "dang_mua", "hoan_tat", "dong"].includes(status)
+        ? await loadRequestAllocations(actor.factoryId, id)
+        : []
+
     return NextResponse.json({
       maintenanceSource,
       lineRecords,
+      allocations,
       request,
       lines,
       signers,
@@ -243,6 +250,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         canClose: !isAdjustment && status === "dang_mua" && (isOwner || actor.isAdmin) && !pendingAdjustmentId,
         // Ảnh theo dòng: người đề nghị + admin, kể cả sau khi ký (ảnh không in lên PDF), trừ phiếu đã huỷ.
         canEditImages: (isOwner || actor.isAdmin) && status !== "huy",
+        // Gắn dòng lập riêng (không thuộc biên bản) cho biên bản bảo trì: người đề nghị + admin. Nhóm phụ
+        // trách biên bản gắn từ phía biên bản (route tự kiểm quyền theo biên bản).
+        canAllocate: !isAdjustment && ["da_duyet", "dang_mua", "hoan_tat", "dong"].includes(status) && (isOwner || actor.isAdmin),
         isAdmin: actor.isAdmin,
       },
     })

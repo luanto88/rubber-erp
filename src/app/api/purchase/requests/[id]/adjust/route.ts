@@ -70,6 +70,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       maintenance_record_id: string | null
     }
     const rootById = new Map(((rootLines || []) as RootLine[]).map((r) => [r.id, r]))
+    // SL đã phân bổ cho biên bản bảo trì theo dòng gốc (bảng chưa có ⇒ rỗng).
+    const { data: allocRows } = await supabaseAdmin
+      .from("purchase_line_record_allocations").select("line_id, so_luong").eq("request_id", id)
+    const allocatedByLine = new Map<string, number>()
+    for (const a of (allocRows || []) as { line_id: string; so_luong: number }[]) {
+      allocatedByLine.set(a.line_id, (allocatedByLine.get(a.line_id) || 0) + (Number(a.so_luong) || 0))
+    }
     const itemIds = [...new Set(input.map((l) => l.itemId).filter(Boolean))]
     const { data: itemRows } = await supabaseAdmin
       .from("inventory_items").select("id, code, name, unit").eq("factory_id", actor.factoryId).in("id", itemIds.length ? itemIds : ["00000000-0000-0000-0000-000000000000"])
@@ -93,6 +100,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // Dòng đã nhập đủ (hoặc phiếu đã hoàn tất): chỉ được đổi giá — giá mới tự áp cho mọi lần nhập khi duyệt.
       if ((eff.received >= eff.so_luong || parentDone) && (item.id !== eff.item_id || soLuong !== eff.so_luong)) {
         errors.push(`Dòng ${n}: đã nhập đủ — chỉ điều chỉnh được đơn giá (giữ nguyên vật tư và số lượng)`)
+      }
+      const allocated = allocatedByLine.get(l.parentLineId) || 0
+      if (allocated > 0 && soLuong < allocated) {
+        errors.push(`Dòng ${n}: đã phân bổ ${allocated} cho biên bản bảo trì — số lượng mới không được nhỏ hơn (gỡ bớt phân bổ trước)`)
+      }
+      if (allocated > 0 && item.id !== eff.item_id) {
+        errors.push(`Dòng ${n}: đã phân bổ cho biên bản bảo trì — không đổi mã được (gỡ phân bổ trước)`)
       }
       if (!(donGia >= 0)) errors.push(`Dòng ${n}: đơn giá không hợp lệ`)
       if (item.id === eff.item_id && soLuong === eff.so_luong && donGia === eff.don_gia) {

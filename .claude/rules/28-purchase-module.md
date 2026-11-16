@@ -399,3 +399,24 @@ Q2 chung dãy ĐNMVT, Q3 badge chỉ cho phiếu gia công / hỗn hợp.
 - Telegram/email ký số: dòng nhãn "🛒 MUA VẬT TƯ" / "🛠️ GIA CÔNG NGOÀI" / "🛒🛠️ MUA VẬT TƯ + GIA CÔNG" dưới tiêu đề, tiêu đề email
   "[Ký duyệt · Gia công] …"; phiếu gia công ghi "Cần hoàn thành", phiếu hỗn hợp đánh dấu "(gia công)" từng dòng dịch vụ
   (`buildPurchaseSummary` trong `src/lib/signing/notify.ts`, dịch vụ theo `inventory_items.la_dich_vu`).
+
+## Gắn phiếu ĐÃ DUYỆT (lập riêng) cho biên bản theo SL (2026-11-17, chờ chạy migration + test tay)
+Bug: cột `purchase_request_lines.maintenance_record_id` chỉ ghi được khi Nháp/Bị trả về ⇒ phiếu gia công/mua lập riêng
+duyệt xong không gắn được biên bản ⇒ biên bản Gia công ngoài báo thiếu mãi (khoá gửi ký) và "Lập đề nghị mua" sinh trùng.
+Người dùng chốt: gắn từ cả 2 phía, cả gia công lẫn vật tư, 1 dòng chia được cho nhiều biên bản theo SL.
+- Migration `20261129_purchase_line_record_allocations.sql` (**chạy tay TRƯỚC deploy**): bảng
+  `purchase_line_record_allocations` (line_id gốc, maintenance_record_id, so_luong; UNIQUE line+record) + RPC
+  `purchase_allocate_line(factory, line, record, qty, actor)` (service_role; qty 0 = gỡ). RPC kiểm: dòng không có cột liên
+  kết, phiếu `goc` `da_duyet|dang_mua|hoan_tat|dong`, không đang điều chỉnh, biên bản `cho_duyet` + không có `yeu_cau_ky`
+  đang luân chuyển/hoàn tất, đúng vật tư hiệu lực + nguồn (dịch vụ ↔ `gia_cong`, vật tư ↔ `ben_ngoai`), Σ ≤ nhu cầu biên bản,
+  Σ dòng ≤ SL hiệu lực (Đóng: đã nhận). Log `gan_bien_ban` / `go_bien_ban`.
+- Dòng ĐÃ có cột liên kết (lập từ biên bản) không nhận phân bổ — giữ nguyên logic cũ.
+- `maintenance-kt.ts`: `loadAllocations` (bỏ phiếu huỷ; nạp mọi phân bổ của các dòng liên quan), `distributeByAllocation`
+  (thuần, rót theo thứ tự tạo phân bổ). Vật tư: hàng nhập của dòng rót vào `earmark` (tầng 1) + `latest` (kho); gia công:
+  hoàn thành rót vào `completedByKey`; phần chưa có ⇒ "đang đề nghị". `KtItemStatus.allocations` mới.
+  `resolveExternalWarehouses` (xuất kho khi ký) cũng tính phân bổ. Giá (`resolveExtPrices`) coi dòng phân bổ như dòng gắn.
+- API: `POST /api/purchase/lines/[lineId]/allocations` {recordId, soLuong} (admin / người đề nghị / nhóm phụ trách biên bản
+  có `maintenance.create|purchase.create`), `GET /api/purchase/allocation-candidates?recordId&itemId`; chi tiết phiếu trả
+  `allocations` + `perms.canAllocate`. Chặn: adjust (SL < phân bổ / đổi mã), huỷ xác nhận gia công (biên bản qua phân bổ đã ký).
+- UI: `purchase/_components/line-allocation.tsx` (`LineAllocationBlock` ở trang phiếu, `RecordAllocateModal` ở khung vật tư
+  mua ngoài của biên bản — nút "Dùng đề nghị có sẵn" / "Phân bổ"), helper nhẹ `allocation-client.ts`.

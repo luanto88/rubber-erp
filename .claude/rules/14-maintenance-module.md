@@ -1632,3 +1632,22 @@ cố ý gỡ SW, dấu hiệu: nút tròn "N" góc trái dưới + Service worke
 - Bấm 1 dòng ⇒ khối chi tiết của thiết bị đó (state `statsFocus`), nút "Bảng tóm tắt N thiết bị" để quay lại. Không đổi lựa chọn.
 - Driver history: `scripts/fix-driver-assignment-gaps.mjs` đã `--apply` 17 dòng hở 1 ngày (2026-11-07). Còn 5B (3 dòng
   chồng chéo, nghi trùng người "Chres Meng Hout"/"Meng Hout") và X03 (Đến < Từ) — chờ người dùng sửa tay.
+
+## Dùng phiếu đề nghị đã duyệt lập riêng (2026-11-17, chờ test tay)
+Khung "Vật tư mua ngoài / Gia công ngoài" của biên bản chưa gửi ký: dòng còn thiếu có nút "Dùng đề nghị có sẵn" (người tạo /
+NV phụ trách / admin) — chọn phiếu đã duyệt, lập riêng, cùng mã, nhập SL; dòng đã gắn hiện chip "Theo đề nghị NN/ĐNMVT · SL".
+Chi tiết: rule 28 mục "Gắn phiếu ĐÃ DUYỆT (lập riêng) cho biên bản theo SL".
+
+## Vá liên kết Biên bản ↔ Kho ↔ Ký số (2026-11-17, chờ chạy migration 20261130 + test tay)
+- **Huỷ / Xoá biên bản chạy ở server**: `POST /api/maintenance/records/[id]/close` `{mode: cancel|delete, lyDo}` →
+  `closeMaintenanceRecord` (`src/lib/maintenance-record-close.ts`): đóng `yeu_cau_ky` đang luân chuyển / hoàn tất (log
+  `nhat_ky_ky` `huy_bien_ban` / `xoa_bien_ban`) → huỷ mọi phiếu X-BT-<mã> đã ghi sổ (id trên biên bản + tìm theo mã) →
+  gỡ phân bổ đề nghị mua → cập nhật `huy` / xoá. Quyền: huỷ = người tạo (chờ duyệt) hoặc admin (đã duyệt / đã ký xong);
+  xoá = admin hoặc người tạo khi chờ duyệt chưa gửi ký. Trước đây chạy rời ở trình duyệt.
+- **Lõi ký** (`signField`): biên bản đã huỷ / đã duyệt / đã xoá ⇒ từ chối ký mọi bước (trước đây ký xong vẫn tự xuất kho và
+  đổi "Đã hủy" thành "Đã duyệt").
+- **Migration `20261130_maintenance_issue_doc_cancel_guard.sql`** (chạy tay): người dùng KHÔNG huỷ được phiếu X-BT ở module
+  Kho nữa (kể cả admin) — chỉ qua biên bản (Huỷ / Hủy sau khi hoàn tất / Xoá / Thử xuất kho lại, đều service role). Bỏ nhánh
+  `X-BT + maintenance.approve` của hàm vỏ. Mọi `CREATE OR REPLACE inventory_cancel_document` về sau chép từ file này.
+- `reverse-approval` kiểm nhà máy của admin = `factoryId` gửi lên.
+- Phân bổ đề nghị cho biên bản đã huỷ không còn chiếm SL dòng (RPC + `loadAllocations` + danh sách ứng viên).

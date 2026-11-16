@@ -60,7 +60,26 @@ export async function resolveExtPrices(
       .eq("maintenance_record_id", recordId)
       .in("item_id", ids)
     if (error) throw new Error(error.message)
-    const linked = ((data || []) as unknown as (LineJoin & { id: string })[])
+    const rawLinked = (data || []) as unknown as (LineJoin & { id: string })[]
+    // Dòng đề nghị lập riêng đã PHÂN BỔ cho biên bản này (bảng chưa có ⇒ bỏ qua).
+    const { data: allocRows, error: allocErr } = await supabase
+      .from("purchase_line_record_allocations")
+      .select("line_id")
+      .eq("factory_id", factoryId)
+      .eq("maintenance_record_id", recordId)
+    if (allocErr && !/purchase_line_record_allocations/.test(allocErr.message)) throw new Error(allocErr.message)
+    const allocLineIds = Array.from(new Set(((allocRows || []) as { line_id: string }[]).map((a) => a.line_id)))
+    if (allocLineIds.length) {
+      const { data: aLines, error: aErr } = await supabase
+        .from("purchase_request_lines")
+        .select("id, item_id, don_gia, created_at, purchase_requests!inner(so, nam, ngay, loai, trang_thai, loai_tien, created_at)")
+        .eq("factory_id", factoryId)
+        .in("id", allocLineIds)
+        .in("item_id", ids)
+      if (aErr) throw new Error(aErr.message)
+      rawLinked.push(...((aLines || []) as unknown as (LineJoin & { id: string })[]))
+    }
+    const linked = rawLinked
       .map((l) => ({ ...l, req: one(l.purchase_requests) }))
       .filter((l) => l.req && l.req.trang_thai !== "huy")
 

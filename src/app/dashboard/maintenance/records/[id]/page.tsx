@@ -4,12 +4,13 @@ import { use, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
-  AlertCircle, AlertTriangle, ArrowLeft, Ban, Check, CheckCircle2, ChevronDown, ChevronUp, Coins, Download, Eye, ExternalLink, FileSignature, FileText, GitBranch, ImagePlus, Loader2, Pencil, PenTool, Plus,
+  AlertCircle, AlertTriangle, ArrowLeft, Ban, Check, CheckCircle2, ChevronDown, ChevronUp, Coins, Download, Eye, ExternalLink, FileSignature, FileText, GitBranch, ImagePlus, Link2, Loader2, Pencil, PenTool, Plus,
   Printer, QrCode, RefreshCw, RotateCcw, Save, Send, ShoppingCart, Trash2, Users, Wrench, X,
 } from "lucide-react"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../../_components/maintenance-shell"
+import { RecordAllocateModal } from "@/app/dashboard/purchase/_components/line-allocation"
 
 function fmtDateVi(dateStr?: string | null): string {
   if (!dateStr) return "—"
@@ -859,6 +860,8 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
 
   // GĐ2g — vật tư mua ngoài đi qua kho tạm KT: trạng thái thiếu/đủ + phiếu đề nghị mua liên kết.
   const [ktStatus, setKtStatus] = useState<KtRecordStatus | null>(null)
+  // Gắn phiếu đề nghị đã duyệt (lập riêng) cho biên bản theo SL.
+  const [allocModal, setAllocModal] = useState<{ itemId: string; name: string; unit: string | null; kind: "vat_tu" | "dich_vu"; suggest: number } | null>(null)
   const [ktDrafting, setKtDrafting] = useState(false)
   const loadKtStatus = useCallback(async (recordId: string) => {
     try {
@@ -1181,44 +1184,32 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     setDangerDialog("cancel")
   }
 
+  // Huỷ / Xoá chạy ở server (đóng yêu cầu ký, hoàn tồn X-BT, gỡ phân bổ đề nghị, cập nhật biên bản cùng
+  // 1 lượt) — xem src/lib/maintenance-record-close.ts.
+  const closeRecordOnServer = async (mode: "cancel" | "delete", reason: string) => {
+    const res = await authFetch(`/api/maintenance/records/${id}/close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode, lyDo: reason }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { error?: string; cancelledDocs?: number }
+    if (!res.ok) throw new Error(data.error || (mode === "cancel" ? "Lỗi hủy biên bản" : "Lỗi xoá biên bản"))
+    return data
+  }
+
   const doCancel = async (reason: string) => {
     if (!factoryId || !id || id === "new") return
-    const isApprovedRecord = record?.trang_thai === "da_duyet"
     setSaving(true); setSaveError(null)
     try {
-      const session = await getFreshAuthSession()
-      if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
-      if (isApprovedRecord) {
-        for (const documentId of issueDocIds) {
-          const { error: cancelErr } = await supabase.rpc("inventory_cancel_document", {
-            p_factory_id: factoryId,
-            p_document_id: documentId,
-            p_cancelled_by: session.user.id,
-            p_cancel_reason: `Hủy biên bản đã phê duyệt ${record?.ma_bb || ""}: ${reason}`,
-          })
-          if (cancelErr) { setSaveError(`Lỗi hủy phiếu xuất kho: ${cancelErr.message}`); return }
-        }
-      }
-
-      const { error } = await supabase
-        .from("maintenance_records")
-        .update({
-          trang_thai: "huy",
-          inventory_issue_doc_id: null,
-          inventory_issue_doc_ids: null,
-          ly_do_huy: reason,
-          huy_boi: session.user.id,
-          huy_luc: new Date().toISOString(),
-        })
-        .eq("id", id)
-        .eq("factory_id", factoryId)
-      if (error) { setSaveError(error.message); return }
+      const data = await closeRecordOnServer("cancel", reason)
       setSaveSuccess(
-        isApprovedRecord
+        data.cancelledDocs
           ? `Biên bản ${record?.ma_bb || ""} đã được hủy. Phiếu xuất kho liên quan đã bị hủy và vật tư đã được hoàn trả về kho.`
           : `Biên bản ${record?.ma_bb || ""} đã được hủy.`,
       )
       void loadRecord(factoryId, id)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Lỗi hủy biên bản")
     } finally {
       setSaving(false)
       // Đóng hộp thoại cả khi lỗi — thông báo lỗi hiện ở toast của trang (hộp thoại che toast).
@@ -1306,33 +1297,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     if (!factoryId || !id || id === "new" || !record) return
     setSaving(true); setSaveError(null)
     try {
-      if (record.trang_thai === "da_duyet" && issueDocIds.length > 0) {
-        const session = await getFreshAuthSession()
-        if (!session?.user) { setSaveError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."); return }
-
-        for (const documentId of issueDocIds) {
-          const { error: cancelErr } = await supabase.rpc("inventory_cancel_document", {
-            p_factory_id: factoryId,
-            p_document_id: documentId,
-            p_cancelled_by: session.user.id,
-            p_cancel_reason: `Xóa biên bản bảo trì ${record.ma_bb || ""}: ${reason}`,
-          })
-          if (cancelErr) { setSaveError(`Lỗi hủy phiếu xuất kho: ${cancelErr.message}`); return }
-        }
-      }
-
-      const { error } = await supabase
-        .from("maintenance_records")
-        .delete()
-        .eq("id", id)
-        .eq("factory_id", factoryId)
-      if (error) { setSaveError(error.message); return }
+      await closeRecordOnServer("delete", reason)
       router.push("/dashboard/maintenance/records")
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Lỗi xoá biên bản")
     } finally {
       setSaving(false)
       setDangerDialog(null)
     }
   }
+
 
   const handleSave = async () => {
     if (!factoryId || lines.length === 0) {
@@ -3007,6 +2981,34 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     // không có nút, người đề nghị tự sửa SL trên phiếu.
     const draftNo = st.draftRequest ? `${String(st.draftRequest.so).padStart(2, "0")}/ĐNMVT` : null
     const returnedOnly = !st.draftRequest && !!st.returnedRequest
+    // Gắn phiếu đề nghị ĐÃ DUYỆT lập riêng (dự trữ kho / gia công chung) cho biên bản — người tạo, NV phụ
+    // trách, admin (route kiểm lại quyền + RPC kiểm biên bản chưa gửi ký).
+    const canAllocate = !done && (isAdmin || isCreator || isInCharge)
+    const renderAllocLine = (it: KtRecordStatus["items"][number]) => {
+      const allocs = it.allocations || []
+      if (!allocs.length && !(canAllocate && it.shortage > 0)) return null
+      return (
+        <div className="basis-full flex flex-wrap items-center gap-1.5 pl-2 text-[11px]">
+          {allocs.map((a) => (
+            <Link key={a.id} href={`/dashboard/purchase/${a.requestId}`} className="rounded-full border border-teal-200 bg-white px-2 py-0.5 font-semibold text-teal-700 hover:bg-teal-50">
+              Theo đề nghị {String(a.so).padStart(2, "0")}/ĐNMVT · {a.qty}
+            </Link>
+          ))}
+          {canAllocate && (
+            <button
+              type="button"
+              onClick={() => setAllocModal({
+                itemId: it.itemId, name: it.name, unit: it.unit, kind: it.kind,
+                suggest: Math.max(0, it.shortage - it.pendingRequested) || it.shortage,
+              })}
+              className="inline-flex items-center gap-1 rounded-md border border-teal-300 bg-white px-2 py-0.5 font-bold text-teal-700 hover:bg-teal-50"
+            >
+              <Link2 size={11} /> {allocs.length ? "Phân bổ" : "Dùng đề nghị có sẵn"}
+            </button>
+          )}
+        </div>
+      )
+    }
     return (
       <div className={`p-3 rounded-xl border ${short ? "bg-amber-50 border-amber-200" : "bg-emerald-50/60 border-emerald-200"}`}>
         <label className="text-[11px] font-bold text-slate-600 block mb-2 uppercase tracking-wider">
@@ -3031,6 +3033,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 {it.pendingRequested > 0 && <> · chờ xác nhận {it.pendingRequested}{pendingSoText(it.pendingRequests)}</>}
                 {!done && it.shortage > 0 && <b className="text-red-600"> · chưa xong {it.shortage}</b>}
               </span>
+              {renderAllocLine(it)}
             </div>
           ) : (
             <div key={it.itemId} className="flex flex-wrap items-center justify-between gap-x-2 text-xs">
@@ -3043,6 +3046,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 {it.pendingRequested > 0 && <> · chờ nhập kho {it.pendingRequested}{pendingSoText(it.pendingRequests)}</>}
                 {!done && it.shortage > 0 && <b className="text-red-600"> · thiếu {it.shortage}</b>}
               </span>
+              {renderAllocLine(it)}
             </div>
           ))}
         </div>
@@ -4051,6 +4055,19 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
           busy={saving}
           onConfirm={(reason) => void doDeleteRecord(reason)}
           onCancel={() => setDangerDialog(null)}
+        />
+      )}
+
+      {allocModal && effectiveId && !effectiveIsNew && (
+        <RecordAllocateModal
+          recordId={effectiveId}
+          itemId={allocModal.itemId}
+          itemName={allocModal.name}
+          unit={allocModal.unit}
+          kind={allocModal.kind}
+          suggest={allocModal.suggest}
+          onClose={() => setAllocModal(null)}
+          onDone={() => void loadKtStatus(effectiveId)}
         />
       )}
 

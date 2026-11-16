@@ -44,16 +44,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .select("maintenance_record_id")
       .eq("id", sc.line_id)
       .maybeSingle()
-    const recordId = (line?.maintenance_record_id as string | null) || null
-    if (recordId) {
-      const [{ data: rec }, { data: yc }] = await Promise.all([
-        supabaseAdmin.from("maintenance_records").select("ma_bb, trang_thai").eq("id", recordId).maybeSingle(),
-        supabaseAdmin.from("yeu_cau_ky").select("id").eq("factory_id", actor.factoryId).eq("modun", "maintenance")
-          .eq("ban_ghi_id", recordId).in("trang_thai", ["dang_luan_chuyen", "hoan_tat"]).limit(1),
+    // Biên bản dùng dòng này: biên bản gắn từ lúc lập + biên bản được phân bổ sau khi duyệt.
+    const { data: allocRows } = await supabaseAdmin
+      .from("purchase_line_record_allocations").select("maintenance_record_id").eq("line_id", sc.line_id)
+    const recordIds = Array.from(new Set([
+      (line?.maintenance_record_id as string | null) || null,
+      ...((allocRows || []) as { maintenance_record_id: string }[]).map((a) => a.maintenance_record_id),
+    ].filter((v): v is string => !!v)))
+    if (recordIds.length) {
+      const [{ data: recs }, { data: ycs }] = await Promise.all([
+        supabaseAdmin.from("maintenance_records").select("id, ma_bb, trang_thai").in("id", recordIds),
+        supabaseAdmin.from("yeu_cau_ky").select("ban_ghi_id").eq("factory_id", actor.factoryId).eq("modun", "maintenance")
+          .in("ban_ghi_id", recordIds).in("trang_thai", ["dang_luan_chuyen", "hoan_tat"]),
       ])
-      if (rec?.trang_thai === "da_duyet" || (yc || []).length) {
+      const signing = new Set(((ycs || []) as { ban_ghi_id: string }[]).map((y) => y.ban_ghi_id))
+      const blocked = ((recs || []) as { id: string; ma_bb: string | null; trang_thai: string | null }[])
+        .filter((r) => r.trang_thai === "da_duyet" || signing.has(r.id))
+      if (blocked.length) {
         return NextResponse.json(
-          { error: `Biên bản ${rec?.ma_bb || ""} đã gửi ký / đã duyệt với dịch vụ này — không huỷ xác nhận được` },
+          { error: `Biên bản ${blocked.map((r) => r.ma_bb || "").join(", ")} đã gửi ký / đã duyệt với dịch vụ này — không huỷ xác nhận được` },
           { status: 409 },
         )
       }

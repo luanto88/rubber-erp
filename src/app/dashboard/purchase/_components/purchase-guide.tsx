@@ -153,6 +153,17 @@ export function PurchaseGuide() {
         </ul>
       </InspectorCard>
 
+      <InspectorCard title="Gắn phiếu đã duyệt (lập riêng) cho biên bản" icon={ClipboardCheck}>
+        <ul className="list-disc space-y-1.5 pl-5">
+          <li>Áp cho dòng <b>không thuộc biên bản nào</b> (phiếu gia công chung, phiếu mua dự trữ) khi phiếu đã <b>Đã duyệt / Đang mua / Hoàn tất / Đóng</b>.</li>
+          <li><b>1 dòng chia được cho nhiều biên bản theo số lượng</b> (vd tiện 84 phíp 203: biên bản A 30, B 40…). Tổng phân bổ không vượt SL duyệt (phiếu Đóng: SL đã nhận).</li>
+          <li>Gắn từ <b>phiếu đề nghị</b> (khối “Dùng cho biên bản” → “Gắn biên bản”, người đề nghị / admin) hoặc từ <b>biên bản</b> (khung vật tư mua ngoài → “Dùng đề nghị có sẵn”, người tạo / NV phụ trách / admin).</li>
+          <li>Gia công: phần <b>đã xác nhận hoàn thành</b> rót cho biên bản theo thứ tự gắn (gắn trước nhận trước); phần còn lại hiện “chờ xác nhận”. Vật tư: hàng đã nhập rót tương tự và được <b>giữ chỗ tầng 1</b> cho biên bản đó; giá biên bản lấy theo phiếu.</li>
+          <li>Chỉ gắn / gỡ khi biên bản <b>chưa gửi ký</b>. Phiếu điều chỉnh không được giảm SL dưới tổng đã phân bổ, không đổi mã khi đã phân bổ.</li>
+          <li>Biên bản đã đủ nhờ phân bổ thì “Lập đề nghị mua” không sinh phiếu trùng.</li>
+        </ul>
+      </InspectorCard>
+
       <InspectorCard title="Giữ hàng cho biên bản (chia tồn kho)" icon={Warehouse}>
         <ul className="list-disc space-y-1.5 pl-5">
           <li><b>Tầng 1:</b> hàng đã nhập từ dòng đề nghị gắn biên bản A được giữ cho A trước (tối đa đúng nhu cầu của A).</li>
