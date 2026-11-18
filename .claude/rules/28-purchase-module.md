@@ -420,3 +420,19 @@ Người dùng chốt: gắn từ cả 2 phía, cả gia công lẫn vật tư, 
   `allocations` + `perms.canAllocate`. Chặn: adjust (SL < phân bổ / đổi mã), huỷ xác nhận gia công (biên bản qua phân bổ đã ký).
 - UI: `purchase/_components/line-allocation.tsx` (`LineAllocationBlock` ở trang phiếu, `RecordAllocateModal` ở khung vật tư
   mua ngoài của biên bản — nút "Dùng đề nghị có sẵn" / "Phân bổ"), helper nhẹ `allocation-client.ts`.
+
+## Huỷ / Đóng phiếu dùng chung + rà soát dữ liệu (2026-11-18, chờ test tay)
+- Logic huỷ / đóng phiếu tách vào `src/lib/purchase/cancel.ts`: `checkPurchaseCancel` (quyền + trạng thái, dùng cả để xem
+  trước), `cancelPurchaseRequest`, `closePurchaseRequest` (`notify:false` cho script). Route `cancel` / `close` chỉ gọi lại.
+  Huỷ biên bản bảo trì có thể huỷ kèm phiếu lập từ biên bản (rule 14 mục cuối).
+- `scripts/audit-purchase-maintenance.mjs [--factory=code]` (CHỈ ĐỌC, phân trang + đối chiếu count, chạy 2 lần cho cùng
+  nội dung): xuất `../rubber-erp-backups/rasoat-de-nghi-bien-ban-<ngày>.xlsx`, sheet A (phiếu từ biên bản đã huỷ/xoá),
+  B (lập thừa theo (biên bản, vật tư): dòng gắn + phân bổ > nhu cầu mua ngoài/gia công, hoặc ≥ 2 dòng), C (dịch vụ gia công
+  chưa gắn biên bản + gợi ý biên bản đang thiếu), D (Nháp/Trả về > 30 ngày, chữ "test"), E (biên bản: kẹt, đã duyệt thiếu
+  X-BT, X-BT mồ côi, chờ duyệt lâu, nghi trùng, trống), F (phân bổ lỗi). Dữ liệu trước phiếu X-BT đầu tiên (11/05/2026,
+  theo NGÀY biên bản) không đưa vào E2/E5/E6, chỉ đếm; mua ngoài chỉ tính thiếu X-BT khi ký hoàn tất từ 06/10/2026.
+  Cột ẩn danh tính (Loại đối tượng / ID / ID dòng / ID biên bản gắn / ID X-BT) — không sửa.
+  Lần chạy 2026-11-18 (phuochoa_kt): A 2 · B 5 · C 9 · D 0 · E 66 · F 0.
+- `scripts/apply-audit-decisions.mjs <file> --actor=<uuid admin> [--apply]`: mặc định in kế hoạch; chỉ xử lý Huỷ / Đóng /
+  Gắn; gọi THẲNG code server qua `scripts/_ts-alias-hook.mjs` (Node ≥ 23, ánh xạ `@/`, transform TS); sao lưu
+  `audit-apply-backup-*.json` trước khi ghi; lý do = ghi chú người dùng + "(Rà soát <ngày>)"; in trạng thái sau khi chạy.

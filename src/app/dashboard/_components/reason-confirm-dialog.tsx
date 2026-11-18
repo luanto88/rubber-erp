@@ -23,10 +23,13 @@ export function ReasonConfirmDialog({
   busy,
   onConfirm,
   onCancel,
+  extra,
 }: {
   title: string
   subtitle?: ReactNode
   points: ReactNode[]
+  /** Nội dung thêm dưới danh sách điểm (vd danh sách phiếu kèm ô tick). */
+  extra?: ReactNode
   reasonLabel?: string
   reasonPlaceholder?: string
   requireReason?: boolean
@@ -110,6 +113,7 @@ export function ReasonConfirmDialog({
               <li key={index}>{point}</li>
             ))}
           </ul>
+          {extra ? <div className="mt-3">{extra}</div> : null}
           {showReason ? (
             <label className="mt-4 block">
               <span className="text-[13px] font-semibold text-slate-700">

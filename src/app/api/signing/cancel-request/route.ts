@@ -10,14 +10,14 @@ export const dynamic = "force-dynamic"
 export async function POST(req: NextRequest) {
   try {
     const authUser = await requireAuthUser(req)
-    const { yeuCauId } = (await req.json()) as { yeuCauId?: string }
+    const { yeuCauId, force, lyDo } = (await req.json()) as { yeuCauId?: string; force?: boolean; lyDo?: string }
     if (!yeuCauId) {
       return NextResponse.json({ error: "Thiếu yeuCauId" }, { status: 400 })
     }
 
     const { data: profile } = await supabaseAdmin
       .from("profiles")
-      .select("role")
+      .select("role, factory_id")
       .eq("id", authUser.id)
       .single()
     const isAdmin = profile?.role === "admin"
@@ -25,7 +25,17 @@ export async function POST(req: NextRequest) {
     const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || ""
     const thietBi = req.headers.get("user-agent") || ""
 
-    const result = await cancelSigningRequest({ yeuCauId, userId: authUser.id, isAdmin, ip, thietBi })
+    // force: admin huỷ yêu cầu ký đã có người ký (để sửa biên bản) — bắt lý do, kiểm cùng nhà máy.
+    const result = await cancelSigningRequest({
+      yeuCauId,
+      userId: authUser.id,
+      isAdmin,
+      ip,
+      thietBi,
+      force: !!force,
+      lyDo,
+      factoryId: force ? (profile?.factory_id as string | undefined) : undefined,
+    })
     return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Lỗi server" }, { status: 400 })

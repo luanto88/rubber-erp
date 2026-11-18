@@ -415,6 +415,11 @@ Vi du:
   migration `20261129_purchase_line_record_allocations.sql` TRƯỚC deploy rồi test tay (rule 28 mục cuối).
 - Vá liên kết Biên bản ↔ Kho ↔ Ký số (huỷ/xoá biên bản ở server, chặn ký biên bản đã huỷ, Kho không huỷ được X-BT): code
   xong 2026-11-17 — chạy migration `20261130_maintenance_issue_doc_cancel_guard.sql` rồi test tay (rule 14 mục cuối).
+  Migration 20261129 + 20261130 ĐÃ CHẠY (2026-11-18).
+- Khoá sửa biên bản khi đang ký (cả admin) + dấu vân tay dữ liệu chặn ký + "Huỷ yêu cầu ký để sửa" (admin) + huỷ/xoá
+  biên bản huỷ kèm phiếu đề nghị: code xong 2026-11-18, CHƯA commit, chờ test tay (rule 14 mục cuối). Rà soát dữ liệu:
+  file `../rubber-erp-backups/rasoat-de-nghi-bien-ban-2026-11-18.xlsx` chờ người dùng điền "Quyết định", rồi chạy
+  `scripts/apply-audit-decisions.mjs` (xem trước → `--apply`) — rule 28 mục cuối.
 
 ## Nhật ký các phiên cũ
 

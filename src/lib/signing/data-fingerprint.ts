@@ -111,6 +111,77 @@ export function hashDispatchEntry(entry: DispatchEntryLike): string {
   return computeIntegrityHash(Buffer.from(canonicalJson(dispatchFingerprintPayload(entry)), "utf8"))
 }
 
+// ── Biên bản bảo trì ────────────────────────────────────────────────────────────────────
+// Trường in lên biên bản + quyết định XUẤT KHO khi ký xong (vật tư, SL, nguồn, mã vật tư).
+// KHÔNG dùng id dòng thiết bị / vật tư (lưu biên bản có thể xoá-chèn lại dòng) — chỉ nội dung,
+// sắp xếp ổn định. Không đưa ảnh vào (đổi ảnh không đổi số liệu xuất kho).
+const MAINT_RECORD_KEYS = [
+  "hang_muc", "ngay", "bo_phan", "tu_gio", "den_gio",
+  "nv_phu_trach", "phu_trach_bao_tri", "bgd_phu_trach", "giam_doc", "ghi_chu",
+  "noi_dung_chung", "nguyen_nhan_chung", "cac_khac_phuc_chung",
+] as const
+const MAINT_LINE_STR_KEYS = [
+  "asset_id", "dispatch_vehicle_id", "ten_tb", "ma_tb", "ten_tai_xe",
+  "noi_dung", "nguyen_nhan", "cac_khac_phuc", "loai_tien", "loai_sua_chua",
+  "nhien_lieu_su_dung", "dvt_do", "chat_luong",
+] as const
+const MAINT_LINE_NUM_KEYS = ["chi_phi_dk", "cong_tho", "so_luong_do", "km_dong_ho"] as const
+
+type Row = Record<string, unknown>
+
+export function maintenanceFingerprintPayload(record: Row, lines: Row[], materials: Row[]) {
+  const head: Record<string, unknown> = {}
+  for (const k of MAINT_RECORD_KEYS) head[k] = toStr(record[k])
+  head.nguoi_thuc_hien = toStrArr(record.nguoi_thuc_hien).sort()
+
+  const matsByLine = new Map<string, Row[]>()
+  for (const m of materials) {
+    const key = toStr(m.line_id)
+    const arr = matsByLine.get(key) || []
+    arr.push(m)
+    matsByLine.set(key, arr)
+  }
+  const outLines = lines
+    .map((l) => {
+      const o: Record<string, unknown> = {}
+      for (const k of MAINT_LINE_STR_KEYS) o[k] = toStr(l[k])
+      for (const k of MAINT_LINE_NUM_KEYS) o[k] = toNum(l[k])
+      o.vat_tu = (matsByLine.get(toStr(l.id)) || [])
+        .map((m) => ({
+          nguon: toStr(m.nguon),
+          inventory_item_id: toStr(m.inventory_item_id),
+          ten_vat_tu: toStr(m.ten_vat_tu),
+          dvt: toStr(m.dvt),
+          so_luong: toNum(m.so_luong),
+          don_gia: toNum(m.don_gia),
+          loai_tien: toStr(m.loai_tien),
+        }))
+        .filter((m) => m.ten_vat_tu || m.inventory_item_id || m.so_luong !== 0)
+        .sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b)))
+      return { sort: toNum(l.sort_order), o }
+    })
+    .sort((a, b) => a.sort - b.sort || canonicalJson(a.o).localeCompare(canonicalJson(b.o)))
+    .map((x) => x.o)
+  return { ...head, lines: outLines }
+}
+
+export async function hashMaintenanceRecord(factoryId: string, recordId: string): Promise<string | null> {
+  const sb = getSupabaseAdmin()
+  const { data: rec, error } = await sb
+    .from("maintenance_records")
+    .select("*")
+    .eq("id", recordId)
+    .eq("factory_id", factoryId)
+    .maybeSingle()
+  if (error || !rec) return null
+  const { data: lines, error: lErr } = await sb.from("maintenance_record_lines").select("*").eq("record_id", recordId)
+  if (lErr) return null
+  const { data: mats, error: mErr } = await sb.from("maintenance_materials").select("*").eq("record_id", recordId)
+  if (mErr) return null
+  const payload = maintenanceFingerprintPayload(rec as Row, (lines || []) as Row[], (mats || []) as Row[])
+  return computeIntegrityHash(Buffer.from(canonicalJson(payload), "utf8"))
+}
+
 /**
  * Hash dữ liệu nguồn của 1 bản ghi nghiệp vụ theo module. Module chưa hỗ trợ → null.
  * Lỗi bất kỳ → null (không throw — đây là lớp phụ, không được làm hỏng luồng chính).
@@ -132,6 +203,8 @@ export async function computeRecordFingerprint(
         if (error || !data) return null
         return hashDispatchEntry(data as DispatchEntryLike)
       }
+      case "maintenance":
+        return await hashMaintenanceRecord(factoryId, banGhiId)
       default:
         return null
     }

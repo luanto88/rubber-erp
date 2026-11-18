@@ -7,6 +7,7 @@ import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
 import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
 import { SignStatusBadge } from "@/app/dashboard/_components/sign-status-badge"
+import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { openSecureFile } from "@/app/dashboard/_components/secure-file-open"
 import type { MaintenanceSigningStatus } from "../records/_components/maintenance-sign-types"
 
@@ -29,10 +30,13 @@ export function MaintenanceSignCell({
   onOpenSignPrompt,
   onCancelled,
   showToast,
+  blocked,
 }: {
   sign: SignState
   user: SessionUser | null
   canCreate: boolean
+  /** Biên bản còn thiếu vật tư mua ngoài / gia công chưa xong ⇒ thay nút "Gửi ký duyệt" bằng nhãn chờ. */
+  blocked?: { label: string; reason: string } | null
   onRetry: () => void
   onOpenSignPrompt: () => void
   onCancelled: () => void
@@ -56,6 +60,14 @@ export function MaintenanceSignCell({
     )
   }
   if (!user) return null
+  // Chưa gửi ký mà còn thiếu hàng ⇒ server sẽ từ chối gửi ký (409) — không hiện nút, hiện nhãn chờ.
+  if (!sign.status && blocked) {
+    return (
+      <span title={blocked.reason} className="inline-flex">
+        <StatusBadge tone="warn" label={blocked.label} size="xs" />
+      </span>
+    )
+  }
   return (
     <SignStatusBadge
       status={sign.status}

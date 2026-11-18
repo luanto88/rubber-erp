@@ -21,7 +21,7 @@ import { DocCodePill } from "@/app/dashboard/_components/doc-ui/doc-code-pill"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
-import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
+import { KtShortageBanner, buildKtBlockedMap } from "@/app/dashboard/_components/kt-shortage-banner"
 
 type KpiData = {
   totalMonth: number
@@ -174,6 +174,8 @@ export default function MaintenanceDashboardPage() {
     if (factoryId) void loadData(factoryId)
   }, [factoryId, loadData])
 
+  // Biên bản còn thiếu vật tư mua ngoài / gia công ⇒ ô "Ký duyệt" hiện nhãn chờ thay nút "Gửi ký duyệt".
+  const [ktBlocked, setKtBlocked] = useState<Record<string, { label: string; reason: string }>>({})
   const canCreate = hasPermission(user, "maintenance.create")
   const canPrint = hasPermission(user, "maintenance.print")
   const isAdmin = user?.role === "admin"
@@ -212,7 +214,7 @@ export default function MaintenanceDashboardPage() {
         }
       />
 
-      <KtShortageBanner />
+      <KtShortageBanner onRecords={(list) => setKtBlocked(buildKtBlockedMap(list))} />
 
       {/* KPI Cards */}
       <StatGrid cols={4}>
@@ -310,6 +312,7 @@ export default function MaintenanceDashboardPage() {
                       onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
                       onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, recent) }}
                       showToast={(msg, ok = true) => setToast({ msg, ok })}
+                      blocked={ktBlocked[r.id] || null}
                     />
                   </td>
                 </ExpandableRow>

@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
     // Dấu vân tay dữ liệu nguồn — tính TRƯỚC khi tạo yêu cầu (gần thời điểm client dựng PDF nhất).
     // Dùng để phát hiện "Đã ký — dữ liệu đã đổi" theo NỘI DUNG thay vì updated_at.
     const duLieuHash =
-      body.modun === "dispatch" && body.banGhiId
+      (body.modun === "dispatch" || body.modun === "maintenance") && body.banGhiId
         ? await computeRecordFingerprint(body.modun, body.factoryId, body.banGhiId)
         : null
 

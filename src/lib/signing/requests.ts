@@ -10,6 +10,7 @@ import { drawSignatureImage, drawTextFit, loadSignerNameFont } from "./stamp-pdf
 import { getTodayISODate, formatDateDisplay } from "@/lib/date-utils"
 import { hasPadesRootCa, applyPadesSignatureToDoc } from "./pades"
 import { checkMaintenanceStock, issueMaintenanceStock } from "@/lib/maintenance-stock-issuance"
+import { hashMaintenanceRecord } from "@/lib/signing/data-fingerprint"
 import { onPurchaseAdjustmentApproved } from "@/lib/purchase/server"
 // CHỈ import type — không kéo `next/server`/nodemailer vào lõi ký. Việc GỬI thông báo do 3 route
 // handler thực hiện qua scheduleSigningNotify(), file này chỉ DỰNG kế hoạch (xem ./notify.ts).
@@ -286,6 +287,18 @@ export async function signField(params: {
       throw new Error(
         `Biên bản ${recState.ma_bb || ""} đã ${recState.trang_thai === "huy" ? "bị huỷ" : "được duyệt"} — không ký tiếp hồ sơ này được.`,
       )
+    }
+    // Nội dung biên bản đã bị sửa sau khi gửi ký (vd admin sửa vật tư/SL) ⇒ PDF đang ký không còn khớp
+    // dữ liệu sẽ xuất kho. Chặn MỌI lượt ký (không chỉ lượt cuối) để không ai ký trên bản lỗi thời.
+    // Yêu cầu cũ không có du_lieu_hash ⇒ bỏ qua; tính hash lỗi (null) ⇒ bỏ qua (lớp phụ).
+    const savedHash = (yeuCau as { du_lieu_hash?: string | null }).du_lieu_hash
+    if (savedHash) {
+      const nowHash = await hashMaintenanceRecord(yeuCau.factory_id as string, yeuCau.ban_ghi_id as string)
+      if (nowHash && nowHash !== savedHash) {
+        throw new Error(
+          `Nội dung biên bản ${recState.ma_bb || ""} đã bị sửa sau khi gửi ký — bản PDF đang ký không còn khớp dữ liệu sẽ xuất kho. Người ký hãy "Trả về" để người lập gửi ký lại bản mới.`,
+        )
+      }
     }
   }
   const willComplete = ((signersBeforeStamp || []) as { id: string; trang_thai: string }[]).every(
@@ -674,6 +687,11 @@ export async function cancelSigningRequest(params: {
   isAdmin: boolean
   ip?: string
   thietBi?: string
+  /** Admin huỷ kể cả khi đã có người ký (vd biên bản cần sửa giữa chừng). Bắt buộc `lyDo`. */
+  force?: boolean
+  lyDo?: string
+  /** Khi có: chặn huỷ yêu cầu ký của nhà máy khác. */
+  factoryId?: string
 }): Promise<{ trangThai: string }> {
   const supabase = getSupabaseAdmin()
 
@@ -683,6 +701,11 @@ export async function cancelSigningRequest(params: {
     .eq("id", params.yeuCauId)
     .single()
   if (ycErr || !yeuCau) throw new Error("Không tìm thấy yêu cầu ký")
+  if (params.factoryId && yeuCau.factory_id !== params.factoryId) throw new Error("Không tìm thấy yêu cầu ký")
+  const lyDo = String(params.lyDo || "").trim()
+  if (params.force && (!params.isAdmin || !lyDo)) {
+    throw new Error("Chỉ admin được huỷ yêu cầu ký đã có người ký, và phải nhập lý do")
+  }
 
   if (yeuCau.trang_thai !== "dang_luan_chuyen") {
     throw new Error("Yêu cầu ký này không còn ở trạng thái đang luân chuyển, không thể hủy")
@@ -697,7 +720,7 @@ export async function cancelSigningRequest(params: {
     .eq("yeu_cau_id", params.yeuCauId)
     .eq("trang_thai", "da_ky")
   if (signedErr) throw new Error(`Không kiểm tra được tiến độ ký: ${signedErr.message}`)
-  if ((signedCount ?? 0) > 0) {
+  if ((signedCount ?? 0) > 0 && !params.force) {
     throw new Error("Đã có người ký — không thể hủy yêu cầu. Dùng \"Trả về\" nếu cần sửa lại.")
   }
 
@@ -715,7 +738,10 @@ export async function cancelSigningRequest(params: {
     ip: params.ip,
     thiet_bi: params.thietBi,
     hash_sau_thao_tac: yeuCau.hash_hien_tai,
-    chi_tiet: { trang_thai_truoc: "dang_luan_chuyen" },
+    chi_tiet: {
+      trang_thai_truoc: "dang_luan_chuyen",
+      ...(params.force ? { force: true, ly_do: lyDo, so_nguoi_da_ky: signedCount ?? 0 } : lyDo ? { ly_do: lyDo } : {}),
+    },
   })
 
   return { trangThai: "huy" }

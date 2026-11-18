@@ -8,7 +8,7 @@ import { authFetch } from "@/lib/auth-fetch"
 // GĐ2g — Banner cảnh báo biên bản bảo trì còn thiếu vật tư mua ngoài trong kho (chưa lập đề nghị
 // mua hoặc đề nghị chưa nhập đủ). Dùng chung ở module Bảo trì và Đề nghị mua. Lỗi tải → ẩn im lặng.
 
-type ShortageRecord = {
+export type ShortageRecord = {
   recordId: string
   maBb: string | null
   boPhan: string | null
@@ -32,7 +32,25 @@ function itemText(it: ShortageRecord["items"][number]): string {
     : `${base} — ${verb}${so} ${it.pendingRequested}${u}, cần lập thêm ${it.shortage - it.pendingRequested}${u}`
 }
 
-export function KtShortageBanner() {
+/** Nhãn ngắn trạng thái chờ của 1 biên bản thiếu (dùng ở banner + ô "Ký duyệt" trên danh sách). */
+export function ktShortageLabel(r: ShortageRecord): string {
+  if (r.needsRequest) return "Chưa lập đề nghị mua"
+  return r.items.every((it) => it.kind === "dich_vu") ? "Chờ xác nhận gia công" : "Chờ nhập kho / gia công"
+}
+
+/** Lý do không gửi ký được (tooltip ở danh sách) — cùng câu chữ với banner. */
+export function ktShortageReason(r: ShortageRecord): string {
+  return `Chưa gửi ký được: ${r.items.map(itemText).join("; ")}`
+}
+
+/** recordId → { nhãn, lý do } cho ô "Ký duyệt" ở danh sách biên bản. */
+export function buildKtBlockedMap(list: ShortageRecord[]): Record<string, { label: string; reason: string }> {
+  const out: Record<string, { label: string; reason: string }> = {}
+  for (const r of list) out[r.recordId] = { label: ktShortageLabel(r), reason: ktShortageReason(r) }
+  return out
+}
+
+export function KtShortageBanner({ onRecords }: { onRecords?: (records: ShortageRecord[]) => void } = {}) {
   const [records, setRecords] = useState<ShortageRecord[]>([])
   const [open, setOpen] = useState(false)
 
@@ -42,13 +60,17 @@ export function KtShortageBanner() {
       try {
         const res = await authFetch("/api/maintenance/kt-shortages")
         const json = (await res.json()) as { records?: ShortageRecord[] }
-        if (alive && res.ok) setRecords(json.records || [])
+        if (alive && res.ok) {
+          setRecords(json.records || [])
+          onRecords?.(json.records || [])
+        }
       } catch {
         // Banner phụ — không chặn trang.
       }
     }
     void run()
     return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ tải 1 lần khi mở trang
   }, [])
 
   if (!records.length) return null
@@ -73,7 +95,7 @@ export function KtShortageBanner() {
               </Link>
               {r.boPhan ? <span className="text-amber-700"> · {r.boPhan}</span> : null}
               <span className={`ml-1.5 px-1.5 py-0.5 rounded-full font-bold ${r.needsRequest ? "bg-red-100 text-red-700" : "bg-sky-100 text-sky-700"}`}>
-                {r.needsRequest ? "Chưa lập đề nghị" : r.items.every((it) => it.kind === "dich_vu") ? "Chờ xác nhận gia công" : "Chờ nhập kho / gia công"}
+                {ktShortageLabel(r)}
               </span>
               <span className="text-amber-800">
                 {" "}— {r.items.map(itemText).join("; ")}

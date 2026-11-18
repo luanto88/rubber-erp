@@ -28,7 +28,7 @@ import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { ExpandableRow, ExpandHeaderCell, ExpandAllToggle } from "@/app/dashboard/_components/doc-ui/expandable-row"
 import type { MaintenanceSignBundle } from "@/lib/maintenance-pdf"
 import { fetchSigningStatusList } from "@/app/dashboard/_components/signing-status-fetch"
-import { KtShortageBanner } from "@/app/dashboard/_components/kt-shortage-banner"
+import { KtShortageBanner, buildKtBlockedMap } from "@/app/dashboard/_components/kt-shortage-banner"
 
 // html5-qrcode cần navigator ⇒ chỉ client (mirror history/page.tsx).
 const QrScanner = dynamic(
@@ -367,6 +367,8 @@ export default function MaintenanceRecordsPage() {
     if (factoryId) void loadRecords(factoryId)
   }, [factoryId, loadRecords])
 
+  // Biên bản còn thiếu vật tư mua ngoài / gia công ⇒ ô "Ký duyệt" hiện nhãn chờ thay nút "Gửi ký duyệt".
+  const [ktBlocked, setKtBlocked] = useState<Record<string, { label: string; reason: string }>>({})
   const canCreate = hasPermission(user, "maintenance.create")
   const canPrint = hasPermission(user, "maintenance.print")
   const isAdmin = user?.role === "admin"
@@ -413,7 +415,7 @@ export default function MaintenanceRecordsPage() {
           </div>,
           document.body,
         )}
-      <div className="mb-3"><KtShortageBanner /></div>
+      <div className="mb-3"><KtShortageBanner onRecords={(list) => setKtBlocked(buildKtBlockedMap(list))} /></div>
       <PageBackgroundMotif theme="slate" />
       <PageHeaderBanner
         title="Biên bản bảo trì"
@@ -707,6 +709,7 @@ export default function MaintenanceRecordsPage() {
                       onOpenSignPrompt={() => router.push(`/dashboard/maintenance/records/${r.id}`)}
                       onCancelled={() => { if (factoryId) void loadSigningStatuses(factoryId, records) }}
                       showToast={(msg, ok = true) => setToast({ msg, ok })}
+                      blocked={ktBlocked[r.id] || null}
                     />
                   </td>
                 </ExpandableRow>

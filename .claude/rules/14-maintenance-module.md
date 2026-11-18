@@ -1651,3 +1651,32 @@ Chi tiết: rule 28 mục "Gắn phiếu ĐÃ DUYỆT (lập riêng) cho biên b
   `X-BT + maintenance.approve` của hàm vỏ. Mọi `CREATE OR REPLACE inventory_cancel_document` về sau chép từ file này.
 - `reverse-approval` kiểm nhà máy của admin = `factoryId` gửi lên.
 - Phân bổ đề nghị cho biên bản đã huỷ không còn chiếm SL dòng (RPC + `loadAllocations` + danh sách ứng viên).
+
+## Khoá sửa khi đang ký + huỷ kèm phiếu đề nghị (2026-11-18, chờ test tay)
+- **Khoá cả admin** khi biên bản đang luân chuyển ký hoặc kẹt (ký xong chưa xuất kho): `isSignLocked` trong
+  `records/[id]/page.tsx` (`isReadOnly = isSignLocked || …`). Banner vàng "Đang ký duyệt — biên bản bị khoá sửa".
+  Admin muốn sửa ⇒ nút nguy hiểm **"Huỷ yêu cầu ký để sửa"** (lý do bắt buộc) → `POST /api/signing/cancel-request`
+  `{yeuCauId, force: true, lyDo}`: `cancelSigningRequest` cho admin huỷ kể cả đã có người ký, kiểm cùng nhà máy, ghi
+  `nhat_ky_ky` `chi_tiet.force/ly_do/so_nguoi_da_ky`. "Trả về" KHÔNG giúp sửa (khôi phục file gốc cũ).
+- **Dấu vân tay dữ liệu**: `create-request` lưu `yeu_cau_ky.du_lieu_hash` cho `modun='maintenance'` (`hashMaintenanceRecord`
+  trong `src/lib/signing/data-fingerprint.ts`: trường đầu biên bản + dòng thiết bị + vật tư nguồn/mã/SL/giá; không dùng id dòng,
+  không đưa ảnh). `signField` so lại ở MỌI lượt ký; lệch ⇒ từ chối "Nội dung biên bản đã bị sửa sau khi gửi ký". Yêu cầu
+  cũ không có hash ⇒ không kiểm (28 yêu cầu đang luân chuyển lúc triển khai). Đồng bộ giá tự động bỏ qua biên bản đang ký
+  nên không gây lệch giả.
+- **Huỷ / Xoá biên bản**: hộp xác nhận tải `GET /api/maintenance/records/[id]/close` (`listRecordLinkedPurchases`):
+  phiếu LẬP TỪ biên bản đang Nháp / Bị trả về / Đang ký ⇒ ô tick "Huỷ luôn các phiếu đề nghị này" (mặc định bật; phiếu
+  người thao tác không có quyền huỷ thì ghi lý do, không gửi); phiếu đã duyệt / đang mua / đóng hoặc phiếu lập riêng chỉ
+  có DÒNG gắn biên bản ⇒ chỉ cảnh báo. `POST` nhận `cancelPurchaseIds`; `closeMaintenanceRecord` kiểm TOÀN BỘ trước, rồi
+  huỷ phiếu bằng `cancelPurchaseRequest` (lý do "Huỷ biên bản <mã>: …") TRƯỚC khi huỷ/xoá biên bản (xoá ⇒ FK SET NULL).
+  Nút xác nhận khoá tới khi tải xong danh sách.
+- Rà soát dữ liệu: `scripts/audit-purchase-maintenance.mjs` (chỉ đọc) + `scripts/apply-audit-decisions.mjs` — xem rule 28.
+
+## Sửa sau test tay 2026-11-18
+- Nút "Dùng đề nghị có sẵn" chỉ hiện khi đã kiểm có ≥ 1 dòng đề nghị dùng được (`allocCandidateCount`, gọi
+  `/api/purchase/allocation-candidates` cho từng vật tư đang thiếu chưa gắn) — trước đây luôn hiện, bấm vào mới báo
+  không có phiếu (vd vật tư tạo mới trong chính phiếu lập từ biên bản).
+- Ô "Ký duyệt" ở danh sách Tổng quan + Biên bản: biên bản chưa gửi ký mà còn thiếu vật tư mua ngoài / gia công chưa
+  xong ⇒ nhãn chờ ("Chưa lập đề nghị mua" / "Chờ nhập kho / gia công" / "Chờ xác nhận gia công", tooltip = lý do) thay
+  cho nút "Gửi ký duyệt". Dữ liệu lấy từ chính `KtShortageBanner` (`onRecords` → `buildKtBlockedMap`), không gọi API lần 2.
+- "Không tải được phiếu đề nghị liên quan" ở localhost 18/11 là do cache Turbopack hỏng (route trả HTML 500 "Failed
+  to restore task data"), không phải lỗi code — tắt dev, xoá `.next/dev/cache/turbopack`, chạy lại.

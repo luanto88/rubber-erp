@@ -11,6 +11,7 @@ import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSe
 import { supabase } from "@/lib/supabase"
 import { MaintenanceShell } from "../../_components/maintenance-shell"
 import { RecordAllocateModal } from "@/app/dashboard/purchase/_components/line-allocation"
+import { fetchAllocationCandidates } from "@/app/dashboard/purchase/_components/allocation-client"
 
 function fmtDateVi(dateStr?: string | null): string {
   if (!dateStr) return "—"
@@ -57,6 +58,7 @@ import { authFetch } from "@/lib/auth-fetch"
 import { extPriceLabel, type ResolvedExtPrice } from "@/lib/maintenance-ext-price-shared"
 import { DEFAULT_REPAIR_THRESHOLD_USD, formatRepairThreshold, getRepairThresholdUsd, setRepairThresholdUsd } from "@/lib/maintenance-threshold"
 import type { KtRecordStatus } from "@/lib/maintenance-kt"
+import type { RecordLinkedPurchase } from "@/lib/maintenance-record-close"
 import { describeKtShortage } from "@/lib/maintenance-kt-message"
 import { PURCHASE_STATUS_LABEL, type PurchaseStatus } from "@/lib/purchase/types"
 import type { MaintenanceSigningStatus } from "../_components/maintenance-sign-types"
@@ -251,7 +253,11 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const [user, setUser] = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [dangerDialog, setDangerDialog] = useState<"cancel" | "reverse" | "delete" | null>(null)
+  const [dangerDialog, setDangerDialog] = useState<"cancel" | "reverse" | "delete" | "cancel-sign" | null>(null)
+  // Phiếu đề nghị mua liên quan biên bản (hộp Huỷ / Xoá biên bản): null = đang tải / chưa tải.
+  const [linkedPurchases, setLinkedPurchases] = useState<RecordLinkedPurchase[] | null>(null)
+  const [linkedPurchasesError, setLinkedPurchasesError] = useState<string | null>(null)
+  const [cancelLinkedPurchases, setCancelLinkedPurchases] = useState(true)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
   const [record, setRecord] = useState<MaintenanceRecord | null>(null)
@@ -642,14 +648,17 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   const isSigningInProgress = signingStatus?.trangThai === "dang_luan_chuyen"
   // Biên bản KẸT: ký số hoàn tất nhưng tự xuất kho lỗi ⇒ vẫn cho_duyet (bug.md #3).
   const isStockStuck = record?.trang_thai === "cho_duyet" && signingStatus?.trangThai === "hoan_tat"
-  // Admin luôn được sửa ở mọi trạng thái. Người tạo được sửa khi Chờ duyệt hoặc Từ chối;
-  // Đã duyệt/Đã hủy/đang luân chuyển ký chỉ admin mới sửa được.
+  // Đang luân chuyển ký / kẹt xuất kho ⇒ KHOÁ cả admin (sửa giữa chừng ⇒ ký xong xuất kho theo số đã sửa,
+  // không theo PDF đã ký). Admin muốn sửa: "Huỷ yêu cầu ký để sửa" (đang ký) / "Huỷ ký duyệt" (kẹt) trước.
+  // Server còn chặn ở signField bằng dấu vân tay dữ liệu (yeu_cau_ky.du_lieu_hash).
+  // Ngoài 2 trường hợp đó: admin sửa mọi trạng thái; người tạo sửa khi Chờ duyệt hoặc Từ chối.
+  const isSignLocked = isSigningInProgress || isStockStuck
   const isReadOnly =
-    !isAdmin &&
-    (record?.trang_thai === "huy" ||
-      record?.trang_thai === "da_duyet" ||
-      isSigningInProgress ||
-      (!effectiveIsNew && !isCreator))
+    isSignLocked ||
+    (!isAdmin &&
+      (record?.trang_thai === "huy" ||
+        record?.trang_thai === "da_duyet" ||
+        (!effectiveIsNew && !isCreator)))
   // Xóa biên bản: người tạo chỉ được xóa khi Chờ duyệt và không đang luân chuyển ký; admin xóa
   // được mọi trạng thái.
   const canDelete = isAdmin || (isCreator && record?.trang_thai === "cho_duyet" && !isSigningInProgress)
@@ -863,6 +872,35 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // Gắn phiếu đề nghị đã duyệt (lập riêng) cho biên bản theo SL.
   const [allocModal, setAllocModal] = useState<{ itemId: string; name: string; unit: string | null; kind: "vat_tu" | "dich_vu"; suggest: number } | null>(null)
   const [ktDrafting, setKtDrafting] = useState(false)
+  // Số dòng đề nghị đã duyệt (lập riêng) còn SL có thể gắn — theo vật tư đang thiếu. Chưa biết / 0 ⇒ ẩn nút
+  // "Dùng đề nghị có sẵn" (trước đây nút luôn hiện, bấm vào mới báo không có phiếu nào).
+  const [allocCandidateCount, setAllocCandidateCount] = useState<Record<string, number>>({})
+  const allocCheckKey = useMemo(() => {
+    if (!ktStatus || !effectiveId || effectiveIsNew) return ""
+    if (ktStatus.trangThai === "da_duyet" || ktStatus.trangThai === "huy") return ""
+    return ktStatus.items
+      .filter((it) => it.shortage > 0 && !(it.allocations || []).length)
+      .map((it) => it.itemId)
+      .sort()
+      .join(",")
+  }, [ktStatus, effectiveId, effectiveIsNew])
+  useEffect(() => {
+    if (!allocCheckKey || !effectiveId) { setAllocCandidateCount({}); return }
+    let alive = true
+    void (async () => {
+      const next: Record<string, number> = {}
+      for (const itemId of allocCheckKey.split(",")) {
+        try {
+          const { candidates } = await fetchAllocationCandidates(effectiveId, itemId)
+          next[itemId] = candidates.filter((c) => c.free > 0 || c.mine > 0).length
+        } catch {
+          next[itemId] = 0
+        }
+      }
+      if (alive) setAllocCandidateCount(next)
+    })()
+    return () => { alive = false }
+  }, [allocCheckKey, effectiveId])
   const loadKtStatus = useCallback(async (recordId: string) => {
     try {
       const res = await authFetch(`/api/maintenance/records/${recordId}/kt-status`)
@@ -1187,14 +1225,67 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
   // Huỷ / Xoá chạy ở server (đóng yêu cầu ký, hoàn tồn X-BT, gỡ phân bổ đề nghị, cập nhật biên bản cùng
   // 1 lượt) — xem src/lib/maintenance-record-close.ts.
   const closeRecordOnServer = async (mode: "cancel" | "delete", reason: string) => {
+    const cancelPurchaseIds = cancelLinkedPurchases
+      ? (linkedPurchases || []).filter((p) => p.cancellable && p.canCancel).map((p) => p.id)
+      : []
     const res = await authFetch(`/api/maintenance/records/${id}/close`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode, lyDo: reason }),
+      body: JSON.stringify({ mode, lyDo: reason, cancelPurchaseIds }),
     })
-    const data = (await res.json().catch(() => ({}))) as { error?: string; cancelledDocs?: number }
+    const data = (await res.json().catch(() => ({}))) as { error?: string; cancelledDocs?: number; cancelledPurchases?: string[] }
     if (!res.ok) throw new Error(data.error || (mode === "cancel" ? "Lỗi hủy biên bản" : "Lỗi xoá biên bản"))
     return data
+  }
+
+  // Mở hộp Huỷ / Xoá ⇒ tải danh sách phiếu đề nghị liên quan (huỷ kèm / cảnh báo).
+  useEffect(() => {
+    if (dangerDialog !== "cancel" && dangerDialog !== "delete") return
+    if (!id || id === "new") return
+    let alive = true
+    setLinkedPurchases(null)
+    setLinkedPurchasesError(null)
+    setCancelLinkedPurchases(true)
+    void (async () => {
+      try {
+        const res = await authFetch(`/api/maintenance/records/${id}/close`)
+        const data = (await res.json().catch(() => ({}))) as { error?: string; purchases?: RecordLinkedPurchase[] }
+        if (!alive) return
+        if (!res.ok) {
+          setLinkedPurchasesError(data.error || `Không tải được phiếu đề nghị liên quan (lỗi máy chủ ${res.status}) — đóng hộp và thử lại`)
+          setLinkedPurchases([])
+          return
+        }
+        setLinkedPurchases(data.purchases || [])
+      } catch (err) {
+        if (!alive) return
+        setLinkedPurchasesError(err instanceof Error ? err.message : "Không tải được phiếu đề nghị liên quan")
+        setLinkedPurchases([])
+      }
+    })()
+    return () => { alive = false }
+  }, [dangerDialog, id])
+
+  // Admin huỷ yêu cầu ký đang luân chuyển (kể cả đã có người ký) để sửa biên bản rồi gửi ký lại.
+  const doCancelSigning = async (reason: string) => {
+    if (!signingStatus?.yeuCauId) return
+    setSaving(true); setSaveError(null)
+    try {
+      const res = await authFetch("/api/signing/cancel-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ yeuCauId: signingStatus.yeuCauId, force: true, lyDo: reason }),
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) { setSaveError(data.error || "Lỗi huỷ yêu cầu ký"); return }
+      setSaveSuccess(`Đã huỷ yêu cầu ký biên bản ${record?.ma_bb || ""}. Sửa xong bấm “Gửi ký duyệt” để ký lại từ đầu.`)
+      void reloadSigningStatus()
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Lỗi huỷ yêu cầu ký")
+    } finally {
+      setSaving(false)
+      setDangerDialog(null)
+    }
   }
 
   const doCancel = async (reason: string) => {
@@ -1202,10 +1293,13 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     setSaving(true); setSaveError(null)
     try {
       const data = await closeRecordOnServer("cancel", reason)
+      const purchaseNote = data.cancelledPurchases?.length
+        ? ` Đã huỷ kèm phiếu đề nghị ${data.cancelledPurchases.join(", ")}.`
+        : ""
       setSaveSuccess(
-        data.cancelledDocs
+        (data.cancelledDocs
           ? `Biên bản ${record?.ma_bb || ""} đã được hủy. Phiếu xuất kho liên quan đã bị hủy và vật tư đã được hoàn trả về kho.`
-          : `Biên bản ${record?.ma_bb || ""} đã được hủy.`,
+          : `Biên bản ${record?.ma_bb || ""} đã được hủy.`) + purchaseNote,
       )
       void loadRecord(factoryId, id)
     } catch (err) {
@@ -2986,7 +3080,9 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
     const canAllocate = !done && (isAdmin || isCreator || isInCharge)
     const renderAllocLine = (it: KtRecordStatus["items"][number]) => {
       const allocs = it.allocations || []
-      if (!allocs.length && !(canAllocate && it.shortage > 0)) return null
+      // Chưa gắn gì ⇒ chỉ hiện nút khi đã kiểm có phiếu dùng được (allocCandidateCount > 0).
+      const showAllocBtn = canAllocate && (allocs.length > 0 || (it.shortage > 0 && (allocCandidateCount[it.itemId] || 0) > 0))
+      if (!allocs.length && !showAllocBtn) return null
       return (
         <div className="basis-full flex flex-wrap items-center gap-1.5 pl-2 text-[11px]">
           {allocs.map((a) => (
@@ -2994,7 +3090,7 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               Theo đề nghị {String(a.so).padStart(2, "0")}/ĐNMVT · {a.qty}
             </Link>
           ))}
-          {canAllocate && (
+          {showAllocBtn && (
             <button
               type="button"
               onClick={() => setAllocModal({
@@ -3606,9 +3702,78 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
       title: "Hủy sau khi hoàn tất để đảo ngược xuất kho và đưa biên bản về chờ ký",
     })
   }
+  if (isSigningInProgress && isAdmin && signingStatus?.yeuCauId) {
+    dangerActions.push({
+      key: "cancel-sign",
+      label: "Huỷ yêu cầu ký để sửa",
+      icon: <RotateCcw size={14} />,
+      onClick: () => setDangerDialog("cancel-sign"),
+      disabled: busy,
+      title: "Huỷ yêu cầu ký đang luân chuyển (kể cả đã có người ký) để sửa biên bản rồi gửi ký lại từ đầu",
+    })
+  }
   if (canDelete) {
     dangerActions.push({ key: "delete", label: "Xóa biên bản", icon: <Trash2 size={14} />, onClick: () => void handleDeleteRecord(), disabled: busy })
   }
+
+  // Khối "phiếu đề nghị liên quan" trong hộp Huỷ / Xoá biên bản.
+  const linkedPurchasesBox = (() => {
+    if (linkedPurchases === null) {
+      return <p className="text-[12.5px] text-slate-500">Đang kiểm tra phiếu đề nghị mua liên quan...</p>
+    }
+    if (linkedPurchasesError) {
+      return <p className="text-[12.5px] text-red-600">{linkedPurchasesError}</p>
+    }
+    if (!linkedPurchases.length) return null
+    const cancellable = linkedPurchases.filter((p) => p.cancellable)
+    const allowed = cancellable.filter((p) => p.canCancel)
+    const warn = linkedPurchases.filter((p) => !p.cancellable)
+    const link = (p: RecordLinkedPurchase) => (
+      <a href={`/dashboard/purchase/${p.id}`} target="_blank" rel="noreferrer" className="font-semibold text-brand-700 underline">
+        {p.soPhieu}
+      </a>
+    )
+    return (
+      <div className="space-y-2">
+        {cancellable.length > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[12.5px] text-slate-700">
+            <label className={`flex items-start gap-2 ${allowed.length ? "cursor-pointer" : "opacity-60"}`}>
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={cancelLinkedPurchases && allowed.length > 0}
+                disabled={!allowed.length || saving}
+                onChange={(e) => setCancelLinkedPurchases(e.target.checked)}
+              />
+              <span className="font-semibold">Huỷ luôn các phiếu đề nghị lập từ biên bản này</span>
+            </label>
+            <ul className="mt-1.5 space-y-0.5 pl-6">
+              {cancellable.map((p) => (
+                <li key={p.id}>
+                  {link(p)} · {p.trangThaiLabel}
+                  {!p.canCancel && <span className="text-amber-700"> — không huỷ kèm được: {p.blockReason || "không có quyền"}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {warn.length > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-800">
+            <p className="font-semibold">Phiếu đề nghị liên quan KHÔNG tự huỷ (hàng có thể đã mua / phục vụ biên bản khác):</p>
+            <ul className="mt-1 space-y-0.5 pl-4">
+              {warn.map((p) => (
+                <li key={p.id}>
+                  {link(p)} · {p.trangThaiLabel}
+                  {p.fromRecord ? "" : " · có dòng gắn biên bản này"}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1">Xem lại các phiếu này sau khi huỷ biên bản (Đóng phiếu / bỏ dòng nếu cần).</p>
+          </div>
+        )}
+      </div>
+    )
+  })()
 
   const headerChip = "rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11.5px] font-medium text-slate-600"
   const signCancelMessage = "Hủy yêu cầu ký biên bản này? Sau khi hủy, có thể bấm “Gửi ký duyệt” để tạo yêu cầu mới từ đầu."
@@ -3728,6 +3893,16 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               ) : undefined
             }
           />
+          {isSigningInProgress && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+              <p className="font-bold">Đang ký duyệt — biên bản bị khoá sửa</p>
+              <p className="mt-1">
+                {isAdmin
+                  ? "Muốn sửa nội dung: bấm “Huỷ yêu cầu ký để sửa”, sửa xong “Gửi ký duyệt” lại từ đầu."
+                  : "Cần sửa: người gửi ký huỷ yêu cầu ký (khi chưa ai ký), hoặc báo admin huỷ yêu cầu ký."}
+              </p>
+            </div>
+          )}
           {isStockStuck && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
               <p className="font-bold">Đã ký đủ nhưng chưa xuất kho được</p>
@@ -4011,11 +4186,12 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
                 ]
               : ["Biên bản chuyển trạng thái Đã hủy và dừng hẳn.", "Thao tác không thể hoàn tác."]
           }
+          extra={linkedPurchasesBox}
           reasonLabel="Lý do hủy"
           reasonPlaceholder="VD: lập trùng, sai thiết bị, sự cố không xảy ra..."
           confirmLabel="Hủy biên bản"
-          busyLabel="Đang hủy..."
-          busy={saving}
+          busyLabel={linkedPurchases === null ? "Đang kiểm tra..." : "Đang hủy..."}
+          busy={saving || linkedPurchases === null}
           onConfirm={(reason) => void doCancel(reason)}
           onCancel={() => setDangerDialog(null)}
         />
@@ -4048,12 +4224,31 @@ export default function MaintenanceRecordFormPage({ params }: { params: Promise<
               ? [`${issueDocIds.length} phiếu xuất kho của biên bản sẽ bị hủy, vật tư hoàn trả về kho.`]
               : []),
           ]}
+          extra={linkedPurchasesBox}
           reasonLabel="Lý do xóa"
           reasonPlaceholder="VD: tạo nhầm..."
           confirmLabel="Xóa biên bản"
-          busyLabel="Đang xóa..."
-          busy={saving}
+          busyLabel={linkedPurchases === null ? "Đang kiểm tra..." : "Đang xóa..."}
+          busy={saving || linkedPurchases === null}
           onConfirm={(reason) => void doDeleteRecord(reason)}
+          onCancel={() => setDangerDialog(null)}
+        />
+      )}
+      {dangerDialog === "cancel-sign" && (
+        <ReasonConfirmDialog
+          title="Huỷ yêu cầu ký để sửa biên bản"
+          subtitle={record?.ma_bb || undefined}
+          points={[
+            "Yêu cầu ký đang luân chuyển bị huỷ — kể cả các chữ ký đã có (vẫn lưu trong nhật ký ký số).",
+            "Biên bản giữ trạng thái Chờ duyệt, mở khoá để sửa; sửa xong bấm “Gửi ký duyệt” để ký lại từ đầu.",
+            "Chưa xuất kho gì nên không ảnh hưởng tồn kho.",
+          ]}
+          reasonLabel="Lý do huỷ yêu cầu ký"
+          reasonPlaceholder="VD: sai số lượng vật tư, cần sửa trước khi ký tiếp..."
+          confirmLabel="Huỷ yêu cầu ký"
+          busyLabel="Đang huỷ..."
+          busy={saving}
+          onConfirm={(reason) => void doCancelSigning(reason)}
           onCancel={() => setDangerDialog(null)}
         />
       )}
