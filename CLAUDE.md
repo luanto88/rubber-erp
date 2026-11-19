@@ -417,9 +417,9 @@ Vi du:
   xong 2026-11-17 — chạy migration `20261130_maintenance_issue_doc_cancel_guard.sql` rồi test tay (rule 14 mục cuối).
   Migration 20261129 + 20261130 ĐÃ CHẠY (2026-11-18).
 - Khoá sửa biên bản khi đang ký (cả admin) + dấu vân tay dữ liệu chặn ký + "Huỷ yêu cầu ký để sửa" (admin) + huỷ/xoá
-  biên bản huỷ kèm phiếu đề nghị: code xong 2026-11-18, CHƯA commit, chờ test tay (rule 14 mục cuối). Rà soát dữ liệu:
-  file `../rubber-erp-backups/rasoat-de-nghi-bien-ban-2026-11-18.xlsx` chờ người dùng điền "Quyết định", rồi chạy
-  `scripts/apply-audit-decisions.mjs` (xem trước → `--apply`) — rule 28 mục cuối.
+  biên bản huỷ kèm phiếu đề nghị: đã push main `d8f7afd`, test tay 4 bước PASS 2026-11-19 (rule 14 mục cuối). CÒN TREO
+  (người dùng để sau): rà soát dữ liệu — file `../rubber-erp-backups/rasoat-de-nghi-bien-ban-2026-11-18.xlsx` chờ người
+  dùng điền "Quyết định", rồi chạy `scripts/apply-audit-decisions.mjs` (xem trước → `--apply`) — rule 28 mục cuối.
 
 ## Nhật ký các phiên cũ
 
@@ -429,11 +429,16 @@ Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguy�
 ## Prompt mở đầu phiên sau
 
 ```
-Đọc CLAUDE.md (bản rút gọn 2026-10-27), rule 29 và mục "Bug chờ sửa (2026-10-27)" trong
-.claude/plans/ke-hoach-dong-bo-ui-toan-app.md. Bắt đầu U8a: sửa bug Kiểm soát quá trình P1→P10
-(P1–P3 trước: xoá phiếu đo nhanh không quyền/không xác nhận, params/page.tsx không kiểm quyền, API
-ocr-image không xác thực). Đọc lại đúng file:dòng trước khi sửa (số dòng có thể lệch). Không đụng UI ngoài
-phạm vi bug. Lên plan liệt kê từng bug + cách sửa để tôi duyệt trước. Xong: tsc + eslint, hướng dẫn test
-tay, hỏi tôi trước khi commit/push. Sau đó mới U8b (UI rule 29 Kiểm soát quá trình), rồi U9a/U9b (Sản lượng)
-— mỗi giai đoạn dừng cho tôi test. Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build.
+Đọc CLAUDE.md, rule 29 và lộ trình U8–U14 trong .claude/plans/ke-hoach-dong-bo-ui-toan-app.md.
+Trạng thái: Bảo trì khoá sửa khi đang ký + huỷ kèm đề nghị đã push d8f7afd, test PASS 2026-11-19.
+Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (file
+../rubber-erp-backups/rasoat-de-nghi-bien-ban-2026-11-18.xlsx chờ tôi điền "Quyết định"; khi tôi gửi lại thì
+chạy scripts/apply-audit-decisions.mjs KHÔNG --apply trước, tôi duyệt kế hoạch rồi mới --apply — rule 28 mục cuối).
+Bắt đầu U11 (KPI, kpi/**): banner violet cho mọi route con, ModuleThemeScope, tab → SegmentedTabs (kpi-shell.tsx),
+badge span tay → StatusBadge (thêm domain kpi_task vào status-registry), bảng scores → enterprise-table dense.
+Chỉ đổi trình bày — giữ nguyên quyền, query, RPC, logic tính điểm (rule 27). Đọc lại đúng file trước khi sửa,
+lên plan liệt kê từng trang + thay đổi để tôi duyệt trước. Xong: tsc + eslint, hướng dẫn test tay, hỏi tôi trước
+khi commit/push. Sau đó U12 (Ghi chú), U13, U14 — mỗi giai đoạn dừng cho tôi test.
+Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ở dev ⇒ tắt dev, xoá
+.next/dev/cache/turbopack, chạy lại.
 ```
