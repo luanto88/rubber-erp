@@ -321,6 +321,7 @@ Vi du:
 - Đề nghị mua vật tư hàng hóa (ký số 3 bước, số ĐNMVT theo năm, gợi ý giá/trùng vật tư): `.claude/rules/28-purchase-module.md`
 - ISO và hồ sơ con: đọc `.claude/rules/16-iso-vanban-module.md` và `.claude/rules/17-iso-soat-xet.md`; ưu tiên các mục "Cập nhật mới nhất (2026-05-28)" nếu có mâu thuẫn với logic cũ.
 - Kho thanh pham (so do kho): `.claude/rules/18-warehouse-tp-module.md`
+- Chấm công / Điểm danh (trực ca quét QR, công nhân không tài khoản, Khmer, F01/F02, sổ phép, chuyên cần cho KPI): `.claude/rules/31-attendance-module.md` + `.claude/plans/cham-cong-2026-11-19.md`
 - Van ban noi bo: `.claude/rules/22-documents-module.md`
 - Lich su chi tiet (khong tu nap): `.claude/history/`
 
@@ -420,6 +421,19 @@ Vi du:
   biên bản huỷ kèm phiếu đề nghị: đã push main `d8f7afd`, test tay 4 bước PASS 2026-11-19 (rule 14 mục cuối). CÒN TREO
   (người dùng để sau): rà soát dữ liệu — file `../rubber-erp-backups/rasoat-de-nghi-bien-ban-2026-11-18.xlsx` chờ người
   dùng điền "Quyết định", rồi chạy `scripts/apply-audit-decisions.mjs` (xem trước → `--apply`) — rule 28 mục cuối.
+
+- Cải tiến đánh giá KPI & 5S (2026-11-19): lộ trình K1–K6 đã duyệt, CHƯA code — `.claude/plans/kpi-5s-cai-tien-2026-11-19.md`
+  (đã chốt: chuyên cần suy từ hoạt động app, KPI dùng tính thưởng, độ khó việc 3 mức, 5S checklist từng S thang 1–5).
+  U11 (giao diện KPI) hoãn tới sau K1–K4.
+- Module Chấm công (thay K1 chuyên cần): kế hoạch C0–C8 đã duyệt 2026-11-19 (`.claude/plans/cham-cong-2026-11-19.md`). C0 code
+  xong 2026-11-19 — chạy migration `20261201_attendance_c0_foundation.sql`, 3 script (xem trước → `--apply`), test tay (rule 31).
+  File dịch Khmer cho chuyên gia: `cung_cap_dl/dich_khmer_cham_cong.xlsx`.
+  C0 test PASS 2026-11-20. C1 (lịch công tháng + chấm tay) code xong 2026-11-20 — chạy migration
+  `20261202_attendance_c1_records.sql` + `assign-workers-department.mjs --apply`, test tay (rule 31). Bàn giao C2:
+  `.claude/plans/ban-giao-cham-cong-c2.md`.
+  2026-11-20: C1 test PASS; migration 20261202 + 20261203 (Có mặt A không bắt buộc lý do) + 20261204 (công nhân không có
+  nghỉ tua) ĐÃ CHẠY, test PASS; ô Tháng rộng hơn 20% + cột ngày xen kẽ đậm/nhạt test PASS. Tiếp theo: C2 "Điểm danh ca"
+  (lên plan cho người dùng duyệt trước khi code).
 
 ## Nhật ký các phiên cũ
 

@@ -598,6 +598,13 @@ export const DEFAULT_PERMISSION_CODES = [
   "norms.approve",
   "norms.periodic_entry",
   "norms.report",
+  // Chấm công (migration 20261201)
+  "attendance.view",
+  "attendance.shift_check",
+  "attendance.mark",
+  "attendance.mark_all",
+  "attendance.approve",
+  "attendance.manage_config",
 ]
 
 export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
@@ -685,6 +692,7 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "kpi.view_all",
     "purchase.view",
     "purchase.create",
+    "attendance.view",
   ],
   user: [
     "dashboard.view",
@@ -714,6 +722,7 @@ export const ROLE_DEFAULTS: Record<AppRole, string[]> = {
     "kpi.view",
     "purchase.view",
     "purchase.create",
+    "attendance.view",
   ],
   customer: ["export.view_own"],
 }

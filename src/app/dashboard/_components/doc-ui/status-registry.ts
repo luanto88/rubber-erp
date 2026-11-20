@@ -25,6 +25,7 @@ export type StatusDomain =
   | "confirm_queue"
   | "norms"
   | "norms_report"
+  | "attendance"
 
 export const TONE_CLASSES: Record<StatusTone, { badge: string; dot: string; pulse: boolean }> = {
   valid: { badge: "bg-[#ecfdf5] text-[#065f46] border-[#a7f3d0]", dot: "bg-[#15803d]", pulse: false },
@@ -160,6 +161,14 @@ export const NORMS_REPORT_STATUS: Record<string, StatusEntry> = {
   huy: { label: "Đã huỷ", tone: "danger" },
 }
 
+/** attendance_records.trang_thai — ngày công (rule 31). */
+export const ATTENDANCE_STATUS: Record<string, StatusEntry> = {
+  co_mat: { label: "Có mặt", tone: "valid" },
+  nghi_tua: { label: "Nghỉ tua", tone: "info" },
+  nghi_co_phep: { label: "Nghỉ có phép", tone: "warn" },
+  nghi_khong_phep: { label: "Nghỉ không phép", tone: "danger" },
+}
+
 const REGISTRY: Record<StatusDomain, Record<string, StatusEntry>> = {
   doc: DOC_STATUS,
   iso: ISO_STATUS,
@@ -175,6 +184,7 @@ const REGISTRY: Record<StatusDomain, Record<string, StatusEntry>> = {
   confirm_queue: CONFIRM_QUEUE_STATUS,
   norms: NORMS_VERSION_STATUS,
   norms_report: NORMS_REPORT_STATUS,
+  attendance: ATTENDANCE_STATUS,
 }
 
 export function resolveStatus(domain: StatusDomain, status: string | null | undefined): StatusEntry {

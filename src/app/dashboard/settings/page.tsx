@@ -46,6 +46,16 @@ import { Kpi5sLocationsTab } from "./_components/kpi-5s-locations-tab"
 import { Kpi5sZonesTab } from "./_components/kpi-5s-zones-tab"
 import { KpiCriteriaTab } from "./_components/kpi-criteria-tab"
 import { KpiScoreWeightsTab } from "./_components/kpi-score-weights-tab"
+import { AttendanceConfigTab } from "./_components/attendance-config-tab"
+import {
+  StaffAttendanceFields,
+  STAFF_ATTENDANCE_COLUMNS,
+  emptyStaffAttendanceValue,
+  staffAttendanceFromRow,
+  staffAttendancePayload,
+  validateStaffAttendance,
+} from "./_components/staff-attendance-fields"
+import { ATTENDANCE_PERMISSION_LABELS } from "@/lib/attendance/types"
 import { resolveMyLeaderDepartmentId } from "@/lib/kpi-department-leaders"
 import { doiOfDoiNho } from "@/lib/dispatch-master"
 import { isFuelCategory } from "@/lib/inventory-fuel"
@@ -207,7 +217,7 @@ type UserEditor = {
 //      `npm run dev`) không vô tình tạo ra nhiều GoTrueClient cùng đọc/ghi 1 key localStorage.
 const SESSION_EXPIRED_MESSAGE = "Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại"
 
-type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" | "iso-vanban" | "kpi-5s"
+type SettingsTab = "system" | "factory-config" | "master-data" | "maintenance" | "iso-vanban" | "kpi-5s" | "attendance"
 type SensitiveActionKind = "change_pin" | "change_signature" | "change_password"
 type SensitiveActionModal = {
   actionType: SensitiveActionKind
@@ -277,9 +287,19 @@ type MaintenanceStaffRow = {
   phong_ban?: string | null
   department_id?: string | null
   active: boolean
+  // Module Chấm công (migration 20261201) — có thể vắng khi chưa chạy migration.
+  loai_nhan_su?: string | null
+  ma_nhan_su?: string | null
+  day_chuyen_mac_dinh?: string | null
+  ca_mac_dinh?: string | null
+  cong_viec_mac_dinh_id?: string | null
+  thu_tu_diem_danh?: number | null
+  ngay_vao_lam?: string | null
+  ngay_nghi_viec?: string | null
+  cho_xac_nhan?: boolean | null
 }
 
-type StaffViewFilter = "all" | "maintenance" | "unlinked"
+type StaffViewFilter = "all" | "maintenance" | "unlinked" | "worker" | "pending_confirm"
 
 type PersonnelAccountAuditRow = {
   profile: ProfileRow
@@ -485,6 +505,18 @@ type DispatchDriverRow = {
   id_number: string | null
   notes: string | null
   is_active: boolean
+  /** Hồ sơ Nhân sự của tài xế (migration 20261201) — dùng mặc định xe khi điểm danh. */
+  staff_id?: string | null
+}
+
+/** Tài xế phụ của xe (migration 20261201, bảng dispatch_vehicle_secondary_drivers). */
+type DispatchSecondaryDriverRow = {
+  id: string
+  vehicle_id: string
+  driver_id: string
+  effective_from: string
+  effective_to: string | null
+  is_current: boolean
 }
 
 type DispatchVehicleAssignmentRow = {
@@ -522,6 +554,7 @@ type DispatchDriverForm = {
   id_number: string
   notes: string
   is_active: boolean
+  staff_id: string
 }
 
 type DispatchVehicleForm = {
@@ -534,6 +567,7 @@ type DispatchVehicleForm = {
   effective_from: string
   note: string
   is_active: boolean
+  secondary_driver_ids: string[]
 }
 
 const SYSTEM_CODES = ["cs", "m"]
@@ -591,6 +625,7 @@ function emptyDispatchDriverForm(): DispatchDriverForm {
     id_number: "",
     notes: "",
     is_active: true,
+    staff_id: "",
   }
 }
 
@@ -605,6 +640,7 @@ function emptyDispatchVehicleForm(sortOrder = "0"): DispatchVehicleForm {
     effective_from: getFactoryTodayISO(),
     note: "",
     is_active: true,
+    secondary_driver_ids: [],
   }
 }
 
@@ -636,6 +672,7 @@ const PERMISSION_MODULE_LABELS: Record<string, string> = {
   inventory: "Kho vật tư",
   iso: "ISO",
   kpi: "KPI & 5S",
+  attendance: "Chấm công",
   maintenance: "Bảo trì",
   notes: "Ghi chú nhanh",
   norms: "Định mức KTKT",
@@ -749,6 +786,7 @@ const PERMISSION_CODE_LABELS: Record<string, string> = {
   "norms.approve": "áp dụng / hủy áp dụng khung định mức",
   "norms.periodic_entry": "nhập kiểm kê tồn xưởng / chỉ số đồng hồ",
   "norms.report": "lập & gửi ký báo cáo định mức",
+  ...ATTENDANCE_PERMISSION_LABELS,
 }
 
 // Mã quyền đã bỏ nhưng bản ghi `permissions` còn giữ tạm (migration 20261006 chỉ gỡ khỏi
@@ -953,6 +991,8 @@ export default function SettingsPage() {
   // Dùng cho tab "KPI & 5S" (sidebar + CRUD Vị trí/Khu vực) — mở rộng thêm lãnh đạo phòng ban,
   // KHÔNG đổi ý nghĩa `canManageKpiConfig` gốc (vẫn dùng riêng cho guard tổng phía trên).
   const canManageKpi5s = canManageKpiConfig || isKpiDeptLeader
+  // Module Chấm công (GĐ C0): danh mục công việc / lý do vắng.
+  const canManageAttendanceConfig = isAdmin || hasPermission(user, "attendance.manage_config") || hasPermission(user, "settings.manage_config")
 
   const [configTab, setConfigTab] = useState<FactoryConfigTab>("warehouses")
   const [invWarehouses, setInvWarehouses] = useState<InvWarehouseRow[]>([])
@@ -962,6 +1002,8 @@ export default function SettingsPage() {
   const [dispatchDrivers, setDispatchDrivers] = useState<DispatchDriverRow[]>([])
   const [dispatchVehicles, setDispatchVehicles] = useState<DispatchVehicleRow[]>([])
   const [dispatchVehicleAssignments, setDispatchVehicleAssignments] = useState<DispatchVehicleAssignmentRow[]>([])
+  const [dispatchSecondaryDrivers, setDispatchSecondaryDrivers] = useState<DispatchSecondaryDriverRow[]>([])
+  const [secondaryDriversAvailable, setSecondaryDriversAvailable] = useState(true)
   const [forestPlots, setForestPlots] = useState<ForestPlotRow[]>([])
   const [forestPlotForm, setForestPlotForm] = useState<ForestPlotForm>(emptyForestPlotForm())
   const [forestPlotGeometry, setForestPlotGeometry] = useState<unknown>(null)
@@ -1107,6 +1149,7 @@ export default function SettingsPage() {
     phong_ban: "",
     department_id: "",
     active: true,
+    attendance: emptyStaffAttendanceValue(),
   })
   const [staffViewFilter, setStaffViewFilter] = useState<StaffViewFilter>("all")
   const [personnelLinkModal, setPersonnelLinkModal] = useState<{ profileId: string; staffId: string } | null>(null)
@@ -1391,6 +1434,14 @@ export default function SettingsPage() {
       setDispatchDrivers(nextDrivers)
       setDispatchVehicles(nextVehicles)
       setDispatchVehicleAssignments(nextAssignments)
+      // Tài xế phụ (migration 20261201) — bảng chưa có thì ẩn mục tài xế phụ, không chặn phần còn lại.
+      const secRes = await supabase
+        .from("dispatch_vehicle_secondary_drivers")
+        .select("id, vehicle_id, driver_id, effective_from, effective_to, is_current")
+        .eq("factory_id", fid)
+        .order("effective_from", { ascending: false })
+      setSecondaryDriversAvailable(!secRes.error)
+      setDispatchSecondaryDrivers((secRes.data || []) as DispatchSecondaryDriverRow[])
       setMaintLoaded(true)
     } finally {
       setMaintLoading(false)
@@ -1476,6 +1527,8 @@ export default function SettingsPage() {
   const saveMaintStaff = async () => {
     if (!factoryId) return
     if (!staffForm.ten.trim()) { setMaintError("Tên không được để trống"); return }
+    const attendanceError = validateStaffAttendance(staffForm.attendance)
+    if (attendanceError) { setMaintError(attendanceError); return }
     setMaintSaving(true); setMaintError("")
     try {
         const nextProfileId = staffForm.profile_id || null
@@ -1497,6 +1550,7 @@ export default function SettingsPage() {
           phong_ban: staffForm.phong_ban?.trim() || null,
           department_id: staffForm.department_id || null,
           active: staffForm.active,
+          ...staffAttendancePayload(staffForm.attendance),
         }
       let result = maintEditId
         ? await supabase.from("maintenance_staff").update(payload).eq("id", maintEditId).eq("factory_id", factoryId).select("id").single()
@@ -1509,13 +1563,19 @@ export default function SettingsPage() {
       ) {
         // Cột mới chưa có (chưa chạy migration) ⇒ bỏ các cột tuỳ chọn rồi lưu lại.
         const fallbackPayload = { ...payload }
-        for (const col of ["phong_ban", "department_id", "mac_dinh_ky"]) delete fallbackPayload[col]
+        for (const col of ["phong_ban", "department_id", "mac_dinh_ky", ...STAFF_ATTENDANCE_COLUMNS]) delete fallbackPayload[col]
         result = maintEditId
           ? await supabase.from("maintenance_staff").update(fallbackPayload).eq("id", maintEditId).eq("factory_id", factoryId).select("id").single()
           : await supabase.from("maintenance_staff").insert(fallbackPayload).select("id").single()
       }
       if (result.error) {
-        setMaintError(isMaintenanceProfileLinkConstraintError(result.error.message) ? getMaintenanceProfileLinkConflictMessage() : result.error.message)
+        setMaintError(
+          isMaintenanceProfileLinkConstraintError(result.error.message)
+            ? getMaintenanceProfileLinkConflictMessage()
+            : /uniq_maintenance_staff_ma_nhan_su/.test(result.error.message)
+              ? `Mã nhân sự "${staffForm.attendance.ma_nhan_su}" đã được dùng cho người khác.`
+              : result.error.message,
+        )
         return
       }
 
@@ -1845,11 +1905,23 @@ export default function SettingsPage() {
         id_number: dispatchDriverForm.id_number.trim() || null,
         notes: dispatchDriverForm.notes.trim() || null,
         is_active: dispatchDriverForm.is_active,
+        staff_id: dispatchDriverForm.staff_id || null,
       }
-      const result = configEditId
+      let result = configEditId
         ? await supabase.from("dispatch_drivers").update(payload).eq("id", configEditId).eq("factory_id", factoryId)
         : await supabase.from("dispatch_drivers").insert(payload)
-      if (result.error) { setConfigError(result.error.message); return }
+      if (result.error && /staff_id/.test(result.error.message) && /schema cache|does not exist|column/i.test(result.error.message)) {
+        // Chưa chạy migration 20261201 ⇒ lưu không có liên kết nhân sự.
+        const legacy: Record<string, unknown> = { ...payload }
+        delete legacy.staff_id
+        result = configEditId
+          ? await supabase.from("dispatch_drivers").update(legacy).eq("id", configEditId).eq("factory_id", factoryId)
+          : await supabase.from("dispatch_drivers").insert(legacy)
+      }
+      if (result.error) {
+        setConfigError(/uniq_dispatch_drivers_staff/.test(result.error.message) ? "Hồ sơ nhân sự này đã gắn với tài xế khác." : result.error.message)
+        return
+      }
       setConfigModal(null)
       void loadMaintenanceData(factoryId)
     } catch (err) {
@@ -1956,6 +2028,30 @@ export default function SettingsPage() {
         if (assignmentResult.error) {
           setConfigError(assignmentResult.error.message)
           return
+        }
+      }
+
+      // Tài xế phụ: đóng người bị bỏ (giữ lịch sử), thêm người mới từ hôm nay (giờ nhà máy).
+      if (secondaryDriversAvailable) {
+        const today = getFactoryTodayISO()
+        const wanted = new Set(dispatchVehicleForm.secondary_driver_ids.filter((id) => id && id !== dispatchVehicleForm.primary_driver_id))
+        const currentSec = dispatchSecondaryDrivers.filter((r) => r.vehicle_id === vehicleId && r.is_current)
+        const toClose = currentSec.filter((r) => !wanted.has(r.driver_id))
+        const currentIds = new Set(currentSec.map((r) => r.driver_id))
+        const toAdd = [...wanted].filter((id) => !currentIds.has(id))
+        for (const r of toClose) {
+          const closeRes = await supabase
+            .from("dispatch_vehicle_secondary_drivers")
+            .update({ is_current: false, effective_to: r.effective_from > today ? r.effective_from : today })
+            .eq("id", r.id)
+            .eq("factory_id", factoryId)
+          if (closeRes.error) { setConfigError(closeRes.error.message); return }
+        }
+        if (toAdd.length > 0) {
+          const addRes = await supabase.from("dispatch_vehicle_secondary_drivers").insert(
+            toAdd.map((driverId) => ({ factory_id: factoryId, vehicle_id: vehicleId, driver_id: driverId, effective_from: today, is_current: true })),
+          )
+          if (addRes.error) { setConfigError(addRes.error.message); return }
         }
       }
 
@@ -2282,6 +2378,7 @@ export default function SettingsPage() {
     deepLinkHandledRef.current = true
     if (qTab === "cau_hinh_nha_may") setTab("factory-config")
     if (qTab === "kpi_5s") setTab("kpi-5s")
+    if (qTab === "cham_cong") setTab("attendance")
     if (qSub === "lo_vuon") setConfigTab("forest-plots")
     if (qSub === "lo_vuon" && qAction === "add" && (isAdmin || hasPermission(user, "settings.manage_config"))) {
       setConfigError("")
@@ -2373,11 +2470,12 @@ export default function SettingsPage() {
       maintenance: canViewMaintenanceConfig,
       "iso-vanban": canViewIsoSignature,
       "kpi-5s": canManageKpi5s,
+      attendance: canManageAttendanceConfig,
     }
     if (visibility[tab]) return
     const firstVisible = (Object.keys(visibility) as SettingsTab[]).find((key) => visibility[key])
     if (firstVisible) setTab(firstVisible)
-  }, [user, tab, canViewUsers, canEditPermissions, canManageSettings, canViewMasterData, canViewMaintenanceConfig, canViewIsoSignature, canManageKpi5s])
+  }, [user, tab, canViewUsers, canEditPermissions, canManageSettings, canViewMasterData, canViewMaintenanceConfig, canViewIsoSignature, canManageKpi5s, canManageAttendanceConfig])
 
   const selectedVehicleAssignmentHistory = useMemo(() => {
     if (!assignmentHistoryVehicleId) return []
@@ -2471,6 +2569,12 @@ export default function SettingsPage() {
     }
     if (staffViewFilter === "unlinked") {
       return maintStaff.filter((staff) => !staff.profile_id)
+    }
+    if (staffViewFilter === "worker") {
+      return maintStaff.filter((staff) => staff.loai_nhan_su === "cong_nhan")
+    }
+    if (staffViewFilter === "pending_confirm") {
+      return maintStaff.filter((staff) => !!staff.cho_xac_nhan)
     }
     return maintStaff
   }, [maintStaff, staffViewFilter])
@@ -2617,6 +2721,7 @@ export default function SettingsPage() {
       phong_ban: profile?.department || "",
       department_id: profile?.department_id || "",
       active: true,
+      attendance: emptyStaffAttendanceValue(),
     })
     setMaintModal("staff")
   }, [])
@@ -2638,6 +2743,7 @@ export default function SettingsPage() {
       phong_ban: staff.phong_ban || "",
       department_id: staff.department_id || "",
       active: staff.active,
+      attendance: staffAttendanceFromRow(staff),
     })
     setMaintModal("staff")
   }, [])
@@ -3406,6 +3512,7 @@ export default function SettingsPage() {
     { key: "maintenance" as const, label: "Bảo trì", icon: Wrench, show: canViewMaintenanceConfig },
     { key: "iso-vanban" as const, label: "ISO & Văn bản", icon: FileText, show: canViewIsoSignature },
     { key: "kpi-5s" as const, label: "KPI & 5S", icon: Target, show: canManageKpi5s },
+    { key: "attendance" as const, label: "Chấm công", icon: ListChecks, show: canManageAttendanceConfig },
   ].filter((item) => item.show)
 
   const configModalFooter = (
@@ -3891,6 +3998,10 @@ export default function SettingsPage() {
                   { key: "all", label: "Tất cả nhân sự" },
                   { key: "maintenance", label: "Nhân sự bảo trì" },
                   { key: "unlinked", label: "Chưa liên kết" },
+                  { key: "worker", label: `Công nhân (${maintStaff.filter((x) => x.loai_nhan_su === "cong_nhan").length})` },
+                  ...(maintStaff.some((x) => x.cho_xac_nhan)
+                    ? [{ key: "pending_confirm" as const, label: `Chờ xác nhận (${maintStaff.filter((x) => x.cho_xac_nhan).length})` }]
+                    : []),
                 ] as const).map((filter) => (
                   <button
                     key={filter.key}
@@ -3924,7 +4035,19 @@ export default function SettingsPage() {
                       <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">{searchOf("staff").trim() && filteredMaintStaff.length > 0 ? noSearchMatchText(searchOf("staff")) : "Chưa có nhân sự phù hợp"}</td></tr>
                     ) : searchedMaintStaff.map((s) => (
                       <tr key={`sys-${s.id}`} className="row-hover">
-                        <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
+                        <td className="px-4 py-3 font-medium text-slate-700">
+                          {s.ten}
+                          {s.loai_nhan_su === "cong_nhan" || s.cho_xac_nhan ? (
+                            <div className="mt-0.5 flex flex-wrap gap-1">
+                              {s.loai_nhan_su === "cong_nhan" ? (
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                                  Công nhân{s.ca_mac_dinh ? ` · Ca ${s.ca_mac_dinh}` : ""}{s.day_chuyen_mac_dinh ? ` · ${s.day_chuyen_mac_dinh}` : ""}
+                                </span>
+                              ) : null}
+                              {s.cho_xac_nhan ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">Chờ xác nhận</span> : null}
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
                         <td className="px-4 py-3 text-slate-600">{s.phong_ban || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{s.group_names.join(", ") || "—"}</td>
@@ -5246,7 +5369,16 @@ export default function SettingsPage() {
                         <td className="px-4 py-3 font-medium text-slate-700">{v.name}</td>
                         <td className="px-4 py-3 text-slate-500 text-xs">{v.vehicle_type || "—"}</td>
                         <td className="px-4 py-3 text-slate-500 text-xs">{v.plate_number || "—"}</td>
-                        <td className="px-4 py-3 text-slate-600 text-sm">{v.current_driver_name || <span className="text-slate-300">—</span>}</td>
+                        <td className="px-4 py-3 text-slate-600 text-sm">
+                          {v.current_driver_name || <span className="text-slate-300">—</span>}
+                          {(() => {
+                            const names = dispatchSecondaryDrivers
+                              .filter((r) => r.vehicle_id === v.id && r.is_current)
+                              .map((r) => dispatchDrivers.find((d) => d.id === r.driver_id)?.name)
+                              .filter(Boolean)
+                            return names.length ? <div className="text-xs text-slate-400">Phụ: {names.join(", ")}</div> : null
+                          })()}
+                        </td>
                         <td className="px-4 py-3">
                           <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (v.is_active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{v.is_active ? "Hoạt động" : "Ngừng"}</span>
                         </td>
@@ -5259,7 +5391,7 @@ export default function SettingsPage() {
                                 onClick={() => {
                                   setConfigEditId(v.id); setConfigError("")
                                   const cur = dispatchVehicleAssignments.find(a => a.vehicle_id === v.id && a.is_current)
-                                  setDispatchVehicleForm({ code: v.code, name: v.name, vehicle_type: v.vehicle_type || "", plate_number: v.plate_number || "", sort_order: String(v.sort_order ?? 0), is_active: v.is_active, primary_driver_id: cur?.driver_id || "", effective_from: cur?.effective_from || getFactoryTodayISO(), note: "" })
+                                  setDispatchVehicleForm({ code: v.code, name: v.name, vehicle_type: v.vehicle_type || "", plate_number: v.plate_number || "", sort_order: String(v.sort_order ?? 0), is_active: v.is_active, primary_driver_id: cur?.driver_id || "", effective_from: cur?.effective_from || getFactoryTodayISO(), note: "", secondary_driver_ids: dispatchSecondaryDrivers.filter((r) => r.vehicle_id === v.id && r.is_current).map((r) => r.driver_id) })
                                   setConfigModal("vehicle")
                                 }}
                                 className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
@@ -5316,7 +5448,7 @@ export default function SettingsPage() {
                                 <button
                                   onClick={() => {
                                     setConfigEditId(d.id); setConfigError("")
-                                    setDispatchDriverForm({ code: d.code || "", name: d.name, phone: d.phone || "", license_number: d.license_number || "", license_class: d.license_class || "", license_expiry: d.license_expiry || "", id_number: d.id_number || "", notes: d.notes || "", is_active: d.is_active })
+                                    setDispatchDriverForm({ code: d.code || "", name: d.name, phone: d.phone || "", license_number: d.license_number || "", license_class: d.license_class || "", license_expiry: d.license_expiry || "", id_number: d.id_number || "", notes: d.notes || "", is_active: d.is_active, staff_id: d.staff_id || "" })
                                     setConfigModal("driver")
                                   }}
                                   className="p-1.5 hover:bg-blue-50 text-blue-500 rounded-lg transition-colors"
@@ -5683,6 +5815,11 @@ export default function SettingsPage() {
                 <label className="text-xs font-bold text-slate-600 block mb-1.5">Chức vụ kiêm nhiệm</label>
                 <input value={staffForm.chuc_vu_kim_nhiem} onChange={e => setStaffForm(p => ({ ...p, chuc_vu_kim_nhiem: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" placeholder="VD: Trưởng ban ISO" />
               </div>
+              <StaffAttendanceFields
+                factoryId={factoryId}
+                value={staffForm.attendance}
+                onChange={(next) => setStaffForm((p) => ({ ...p, attendance: next }))}
+              />
               <div className="flex items-center gap-3">
                 <input type="checkbox" id="staff-active" checked={staffForm.active} onChange={e => setStaffForm(p => ({ ...p, active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
                 <label htmlFor="staff-active" className="text-sm font-bold text-slate-600">Đang làm việc</label>
@@ -6492,6 +6629,22 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <div>
+                    <label className="text-xs font-bold text-slate-600 block mb-1.5">Hồ sơ nhân sự</label>
+                    <select
+                      value={dispatchDriverForm.staff_id}
+                      onChange={(e) => setDispatchDriverForm((p) => ({ ...p, staff_id: e.target.value }))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500"
+                    >
+                      <option value="">Chưa liên kết</option>
+                      {maintStaff
+                        .filter((st) => st.id === dispatchDriverForm.staff_id || (st.active && !dispatchDrivers.some((d) => d.staff_id === st.id && d.id !== configEditId)))
+                        .map((st) => (
+                          <option key={st.id} value={st.id}>{st.ten}{st.ma_nhan_su ? ` (${st.ma_nhan_su})` : ""}{st.loai_nhan_su === "cong_nhan" ? " · Công nhân" : ""}</option>
+                        ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">Liên kết để khi trực ca điểm danh, người lái xe được chọn sẵn đúng xe mình phụ trách.</p>
+                  </div>
+                  <div>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú</label>
                     <input value={dispatchDriverForm.notes} onChange={(e) => setDispatchDriverForm((p) => ({ ...p, notes: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500" />
                   </div>
@@ -6607,6 +6760,34 @@ export default function SettingsPage() {
                       </label>
                     </div>
                   </div>
+                  {secondaryDriversAvailable ? (
+                    <div>
+                      <label className="text-xs font-bold text-slate-600 block mb-1.5">Tài xế phụ</label>
+                      <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-xl border border-slate-200 p-2">
+                        {dispatchDrivers
+                          .filter((d) => d.id !== dispatchVehicleForm.primary_driver_id && (d.is_active || dispatchVehicleForm.secondary_driver_ids.includes(d.id)))
+                          .map((d) => {
+                            const on = dispatchVehicleForm.secondary_driver_ids.includes(d.id)
+                            return (
+                              <button
+                                key={d.id}
+                                type="button"
+                                onClick={() =>
+                                  setDispatchVehicleForm((p) => ({
+                                    ...p,
+                                    secondary_driver_ids: on ? p.secondary_driver_ids.filter((x) => x !== d.id) : [...p.secondary_driver_ids, d.id],
+                                  }))
+                                }
+                                className={`rounded-full border px-3 py-1 text-xs font-bold ${on ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}
+                              >
+                                {d.code ? `${d.code} - ${d.name}` : d.name}
+                              </button>
+                            )
+                          })}
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500">Chọn thêm người lái thay (vd lái ca khác). Thay đổi có hiệu lực từ hôm nay, lịch sử được giữ.</p>
+                    </div>
+                  ) : null}
                   <div>
                     <label className="text-xs font-bold text-slate-600 block mb-1.5">Ghi chú thay đổi tài xế chính</label>
                     <textarea value={dispatchVehicleForm.note} onChange={(e) => setDispatchVehicleForm((p) => ({ ...p, note: e.target.value }))} rows={3} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm outline-none focus:border-emerald-500 resize-none" />
@@ -7275,6 +7456,21 @@ export default function SettingsPage() {
                 <KpiScoreWeightsTab factoryId={factoryId} canManage={canManageKpiConfig} />
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab Chấm công (GĐ C0) ── */}
+      {tab === "attendance" && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 px-6 py-4 border-b border-slate-200 flex items-center gap-2">
+              <ListChecks size={16} className="text-emerald-600" />
+              <span className="font-extrabold text-slate-700">Chấm công</span>
+            </div>
+            <div className="p-6">
+              <AttendanceConfigTab factoryId={factoryId} canManage={canManageAttendanceConfig} />
+            </div>
           </div>
         </div>
       )}

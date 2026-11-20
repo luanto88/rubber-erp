@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import {
   Activity,
+  CalendarCheck,
   BarChart3,
   Bell,
   ChevronDown,
@@ -150,6 +151,7 @@ const NAV: NavItem[] = [
       { key: "/dashboard/purchase", label: "Đề nghị mua vật tư", icon: ShoppingCart, permission: "purchase.view" },
       { key: "/dashboard/process", label: "Kiểm soát quá trình", icon: Activity, permission: "process.view" },
       { key: "/dashboard/norms", label: "Định mức KTKT", icon: Scale, permission: "norms.view" },
+      { key: "/dashboard/attendance", label: "Chấm công", icon: CalendarCheck, permission: "attendance.view" },
     ],
   },
   {

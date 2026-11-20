@@ -3,6 +3,7 @@
 import Link from "next/link"
 import {
   Activity,
+  CalendarCheck,
   BarChart3,
   ClipboardCheck,
   FileOutput,
@@ -31,6 +32,7 @@ const MODULES: { label: string; path: string; icon: typeof Package; permission?:
   { label: "Xuất hàng", path: "/dashboard/export", icon: FileOutput, permission: "export.view" },
   { label: "Bảo trì", path: "/dashboard/maintenance", icon: Wrench, permission: "maintenance.view" },
   { label: "Kiểm soát quá trình", path: "/dashboard/process", icon: Activity, permission: "process.view" },
+  { label: "Chấm công", path: "/dashboard/attendance", icon: CalendarCheck, permission: "attendance.view" },
   { label: "Quản lý ISO", path: "/dashboard/iso", icon: FileText, permission: "iso.view" },
   { label: "Văn bản nội bộ", path: "/dashboard/documents", icon: FileOutput, permission: "documents.view" },
   { label: "Ghi chú nhanh", path: "/dashboard/notes", icon: NotebookPen, permission: "notes.view" },
