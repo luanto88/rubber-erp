@@ -8,7 +8,9 @@ danh sách công nhân `cung_cap_dl/DS_CN.pdf`.
 - GĐ1 code + test PASS 2026-11-23: migration `20261206_attendance_c2b_grid.sql` ĐÃ CHẠY; `seed-attendance-catalog.mjs --update --apply`
   (48 việc theo mẫu mới, tắt việc mẫu cũ); `import-worker-gender.mjs --apply` (44/44 công nhân có giới tính; Khean Sok Khoeun /
   Binh Ban = tổ trưởng ca A / B); form Nhân sự có "Vai trò trong tổ"; Cài đặt → Chấm công → Điểm QR có "Thẻ nhóm ở màn điểm danh".
-- ⚠️ Màn `/dashboard/attendance/shift` hiện tại (C2 cũ, chọn "phần") KHÔNG khớp RPC mới — GĐ2 viết lại toàn bộ.
+- GĐ1 đã commit `0efb49f` (2026-11-23, chưa push).
+- GĐ2 code xong 2026-11-23 (tsc + eslint sạch, CHƯA commit). Test desktop có 4 lỗi ⇒ kế hoạch sửa + prompt phiên sau:
+  `.claude/plans/ban-giao-cham-cong-c2-sua-sau-test-gd2.md` (ưu tiên file đó).
 
 ## Ý nghĩa "Thẻ nhóm ở màn điểm danh" (đã giải thích cho người dùng 2026-11-23)
 - Tick nhóm = nhóm đó hiện thành 1 THẺ (tab) TRONG CÙNG màn điểm danh của trực ca. KHÔNG phải mỗi nhóm 1 màn / 1 phiếu riêng.

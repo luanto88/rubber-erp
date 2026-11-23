@@ -33,6 +33,7 @@ type JobForm = {
   loai_xe: string
   sort_order: string
   is_active: boolean
+  an_diem_danh: boolean
 }
 
 type ReasonForm = {
@@ -52,7 +53,7 @@ function tableMissingMessage(message: string) {
     : message
 }
 
-export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: string | null; canManage: boolean }) {
+export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: { factoryId: string | null; canManage: boolean; isAdmin?: boolean }) {
   const [subTab, setSubTab] = useState<SubTab>("jobs")
   const [dayChuyen, setDayChuyen] = useState<AttendanceDayChuyen>("Mủ tạp")
   const [jobs, setJobs] = useState<AttendanceJobType[]>([])
@@ -73,7 +74,7 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
       const [jobRes, reasonRes, vehRes] = await Promise.all([
         supabase
           .from("attendance_job_types")
-          .select("id, factory_id, day_chuyen, to_nhom, ten, ten_khmer, so_nguoi_goi_y, loai_xe, sort_order, is_active")
+          .select("*")
           .eq("factory_id", fid)
           .order("sort_order")
           .order("ten"),
@@ -110,6 +111,8 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
     if (factoryId) void load(factoryId)
   }, [factoryId, load])
 
+  const hasAnDiemDanhCol = jobs.length === 0 || "an_diem_danh" in jobs[0]
+
   const jobsByGroup = useMemo(() => {
     const shown = jobs.filter((j) => j.day_chuyen === dayChuyen)
     return ATTENDANCE_TO_NHOM.map((to) => ({ to, rows: shown.filter((j) => j.to_nhom === to) })).filter((g) => g.rows.length > 0)
@@ -128,6 +131,7 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
       loai_xe: "",
       sort_order: String(maxOrder + 10),
       is_active: true,
+      an_diem_danh: false,
     })
   }
 
@@ -156,6 +160,8 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
         loai_xe: jobForm.loai_xe.trim() || null,
         sort_order: Number(jobForm.sort_order) || 0,
         is_active: jobForm.is_active,
+        // Cột có từ migration 20261207 — chưa chạy thì không gửi (giữ form chạy như cũ).
+        ...(hasAnDiemDanhCol ? { an_diem_danh: jobForm.an_diem_danh } : {}),
       }
       const { error: err } = jobForm.id
         ? await supabase.from("attendance_job_types").update(payload).eq("id", jobForm.id).eq("factory_id", factoryId)
@@ -259,7 +265,7 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
 
       {error ? <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{error}</div> : null}
 
-      {subTab === "qr" ? <AttendanceQrPointsCard factoryId={factoryId} canManage={canManage} /> : subTab === "jobs" ? (
+      {subTab === "qr" ? <AttendanceQrPointsCard factoryId={factoryId} canManage={canManage} isAdmin={isAdmin} /> : subTab === "jobs" ? (
         <div className="space-y-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2">
@@ -329,7 +335,10 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
                         <td className="text-right">{r.so_nguoi_goi_y}</td>
                         <td className="text-slate-600">{r.loai_xe || "—"}</td>
                         <td className="text-right">{r.sort_order}</td>
-                        <td>{r.is_active ? "Đang dùng" : "Đã tắt"}</td>
+                        <td>
+                          {r.is_active ? "Đang dùng" : "Đã tắt"}
+                          {r.an_diem_danh ? <span className="ml-1.5 rounded bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-500">Ẩn ở điểm danh</span> : null}
+                        </td>
                         {canManage ? (
                           <td className="text-right">
                             <div className="flex justify-end gap-1">
@@ -348,6 +357,7 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
                                     loai_xe: r.loai_xe || "",
                                     sort_order: String(r.sort_order ?? 0),
                                     is_active: r.is_active,
+                                    an_diem_danh: !!r.an_diem_danh,
                                   })
                                 }}
                                 className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
@@ -544,6 +554,22 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
               <input type="checkbox" checked={jobForm.is_active} onChange={(e) => setJobForm({ ...jobForm, is_active: e.target.checked })} />
               Đang dùng
             </label>
+            {hasAnDiemDanhCol ? (
+              <label className="flex items-start gap-2 text-sm font-semibold text-slate-600">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={jobForm.an_diem_danh}
+                  onChange={(e) => setJobForm({ ...jobForm, an_diem_danh: e.target.checked })}
+                />
+                <span>
+                  Ẩn ở màn điểm danh
+                  <span className="block text-xs font-normal text-slate-500">
+                    Trực ca không giao việc này (vd Trực xuất hàng — người tạo đơn xuất chọn người). Vẫn in trên phiếu F01/F02.
+                  </span>
+                </span>
+              </label>
+            ) : null}
           </div>
         </ModalShell>
       ) : null}

@@ -439,6 +439,9 @@ Vi du:
   2026-11-23: C2 LÀM LẠI dạng lưới ô người (người dùng test thấy rối) — GĐ1 (migration 20261206 + danh mục mẫu F01/F02 mới +
   giới tính / tổ trưởng + thẻ nhóm) ĐÃ CHẠY, test PASS. GĐ2 (màn lưới) + GĐ3 (đơn xuất, giờ kết thúc ca, phiếu F01/F02 Canvas):
   `.claude/plans/ban-giao-cham-cong-c2-luoi.md` (thay file bàn giao c2b-c3 cho phần C2).
+  2026-11-23: GĐ2 màn lưới + sửa sau test (thẻ ↔ loại việc, Tổ tiếp nhận, ẩn Trực xuất hàng, tóm tắt trước khi gửi, chặn người
+  chưa phân công ca, Khmer, nam trước nữ sau, header + Tải PNG / xoá điểm QR) — migration 20261207 ĐÃ CHẠY, test PASS, đã commit
+  (chưa push). GĐ3 + dấu duyệt / bản cứng F01/F02 + F09 + vị trí Ca trưởng / Tổ trưởng: `.claude/plans/ban-giao-cham-cong-c2-gd3.md`.
 
 ## Nhật ký các phiên cũ
 

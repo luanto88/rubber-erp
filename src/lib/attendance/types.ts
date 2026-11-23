@@ -36,6 +36,8 @@ export type AttendanceJobType = {
   loai_xe: string | null
   sort_order: number
   is_active: boolean
+  /** true ⇒ không hiện ở màn điểm danh (vd Trực xuất hàng — chọn ở đơn xuất). Migration 20261207. */
+  an_diem_danh?: boolean
 }
 
 export type AttendanceAbsenceReason = {

@@ -7469,7 +7469,7 @@ export default function SettingsPage() {
               <span className="font-extrabold text-slate-700">Chấm công</span>
             </div>
             <div className="p-6">
-              <AttendanceConfigTab factoryId={factoryId} canManage={canManageAttendanceConfig} />
+              <AttendanceConfigTab factoryId={factoryId} canManage={canManageAttendanceConfig} isAdmin={isAdmin} />
             </div>
           </div>
         </div>

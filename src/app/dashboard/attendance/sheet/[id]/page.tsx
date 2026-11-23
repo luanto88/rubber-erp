@@ -1,8 +1,8 @@
 "use client"
 
-// Chi tiết phiếu điểm danh ngày (GĐ C2, rule 31): các phần (tổ / ca) + dòng điểm danh. Văn phòng
-// (attendance.approve / mark_all / admin) duyệt hoặc trả về TỪNG PHẦN đã gửi. Đã duyệt ⇒ khoá (ngày công nguồn trực ca
-// không sửa được, chỉ admin). Bản PDF F01/F02 để GĐ C7.
+// Chi tiết phiếu điểm danh ngày (rule 31, C2 làm lại GĐ2): mỗi phiếu CA 1 khối, dòng = người (nhiều việc, người thay).
+// Văn phòng (attendance.approve / mark_all / admin) duyệt hoặc trả về TỪNG CA đã gửi. Đã duyệt ⇒ khoá (ngày công nguồn
+// trực ca không sửa được, chỉ admin). Bản PDF F01/F02 để GĐ3.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
@@ -10,7 +10,7 @@ import { CheckCircle2, ClipboardCheck, Undo2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { getErrorMessage } from "@/lib/error-message"
-import { LINE_SELECT, SECTION_SELECT, sectionLabel, type AttendanceSection, type DbLine } from "@/lib/attendance/shift"
+import { LINE_SELECT, SECTION_SELECT, jobIdsOf, sectionLabel, type AttendanceSection, type DbLine } from "@/lib/attendance/shift"
 import { moduleThemeClass } from "@/app/dashboard/_components/doc-ui/module-theme"
 import { DetailPageHeader, HeaderButton } from "@/app/dashboard/_components/doc-ui/detail-page-header"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
@@ -126,8 +126,8 @@ export default function AttendanceSheetDetailPage() {
       const r = (data || {}) as { sections?: number; records?: number; skipped_manual?: number }
       setNotice(
         action === "duyet"
-          ? `Đã duyệt ${r.sections ?? 0} phần, ghi ${r.records ?? 0} ngày công.${r.skipped_manual ? ` ${r.skipped_manual} ngày giữ nguyên vì đã chấm tay trước đó.` : ""}`
-          : `Đã trả về ${r.sections ?? 0} phần cho trực ca.`,
+          ? `Đã duyệt ${r.sections ?? 0} phiếu ca, ghi ${r.records ?? 0} ngày công.${r.skipped_manual ? ` ${r.skipped_manual} ngày giữ nguyên vì đã chấm tay trước đó.` : ""}`
+          : `Đã trả về ${r.sections ?? 0} phiếu ca cho trực ca.`,
       )
       setReturnTarget(null)
       setApproveTargets(null)
@@ -163,17 +163,16 @@ export default function AttendanceSheetDetailPage() {
         }
         actions={
           canReview && pendingSections.length > 0 ? (
-            <HeaderButton tone="brand" icon={<CheckCircle2 size={15} />} label={`Duyệt mọi phần đã gửi (${pendingSections.length})`} onClick={() => setApproveTargets(pendingSections)} disabled={busy} />
+            <HeaderButton tone="brand" icon={<CheckCircle2 size={15} />} label={`Duyệt mọi ca đã gửi (${pendingSections.length})`} onClick={() => setApproveTargets(pendingSections)} disabled={busy} />
           ) : undefined
         }
       />
       {error ? <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{error}</div> : null}
       {notice ? <div className="rounded-xl bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{notice}</div> : null}
 
-      {sections.length === 0 ? <ListState kind="empty" message="Phiếu chưa có phần nào." /> : null}
+      {sections.length === 0 ? <ListState kind="empty" message="Phiếu chưa có phiếu ca nào." /> : null}
       {sections.map((sec) => {
         const ls = linesBySection.get(sec.id) || []
-        const replacedBy = new Map(ls.filter((l) => l.thay_cho_staff_id).map((l) => [l.thay_cho_staff_id as string, l.staff_id]))
         return (
           <section key={sec.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -198,7 +197,7 @@ export default function AttendanceSheetDetailPage() {
               {canReview && sec.trang_thai === "da_gui" ? (
                 <div className="flex shrink-0 gap-2">
                   <HeaderButton tone="danger" icon={<Undo2 size={14} />} label="Trả về" onClick={() => setReturnTarget(sec)} disabled={busy} />
-                  <HeaderButton tone="brand" icon={<CheckCircle2 size={14} />} label="Duyệt phần" onClick={() => setApproveTargets([sec])} disabled={busy} />
+                  <HeaderButton tone="brand" icon={<CheckCircle2 size={14} />} label="Duyệt ca" onClick={() => setApproveTargets([sec])} disabled={busy} />
                 </div>
               ) : null}
             </div>
@@ -211,7 +210,7 @@ export default function AttendanceSheetDetailPage() {
                     <th>Công việc</th>
                     <th>Xe</th>
                     <th>Điểm danh</th>
-                    <th>Người thay / thay cho</th>
+                    <th>Người thay</th>
                     <th>Ghi chú</th>
                   </tr>
                 </thead>
@@ -226,21 +225,41 @@ export default function AttendanceSheetDetailPage() {
                           {name(l.staff_id)}
                           {l.la_them_ngoai ? <span className="ml-1 text-[11px] font-normal text-slate-400">(thêm)</span> : null}
                         </td>
-                        <td>{l.cong_viec_id ? jobNames.get(l.cong_viec_id) || "—" : <span className="text-slate-400">Chưa phân công</span>}</td>
+                        <td>
+                          {jobIdsOf(l).length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {jobIdsOf(l).map((j) => (
+                                <span key={j} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                                  {jobNames.get(j) || "—"}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
                         <td>{l.vehicle_id ? vehicles.get(l.vehicle_id) || "—" : ""}</td>
                         <td>
                           {l.diem_danh === "co" ? (
                             <StatusBadge tone={l.xep_loai === "B" ? "warn" : "valid"} label={`Có mặt · ${l.xep_loai || "A"}`} size="xs" />
                           ) : (
                             <div>
-                              <StatusBadge tone={l.vang_loai === "khong_phep" ? "danger" : "warn"} label={l.vang_loai === "khong_phep" ? "Vắng không phép" : "Vắng có phép"} size="xs" />
+                              <StatusBadge
+                                tone={l.vang_loai === "khong_phep" ? "danger" : l.vang_loai ? "warn" : "draft"}
+                                label={l.vang_loai === "khong_phep" ? "Vắng không phép" : l.vang_loai ? "Vắng có phép" : "Vắng (chưa chọn phép)"}
+                                size="xs"
+                              />
                               {l.ly_do ? <div className="text-xs text-slate-500">{l.ly_do}</div> : null}
                             </div>
                           )}
                         </td>
                         <td className="text-xs">
-                          {l.thay_cho_staff_id ? <span className="text-violet-700">Thay cho {name(l.thay_cho_staff_id)}</span> : null}
-                          {replacedBy.get(l.staff_id) ? <span className="text-slate-600">Người thay: {name(replacedBy.get(l.staff_id) || null)}</span> : null}
+                          {l.thay_the_staff_id ? <span className="font-semibold text-violet-700">{name(l.thay_the_staff_id)}</span> : null}
+                          {!l.thay_the_staff_id && l.thay_the_ten ? (
+                            <span className="font-semibold text-violet-700">
+                              {l.thay_the_ten} <span className="font-normal text-slate-400">(tạm)</span>
+                            </span>
+                          ) : null}
                         </td>
                         <td className="text-xs">{l.ghi_chu || ""}</td>
                       </tr>
@@ -255,9 +274,9 @@ export default function AttendanceSheetDetailPage() {
 
       {returnTarget ? (
         <ReasonConfirmDialog
-          title="Trả về phần điểm danh"
+          title="Trả về phiếu ca"
           subtitle={`${sheet.ma_phieu} · ${sectionLabel(returnTarget.loai, returnTarget.ca, sheet.day_chuyen)}`}
-          points={["Trực ca lập phần này sẽ được báo trên chuông và sửa rồi gửi lại.", "Chưa ghi ngày công nào cho phần này."]}
+          points={["Trực ca lập phiếu ca này sẽ được báo trên chuông và sửa rồi gửi lại.", "Chưa ghi ngày công nào cho phiếu ca này."]}
           confirmLabel="Trả về"
           busy={busy}
           onConfirm={(r) => void review([returnTarget], "tra_ve", r)}
@@ -266,10 +285,11 @@ export default function AttendanceSheetDetailPage() {
       ) : null}
       {approveTargets ? (
         <ReasonConfirmDialog
-          title={approveTargets.length > 1 ? `Duyệt ${approveTargets.length} phần đã gửi` : "Duyệt phần điểm danh"}
+          title={approveTargets.length > 1 ? `Duyệt ${approveTargets.length} phiếu ca đã gửi` : "Duyệt phiếu ca"}
           subtitle={approveTargets.map((t) => sectionLabel(t.loai, t.ca, sheet.day_chuyen)).join(" · ")}
           points={[
-            "Ghi ngày công nguồn trực ca cho mọi người trong phần (có mặt + xếp loại A/B, vắng có / không phép).",
+            "Ghi ngày công nguồn trực ca cho mọi người trong phiếu ca (có mặt + xếp loại A/B, vắng có / không phép).",
+            "Người thay có trong Nhân sự được tính có mặt (A); người thay gõ tay (tạm) không ghi ngày công.",
             "Ngày đã chấm tay trước đó được giữ nguyên.",
             "Sau khi duyệt KHÔNG sửa được nữa (ở cả phiếu lẫn Lịch công) — chỉ admin sửa, có lý do.",
           ]}

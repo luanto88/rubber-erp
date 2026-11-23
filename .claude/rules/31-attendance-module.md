@@ -99,3 +99,36 @@ save / submit / review_section về sau chép từ file này). Danh mục 48 vi�
 hàng", việc mẫu cũ đã tắt). `maintenance_staff.to_vai_tro` / `to_pham_vi` (tổ trưởng / tổ phó in phiếu, thiếu ⇒ không in).
 `personnel_groups.hien_diem_danh` = nhóm hiện thành THẺ trong CÙNG màn điểm danh của trực ca (không phải màn / phiếu riêng).
 `export_orders.nguoi_xuat_hang_ids` (UI ở GĐ3).
+
+### GĐ2 màn lưới + văn phòng (2026-11-23, chờ test tay)
+- `/dashboard/attendance/shift` viết lại: mở màn TỰ mở phiếu ca (`attendance_open_section(..., 'ca_san_xuat', ca)`), chip Ca
+  (mặc định ca được phân công) / Dây chuyền (mặc định `day_chuyen_mac_dinh` của trực ca → của điểm QR) / ngày trên header.
+  Thẻ = "Ca X" + nhóm `hien_diem_danh` + "Khác" (người có dòng ngoài các thẻ). Ô người `_components/worker-tile.tsx`,
+  tấm chọn việc `job-sheet.tsx` (nhiều việc, A/B, xe khi việc có `loai_xe`, người thay từ công nhân ca khác + thành viên nhóm
+  hoặc tên gõ tay "(tạm)"), bước gửi `submit-review.tsx` (vắng: có / không phép + lý do; công nhân ca chưa giao: Vắng / Bỏ qua).
+- Tự lưu 2 s sau thay đổi cuối (`attendance_save_section`, chỉ gửi người có việc hoặc vắng), lỗi ⇒ thử lại sau 8 s; đổi ca /
+  dây chuyền / ngày / rời màn ⇒ lưu ngay trước. Phiếu ca mới chưa có dòng ⇒ gợi ý từ phiếu cùng dây chuyền + ca gần nhất
+  (10 phiếu ngày trước) — chỉ chép việc + xe, banner "Xoá hết việc".
+- Hàm thuần `src/lib/attendance/shift.ts`: `buildRosterTabs`, `classifyTile`, `countRoster`, `suggestFromPrevious`,
+  `linesToPayload`, `jobIdsOf` (dòng cũ chỉ có `cong_viec_id`). Đã bỏ `buildDefaultLines` / `validateLines`.
+- Văn phòng: danh sách thêm cột "Người thay"; chi tiết phiếu = mỗi phiếu ca 1 khối, cột Việc (nhiều) + Người thay ("(tạm)").
+
+
+### Sửa sau test GĐ2 (2026-11-23, chờ chạy migration 20261207 + test tay)
+- Thẻ ↔ loại việc: `personnel_groups.diem_danh_to_nhom` (tiep_nhan | co_dien | ca_san_xuat; trống = mọi tổ trừ ca SX), chọn ở
+  Cài đặt → Chấm công → Điểm QR → "Loại việc của từng thẻ". Thẻ Ca chỉ việc `ca_san_xuat`; thẻ "Khác" mọi việc. Hàm thuần
+  `jobsForTab` (shift.ts) luôn giữ việc đang có trên dòng. Thành viên nhóm có thẻ riêng KHÔNG hiện ở thẻ Ca.
+- Nhóm hệ thống "Tổ tiếp nhận" (code tiep_nhan) — thêm thành viên ở Cài đặt → Nhân sự.
+- `attendance_job_types.an_diem_danh` (ô "Ẩn ở màn điểm danh" ở form công việc): Trực xuất hàng — chọn người ở đơn xuất.
+- Bước gửi có khối tóm tắt (dây chuyền · ca · ngày · mã, số có mặt / vắng / người thay, bảng theo việc).
+- RPC `attendance_reopen_section(section, ly_do)` — CHỈ admin mở lại phiếu ca đã duyệt (UI ở GĐ3). Bảng bản cứng
+  `attendance_sheet_snapshots` + bucket `attendance-sheet-reports` (dùng ở GĐ3).
+- Sau test lần 2 (2026-11-23): màn điểm danh nạp quyền mới nhất (`hydrateActiveSession`, lỗi mạng mới dùng cache); KHÔNG có
+  quyền trực ca, hoặc có `shift_check` nhưng chưa được phân công ca nào (Cài đặt → Cấu hình nhà máy → Phân công trực ca) và
+  không có mark / mark_all ⇒ chỉ hiện thông báo + Về trang chính / Đăng xuất. Lưới xếp nam → nữ → chưa khai giới tính
+  (`genderRank`). Đăng xuất có lớp phủ "Đang đăng xuất...". Khmer: dây chuyền, tên thẻ theo code nhóm (tiep_nhan / co_dien /
+  bao_tri), "Khác". Icon xám = chưa khai giới tính (không phải bị khoá).
+- Test lần 2 PASS (2026-11-23). Header màn điểm danh: tiêu đề "QR điểm danh <tên điểm QR>" + mã phiếu; góc phải = tên +
+  chức vụ thật (`chuc_vu_chinh_quyen || chuc_vu`), bấm ⇒ menu. Cài đặt → Điểm QR: xem QR có "Tải PNG" (`OrderQrDownload`),
+  admin xoá được điểm QR. Bàn giao GĐ3 (+ vị trí Ca trưởng / Tổ trưởng mặc định, đổi người thay):
+  `.claude/plans/ban-giao-cham-cong-c2-gd3.md`.
