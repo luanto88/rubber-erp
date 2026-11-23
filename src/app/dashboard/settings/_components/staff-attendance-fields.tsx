@@ -24,7 +24,17 @@ export type StaffAttendanceValue = {
   ngay_vao_lam: string
   ngay_nghi_viec: string
   cho_xac_nhan: boolean
+  /** Vai trò in trên phiếu F01/F02 (migration 20261206). */
+  to_vai_tro: "" | "to_truong" | "to_pho"
+  to_pham_vi: "" | "tiep_nhan" | "co_dien" | "ca_san_xuat"
 }
+
+export const TO_VAI_TRO_LABEL = { to_truong: "Tổ trưởng", to_pho: "Tổ phó" } as const
+export const TO_PHAM_VI_LABEL = {
+  tiep_nhan: "Tổ tiếp nhận",
+  co_dien: "Tổ cơ điện – nâng hàng",
+  ca_san_xuat: "Ca sản xuất (theo ca mặc định)",
+} as const
 
 export const emptyStaffAttendanceValue = (): StaffAttendanceValue => ({
   loai_nhan_su: "nhan_vien",
@@ -36,6 +46,8 @@ export const emptyStaffAttendanceValue = (): StaffAttendanceValue => ({
   ngay_vao_lam: "",
   ngay_nghi_viec: "",
   cho_xac_nhan: false,
+  to_vai_tro: "",
+  to_pham_vi: "",
 })
 
 /** Lỗi nhập liệu (null = hợp lệ). */
@@ -46,6 +58,8 @@ export function validateStaffAttendance(v: StaffAttendanceValue): string | null 
   if (v.thu_tu_diem_danh && !/^\d{1,4}$/.test(v.thu_tu_diem_danh.trim())) {
     return "Thứ tự điểm danh phải là số nguyên dương."
   }
+  if (!!v.to_vai_tro !== !!v.to_pham_vi) return "Chọn đủ cả vai trò lẫn tổ (hoặc để trống cả hai)."
+  if (v.to_pham_vi === "ca_san_xuat" && !v.ca_mac_dinh) return "Tổ trưởng / tổ phó ca sản xuất phải có ca mặc định."
   return null
 }
 
@@ -61,6 +75,8 @@ export function staffAttendancePayload(v: StaffAttendanceValue): Record<string, 
     ngay_vao_lam: v.ngay_vao_lam || null,
     ngay_nghi_viec: v.ngay_nghi_viec || null,
     cho_xac_nhan: v.cho_xac_nhan,
+    to_vai_tro: v.to_vai_tro || null,
+    to_pham_vi: v.to_pham_vi || null,
   }
 }
 
@@ -76,6 +92,8 @@ type StaffRowLike = {
   ngay_vao_lam?: string | null
   ngay_nghi_viec?: string | null
   cho_xac_nhan?: boolean | null
+  to_vai_tro?: string | null
+  to_pham_vi?: string | null
 }
 
 export function staffAttendanceFromRow(row: StaffRowLike): StaffAttendanceValue {
@@ -89,6 +107,8 @@ export function staffAttendanceFromRow(row: StaffRowLike): StaffAttendanceValue 
     ngay_vao_lam: row.ngay_vao_lam || "",
     ngay_nghi_viec: row.ngay_nghi_viec || "",
     cho_xac_nhan: !!row.cho_xac_nhan,
+    to_vai_tro: row.to_vai_tro === "to_truong" || row.to_vai_tro === "to_pho" ? row.to_vai_tro : "",
+    to_pham_vi: row.to_pham_vi === "tiep_nhan" || row.to_pham_vi === "co_dien" || row.to_pham_vi === "ca_san_xuat" ? row.to_pham_vi : "",
   }
 }
 
@@ -221,6 +241,26 @@ export function StaffAttendanceFields({
         {isWorker && !value.ca_mac_dinh ? (
           <p className="mt-1 text-xs text-amber-600">Công nhân chưa xếp ca sẽ không hiện sẵn trong danh sách điểm danh của trực ca.</p>
         ) : null}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>Vai trò trong tổ (phiếu F01/F02)</label>
+          <select value={value.to_vai_tro} onChange={(e) => set({ to_vai_tro: e.target.value as StaffAttendanceValue["to_vai_tro"] })} className={inputCls}>
+            <option value="">Không</option>
+            {(Object.keys(TO_VAI_TRO_LABEL) as (keyof typeof TO_VAI_TRO_LABEL)[]).map((k) => (
+              <option key={k} value={k}>{TO_VAI_TRO_LABEL[k]}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Của tổ</label>
+          <select value={value.to_pham_vi} onChange={(e) => set({ to_pham_vi: e.target.value as StaffAttendanceValue["to_pham_vi"] })} className={inputCls}>
+            <option value="">—</option>
+            {(Object.keys(TO_PHAM_VI_LABEL) as (keyof typeof TO_PHAM_VI_LABEL)[]).map((k) => (
+              <option key={k} value={k}>{TO_PHAM_VI_LABEL[k]}</option>
+            ))}
+          </select>
+        </div>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>

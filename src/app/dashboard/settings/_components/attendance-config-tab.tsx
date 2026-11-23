@@ -19,8 +19,9 @@ import {
 } from "@/lib/attendance/types"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { ModalShell } from "../../_components/modal-shell"
+import { AttendanceQrPointsCard } from "./attendance-qr-points-card"
 
-type SubTab = "jobs" | "reasons"
+type SubTab = "jobs" | "reasons" | "qr"
 
 type JobForm = {
   id: string | null
@@ -244,11 +245,21 @@ export function AttendanceConfigTab({ factoryId, canManage }: { factoryId: strin
       <div className="flex flex-wrap gap-2 border-b border-slate-100">
         {subTabBtn("jobs", "Công việc", jobs.length)}
         {subTabBtn("reasons", "Lý do vắng", reasons.length)}
+        <button
+          type="button"
+          onClick={() => setSubTab("qr")}
+          className={
+            "rounded-t-xl border-b-2 px-4 py-2 text-sm font-bold transition-all " +
+            (subTab === "qr" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-transparent text-slate-500 hover:bg-slate-50")
+          }
+        >
+          Điểm QR điểm danh
+        </button>
       </div>
 
       {error ? <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{error}</div> : null}
 
-      {subTab === "jobs" ? (
+      {subTab === "qr" ? <AttendanceQrPointsCard factoryId={factoryId} canManage={canManage} /> : subTab === "jobs" ? (
         <div className="space-y-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2">

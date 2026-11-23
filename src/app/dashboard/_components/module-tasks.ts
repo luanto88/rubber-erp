@@ -453,6 +453,30 @@ export async function getNormsTasks(factoryId: string, user: SessionUser): Promi
   return { moduleLabel: "Định mức KTKT", items }
 }
 
+// ── Chấm công — phiếu điểm danh ca (rule 31 GĐ C2) ─────────────────────────────
+export async function getAttendanceTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
+  const items: ModuleTaskItem[] = []
+  const isAdmin = user.role === "admin"
+  if (isAdmin || hasPermission(user, "attendance.approve") || hasPermission(user, "attendance.mark_all")) {
+    const { count, error } = await supabase
+      .from("attendance_sheet_sections")
+      .select("id", { count: "exact", head: true })
+      .eq("factory_id", factoryId)
+      .eq("trang_thai", "da_gui")
+    items.push({ label: "Phần điểm danh chờ duyệt", count: error ? 0 : count || 0, link: "/dashboard/attendance?tab=sheets" })
+  }
+  if (isAdmin || ["attendance.shift_check", "attendance.mark", "attendance.mark_all"].some((p) => hasPermission(user, p))) {
+    const { count, error } = await supabase
+      .from("attendance_sheet_sections")
+      .select("id", { count: "exact", head: true })
+      .eq("factory_id", factoryId)
+      .eq("truc_ca_user_id", user.id)
+      .eq("trang_thai", "tra_ve")
+    items.push({ label: "Phần điểm danh của bạn bị trả về", count: error ? 0 : count || 0, link: "/dashboard/attendance/shift" })
+  }
+  return { moduleLabel: "Chấm công", items }
+}
+
 // ── Đề nghị mua vật tư ───────────────────────────────────────────────────────
 export async function getPurchaseTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
   const items: ModuleTaskItem[] = []
@@ -655,5 +679,6 @@ export async function getModuleTasks(
   if (isUnderRoute(pathname, "/dashboard/kpi")) return getKpiTasks(factoryId, user)
   if (isUnderRoute(pathname, "/dashboard/purchase")) return getPurchaseTasks(factoryId, user)
   if (isUnderRoute(pathname, "/dashboard/norms")) return getNormsTasks(factoryId, user)
+  if (isUnderRoute(pathname, "/dashboard/attendance")) return getAttendanceTasks(factoryId, user)
   return null
 }

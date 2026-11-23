@@ -1,6 +1,7 @@
 // Seed danh mục Chấm công (công việc + lý do vắng) từ src/lib/attendance/khmer-catalog.json.
 // Mặc định CHỈ XEM; --apply mới ghi. Chỉ THÊM mục chưa có (khoá: dây chuyền + tổ + tên, không phân biệt hoa thường);
-// mục đã có mà khác tên Khmer / số người / loại xe thì in ra, chỉ cập nhật khi thêm --update.
+// mục đã có mà khác tên Khmer / số người / loại xe / thứ tự / đang tắt thì in ra, chỉ cập nhật khi thêm --update.
+// --update còn TẮT (is_active = false, KHÔNG xoá) công việc không còn trong danh mục (vd mẫu F01/F02 cũ).
 //   node --env-file=.env.local scripts/seed-attendance-catalog.mjs [--factory=phuochoa_kt] [--apply] [--update]
 import { readFileSync } from "node:fs"
 import { createClient } from "@supabase/supabase-js"
@@ -40,12 +41,19 @@ for (const j of catalog.jobs) {
   }
   const cur = existingJobs.get(jobKey(row))
   if (!cur) { jobInserts.push(row); continue }
-  const diff = ["ten_khmer", "so_nguoi_goi_y", "loai_xe"].filter((k) => (cur[k] ?? null) !== (row[k] ?? null))
+  const diff = ["ten_khmer", "so_nguoi_goi_y", "loai_xe", "sort_order"].filter((k) => (cur[k] ?? null) !== (row[k] ?? null))
+  if (cur.is_active === false) {
+    diff.push("is_active")
+    row.is_active = true
+  }
   if (diff.length) jobUpdates.push({ id: cur.id, ten: row.ten, day_chuyen: row.day_chuyen, diff, patch: Object.fromEntries(diff.map((k) => [k, row[k]])) })
 }
-console.log(`Công việc: có sẵn ${jobs.length}, thêm mới ${jobInserts.length}, khác danh mục ${jobUpdates.length}`)
+const catalogKeys = new Set(catalog.jobs.map((j) => `${j.day_chuyen}|${j.to_nhom}|${norm(j.ten)}`))
+const jobDeactivate = jobs.filter((j) => j.is_active !== false && !catalogKeys.has(jobKey(j)))
+console.log(`Công việc: có sẵn ${jobs.length}, thêm mới ${jobInserts.length}, khác danh mục ${jobUpdates.length}, tắt (không còn trong danh mục) ${jobDeactivate.length}`)
 for (const r of jobInserts) console.log(`  + ${r.day_chuyen} · ${r.to_nhom} · ${r.ten} · ${r.ten_khmer || "(chưa có Khmer)"} · ${r.so_nguoi_goi_y} người${r.loai_xe ? ` · xe ${r.loai_xe}` : ""}`)
 for (const u of jobUpdates) console.log(`  ~ ${u.day_chuyen} · ${u.ten}: ${u.diff.join(", ")}`)
+for (const j of jobDeactivate) console.log(`  - ${j.day_chuyen} · ${j.to_nhom} · ${j.ten} (tắt, không xoá)`)
 
 // ── Lý do vắng ──
 const { data: reasons, error: rErr } = await sb.from("attendance_absence_reasons").select("*").eq("factory_id", factory.id)
@@ -80,9 +88,13 @@ if (UPDATE) {
     const { error } = await sb.from("attendance_job_types").update(u.patch).eq("id", u.id)
     if (error) throw new Error(`Cập nhật ${u.ten} lỗi: ${error.message}`)
   }
+  for (const j of jobDeactivate) {
+    const { error } = await sb.from("attendance_job_types").update({ is_active: false }).eq("id", j.id)
+    if (error) throw new Error(`Tắt ${j.ten} lỗi: ${error.message}`)
+  }
   for (const u of reasonUpdates) {
     const { error } = await sb.from("attendance_absence_reasons").update(u.patch).eq("id", u.id)
     if (error) throw new Error(`Cập nhật ${u.ten} lỗi: ${error.message}`)
   }
 }
-console.log(`\nĐÃ GHI: +${jobInserts.length} công việc, +${reasonInserts.length} lý do${UPDATE ? `, cập nhật ${jobUpdates.length + reasonUpdates.length}` : ""}.`)
+console.log(`\nĐÃ GHI: +${jobInserts.length} công việc, +${reasonInserts.length} lý do${UPDATE ? `, cập nhật ${jobUpdates.length + reasonUpdates.length}, tắt ${jobDeactivate.length}` : ""}.`)

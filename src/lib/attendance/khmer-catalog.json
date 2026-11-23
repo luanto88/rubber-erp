@@ -1,78 +1,451 @@
 {
-  "_ghi_chu": "Nguồn duy nhất cho danh mục công việc / lý do vắng song ngữ Việt–Khmer (module Chấm công). nguon: 'excel' = cung_cap_dl/danh sách công nhân.xlsx (đã sửa lỗi gõ rõ ràng, xem ghi_chu), 'mau_F01' / 'mau_F02' = đọc từ mẫu giấy, 'may_dich' = máy dịch — CẦN chuyên gia duyệt. Sửa xong chạy lại scripts/seed-attendance-catalog.mjs và scripts/export-attendance-khmer.mjs.",
+  "_ghi_chu": "Nguồn duy nhất cho danh mục công việc / lý do vắng song ngữ Việt–Khmer (module Chấm công). nguon: 'excel' = cung_cap_dl/danh sách công nhân.xlsx (đã sửa lỗi gõ rõ ràng, xem ghi_chu), 'mau_F01' / 'mau_F02' = mẫu giấy cũ, 'mau_F01_new' / 'mau_F02_new' = mẫu cải tiến 2026-11 (NMCB-QT01-F01_new.pdf, F02 _new.pdf), 'may_dich' = máy dịch — CẦN chuyên gia duyệt. Sửa xong chạy lại scripts/seed-attendance-catalog.mjs và scripts/export-attendance-khmer.mjs.",
   "jobs": [
-    { "day_chuyen": "Mủ tạp", "to_nhom": "tiep_nhan", "ten": "Cân mủ tạp", "ten_khmer": "ថ្លឹងជ័រ", "so_nguoi_goi_y": 2, "nguon": "mau_F01" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "tiep_nhan", "ten": "Kiểm tra, phân loại", "ten_khmer": "ពិនិត្យ និងបែងចែកប្រភេទ", "so_nguoi_goi_y": 2, "nguon": "excel", "ghi_chu": "Excel ghi 'និត្យ' — đã sửa thành 'ពិនិត្យ'" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "tiep_nhan", "ten": "Xé nhỏ - lưu kho", "ten_khmer": "ហែក - រក្សាទុកក្នុងឃ្លាំង", "so_nguoi_goi_y": 2, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "tiep_nhan", "ten": "Vận hành xe xúc", "ten_khmer": "រត់ឡានសាក់ស័រ", "so_nguoi_goi_y": 2, "loai_xe": "Xúc sản xuất", "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "tiep_nhan", "ten": "Vệ sinh kho", "ten_khmer": "សម្អាតឃ្លាំង", "so_nguoi_goi_y": 2, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "co_dien", "ten": "Vận hành lò sấy", "ten_khmer": "ប្រតិបត្តិការឡសម្ងួត", "so_nguoi_goi_y": 2, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "co_dien", "ten": "Bảo trì máy", "ten_khmer": "ថែទាំម៉ាស៊ីន", "so_nguoi_goi_y": 2, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "nang_hang", "ten": "Xe xúc tiếp liệu", "ten_khmer": "សាក់ស័រ", "so_nguoi_goi_y": 2, "loai_xe": "Xúc sản xuất", "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "nang_hang", "ten": "Nâng nhập kho", "ten_khmer": "លើកជ័របញ្ចូលឃ្លាំង", "so_nguoi_goi_y": 2, "loai_xe": "Nâng sản xuất", "nguon": "excel", "ghi_chu": "Excel ghi 'ឃ្លែំង' — đã sửa thành 'ឃ្លាំង'" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "nang_hang", "ten": "Bảo trì xe", "ten_khmer": "ថែទាំឡាន", "so_nguoi_goi_y": 2, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "nang_hang", "ten": "Vệ sinh tạp vụ", "ten_khmer": "សម្អាត", "so_nguoi_goi_y": 2, "nguon": "excel", "ghi_chu": "Excel ghi 'សម្អែត' — đã sửa thành 'សម្អាត'" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Vận hành xe xúc", "ten_khmer": "រត់សាក់ស័រ", "so_nguoi_goi_y": 1, "loai_xe": "Xúc sản xuất", "nguon": "mau_F01" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Tiếp liệu", "ten_khmer": "បញ្ជូនវត្ថុធាតុដើម", "so_nguoi_goi_y": 2, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Đẩy thùng, vệ sinh", "ten_khmer": "រុញឡាំង សម្អាត", "so_nguoi_goi_y": 1, "nguon": "excel", "ghi_chu": "Excel ghi 'សម្អែត' — đã sửa thành 'សម្អាត'" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Vận hành máy xé", "ten_khmer": "ប្រតិបត្តិការម៉ាស៊ីនហែក", "so_nguoi_goi_y": 1, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Vận hành máy cán 1,2,3", "ten_khmer": "ប្រតិបត្តិការម៉ាស៊ីនកិន ១,២,៣", "so_nguoi_goi_y": 1, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Vận hành máy cán 4,5,6,7", "ten_khmer": "ប្រតិបត្តិការម៉ាស៊ីនកិន ៤,៥,៦,៧", "so_nguoi_goi_y": 1, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Vận hành băm tinh", "ten_khmer": "ប្រតិបត្តិការម៉ាស៊ីនកិនម៉ត់", "so_nguoi_goi_y": 1, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Phả mủ", "ten_khmer": "វាយជ័រ", "so_nguoi_goi_y": 2, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Ra lò", "ten_khmer": "ចេញឡាំង", "so_nguoi_goi_y": 4, "nguon": "excel", "ghi_chu": "Excel ghi 'ចែញឡាំង' — đã sửa theo mẫu F01 'ចេញឡាំង'" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Cân bành mủ", "ten_khmer": "ថ្លឹងដុំជ័រ", "so_nguoi_goi_y": 2, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Ép bành", "ten_khmer": "គាប", "so_nguoi_goi_y": 1, "nguon": "excel" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Vô bao", "ten_khmer": "វេចខ្ចប់", "so_nguoi_goi_y": 1, "nguon": "excel", "ghi_chu": "Excel ghi 'វែចខ្ចប់' — đã sửa thành 'វេចខ្ចប់'" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Dán nhãn", "ten_khmer": "បិទតែម", "so_nguoi_goi_y": 1, "nguon": "excel", "ghi_chu": "Excel ghi 'បិតតែម' — đã sửa thành 'បិទតែម'" },
-    { "day_chuyen": "Mủ tạp", "to_nhom": "ca_san_xuat", "ten": "Cắt mẫu - vô kiện", "ten_khmer": "កាត់គំរូ រៀបឡាំង", "so_nguoi_goi_y": 1, "nguon": "excel" },
-
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Cấp phát NH3", "ten_khmer": "ផ្គត់ផ្គង់ NH3", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Pha hóa chất", "ten_khmer": "លាយគីមី", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Tiếp nhận hồ 1", "ten_khmer": "ទទួលជ័រអាងទី១", "so_nguoi_goi_y": 2, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Tiếp nhận hồ 2", "ten_khmer": "ទទួលជ័រអាងទី២", "so_nguoi_goi_y": 2, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Xác định DRC", "ten_khmer": "ដុត DRC", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Pha chế (Phối liệu)", "ten_khmer": "លាយគីមីនឹងជ័រ", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Vệ sinh khu tiếp nhận", "ten_khmer": "សម្អាតកន្លែងទទួលជ័រ", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Đo pH", "ten_khmer": "វាស់ pH", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Phân phối mủ", "ten_khmer": "បែងចែកជ័រ", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Xi hạ bọt", "ten_khmer": "បាញ់ពពុះ", "so_nguoi_goi_y": 3, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Cào mương", "ten_khmer": "សម្អាតប្រឡាយ", "so_nguoi_goi_y": 1, "nguon": "may_dich", "ghi_chu": "Chữ Khmer trên mẫu F02 không trích được rõ — máy dịch" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Gạt bọt", "ten_khmer": "កោសពពុះ", "so_nguoi_goi_y": 1, "nguon": "may_dich", "ghi_chu": "Chữ Khmer trên mẫu F02 không trích được rõ — máy dịch" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Khiêng tàu", "ten_khmer": "សែងពពុះ", "so_nguoi_goi_y": 2, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Chống oxy hoá", "ten_khmer": "ការពារអុកស៊ីតកម្ម", "so_nguoi_goi_y": 1, "nguon": "may_dich", "ghi_chu": "Chữ Khmer trên mẫu F02 không trích được rõ — máy dịch" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "tiep_nhan", "ten": "Kiểm tra nhanh độ nhớt", "ten_khmer": "ពិនិត្យភាពខាប់រហ័ស", "so_nguoi_goi_y": 1, "nguon": "may_dich" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "co_dien", "ten": "Bảo trì máy, vận hành lò sấy", "ten_khmer": "ថែទាំម៉ាស៊ីន, រត់ឡសម្ងួត", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "co_dien", "ten": "Trực trạm cấp điện", "ten_khmer": "យាមស្ថានីយ៍អគ្គិសនី", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "co_dien", "ten": "Trực trạm cấp nước 1", "ten_khmer": "យាមស្ថានីយ៍ទឹក ១", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "co_dien", "ten": "Trực hồ XLNT", "ten_khmer": "យាមអាងប្រព្រឹត្តកម្មទឹកកខ្វក់", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "nang_hang", "ten": "Nâng nhập kho TP", "ten_khmer": "លើកជ័របញ្ចូលឃ្លាំង", "so_nguoi_goi_y": 1, "loai_xe": "Nâng sản xuất", "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "nang_hang", "ten": "Vệ sinh tạp vụ", "ten_khmer": "សម្អាត", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "nang_hang", "ten": "Trực xuất hàng", "ten_khmer": "យាមបញ្ចេញជ័រ", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "nang_hang", "ten": "Trực sửa chữa", "ten_khmer": "យាមជួសជុល", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Cán kéo", "ten_khmer": "ម៉ាស៊ីនទាញ", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Cán băm", "ten_khmer": "ម៉ាស៊ីនកិន", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Phả mủ", "ten_khmer": "វាយជ័រ", "so_nguoi_goi_y": 2, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Ra lò", "ten_khmer": "ចេញឡាំង", "so_nguoi_goi_y": 4, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Đẩy thùng, vệ sinh", "ten_khmer": "រុញឡាំង សម្អាត", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Cân", "ten_khmer": "ថ្លឹង", "so_nguoi_goi_y": 2, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Ép bành", "ten_khmer": "គាប", "so_nguoi_goi_y": 2, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Vô bao", "ten_khmer": "វេចខ្ចប់", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Dán nhãn", "ten_khmer": "បិទតែម", "so_nguoi_goi_y": 1, "nguon": "mau_F02" },
-    { "day_chuyen": "Mủ nước", "to_nhom": "ca_san_xuat", "ten": "Cắt mẫu - vô kiện", "ten_khmer": "កាត់គំរូ រៀបឡាំង", "so_nguoi_goi_y": 1, "nguon": "mau_F02" }
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "tiep_nhan",
+      "ten": "Xé nhỏ - Lưu kho",
+      "ten_khmer": "ហែក - រក្សា",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "tiep_nhan",
+      "ten": "Vận hành xe xúc",
+      "ten_khmer": "រត់ឡានសាក់ស័រ",
+      "so_nguoi_goi_y": 1,
+      "loai_xe": "Xúc sản xuất",
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "tiep_nhan",
+      "ten": "Vệ sinh kho",
+      "ten_khmer": "សម្អាតឃ្លាំង",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "co_dien",
+      "ten": "Trực ca",
+      "ten_khmer": "យាម",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "co_dien",
+      "ten": "Lái xe nâng",
+      "ten_khmer": "បើកឡានលើកទំនិញ",
+      "so_nguoi_goi_y": 1,
+      "loai_xe": "Nâng sản xuất",
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "co_dien",
+      "ten": "Vận hành lò sấy",
+      "ten_khmer": "តំណើការឡសម្ងួត",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "co_dien",
+      "ten": "Trực xuất hàng",
+      "ten_khmer": "បញ្ចេញជ័រ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "co_dien",
+      "ten": "Bảo trì máy",
+      "ten_khmer": "ថែមទាំម៉ាស៊ីន",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Xe xúc tiếp liệu",
+      "ten_khmer": "សាក់ស័រ",
+      "so_nguoi_goi_y": 1,
+      "loai_xe": "Xúc sản xuất",
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Tiếp liệu & vận hành máy xé",
+      "ten_khmer": "ហែកជ័រ និងរត់ម៉ាស៊ីនហែក",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Vận hành máy cán",
+      "ten_khmer": "រត់ម៉ាស៊ីនកិនលេខ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Vận hành băm tinh",
+      "ten_khmer": "រត់ម៉ាស៊ីនជិញ្ជ្រាំ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Phả mủ",
+      "ten_khmer": "វាយជ័រ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Ra lò",
+      "ten_khmer": "ចេញឡាំង",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Cân ép bành mủ",
+      "ten_khmer": "ថ្លឹងគាប",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Vô bao dán nhãn",
+      "ten_khmer": "វេចខ្ចប់បិតតែម",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Cắt mẫu - Vô kiện",
+      "ten_khmer": "កាត់គំរូរៀបឡាំង",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ tạp",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Vệ sinh tạp vụ",
+      "ten_khmer": "សម្អាត",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F01_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Cấp phát NH3",
+      "ten_khmer": "ផ្គតផ្គង់NH3",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Xác định DRC",
+      "ten_khmer": "ដុត DRC",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Pha chế (Phối liệu)",
+      "ten_khmer": "លាយគីមីនឹងជ័រ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Đo pH",
+      "ten_khmer": "វាស់pH",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Pha hóa chất",
+      "ten_khmer": "លាយគីមី",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Tiếp nhận hồ 1",
+      "ten_khmer": "ទទួលជ័រអាងទី១",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Tiếp nhận hồ 2",
+      "ten_khmer": "ទទួលជ័រអាងទី២",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Kiểm tra nhanh độ nhớt",
+      "ten_khmer": "ពិនិត្យមន្នី",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Phân phối mủ",
+      "ten_khmer": "បែងចែកជ័រ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Xi hạ bọt",
+      "ten_khmer": "បាញ់ពពុះ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Cào mương",
+      "ten_khmer": "សម្អាតបែ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Gạt bọt",
+      "ten_khmer": "សម្អាតបែ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Khiêng tàu",
+      "ten_khmer": "សែងពពុះ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Chống oxy hoá",
+      "ten_khmer": "បាញ់មេតា",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Vệ sinh khu tiếp nhận",
+      "ten_khmer": "សម្អាតកន្លែងទទួលជ័រ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "tiep_nhan",
+      "ten": "Trực hồ XLNT",
+      "ten_khmer": "យាមអាងប្រព្រឹត្តកម្ម",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "co_dien",
+      "ten": "Trực ca",
+      "ten_khmer": "យាម",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "co_dien",
+      "ten": "Lái xe nâng",
+      "ten_khmer": "បើកឡានលើកទំនិញ",
+      "so_nguoi_goi_y": 1,
+      "loai_xe": "Nâng sản xuất",
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "co_dien",
+      "ten": "Vận hành lò sấy",
+      "ten_khmer": "តំណើការឡសម្ងួត",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "co_dien",
+      "ten": "Trực xuất hàng",
+      "ten_khmer": "បញ្ចេញជ័រ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "co_dien",
+      "ten": "Bảo trì máy",
+      "ten_khmer": "ថែមទាំម៉ាស៊ីន",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Cán kéo",
+      "ten_khmer": "ម៉ាស៊ីនទាញ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Vận hành máy cán",
+      "ten_khmer": "រត់ម៉ាស៊ីនកិនលេខ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Vận hành băm tinh",
+      "ten_khmer": "រត់ម៉ាស៊ីនជិញ្ជ្រាំ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Phả mủ",
+      "ten_khmer": "វាយជ័រ",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Ra lò",
+      "ten_khmer": "ចេញឡាំង",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Cân ép bành mủ",
+      "ten_khmer": "ថ្លឹងគាប",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Vô bao dán nhãn",
+      "ten_khmer": "វេចខ្ចប់បិតតែម",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Cắt mẫu - Vô kiện",
+      "ten_khmer": "កាត់គំរូរៀបឡាំង",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    },
+    {
+      "day_chuyen": "Mủ nước",
+      "to_nhom": "ca_san_xuat",
+      "ten": "Vệ sinh tạp vụ",
+      "ten_khmer": "សម្អាត",
+      "so_nguoi_goi_y": 1,
+      "nguon": "mau_F02_new"
+    }
   ],
   "reasons": [
-    { "ten": "Ốm, sốt", "ten_khmer": "ឈឺ គ្រុនក្តៅ", "nguon": "may_dich" },
-    { "ten": "Việc gia đình", "ten_khmer": "កិច្ចការគ្រួសារ", "nguon": "may_dich" },
-    { "ten": "Đám cưới", "ten_khmer": "ពិធីមង្គលការ", "nguon": "may_dich" },
-    { "ten": "Đám tang", "ten_khmer": "ពិធីបុណ្យសព", "nguon": "may_dich" },
-    { "ten": "Tai nạn", "ten_khmer": "គ្រោះថ្នាក់", "nguon": "may_dich" },
-    { "ten": "Không báo trước", "ten_khmer": "មិនបានជូនដំណឹងជាមុន", "nguon": "may_dich" }
+    {
+      "ten": "Ốm, sốt",
+      "ten_khmer": "ឈឺ គ្រុនក្តៅ",
+      "nguon": "may_dich"
+    },
+    {
+      "ten": "Việc gia đình",
+      "ten_khmer": "កិច្ចការគ្រួសារ",
+      "nguon": "may_dich"
+    },
+    {
+      "ten": "Đám cưới",
+      "ten_khmer": "ពិធីមង្គលការ",
+      "nguon": "may_dich"
+    },
+    {
+      "ten": "Đám tang",
+      "ten_khmer": "ពិធីបុណ្យសព",
+      "nguon": "may_dich"
+    },
+    {
+      "ten": "Tai nạn",
+      "ten_khmer": "គ្រោះថ្នាក់",
+      "nguon": "may_dich"
+    },
+    {
+      "ten": "Không báo trước",
+      "ten_khmer": "មិនបានជូនដំណឹងជាមុន",
+      "nguon": "may_dich"
+    }
   ],
   "to_nhom_labels": [
-    { "ma": "tiep_nhan", "ten": "Tổ tiếp nhận", "ten_khmer": "ក្រុមទទួលជ័រ", "nguon": "mau_F01" },
-    { "ma": "co_dien", "ten": "Tổ cơ điện", "ten_khmer": "ក្រុមជួសជុល", "nguon": "mau_F01" },
-    { "ma": "nang_hang", "ten": "Tổ nâng hàng", "ten_khmer": "ក្រុមលើកជ័រ", "nguon": "mau_F01" },
-    { "ma": "ca_san_xuat", "ten": "Ca sản xuất", "ten_khmer": "វេនផលិត", "nguon": "mau_F01" }
+    {
+      "ma": "tiep_nhan",
+      "ten": "Tổ tiếp nhận",
+      "ten_khmer": "ក្រុមទទួលជ័រ",
+      "nguon": "mau_F01"
+    },
+    {
+      "ma": "co_dien",
+      "ten": "Tổ cơ điện – nâng hàng",
+      "ten_khmer": "ក្រុមជួសជុលលើកទំនិញ",
+      "nguon": "mau_F01_new"
+    },
+    {
+      "ma": "nang_hang",
+      "ten": "Tổ nâng hàng",
+      "ten_khmer": "ក្រុមលើកជ័រ",
+      "nguon": "mau_F01"
+    },
+    {
+      "ma": "ca_san_xuat",
+      "ten": "Ca sản xuất",
+      "ten_khmer": "វេនផលិត",
+      "nguon": "mau_F01"
+    }
   ]
 }

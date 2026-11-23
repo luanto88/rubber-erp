@@ -432,8 +432,13 @@ Vi du:
   `20261202_attendance_c1_records.sql` + `assign-workers-department.mjs --apply`, test tay (rule 31). Bàn giao C2:
   `.claude/plans/ban-giao-cham-cong-c2.md`.
   2026-11-20: C1 test PASS; migration 20261202 + 20261203 (Có mặt A không bắt buộc lý do) + 20261204 (công nhân không có
-  nghỉ tua) ĐÃ CHẠY, test PASS; ô Tháng rộng hơn 20% + cột ngày xen kẽ đậm/nhạt test PASS. Tiếp theo: C2 "Điểm danh ca"
-  (lên plan cho người dùng duyệt trước khi code).
+  nghỉ tua) ĐÃ CHẠY, test PASS; ô Tháng rộng hơn 20% + cột ngày xen kẽ đậm/nhạt test PASS.
+  C2 "Điểm danh ca" code xong 2026-11-20 (kế hoạch mục 10 đã duyệt; duyệt xong ⇒ khoá) — chạy migration
+  `20261205_attendance_c2_shift_sheets.sql` TRƯỚC deploy, test tay (rule 31 mục GĐ C2). Bàn giao C2b/C3:
+  `.claude/plans/ban-giao-cham-cong-c2b-c3.md`.
+  2026-11-23: C2 LÀM LẠI dạng lưới ô người (người dùng test thấy rối) — GĐ1 (migration 20261206 + danh mục mẫu F01/F02 mới +
+  giới tính / tổ trưởng + thẻ nhóm) ĐÃ CHẠY, test PASS. GĐ2 (màn lưới) + GĐ3 (đơn xuất, giờ kết thúc ca, phiếu F01/F02 Canvas):
+  `.claude/plans/ban-giao-cham-cong-c2-luoi.md` (thay file bàn giao c2b-c3 cho phần C2).
 
 ## Nhật ký các phiên cũ
 

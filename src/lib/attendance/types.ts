@@ -10,8 +10,9 @@ export type AttendanceToNhom = (typeof ATTENDANCE_TO_NHOM)[number]
 /** Tên tổ theo dây chuyền — Mủ nước tiếp nhận là "đánh đông", nâng hàng là "bao bì nâng hàng" (mẫu F02). */
 export function toNhomLabel(to: AttendanceToNhom, dayChuyen?: string | null): string {
   if (to === "tiep_nhan") return dayChuyen === "Mủ nước" ? "Tổ tiếp nhận đánh đông" : "Tổ tiếp nhận mủ tạp"
-  if (to === "co_dien") return "Tổ cơ điện"
-  if (to === "nang_hang") return dayChuyen === "Mủ nước" ? "Tổ bao bì nâng hàng" : "Tổ nâng hàng"
+  // Mẫu F01/F02 cải tiến (2026-11): cơ điện + nâng hàng gộp 1 tổ; mã nang_hang chỉ còn ở công việc cũ (đã tắt).
+  if (to === "co_dien") return "Tổ cơ điện – nâng hàng"
+  if (to === "nang_hang") return "Tổ nâng hàng (mẫu cũ)"
   return "Ca sản xuất"
 }
 

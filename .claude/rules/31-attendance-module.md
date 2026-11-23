@@ -60,3 +60,42 @@ KPI chỉ ĐỌC kết quả chuyên cần của module này (rule 27).
   trong FilterBar, không sửa FilterBar dùng chung); cột ngày xen kẽ nền/viền đậm–nhạt (`dayColCls`), cột hôm nay giữ màu
   nhấn. Test PASS 2026-11-20.
 - Khoảng trống đã biết: đổi nhân sự từ nhân viên sang công nhân KHÔNG chặn các ô "nghi_tua" đã có từ trước.
+
+## GĐ C2 — Điểm danh ca (2026-11-20, chờ chạy migration + test tay)
+Người dùng chốt (kế hoạch mục 10): gửi / duyệt / trả về THEO TỪNG PHẦN; Tổ tiếp nhận / Cơ điện / Nâng hàng = 1 phần / ngày
+(ca NULL), Ca sản xuất = 1 phần / ca; trực ca mở được ca khác ca phân công (cảnh báo + `ngoai_phan_cong`); 1 người ở nhiều
+phần cùng ngày ⇒ Có mặt nếu có mặt ≥ 1 phần, xếp B nếu bất kỳ phần nào B. **Đã duyệt ⇒ KHOÁ**: phần không sửa / trả về được;
+ngày công `attendance_records.sheet_line_id` khác NULL ⇒ `attendance_set_days` / `attendance_clear_days` từ chối (chỉ admin,
+lý do bắt buộc).
+- Migration `20261205_attendance_c2_shift_sheets.sql` (**chạy tay TRƯỚC deploy**, sau 20261204): `attendance_qr_points`
+  (token base64url 22), `attendance_daily_sheets` (UNIQUE ngày + dây chuyền, mã `F01-ddmmyy` / `F02-ddmmyy`, trạng thái SUY
+  bằng `attendance_recompute_sheet`), `attendance_sheet_sections`, `attendance_sheet_lines` (UNIQUE phần + người;
+  `thay_cho_staff_id` trên dòng NGƯỜI THAY). RLS chỉ SELECT. RPC: `attendance_resolve_qr`, `attendance_open_section`
+  (trực ca chỉ hôm nay / hôm qua; người chấm công mọi ngày quá khứ), `attendance_save_section` (thay toàn bộ dòng, 1 giao
+  dịch), `attendance_submit_section` (+ chuông người có approve / mark_all), `attendance_review_sections` (duyệt ⇒ ghi ngày
+  công nguồn `truc_ca`, KHÔNG đè `bo_sung_tay`, log `duyet_phieu`; trả về ⇒ lý do bắt buộc + chuông trực ca),
+  `attendance_quick_add_worker` (công nhân `cho_xac_nhan`, trùng tên ⇒ trả người cũ). Mọi `CREATE OR REPLACE
+  attendance_set_days / clear_days` về sau chép từ file này.
+- Quyền sửa phần: người lập (`truc_ca_user_id`) có `shift_check`, hoặc mark / mark_all / admin; chỉ khi `dang_lam | tra_ve`.
+- Màn `/dashboard/attendance/shift?qr=<token>` (hoặc `?section=<id>` từ chuông; layout bypass sidebar): chọn dây chuyền / ngày /
+  phần / ca (tự theo `production_shift_assignments`) → "Mở điểm danh" → danh sách mặc định `buildDefaultLines`
+  (`src/lib/attendance/shift.ts`): mỗi công việc hiện max(số người gợi ý, số người có việc đó mặc định) dòng; Ca sản xuất thêm
+  công nhân của ca chưa có việc ở nhóm "Chưa phân công việc". Ô trống không lưu. Chọn người thay ⇒ tự thêm dòng người thay
+  nhận đúng việc. Ô Xe khi việc có `loai_xe`, mặc định xe người đó là tài xế chính/phụ. Lưu nháp / Gửi chấm công (chỉ online).
+- Song ngữ: `src/lib/attendance/khmer-ui.json` + `i18n.ts` (`at`, `bilingual`); xuất file chuyên gia bằng
+  `node scripts/export-attendance-khmer.mjs` (70 chữ màn điểm danh, máy dịch).
+- Văn phòng: tab "Phiếu điểm danh" (`?tab=sheets`, `sheet-review-list.tsx`) + chi tiết `/dashboard/attendance/sheet/[id]`
+  (Duyệt / Trả về từng phần, "Duyệt mọi phần đã gửi"). Chuông `getAttendanceTasks`. Registry `attendance_sheet`.
+- Cài đặt → Chấm công → "Điểm QR điểm danh" (`attendance-qr-points-card.tsx`): thêm / sửa / tạo lại token / in tem
+  (`buildQrLabelsPdf`). QR = `buildAttendanceQrUrl` (domain qlsxkpt.vercel.app như tem thiết bị).
+- Chưa làm: chi tiết phiếu chưa có PDF F01/F02 (GĐ C7); không có hàng đợi mất mạng; Lịch công chưa tô ô đã khoá (RPC báo lỗi
+  khi chấm vào); `ket_thuc_luc` + khối nhân sự ca ở chi tiết lô = C2b.
+
+## C2 làm lại "lưới ô người" (2026-11-22/23) — GĐ1 test PASS, GĐ2–3 chưa làm
+Bàn giao + mô hình đầy đủ: `.claude/plans/ban-giao-cham-cong-c2-luoi.md`. Thay mô hình "phần" ở mục GĐ C2 trên: 1 phiếu / CA
+(section `loai = 'ca_san_xuat'`), dòng nhiều việc (`cong_viec_ids`), người vắng có người thay (`thay_the_staff_id` /
+`thay_the_ten` gõ tay — không tạo nhân sự). Migration `20261206_attendance_c2b_grid.sql` ĐÃ CHẠY (mọi CREATE OR REPLACE
+save / submit / review_section về sau chép từ file này). Danh mục 48 việc theo F01/F02 cải tiến (tổ `co_dien` = "Cơ điện – nâng
+hàng", việc mẫu cũ đã tắt). `maintenance_staff.to_vai_tro` / `to_pham_vi` (tổ trưởng / tổ phó in phiếu, thiếu ⇒ không in).
+`personnel_groups.hien_diem_danh` = nhóm hiện thành THẺ trong CÙNG màn điểm danh của trực ca (không phải màn / phiếu riêng).
+`export_orders.nguoi_xuat_hang_ids` (UI ở GĐ3).

@@ -684,6 +684,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (
     pathname.includes("/print") ||
     pathname.startsWith("/dashboard/product/confirm") ||
+    pathname.startsWith("/dashboard/attendance/shift") ||
     pathname.startsWith("/dashboard/force-change-password") ||
     pathname.startsWith("/dashboard/ky/")
   ) {

@@ -11,7 +11,7 @@ const catalog = read("../src/lib/attendance/khmer-catalog.json")
 const uiPath = new URL("../src/lib/attendance/khmer-ui.json", import.meta.url)
 const ui = existsSync(uiPath) ? JSON.parse(readFileSync(uiPath, "utf8")) : null
 
-const NGUON = { excel: "File danh sách công nhân", mau_F01: "Mẫu giấy F01", mau_F02: "Mẫu giấy F02", may_dich: "Máy dịch — cần duyệt" }
+const NGUON = { excel: "File danh sách công nhân", mau_F01: "Mẫu giấy F01", mau_F02: "Mẫu giấy F02", mau_F01_new: "Mẫu F01 cải tiến", mau_F02_new: "Mẫu F02 cải tiến", may_dich: "Máy dịch — cần duyệt" }
 const TO = Object.fromEntries(catalog.to_nhom_labels.map((t) => [t.ma, t.ten]))
 const header = ["STT", "Nhóm", "Tiếng Việt", "Tiếng Khmer (hiện tại)", "Nguồn", "Ghi chú", "Khmer đề xuất (chuyên gia)", "Nhận xét"]
 
