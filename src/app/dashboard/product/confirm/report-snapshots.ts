@@ -52,6 +52,9 @@ export type DayLockState = {
   cas: string[];
   lockedCas: string[];
   current: Partial<Record<ReportSnapshotKind, ReportSnapshotInfo>>;
+  /** Người khóa ca muộn nhất + thời điểm (dấu "Đã duyệt" trên F09, chỉ khi khóa đủ). */
+  lastLockName?: string | null;
+  lastLockAt?: string | null;
 };
 
 const EMPTY_STATE: DayLockState = {
@@ -60,6 +63,8 @@ const EMPTY_STATE: DayLockState = {
   cas: [],
   lockedCas: [],
   current: {},
+  lastLockName: null,
+  lastLockAt: null,
 };
 
 function assertDay(ngay: string) {
@@ -91,7 +96,7 @@ async function computeDayLocks(factoryId: string, ngay: string) {
     ),
     supabase
       .from("product_shift_locks")
-      .select("id, ca")
+      .select("id, ca, locked_by, locked_at")
       .eq("factory_id", factoryId)
       .eq("ngay_sx", ngay)
       .eq("is_active", true),
@@ -103,11 +108,12 @@ async function computeDayLocks(factoryId: string, ngay: string) {
       (txRows as Array<{ ca: string | null }>).map((r) => String(r.ca || "").trim()).filter(Boolean),
     ),
   ].sort();
-  const locks = (locksRes.data || []) as Array<{ id: string; ca: string }>;
+  const locks = (locksRes.data || []) as Array<{ id: string; ca: string; locked_by: string | null; locked_at: string | null }>;
   const lockedCas = [...new Set(locks.map((l) => l.ca))].sort();
   const fullyLocked = cas.length > 0 && cas.every((ca) => lockedCas.includes(ca));
   const lockIds = locks.map((l) => l.id).sort();
-  return { cas, lockedCas, fullyLocked, lockIds };
+  const last = [...locks].sort((a, b) => (b.locked_at || "").localeCompare(a.locked_at || ""))[0];
+  return { cas, lockedCas, fullyLocked, lockIds, lastLockBy: last?.locked_by || null, lastLockAt: last?.locked_at || null };
 }
 
 function sameIds(a: string[] | null | undefined, b: string[]): boolean {
@@ -173,7 +179,7 @@ export async function loadDayLockState(
   const { missing, rows } = await loadCurrentSnapshots(factoryId, ngay, locks.lockIds);
   if (missing) return { ...EMPTY_STATE, unavailable: true, cas: locks.cas, lockedCas: locks.lockedCas };
 
-  const names = await resolveNames(Object.values(rows).map((r) => r?.created_by || ""));
+  const names = await resolveNames([...Object.values(rows).map((r) => r?.created_by || ""), locks.lastLockBy || ""]);
   const current: DayLockState["current"] = {};
   for (const kind of KINDS) {
     const r = rows[kind];
@@ -187,7 +193,15 @@ export async function loadDayLockState(
       inputs: r.inputs,
     };
   }
-  return { unavailable: false, fullyLocked: true, cas: locks.cas, lockedCas: locks.lockedCas, current };
+  return {
+    unavailable: false,
+    fullyLocked: true,
+    cas: locks.cas,
+    lockedCas: locks.lockedCas,
+    current,
+    lastLockName: locks.lastLockBy ? names.get(locks.lastLockBy) || "—" : null,
+    lastLockAt: locks.lastLockAt,
+  };
 }
 
 async function assertCanCreate(

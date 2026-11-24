@@ -14,25 +14,37 @@ import { getActiveFactoryId, hasPermission, hydrateActiveSession, signOutEverywh
 import { getErrorMessage } from "@/lib/error-message"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
-import { ATTENDANCE_CA, ATTENDANCE_DAY_CHUYEN, type AttendanceAbsenceReason, type AttendanceJobType } from "@/lib/attendance/types"
+import { ATTENDANCE_DAY_CHUYEN, type AttendanceAbsenceReason, type AttendanceJobType } from "@/lib/attendance/types"
 import {
   LINE_SELECT,
+  POSITION_KEYS,
   SECTION_SELECT,
+  UNIT_SELECT,
+  positionLabelKey,
+  type AttendanceUnit,
+  applyPositionChange,
   buildRosterTabs,
   classifyTile,
   countRoster,
   dbLineToDraft,
+  defaultPositions,
+  hasStoredPositions,
   isStaffWorking,
-  jobsForTab,
+  isJobOfUnit,
+  jobsForUnit,
   linesToPayload,
+  positionHolderIds,
+  positionsOfStaff,
   shortJobLabel,
   suggestFromPrevious,
   type AttendanceSection,
   type DbLine,
-  type RosterGroup,
+  type PositionKey,
+  type SectionPositions,
   type SheetLineDraft,
   type ShiftStaff,
 } from "@/lib/attendance/shift"
+import { PositionBlock } from "./_components/position-block"
 import { ATT_LANG_OPTIONS, at, bilingual, loadAttLang, storeAttLang, type AttLang } from "@/lib/attendance/i18n"
 import { WorkerTile } from "./_components/worker-tile"
 import { JobSheet, type SheetVehicle } from "./_components/job-sheet"
@@ -85,14 +97,15 @@ export default function AttendanceShiftPage() {
   // Danh mục
   const [catalogReady, setCatalogReady] = useState(false)
   const [staff, setStaff] = useState<ShiftStaff[]>([])
-  const [groups, setGroups] = useState<RosterGroup[]>([])
   const [jobs, setJobs] = useState<AttendanceJobType[]>([])
   const [reasons, setReasons] = useState<AttendanceAbsenceReason[]>([])
   const [vehicles, setVehicles] = useState<SheetVehicle[]>([])
   const [vehicleByStaff, setVehicleByStaff] = useState<Map<string, string>>(new Map())
   const [assignedCas, setAssignedCas] = useState<string[]>([])
+  const [units, setUnits] = useState<AttendanceUnit[]>([])
   const [qrName, setQrName] = useState<string | null>(null)
   const qrDayChuyenRef = useRef<string | null>(null)
+  const qrUnitRef = useRef<string | null>(null)
   const initialSectionRef = useRef<string | null>(null)
 
   // Phiếu ca đang mở
@@ -102,6 +115,8 @@ export default function AttendanceShiftPage() {
   const [section, setSection] = useState<AttendanceSection | null>(null)
   const [maPhieu, setMaPhieu] = useState("")
   const [lines, setLines] = useState<SheetLineDraft[]>([])
+  const [positions, setPositions] = useState<SectionPositions>({})
+  const positionsRef = useRef<SectionPositions>({})
   const [opening, setOpening] = useState(false)
   const [openError, setOpenError] = useState<string | null>(null)
   const [suggestedFrom, setSuggestedFrom] = useState<string | null>(null)
@@ -121,7 +136,7 @@ export default function AttendanceShiftPage() {
   const [activeTab, setActiveTab] = useState("ca")
   const [onlyUnassigned, setOnlyUnassigned] = useState(false)
   const [sheetFor, setSheetFor] = useState<string | null>(null)
-  const [sheetTabKey, setSheetTabKey] = useState<string>("ca")
+  const [, setSheetTabKey] = useState<string>("ca")
   const [reviewOpen, setReviewOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -131,12 +146,20 @@ export default function AttendanceShiftPage() {
   const canShift = canEditAny || (!!user && hasPermission(user, "attendance.shift_check"))
 
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff])
+  const unitsRef = useRef<Map<string, AttendanceUnit>>(new Map())
+  useEffect(() => {
+    unitsRef.current = new Map(units.map((u) => [u.code, u]))
+  }, [units])
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs])
   const lineByStaff = useMemo(() => new Map(lines.map((l) => [l.staff_id, l])), [lines])
+  const holderIds = useMemo(() => positionHolderIds(positions), [positions])
 
   useEffect(() => {
     linesRef.current = lines
   }, [lines])
+  useEffect(() => {
+    positionsRef.current = positions
+  }, [positions])
 
   // ── Bootstrap ──
   useEffect(() => {
@@ -167,6 +190,7 @@ export default function AttendanceShiftPage() {
           if (point) {
             setQrName(point.ten_diem as string)
             qrDayChuyenRef.current = (point.day_chuyen_mac_dinh as string | null) || null
+            qrUnitRef.current = (point.unit_code as string | null) || null
           }
         }
       } catch (err) {
@@ -179,12 +203,12 @@ export default function AttendanceShiftPage() {
   }, [])
 
   // ── Danh mục ──
-  const loadCatalog = useCallback(async (fid: string, uid: string | null) => {
-    const [staffRows, jobRes, reasonRes, vehRes, mainRes, subRes, drvRes, asgRes, grpRes] = await Promise.all([
+  const loadCatalog = useCallback(async (fid: string, uid: string | null, u0: SessionUser | null) => {
+    const [staffRows, jobRes, reasonRes, vehRes, mainRes, subRes, drvRes, asgRes, unitRes] = await Promise.all([
       fetchAllPaginated<ShiftStaff>((from, to) =>
         supabase
           .from("maintenance_staff")
-          .select("id, ten, gioi_tinh, loai_nhan_su, ca_mac_dinh, day_chuyen_mac_dinh, thu_tu_diem_danh, ngay_vao_lam, ngay_nghi_viec, active, cho_xac_nhan, profile_id, chuc_vu, chuc_vu_chinh_quyen")
+          .select("id, ten, gioi_tinh, loai_nhan_su, ca_mac_dinh, day_chuyen_mac_dinh, thu_tu_diem_danh, ngay_vao_lam, ngay_nghi_viec, active, cho_xac_nhan, profile_id, chuc_vu, chuc_vu_chinh_quyen, to_vai_tro, to_pham_vi")
           .eq("factory_id", fid)
           .order("ten")
           .order("id")
@@ -199,9 +223,11 @@ export default function AttendanceShiftPage() {
       uid
         ? supabase.from("production_shift_assignments").select("ca").eq("factory_id", fid).eq("assigned_user_id", uid).eq("is_active", true)
         : Promise.resolve({ data: [] as { ca: string }[], error: null }),
-      supabase.from("personnel_groups").select("*").eq("factory_id", fid).eq("is_active", true).eq("hien_diem_danh", true).order("sort_order"),
+      supabase.from("attendance_units").select(UNIT_SELECT).eq("factory_id", fid).order("sort_order"),
     ])
-    for (const r of [jobRes, reasonRes, vehRes, grpRes]) if (r.error) throw r.error
+    for (const r of [jobRes, reasonRes, vehRes, unitRes]) if (r.error) throw r.error
+    const unitRows = (unitRes.data || []) as AttendanceUnit[]
+    setUnits(unitRows)
     setStaff(staffRows)
     setJobs((jobRes.data || []) as AttendanceJobType[])
     setReasons((reasonRes.data || []) as AttendanceAbsenceReason[])
@@ -215,48 +241,38 @@ export default function AttendanceShiftPage() {
     }
     setVehicleByStaff(vMap)
 
-    const grpRows = (grpRes.data || []) as { id: string; name: string; code: string | null; diem_danh_to_nhom?: string | null }[]
-    let members: { group_id: string; staff_id: string }[] = []
-    if (grpRows.length > 0) {
-      const { data: mem, error: memErr } = await supabase
-        .from("personnel_group_members")
-        .select("group_id, staff_id")
-        .eq("factory_id", fid)
-        .in("group_id", grpRows.map((g) => g.id))
-      if (memErr) throw memErr
-      members = (mem || []) as { group_id: string; staff_id: string }[]
-    }
-    setGroups(
-      grpRows.map((g) => ({
-        id: g.id,
-        name: g.name,
-        code: g.code || null,
-        toNhom: g.diem_danh_to_nhom || null,
-        memberIds: members.filter((m) => m.group_id === g.id).map((m) => m.staff_id),
-      })),
-    )
-
-    const cas = Array.from(new Set(((asgRes.data || []) as { ca: string }[]).map((r) => r.ca))).sort()
+    const activeCodes = unitRows.filter((u) => u.is_active).map((u) => u.code)
+    const cas = Array.from(new Set(((asgRes.data || []) as { ca: string }[]).map((r) => r.ca))).filter((c) => activeCodes.includes(c))
+    cas.sort((a, b) => activeCodes.indexOf(a) - activeCodes.indexOf(b))
     setAssignedCas(cas)
     if (!initialSectionRef.current) {
-      if (cas[0]) setCa(cas[0])
+      // Ca/Tổ mặc định: của điểm QR (nếu được phép) → ca/tổ đầu tiên được phân công → đơn vị đầu danh mục.
+      const editAll = !!u0 && (u0.role === "admin" || hasPermission(u0, "attendance.mark") || hasPermission(u0, "attendance.mark_all"))
+      const allowed = editAll ? activeCodes : cas
+      const qrUnit = qrUnitRef.current
+      const pick = qrUnit && allowed.includes(qrUnit) ? qrUnit : allowed[0]
+      if (pick) setCa(pick)
       const me = staffRows.find((s) => s.profile_id && s.profile_id === uid)
       const dc = me?.day_chuyen_mac_dinh || qrDayChuyenRef.current
-      if (dc && (ATTENDANCE_DAY_CHUYEN as readonly string[]).includes(dc)) setDayChuyen(dc)
+      const fixedDc = unitRows.find((u) => u.code === pick)?.day_chuyen || null
+      if (fixedDc) setDayChuyen(fixedDc)
+      else if (dc && (ATTENDANCE_DAY_CHUYEN as readonly string[]).includes(dc)) setDayChuyen(dc)
     }
   }, [])
 
   useEffect(() => {
     if (!factoryId || catalogReady || !canShift) return
-    loadCatalog(factoryId, user?.id || null)
+    loadCatalog(factoryId, user?.id || null, user)
       .then(() => setCatalogReady(true))
       .catch((err) => setFatal(getErrorMessage(err, "Không tải được danh mục.")))
   }, [factoryId, user, loadCatalog, catalogReady, canShift])
 
   // ── Danh sách thẻ (phụ thuộc phiếu đang mở) ──
+  const unitByCode = useMemo(() => new Map(units.map((u) => [u.code, u])), [units])
+  const currentUnit = unitByCode.get(ca) || null
   const tabs = useMemo(
-    () => buildRosterTabs(staff, groups, ca, dayChuyen, ngay, lines.map((l) => l.staff_id)),
-    [staff, groups, ca, dayChuyen, ngay, lines],
+    () => buildRosterTabs(staff, currentUnit, dayChuyen, ngay, [...lines.map((l) => l.staff_id), ...holderIds]),
+    [staff, currentUnit, dayChuyen, ngay, lines, holderIds],
   )
 
   // ── Mở / nạp phiếu ca ──
@@ -311,8 +327,9 @@ export default function AttendanceShiftPage() {
               const secIds = new Set(secs.filter((x) => x.sheet_id === sht.id).map((x) => x.id))
               const these = all.filter((l) => secIds.has(l.section_id))
               if (these.length === 0) continue
-              const roster = new Set(buildRosterTabs(staff, groups, sheetCa, sheetDc, sheetNgay, []).flatMap((t) => t.staffIds))
-              const activeJobs = new Set(jobs.filter((j) => j.is_active && !j.an_diem_danh && j.day_chuyen === sheetDc).map((j) => j.id))
+              const sheetUnit = unitsRef.current.get(sheetCa) || null
+              const roster = new Set(buildRosterTabs(staff, sheetUnit, sheetDc, sheetNgay, []).flatMap((t) => t.staffIds))
+              const activeJobs = new Set(jobs.filter((j) => j.is_active && !j.an_diem_danh && isJobOfUnit(j, sheetUnit, sheetDc)).map((j) => j.id))
               const sug = suggestFromPrevious(these, roster, activeJobs)
               if (sug.length > 0) {
                 next = sug
@@ -324,9 +341,18 @@ export default function AttendanceShiftPage() {
           }
         }
       }
+      // Vị trí phụ trách: phiếu chưa từng lưu vị trí ⇒ điền mặc định theo hồ sơ nhân sự (lưu ở lần tự lưu kế tiếp).
+      let pos: SectionPositions = hasStoredPositions(s.vi_tri) ? (s.vi_tri as SectionPositions) : {}
+      let posDefaulted = false
+      if (!hasStoredPositions(s.vi_tri) && editableNow) {
+        pos = defaultPositions(staff, sheetCa, sheetDc, sheetNgay)
+        posDefaulted = POSITION_KEYS.some((k) => !!pos[k]?.staff_id)
+      }
+      setPositions(pos)
+      positionsRef.current = pos
       setLines(next)
       linesRef.current = next
-      if (suggested) {
+      if (suggested || posDefaulted) {
         versionRef.current += 1
         setVersion(versionRef.current)
       } else {
@@ -335,7 +361,7 @@ export default function AttendanceShiftPage() {
         setSaveState("idle")
       }
     },
-    [canEditAny, user, staff, groups, jobs],
+    [canEditAny, user, staff, jobs],
   )
   const loadSectionRef = useRef(loadSection)
   useEffect(() => {
@@ -400,8 +426,8 @@ export default function AttendanceShiftPage() {
       try {
         const { error: rpcErr } = await supabase.rpc("attendance_save_section", {
           p_section_id: section.id,
-          p_header: { ghi_chu: section.ghi_chu || "" },
-          p_lines: linesToPayload(linesRef.current),
+          p_header: { ghi_chu: section.ghi_chu || "", vi_tri: positionsRef.current },
+          p_lines: linesToPayload(linesRef.current, positionHolderIds(positionsRef.current)),
         })
         if (rpcErr) throw rpcErr
         setSavedVersion(v)
@@ -461,10 +487,33 @@ export default function AttendanceShiftPage() {
 
   const clearAllJobs = () => {
     if (!window.confirm(T("xacNhanXoaHet"))) return
-    setLines([])
+    // Giữ dòng vắng tự động của người mặc định đã bị thay ở vị trí phụ trách.
+    let next: SheetLineDraft[] = []
+    for (const k of POSITION_KEYS) {
+      const slot = positionsRef.current[k]
+      if (slot?.staff_id && slot.goc_staff_id && slot.staff_id !== slot.goc_staff_id) {
+        next = applyPositionChange(next, { staff_id: null, goc_staff_id: slot.goc_staff_id }, slot.staff_id)
+      }
+    }
+    setLines(next)
     setSuggestedFrom(null)
     markChanged()
   }
+
+  const changePosition = (key: PositionKey, staffId: string | null) => {
+    const slot = positionsRef.current[key]
+    const nextLines = applyPositionChange(linesRef.current, slot, staffId)
+    const nextPos: SectionPositions = { ...positionsRef.current, [key]: { staff_id: staffId, goc_staff_id: slot?.goc_staff_id || null } }
+    setLines(nextLines)
+    linesRef.current = nextLines
+    setPositions(nextPos)
+    positionsRef.current = nextPos
+    markChanged()
+  }
+  const positionCandidates = useMemo(
+    () => staff.filter((s) => isStaffWorking(s, ngay) && !s.cho_xac_nhan).sort((a, b) => a.ten.localeCompare(b.ten, "vi")),
+    [staff, ngay],
+  )
 
   const quickAddReason = async (ten: string): Promise<AttendanceAbsenceReason | null> => {
     if (!factoryId || !ten) return null
@@ -481,25 +530,19 @@ export default function AttendanceShiftPage() {
   }
 
   // ── Gửi ──
-  // Người chưa giao lúc gửi: công nhân của ca (thẻ Ca + công nhân ca này nằm ở thẻ nhóm, vd Tổ tiếp nhận).
+  // Người chưa giao lúc gửi: thành viên của ca/tổ đang điểm danh (thẻ chính).
   const unassignedCa = useMemo(() => {
-    const ids = new Set<string>()
-    for (const t of tabs) {
-      for (const id of t.staffIds) {
-        const s = staffById.get(id)
-        if (t.key === "ca" || (s && s.loai_nhan_su === "cong_nhan" && s.ca_mac_dinh === ca)) ids.add(id)
-      }
-    }
+    const ids = new Set<string>(tabs.find((t) => t.key === "ca")?.staffIds || [])
     return Array.from(ids)
-      .filter((id) => classifyTile(lineByStaff.get(id)) === "chua_giao")
+      .filter((id) => classifyTile(lineByStaff.get(id), holderIds.has(id)) === "chua_giao")
       .map((id) => staffById.get(id))
       .filter((s): s is ShiftStaff => !!s)
-  }, [tabs, lineByStaff, staffById, ca])
+  }, [tabs, lineByStaff, staffById, holderIds])
   const absentLines = useMemo(() => lines.filter((l) => l.diem_danh === "vang"), [lines])
 
   const openReview = () => {
     setError(null)
-    const hasAny = lines.some((l) => l.diem_danh === "vang" || l.cong_viec_ids.length > 0)
+    const hasAny = holderIds.size > 0 || lines.some((l) => l.diem_danh === "vang" || l.cong_viec_ids.length > 0)
     if (!hasAny && unassignedCa.length === 0) {
       setError(T("chuaCoAi"))
       return
@@ -552,17 +595,16 @@ export default function AttendanceShiftPage() {
 
   // ── Dữ liệu hiển thị ──
   const allRosterIds = useMemo(() => Array.from(new Set(tabs.flatMap((t) => t.staffIds))), [tabs])
-  const counts = countRoster(allRosterIds, lines)
+  const counts = countRoster(allRosterIds, lines, holderIds)
   const currentTab = tabs.find((t) => t.key === activeTab) || tabs[0]
-  const tileIds = (currentTab?.staffIds || []).filter((id) => !onlyUnassigned || classifyTile(lineByStaff.get(id)) === "chua_giao")
-  const notAssigned = !canEditAny && assignedCas.length > 0 && !assignedCas.includes(ca)
+  const tileIds = (currentTab?.staffIds || []).filter((id) => !onlyUnassigned || classifyTile(lineByStaff.get(id), holderIds.has(id)) === "chua_giao")
+  // Ca/Tổ chọn được: người chấm toàn nhà máy ⇒ mọi ca/tổ đang dùng; trực ca ⇒ chỉ ca/tổ được phân công.
+  const unitChoices = units.filter((u) => u.is_active && (canEditAny || assignedCas.includes(u.code)))
 
   const jobsForSheet = useCallback(
-    (line: SheetLineDraft | undefined) => {
-      const tab = tabs.find((t) => t.key === sheetTabKey)
-      return jobsForTab(jobs, dayChuyen, tab ? tab.jobToNhom : null, line?.cong_viec_ids || [])
-    },
-    [jobs, dayChuyen, tabs, sheetTabKey],
+    // Mọi người (kể cả người thay mượn từ ca/tổ khác) chỉ nhận việc của Ca/Tổ đang điểm danh.
+    (line: SheetLineDraft | undefined) => jobsForUnit(jobs, currentUnit, dayChuyen, line?.cong_viec_ids || []),
+    [jobs, currentUnit, dayChuyen],
   )
 
   const sheetPerson = sheetFor ? staffById.get(sheetFor) : undefined
@@ -571,12 +613,12 @@ export default function AttendanceShiftPage() {
     const taken = new Set<string>(lines.map((l) => l.staff_id))
     for (const l of lines) if (l.thay_the_staff_id && l.staff_id !== sheetFor) taken.add(l.thay_the_staff_id)
     taken.add(sheetFor)
-    const groupMembers = new Set(groups.flatMap((g) => g.memberIds))
     return staff
       .filter((s) => !taken.has(s.id) && isStaffWorking(s, ngay) && !s.cho_xac_nhan)
-      .filter((s) => (s.loai_nhan_su === "cong_nhan" && s.ca_mac_dinh !== ca) || groupMembers.has(s.id))
+      // Người của ca/tổ khác (có Ca/Tổ mặc định) hoặc công nhân chưa gán ca/tổ.
+      .filter((s) => s.ca_mac_dinh !== ca && (s.loai_nhan_su === "cong_nhan" || !!s.ca_mac_dinh))
       .sort((a, b) => a.ten.localeCompare(b.ten, "vi"))
-  }, [sheetFor, lines, groups, staff, ngay, ca])
+  }, [sheetFor, lines, staff, ngay, ca])
 
   // ── Render ──
   if (booting) {
@@ -610,7 +652,7 @@ export default function AttendanceShiftPage() {
     ? !canShift
       ? T("noPermission")
       : catalogReady && !canEditAny && assignedCas.length === 0
-        ? T("chuaPhanCongCa")
+        ? T("chuaPhanCongCaTo")
         : null
     : null
   if (blockedMsg) {
@@ -643,7 +685,7 @@ export default function AttendanceShiftPage() {
   }
 
   const tabLabel = (t: { key: string; label: string; code: string | null }) => {
-    if (t.key === "ca") return `${T("ca")} ${ca}`
+    if (t.key === "ca") return currentUnit ? bilingual(lang, currentUnit.ten, currentUnit.ten_khmer) : `${T("ca")} ${ca}`
     if (t.key === "khac") return T("tabKhac")
     if (lang === "km") {
       if (t.code === "tiep_nhan") return T("tabTiepNhan")
@@ -711,16 +753,36 @@ export default function AttendanceShiftPage() {
           </div>
         </div>
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-1.5 px-3 pb-2.5 pt-2 text-xs">
-          <div className="flex overflow-hidden rounded-lg border border-white/30">
-            {ATTENDANCE_CA.map((c) => (
-              <button key={c} type="button" onClick={() => void flushThen(() => setCa(c))} className={`px-2.5 py-1 font-bold ${ca === c ? "bg-white text-[#1c3a32]" : "text-white"}`}>
-                {T("ca")} {c}
-              </button>
+          <select
+            value={ca}
+            onChange={(e) => {
+              const v = e.target.value
+              const fixedDc = unitByCode.get(v)?.day_chuyen || null
+              void flushThen(() => {
+                setCa(v)
+                if (fixedDc) setDayChuyen(fixedDc)
+              })
+            }}
+            aria-label={T("caTo")}
+            className="max-w-[60vw] rounded-lg border border-white/30 bg-white/10 px-2 py-1 font-bold text-white [&>option]:text-slate-800"
+          >
+            {unitChoices.map((u) => (
+              <option key={u.code} value={u.code}>
+                {bilingual(lang, u.ten, u.ten_khmer)}
+              </option>
             ))}
-          </div>
+            {!unitChoices.some((u) => u.code === ca) ? <option value={ca}>{currentUnit ? bilingual(lang, currentUnit.ten, currentUnit.ten_khmer) : ca}</option> : null}
+          </select>
           <div className="flex overflow-hidden rounded-lg border border-white/30">
             {ATTENDANCE_DAY_CHUYEN.map((dc) => (
-              <button key={dc} type="button" onClick={() => void flushThen(() => setDayChuyen(dc))} className={`px-2.5 py-1 font-bold ${dayChuyen === dc ? "bg-white text-[#1c3a32]" : "text-white"}`}>
+              <button
+                key={dc}
+                type="button"
+                disabled={!!currentUnit?.day_chuyen && currentUnit.day_chuyen !== dc}
+                title={currentUnit?.day_chuyen && currentUnit.day_chuyen !== dc ? ` chỉ thuộc ${currentUnit.day_chuyen}` : undefined}
+                onClick={() => void flushThen(() => setDayChuyen(dc))}
+                className={`px-2.5 py-1 font-bold disabled:cursor-not-allowed disabled:opacity-30 ${dayChuyen === dc ? "bg-white text-[#1c3a32]" : "text-white"}`}
+              >
                 {dcLabel(dc)}
               </button>
             ))}
@@ -742,11 +804,6 @@ export default function AttendanceShiftPage() {
 
       <main className="mx-auto max-w-5xl space-y-3 px-3 py-3">
         {fatal ? <div className="rounded-xl bg-rose-50 p-4 text-sm font-semibold text-rose-700">{fatal}</div> : null}
-        {notAssigned && canShift ? (
-          <div className="flex items-start gap-1.5 rounded-xl bg-amber-50 p-2.5 text-xs font-semibold text-amber-800">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0" /> {T("notAssignedWarn", { ca })}
-          </div>
-        ) : null}
         {error ? (
           <div className="flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
@@ -794,6 +851,8 @@ export default function AttendanceShiftPage() {
               </div>
             ) : null}
 
+            <PositionBlock T={T} unitLoai={currentUnit?.loai || null} positions={positions} staffById={staffById} candidates={positionCandidates} readOnly={!editable} onChange={changePosition} />
+
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs font-bold">
                 <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700">
@@ -813,7 +872,7 @@ export default function AttendanceShiftPage() {
               </div>
               <div className="flex gap-1.5 overflow-x-auto pb-0.5">
                 {tabs.map((t) => {
-                  const pending = t.staffIds.filter((id) => classifyTile(lineByStaff.get(id)) === "chua_giao").length
+                  const pending = t.staffIds.filter((id) => classifyTile(lineByStaff.get(id), holderIds.has(id)) === "chua_giao").length
                   const active = currentTab?.key === t.key
                   return (
                     <button
@@ -838,8 +897,10 @@ export default function AttendanceShiftPage() {
                   const s = staffById.get(id)
                   if (!s) return null
                   const line = lineByStaff.get(id)
-                  const state = classifyTile(line)
+                  const state = classifyTile(line, holderIds.has(id))
                   const firstJob = line?.cong_viec_ids[0] ? jobById.get(line.cong_viec_ids[0]) : undefined
+                  const posKeys = positionsOfStaff(positions, id)
+                  const roleLabel = posKeys.length > 0 ? T(positionLabelKey(posKeys[0], currentUnit?.loai)) + (posKeys.length > 1 ? ` +${posKeys.length - 1}` : "") : ""
                   const rep = line?.thay_the_staff_id ? staffById.get(line.thay_the_staff_id)?.ten || "?" : line?.thay_the_ten || ""
                   return (
                     <WorkerTile
@@ -853,6 +914,7 @@ export default function AttendanceShiftPage() {
                       replacementName={rep}
                       vangLabel={T("vang")}
                       chuaGiaoLabel={T("chuaGiao")}
+                      roleLabel={roleLabel}
                       onClick={() => {
                         setSheetTabKey(currentTab?.key || "ca")
                         setSheetFor(id)

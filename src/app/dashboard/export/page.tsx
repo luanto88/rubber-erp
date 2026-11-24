@@ -60,6 +60,7 @@ import { OrderQrDownload } from "./_components/order-qr-download";
 import { PageHeaderBanner } from "@/app/dashboard/_components/page-header-banner";
 import { PageBackgroundMotif } from "@/app/dashboard/_components/page-background-motif";
 import { FilterBar } from "@/app/dashboard/_components/filter-bar";
+import { FilterMultiSelect } from "@/app/dashboard/_components/filter-multi-select";
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper";
 import { ModalShell } from "@/app/dashboard/_components/modal-shell";
 import { CustomerGrantModal } from "@/app/dashboard/export/_components/customer-grant-modal";
@@ -179,6 +180,8 @@ type ExportOrder = {
   assignments: Assignment[];
   tong_banh: number;
   yeu_cau_chi_tieu: ChiTieuReq[];
+  // Chấm công GĐ3: người trực xuất hàng (nhóm nhân sự code 'xuat_hang'), in dòng "Trực xuất hàng" F01/F02.
+  nguoi_xuat_hang_ids?: string[] | null;
   files: { name: string; url: string; path?: string; size?: number }[];
   trang_thai?: string | null;
   created_by?: string | null;
@@ -320,6 +323,7 @@ const emptyForm = (prefix: "CSR" | "SVR" = "CSR") => ({
   vehicles: [emptyVehicle()] as Vehicle[],
   assignments: [] as Assignment[],
   yeu_cau_chi_tieu: [] as ChiTieuReq[],
+  nguoi_xuat_hang_ids: [] as string[],
 });
 type ExportForm = ReturnType<typeof emptyForm>;
 type PendingRetestAttach = {
@@ -465,6 +469,44 @@ export default function ExportPage() {
     [grade, isNMCP],
   );
 
+  // Chấm công GĐ3: người trực xuất hàng = thành viên nhóm nhân sự code 'xuat_hang'.
+  const [exportGroupIds, setExportGroupIds] = useState<string[]>([]);
+  const [staffNameById, setStaffNameById] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!factoryId) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const [{ data: grp, error: gErr }, staffRows] = await Promise.all([
+          supabase.from("personnel_groups").select("id").eq("factory_id", factoryId).eq("code", "xuat_hang").eq("is_active", true),
+          fetchAllPaginated<{ id: string; ten: string }>((from, to) =>
+            supabase.from("maintenance_staff").select("id, ten").eq("factory_id", factoryId).order("ten").order("id").range(from, to),
+          ),
+        ]);
+        if (gErr) throw gErr;
+        const gids = ((grp || []) as { id: string }[]).map((g) => g.id);
+        let memberIds: string[] = [];
+        if (gids.length > 0) {
+          const { data: mem, error: mErr } = await supabase
+            .from("personnel_group_members")
+            .select("staff_id")
+            .eq("factory_id", factoryId)
+            .in("group_id", gids);
+          if (mErr) throw mErr;
+          memberIds = Array.from(new Set(((mem || []) as { staff_id: string }[]).map((m) => m.staff_id)));
+        }
+        if (!alive) return;
+        setExportGroupIds(memberIds);
+        setStaffNameById(new Map(staffRows.map((s) => [s.id, s.ten])));
+      } catch (err) {
+        console.warn("Không tải được nhóm Xuất hàng:", err);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [factoryId]);
+
   // Pallet xuất: base list + custom options added at runtime
   const [palletTypes, setPalletTypes] = useState<string[]>(PALLET_XUAT_DEFAULT);
   const [palletTypesFromDb, setPalletTypesFromDb] = useState(false);
@@ -496,6 +538,13 @@ export default function ExportPage() {
   // Views
   const [view, setView] = useState<"list" | "add">("list");
   const [form, setForm] = useState<ExportForm>(emptyForm());
+  // Thành viên nhóm Xuất hàng + người đã chọn trên đơn đang sửa (kể cả đã rời nhóm).
+  const exportStaffOptions = useMemo(() => {
+    const ids = Array.from(new Set([...exportGroupIds, ...form.nguoi_xuat_hang_ids]));
+    return ids
+      .map((id) => ({ id, ten: (staffNameById.get(id) || "?") + (exportGroupIds.includes(id) ? "" : " (ngoài nhóm)") }))
+      .sort((a, b) => a.ten.localeCompare(b.ten, "vi"));
+  }, [exportGroupIds, form.nguoi_xuat_hang_ids, staffNameById]);
   const [editId, setEditId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
@@ -816,7 +865,7 @@ export default function ExportPage() {
 
     try {
       const snapshot = JSON.parse(raw) as ExportDraftSnapshot;
-      setForm(snapshot.form);
+      setForm({ ...snapshot.form, nguoi_xuat_hang_ids: snapshot.form.nguoi_xuat_hang_ids || [] });
       setEditId(snapshot.editId);
       setView("add");
       setKienScanEntries([]);
@@ -1146,6 +1195,7 @@ export default function ExportPage() {
         : [emptyVehicle()],
       assignments: editAssignments,
       yeu_cau_chi_tieu: order.yeu_cau_chi_tieu || [],
+      nguoi_xuat_hang_ids: order.nguoi_xuat_hang_ids || [],
     });
     // Nếu loai_pallet của đơn cũ không có trong base list thì thêm vào palletExtra
     if (order.loai_pallet && !palletTypes.includes(order.loai_pallet)) {
@@ -2169,6 +2219,7 @@ export default function ExportPage() {
         vehicles: form.vehicles,
         assignments: form.assignments,
         yeu_cau_chi_tieu: form.yeu_cau_chi_tieu,
+        nguoi_xuat_hang_ids: form.nguoi_xuat_hang_ids,
         tong_banh: totalBanh,
       };
       const newLotIds = [...new Set(form.assignments.map((a) => a.lot_id))];
@@ -3460,6 +3511,24 @@ export default function ExportPage() {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1.5">
+                  Người trực xuất hàng <span className="font-normal text-slate-400">(không bắt buộc)</span>
+                </label>
+                <FilterMultiSelect
+                  fullWidth
+                  options={exportStaffOptions.map((s) => s.id)}
+                  labels={Object.fromEntries(exportStaffOptions.map((s) => [s.id, s.ten]))}
+                  selected={form.nguoi_xuat_hang_ids}
+                  onChange={(next) => setForm((p) => ({ ...p, nguoi_xuat_hang_ids: next }))}
+                  placeholder={exportStaffOptions.length ? "Chọn người trực xuất hàng" : "Nhóm “Xuất hàng” chưa có thành viên"}
+                  searchPlaceholder="Tìm người..."
+                />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  Lấy từ nhóm nhân sự “Xuất hàng” (Cài đặt → Nhân sự). In vào dòng “Trực xuất hàng” của phiếu điểm danh F01/F02 cùng ngày.
+                </p>
               </div>
 
               {/* Số hóa đơn - Số hợp đồng: mỗi trường 1 dòng riêng */}

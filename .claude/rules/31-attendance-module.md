@@ -132,3 +132,66 @@ hàng", việc mẫu cũ đã tắt). `maintenance_staff.to_vai_tro` / `to_pham_
   chức vụ thật (`chuc_vu_chinh_quyen || chuc_vu`), bấm ⇒ menu. Cài đặt → Điểm QR: xem QR có "Tải PNG" (`OrderQrDownload`),
   admin xoá được điểm QR. Bàn giao GĐ3 (+ vị trí Ca trưởng / Tổ trưởng mặc định, đổi người thay):
   `.claude/plans/ban-giao-cham-cong-c2-gd3.md`.
+
+### GĐ3 (2026-11-24, chờ chạy migration 20261208 + test tay)
+- **Admin mở lại phiếu ca đã duyệt**: chi tiết phiếu, nút "Mở lại để sửa" (chỉ `role = admin`) ⇒ `ReasonConfirmDialog` ⇒
+  RPC `attendance_reopen_section` (20261207).
+- **Vị trí phụ trách** (migration `20261208_attendance_section_positions.sql`, **chạy tay TRƯỚC deploy** — `SECTION_SELECT` đọc
+  cột `vi_tri`, thiếu cột là mọi màn chấm công lỗi). Người dùng chốt: (a) người giữ vị trí = có mặt A dù không giao việc;
+  (b) người mặc định bị thay ⇒ tự VẮNG, người thay = người giữ mới, chọn phép lúc gửi; (c) cả 3 tổ; (d) Ca trưởng = Tổ trưởng ca.
+  `attendance_sheet_sections.vi_tri` = 6 khoá `<ca_san_xuat|tiep_nhan|co_dien>.<to_truong|to_pho>` → `{staff_id, goc_staff_id}`.
+  Phiếu chưa có vị trí ⇒ màn trực ca điền mặc định theo hồ sơ (`defaultPositions`, `to_vai_tro` + `to_pham_vi`, ca SX theo
+  `ca_mac_dinh`). Khối "Vị trí phụ trách" (`shift/_components/position-block.tsx`) trên lưới; ô người giữ vị trí có nhãn tím.
+  Hàm thuần: `applyPositionChange`, `positionHolderIds`, `classifyTile(line, isHolder)`, `linesToPayload(lines, holderIds)`
+  (người giữ chưa có dòng ⇒ thêm dòng Có mặt A). RPC save nhận `p_header.vi_tri`, đồng bộ `to_truong_staff_id` /
+  `to_pho_staff_id` / `ca_truong_ten`. Mọi `CREATE OR REPLACE attendance_save_section` về sau chép từ 20261208.
+- **Đơn xuất**: ô "Người trực xuất hàng" (nhóm `xuat_hang`, `export_orders.nguoi_xuat_hang_ids`), chi tiết đơn hiện tên.
+- **Kết thúc ca** (màn quét TP): sau khi dựng phiếu F09 thành công gọi `attendance_close_shift(ngày, ca của Hub)` best-effort.
+- **Phiếu F01/F02**: tab "Phiếu F01/F02" ở chi tiết phiếu. Dữ liệu `sheet-report-actions.ts` (`loadF01Model`, service role,
+  quyền attendance.view|approve|mark_all|shift_check); mô hình `src/lib/attendance/f01-model.ts`; vẽ Canvas → JPEG → jsPDF A4
+  `f01-sheet.ts` (QR góc phải trên, chân trang mã tài liệu, bảng Vắng cuối mỗi ca, chỉ in việc có người, người thay ghi
+  "(thay X)", Trực xuất hàng ∪ người trên đơn xuất ĐÃ DUYỆT cùng ngày cùng dây chuyền). Giờ ca = `bat_dau_luc` – `ket_thuc_luc`.
+  Chữ in song ngữ ở `khmer-ui.json` nhóm "Phiếu F01/F02" (`nguon: mau_giay` = chép mẫu giấy).
+- **Bản cứng F01/F02 + dấu duyệt**: đủ duyệt = mọi phiếu ca `da_duyet`; `approval_key` = sha256 `section_id:duyet_luc`; lần mở
+  đầu sau khi đủ duyệt dựng PDF có dấu (`src/lib/pdf-approval-stamp.ts`) rồi lưu (`attendance_sheet_snapshots`, bucket
+  `attendance-sheet-reports`); mở lại dùng đúng bản đó (`f01-client.ts`). Admin mở lại ⇒ key đổi ⇒ bản mới. Lỗi lưu không chặn xem.
+- **F09**: bản cứng mới (ngày khoá đủ ca) có dấu "Đã duyệt: <người khoá ca cuối> · giờ khoá" (`loadDayLockState` trả
+  `lastLockName/lastLockAt`). Bản cứng cũ bất biến. Không áp F11/F12.
+- Sửa sau test 2026-11-24 (migration `20261209_attendance_logs_fix_delete_sheet.sql`, **chạy tay**): ràng buộc
+  `attendance_logs.hanh_dong` trên DB thật thiếu `mo_lai_phieu` (phần đó của 20261207 không được áp) ⇒ thêm lại + `xoa_phieu`;
+  RPC `attendance_delete_sheet` (CHỈ admin, lý do) xoá cả phiếu ngày, tính lại ngày công truc_ca từ phiếu khác (nút "Xoá phiếu"
+  ở chi tiết); bỏ FK `attendance_sheet_snapshots.sheet_id`. Form Nhân sự: "Vai trò trong tổ" = Không ⇒ ô "Của tổ" khoá
+  (người thường để Không); lưu chặn trùng vị trí (`findRoleConflict`: cùng vai trò + tổ + ca (ca SX) + dây chuyền giao nhau).
+  F01/F02: mỗi việc 1 dòng (chữ tự thu), nhiều người nối "A, B", người thay in nghiêng, xếp loại "A-A-B", KHÔNG in người vắng,
+  Ngăn / Chỉ thị xuống dòng đủ chữ, chân trang chỉ số trang. Dấu duyệt kiểu Văn bản: tick xanh + chữ xám
+  "Phiếu được duyệt bởi {Tên} dd/mm/yyyy hh:mm:ss" (cả F09).
+
+### Ca / Tổ điểm danh (2026-11-24, chờ chạy migration 20261210 + test tay)
+Người dùng chốt: Tổ xử lý nước thải, Tổ tiếp nhận mủ tạp, Tổ cơ điện – bảo trì – xe nâng hoạt động như Ca A/B/C; thêm được
+ca/tổ mới; mỗi ca/tổ có trưởng/phó (trống thì phiếu để trống); tổ ⇒ "Tổ trưởng / Tổ phó", ca ⇒ "Ca trưởng / Ca phó"; thành
+viên = nhân sự có "Ca/Tổ mặc định" là đơn vị đó; tổ dùng chung 2 dây chuyền đi theo dây chuyền người điểm danh chọn — cùng
+ngày + cùng dây chuyền ⇒ chung 1 phiếu.
+- Migration `20261210_attendance_units.sql` (**chạy tay TRƯỚC deploy**): bảng `attendance_units` (code bất biến, tên, tên Khmer,
+  loai ca|to, to_nhom = loại việc hiện khi giao, thứ tự, đang dùng; seed TN_MT, XLNT, CD, A, B, C); bỏ CHECK ca A/B/C ở
+  `maintenance_staff.ca_mac_dinh`, `production_shift_assignments.ca`, `attendance_sheet_sections.ca` (cột `ca` nay giữ MÃ đơn vị,
+  section vẫn `loai = 'ca_san_xuat'`); chuyển `to_pham_vi` cũ → `ca_mac_dinh` CD / TN_MT (chỉ khi đang trống); `vi_tri` 6 khoá →
+  `{truong, pho}`; `attendance_qr_points.unit_code`; đổi mã phiếu cũ sang `TKSXMT-` / `TKSXMN-` + ddmmyy. `attendance_open_section`
+  mới: người không có mark / mark_all / admin phải có dòng `production_shift_assignments` với `ca = mã đơn vị`. Mọi
+  `CREATE OR REPLACE attendance_open_section / attendance_save_section` về sau chép từ file 20261210.
+- Cài đặt → Chấm công → "Ca / Tổ" (`attendance-units-card.tsx`, không xoá — chỉ tắt). Nhân sự: "Ca/Tổ mặc định" + "Vai trò trong
+  ca/tổ" (trưởng/phó), chặn trùng (`findRoleConflict`: cùng vai trò + cùng Ca/Tổ + dây chuyền giao nhau). Điểm QR có "Ca/Tổ mặc
+  định". Phân công điểm danh (`shift-assignments-tab.tsx`) liệt kê mọi Ca/Tổ.
+- Màn điểm danh: ô chọn Ca/Tổ (người được phân công chỉ thấy đơn vị của mình; mark / mark_all thấy tất cả), thẻ chính = người có
+  Ca/Tổ mặc định là đơn vị đó; khối vị trí 2 ô trưởng / phó theo loại đơn vị.
+- Phiếu TKSX (tab "Phiếu TKSX", trước là "Phiếu F01"): mỗi Ca/Tổ có phát sinh 1 khối theo `sort_order`; khối ca có giờ ca + sản
+  lượng; QR nhỏ hơn 20%. `loadUserShiftAssignment` (màn quét TP) chỉ lấy ca A/B/C.
+- Sau test 2026-11-24 (migration `20261211_attendance_unit_jobs.sql`, **chạy tay sau 20261210**). Người dùng chốt: nhóm nhân sự
+  chỉ là nhóm CHUYÊN MÔN (KPI, người thực hiện biên bản, người trực xuất hàng) — màn điểm danh KHÔNG còn thẻ nhóm (migration tắt
+  `hien_diem_danh`, Cài đặt → Điểm QR bỏ mục thẻ nhóm); trực ca chỉ `shift_check` chỉ thấy đúng Ca/Tổ được phân công, người thay
+  mượn từ ca/tổ khác nằm ở thẻ "Khác" và chỉ nhận việc của Ca/Tổ đang điểm danh. Trực ca / Trực xuất hàng là NHIỆM VỤ, không phải tổ.
+  `attendance_units.day_chuyen`: NULL = chọn khi điểm danh (Ca A/B/C, tổ độc lập Cơ điện / XLNT / Đội xe cơ khí `XE_CK` mới — mỗi
+  dây chuyền phân công riêng, in ở cả TKSXMT lẫn TKSXMN, người có ở cả 2 thì in 2 phiếu, ngày công 1 lần); `Mủ tạp` (TN_MT) /
+  `Mủ nước` (Tổ tiếp nhận mủ nước `TN_MN` mới) = khoá dây chuyền (RPC open chặn, màn điểm danh khoá nút). Việc:
+  `attendance_job_types.unit_code` (việc của tổ, `day_chuyen` NULL được), việc ca = `unit_code` NULL + `ca_san_xuat` + dây chuyền;
+  hàm `isJobOfUnit` / `jobsForUnit` (shift.ts). Migration chuyển việc tiếp nhận MT → TN_MT, MN → TN_MN, "Trực hồ XLNT" → XLNT,
+  cơ điện → CD (bản Mủ nước trùng tên tắt). Cài đặt → Công việc: chip theo "Thuộc" (Ca sản xuất · dây chuyền / từng tổ).

@@ -13,6 +13,8 @@ export type AttendanceQrPoint = {
   token: string
   ten_diem: string
   day_chuyen_mac_dinh: AttendanceDayChuyen | null
+  /** Mã Ca/Tổ mở sẵn khi quét (migration 20261210). */
+  unit_code?: string | null
   is_active: boolean
   sort_order: number
 }
@@ -43,9 +45,125 @@ export type AttendanceSection = {
   trang_thai: SectionStatus
   gui_luc: string | null
   duyet_luc: string | null
+  duyet_boi?: string | null
   tra_ve_ly_do: string | null
   tra_ve_luc: string | null
   ghi_chu: string | null
+  /** Vị trí phụ trách (migration 20261208). {} = chưa từng lưu ⇒ màn trực ca điền mặc định theo hồ sơ nhân sự. */
+  vi_tri?: SectionPositions | null
+}
+
+// ── Ca / Tổ (đơn vị điểm danh, migration 20261210) ──
+export type AttendanceUnit = {
+  id: string
+  code: string
+  ten: string
+  ten_khmer: string | null
+  loai: "ca" | "to"
+  /** Cũ (trước 20261211) — không còn dùng để lọc việc; việc của tổ gắn theo attendance_job_types.unit_code. */
+  to_nhom: string | null
+  /** NULL = chọn dây chuyền khi điểm danh (Ca A/B/C, tổ độc lập); có giá trị = tổ chỉ thuộc dây chuyền đó (20261211). */
+  day_chuyen?: string | null
+  sort_order: number
+  is_active: boolean
+}
+export const UNIT_SELECT = "id, code, ten, ten_khmer, loai, to_nhom, day_chuyen, sort_order, is_active"
+
+// ── Vị trí phụ trách: trưởng / phó của CHÍNH ca/tổ (người dùng chốt 2026-11-23/24) ──
+// (a) người giữ vị trí tính CÓ MẶT A dù không có việc; (b) người gốc bị thay ⇒ tự VẮNG, người thay = người giữ mới.
+// Ca ⇒ "Ca trưởng / Ca phó"; tổ ⇒ "Tổ trưởng / Tổ phó". Chưa có người ⇒ để trống trên phiếu.
+export const POSITION_KEYS = ["truong", "pho"] as const
+export type PositionKey = (typeof POSITION_KEYS)[number]
+/** staff_id = người đang giữ; goc_staff_id = người mặc định theo hồ sơ lúc mở phiếu (để biết ai bị thay). */
+export type PositionSlot = { staff_id: string | null; goc_staff_id: string | null }
+export type SectionPositions = Partial<Record<PositionKey, PositionSlot>>
+
+/** Khoá chữ (khmer-ui.json) của nhãn vị trí theo loại đơn vị. */
+export function positionLabelKey(key: PositionKey, unitLoai: "ca" | "to" | null | undefined): string {
+  if (unitLoai === "to") return key === "truong" ? "vtToTruong" : "vtToPho"
+  return key === "truong" ? "vtCaTruong" : "vtCaPho"
+}
+
+const VAI_TRO_OF: Record<PositionKey, "to_truong" | "to_pho"> = { truong: "to_truong", pho: "to_pho" }
+
+/** Đã từng lưu vị trí chưa (cột rỗng {} / null ⇒ chưa). */
+export function hasStoredPositions(p: SectionPositions | null | undefined): boolean {
+  return !!p && Object.keys(p).length > 0
+}
+
+/**
+ * Người mặc định theo hồ sơ: vai trò trưởng/phó + Ca/Tổ mặc định = đơn vị này; dây chuyền khớp hoặc trống.
+ * Nhiều người cùng vai trò ⇒ lấy người đầu theo thứ tự điểm danh.
+ */
+export function defaultPositions(staff: ShiftStaff[], unitCode: string, dayChuyen: string, ngay: string): SectionPositions {
+  const out: SectionPositions = {}
+  for (const key of POSITION_KEYS) {
+    const found = staff
+      .filter(
+        (s) =>
+          s.to_vai_tro === VAI_TRO_OF[key] &&
+          s.ca_mac_dinh === unitCode &&
+          !s.cho_xac_nhan &&
+          isStaffWorking(s, ngay) &&
+          (!s.day_chuyen_mac_dinh || s.day_chuyen_mac_dinh === dayChuyen),
+      )
+      .sort(compareStaffOrder)[0]
+    out[key] = { staff_id: found?.id || null, goc_staff_id: found?.id || null }
+  }
+  return out
+}
+
+/** Người đang giữ ít nhất 1 vị trí. */
+export function positionHolderIds(p: SectionPositions | null | undefined): Set<string> {
+  const ids = new Set<string>()
+  if (!p) return ids
+  for (const key of POSITION_KEYS) {
+    const id = p[key]?.staff_id
+    if (id) ids.add(id)
+  }
+  return ids
+}
+
+/** Các vị trí 1 người đang giữ (để hiện nhãn trên ô). */
+export function positionsOfStaff(p: SectionPositions | null | undefined, staffId: string): PositionKey[] {
+  if (!p) return []
+  return POSITION_KEYS.filter((k) => p[k]?.staff_id === staffId)
+}
+
+/**
+ * Đổi người giữ vị trí ⇒ trả về DÒNG mới (người gốc tự vắng có người thay — quy tắc (b)).
+ * - Bỏ dòng vắng tự động cũ của người gốc (vắng, người thay = người giữ cũ, không việc, chưa chọn phép).
+ * - Người mới ≠ người gốc: người gốc chưa có dòng / có mặt mà không việc ⇒ thành vắng, người thay = người mới.
+ *   Người gốc đã được giao việc (đi làm việc khác) hoặc đã đánh vắng tay ⇒ giữ nguyên.
+ */
+export function applyPositionChange(
+  lines: SheetLineDraft[],
+  slot: PositionSlot | undefined,
+  newStaffId: string | null,
+): SheetLineDraft[] {
+  const goc = slot?.goc_staff_id || null
+  const oldHolder = slot?.staff_id || null
+  let out = lines
+  if (goc && oldHolder && oldHolder !== goc) {
+    out = out.filter(
+      (l) =>
+        !(
+          l.staff_id === goc &&
+          l.diem_danh === "vang" &&
+          l.thay_the_staff_id === oldHolder &&
+          l.cong_viec_ids.length === 0 &&
+          !l.vang_loai
+        ),
+    )
+  }
+  if (goc && newStaffId && newStaffId !== goc) {
+    const cur = out.find((l) => l.staff_id === goc)
+    if (!cur || (cur.diem_danh === "co" && cur.cong_viec_ids.length === 0)) {
+      const absent = emptyLine({ id: cur?.id, staff_id: goc, diem_danh: "vang", thay_the_staff_id: newStaffId })
+      out = cur ? out.map((l) => (l.staff_id === goc ? absent : l)) : [...out, absent]
+    }
+  }
+  return out
 }
 
 export type DiemDanh = "co" | "vang"
@@ -73,7 +191,7 @@ export type SheetLineDraft = {
 }
 
 export const SECTION_SELECT =
-  "id, sheet_id, factory_id, loai, ca, ca_truong_ten, to_truong_staff_id, to_pho_staff_id, truc_ca_user_id, truc_ca_staff_id, ngoai_phan_cong, bat_dau_luc, ket_thuc_luc, trang_thai, gui_luc, duyet_luc, tra_ve_ly_do, tra_ve_luc, ghi_chu"
+  "id, sheet_id, factory_id, loai, ca, ca_truong_ten, to_truong_staff_id, to_pho_staff_id, truc_ca_user_id, truc_ca_staff_id, ngoai_phan_cong, bat_dau_luc, ket_thuc_luc, trang_thai, gui_luc, duyet_luc, duyet_boi, tra_ve_ly_do, tra_ve_luc, ghi_chu, vi_tri"
 
 export const LINE_SELECT =
   "id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, vehicle_id, xep_loai, diem_danh, vang_loai, ly_do_id, ly_do, thay_the_staff_id, thay_the_ten, ghi_chu, la_them_ngoai"
@@ -85,8 +203,13 @@ export const SECTION_STATUS_LABEL: Record<SectionStatus, string> = {
   tra_ve: "Bị trả về",
 }
 
-export function sectionLabel(loai: AttendanceToNhom, ca: string | null, dayChuyen?: string | null): string {
-  if (loai === "ca_san_xuat") return `Ca sản xuất ${ca || ""}`.trim()
+export function sectionLabel(
+  loai: AttendanceToNhom,
+  ca: string | null,
+  dayChuyen?: string | null,
+  units?: Map<string, { ten: string }>,
+): string {
+  if (loai === "ca_san_xuat") return (ca && units?.get(ca)?.ten) || `Ca ${ca || ""}`.trim()
   if (loai === "tiep_nhan") return dayChuyen === "Mủ nước" ? "Tổ tiếp nhận đánh đông" : "Tổ tiếp nhận mủ tạp"
   if (loai === "co_dien") return "Tổ cơ điện – nâng hàng"
   return "Tổ nâng hàng (mẫu cũ)"
@@ -152,6 +275,8 @@ export type ShiftStaff = {
   profile_id: string | null
   chuc_vu?: string | null
   chuc_vu_chinh_quyen?: string | null
+  to_vai_tro?: string | null
+  to_pham_vi?: string | null
 }
 
 export function isStaffWorking(s: ShiftStaff, iso: string): boolean {
@@ -177,99 +302,85 @@ export function compareStaffOrder(a: ShiftStaff, b: ShiftStaff): number {
   return oa - ob || a.ten.localeCompare(b.ten, "vi")
 }
 
-/**
- * jobToNhom: loại việc (to_nhom) được giao ở thẻ này. null = mọi loại (thẻ "Khác").
- * Thẻ Ca ⇒ ['ca_san_xuat']; thẻ nhóm ⇒ [diem_danh_to_nhom] hoặc mọi tổ trừ ca SX khi nhóm chưa đặt loại việc.
- */
-export type RosterTab = { key: string; label: string; code: string | null; staffIds: string[]; jobToNhom: string[] | null }
-export type RosterGroup = { id: string; name: string; code: string | null; memberIds: string[]; toNhom: string | null }
-
-const NON_CA_TO_NHOM = ["tiep_nhan", "co_dien", "nang_hang"]
+/** Thẻ trên lưới (từ 20261211 không còn thẻ nhóm — nhóm nhân sự chỉ là chuyên môn). */
+export type RosterTab = { key: string; label: string; code: string | null; staffIds: string[] }
 
 /**
- * Thẻ trên lưới: "Ca X" (công nhân ca đó, cùng dây chuyền hoặc chưa đặt, còn làm việc, đã xác nhận, KHÔNG thuộc nhóm có
- * thẻ riêng — người dùng chốt 2026-11-23) + 1 thẻ / nhóm hien_diem_danh (thành viên còn làm việc).
- * `lineStaffIds` = người đã có dòng trong phiếu; ai không thuộc thẻ nào ⇒ thẻ "Khác".
+ * Thẻ CHÍNH = người có "Ca/Tổ mặc định" = đơn vị đang điểm danh (cùng dây chuyền hoặc chưa đặt, còn làm việc, đã xác
+ * nhận). `lineStaffIds` = người đã có dòng / giữ vị trí trong phiếu; ai không thuộc thẻ chính ⇒ thẻ "Khác"
+ * (người thay mượn từ ca/tổ khác).
  */
 export function buildRosterTabs(
   staff: ShiftStaff[],
-  groups: RosterGroup[],
-  ca: string,
+  unit: Pick<AttendanceUnit, "code" | "ten"> | null,
   dayChuyen: string,
   ngay: string,
   lineStaffIds: string[],
 ): RosterTab[] {
   const byId = new Map(staff.map((s) => [s.id, s]))
-  const groupTabs: RosterTab[] = []
-  for (const g of groups) {
-    const ids = g.memberIds
-      .map((id) => byId.get(id))
-      .filter((s): s is ShiftStaff => !!s && isStaffWorking(s, ngay))
-      .sort(compareStaffOrder)
-      .map((s) => s.id)
-    if (ids.length > 0) {
-      groupTabs.push({ key: `g:${g.id}`, label: g.name, code: g.code, staffIds: ids, jobToNhom: g.toNhom ? [g.toNhom] : NON_CA_TO_NHOM })
-    }
-  }
-  const inGroupTab = new Set(groupTabs.flatMap((t) => t.staffIds))
+  const unitCode = unit?.code || ""
   const caIds = staff
     .filter(
       (s) =>
-        s.loai_nhan_su === "cong_nhan" &&
         !s.cho_xac_nhan &&
-        s.ca_mac_dinh === ca &&
+        !!unitCode &&
+        s.ca_mac_dinh === unitCode &&
         (!s.day_chuyen_mac_dinh || s.day_chuyen_mac_dinh === dayChuyen) &&
-        isStaffWorking(s, ngay) &&
-        !inGroupTab.has(s.id),
+        isStaffWorking(s, ngay),
     )
     .sort(compareStaffOrder)
     .map((s) => s.id)
-  const tabs: RosterTab[] = [{ key: "ca", label: `Ca ${ca}`, code: null, staffIds: caIds, jobToNhom: ["ca_san_xuat"] }, ...groupTabs]
+  const tabs: RosterTab[] = [{ key: "ca", label: unit?.ten || unitCode, code: null, staffIds: caIds }]
   const shown = new Set(tabs.flatMap((t) => t.staffIds))
   const extra = lineStaffIds
     .filter((id) => !shown.has(id) && byId.has(id))
     .map((id) => byId.get(id) as ShiftStaff)
     .sort(compareStaffOrder)
     .map((s) => s.id)
-  if (extra.length > 0) tabs.push({ key: "khac", label: "Khác", code: null, staffIds: extra, jobToNhom: null })
+  if (extra.length > 0) tabs.push({ key: "khac", label: "Khác", code: null, staffIds: extra })
   return tabs
 }
 
-/**
- * Việc hiện ở tấm chọn việc: cùng dây chuyền, đang dùng, không ẩn ở điểm danh, đúng loại việc của thẻ
- * — CỘNG việc đang có trên dòng (dòng cũ / gợi ý) để không mất dữ liệu.
- */
-export function jobsForTab<J extends { id: string; day_chuyen: string; to_nhom: string; is_active: boolean; an_diem_danh?: boolean }>(
-  jobs: J[],
+/** Việc thuộc Ca/Tổ (20261211): tổ ⇒ việc gắn unit_code; ca ⇒ việc ca sản xuất (không unit_code) của dây chuyền. */
+export function isJobOfUnit(
+  j: { day_chuyen: string | null; to_nhom: string; unit_code?: string | null },
+  unit: Pick<AttendanceUnit, "code" | "loai"> | null,
   dayChuyen: string,
-  jobToNhom: string[] | null,
-  currentIds: string[],
-): J[] {
+): boolean {
+  if (!unit) return false
+  if (unit.loai === "to") return j.unit_code === unit.code
+  return !j.unit_code && j.to_nhom === "ca_san_xuat" && j.day_chuyen === dayChuyen
+}
+
+/**
+ * Việc hiện ở tấm chọn việc: việc của Ca/Tổ đang điểm danh, đang dùng, không ẩn ở điểm danh — CỘNG việc đang có trên
+ * dòng (dòng cũ / gợi ý) để không mất dữ liệu.
+ */
+export function jobsForUnit<
+  J extends { id: string; day_chuyen: string | null; to_nhom: string; unit_code?: string | null; is_active: boolean; an_diem_danh?: boolean },
+>(jobs: J[], unit: Pick<AttendanceUnit, "code" | "loai"> | null, dayChuyen: string, currentIds: string[]): J[] {
   const keep = new Set(currentIds)
-  return jobs.filter(
-    (j) =>
-      keep.has(j.id) ||
-      (j.day_chuyen === dayChuyen && j.is_active && !j.an_diem_danh && (!jobToNhom || jobToNhom.includes(j.to_nhom))),
-  )
+  return jobs.filter((j) => keep.has(j.id) || (j.is_active && !j.an_diem_danh && isJobOfUnit(j, unit, dayChuyen)))
 }
 
 export type TileState = "chua_giao" | "co_mat" | "vang_co_thay" | "vang"
 
-export function classifyTile(line: SheetLineDraft | undefined): TileState {
-  if (!line) return "chua_giao"
+/** `isHolder` = đang giữ vị trí phụ trách ⇒ có mặt dù không có việc (quy tắc (a)). */
+export function classifyTile(line: SheetLineDraft | undefined, isHolder = false): TileState {
+  if (!line) return isHolder ? "co_mat" : "chua_giao"
   if (line.diem_danh === "vang") return line.thay_the_staff_id || line.thay_the_ten ? "vang_co_thay" : "vang"
-  return line.cong_viec_ids.length > 0 ? "co_mat" : "chua_giao"
+  return line.cong_viec_ids.length > 0 || isHolder ? "co_mat" : "chua_giao"
 }
 
-/** Đếm trên MỌI người trong các thẻ (không trùng) + người có dòng. */
-export function countRoster(staffIds: string[], lines: SheetLineDraft[]) {
+/** Đếm trên MỌI người trong các thẻ (không trùng) + người có dòng + người giữ vị trí. */
+export function countRoster(staffIds: string[], lines: SheetLineDraft[], holderIds: Set<string> = new Set()) {
   const byStaff = new Map(lines.map((l) => [l.staff_id, l]))
-  const all = new Set([...staffIds, ...lines.map((l) => l.staff_id)])
+  const all = new Set([...staffIds, ...lines.map((l) => l.staff_id), ...holderIds])
   let co = 0
   let vang = 0
   let chuaGiao = 0
   for (const id of all) {
-    const st = classifyTile(byStaff.get(id))
+    const st = classifyTile(byStaff.get(id), holderIds.has(id))
     if (st === "co_mat") co += 1
     else if (st === "chua_giao") chuaGiao += 1
     else vang += 1
@@ -289,11 +400,12 @@ export function suggestFromPrevious(prevLines: DbLine[], rosterIds: Set<string>,
   return out
 }
 
-/** Chỉ người có việc hoặc vắng mới lưu. */
-export function linesToPayload(lines: SheetLineDraft[]) {
-  return lines
-    .filter((l) => l.staff_id && (l.diem_danh === "vang" || l.cong_viec_ids.length > 0))
-    .map((l, i) => lineToPayload(l, i + 1))
+/** Chỉ người có việc / vắng / đang giữ vị trí phụ trách mới lưu. Người giữ vị trí chưa có dòng ⇒ thêm dòng Có mặt A. */
+export function linesToPayload(lines: SheetLineDraft[], holderIds: Set<string> = new Set()) {
+  const kept = lines.filter((l) => l.staff_id && (l.diem_danh === "vang" || l.cong_viec_ids.length > 0 || holderIds.has(l.staff_id)))
+  const has = new Set(kept.map((l) => l.staff_id))
+  for (const id of holderIds) if (!has.has(id)) kept.push(emptyLine({ staff_id: id }))
+  return kept.map((l, i) => lineToPayload(l, i + 1))
 }
 
 export function lineToPayload(l: SheetLineDraft, stt: number) {

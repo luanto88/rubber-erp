@@ -13,6 +13,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { PDF_FONT_NAME, ensurePdfFont, safeName } from "@/lib/pdf-qr-shared";
 import { formatDateDisplay } from "@/lib/date-utils";
+import { drawApprovalStampPdf, type ApprovalStamp } from "@/lib/pdf-approval-stamp";
 import type { ShiftReportCaSection, ShiftReportData } from "@/app/dashboard/product/confirm/actions";
 
 // Tên nhà máy hard-code theo đúng mẫu — nhà máy khác PHK cần rà lại nếu tái sử dụng (giống tiền
@@ -304,7 +305,7 @@ function renderCaSection(doc: jsPDF, startY: number, section: ShiftReportCaSecti
   return (doc as PdfWithTable).lastAutoTable?.finalY ?? y + 20;
 }
 
-export async function buildShiftReportPdf(data: ShiftReportData): Promise<jsPDF> {
+export async function buildShiftReportPdf(data: ShiftReportData, approval?: ApprovalStamp | null): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   await ensurePdfFont(doc);
 
@@ -349,7 +350,17 @@ export async function buildShiftReportPdf(data: ShiftReportData): Promise<jsPDF>
     },
   });
 
-  renderCumulative(doc, (doc as PdfWithTable).lastAutoTable?.finalY ?? y + 20, data);
+  const endY = renderCumulative(doc, (doc as PdfWithTable).lastAutoTable?.finalY ?? y + 20, data);
+
+  // Dấu "Đã duyệt" (chỉ khi dựng bản cứng ngày đã khóa đủ ca): góc phải cuối trang cuối, trên chân trang.
+  if (approval) {
+    const pageH = doc.internal.pageSize.getHeight();
+    const stampY = pageH - 16;
+    if (endY > stampY - 6) doc.addPage();
+    doc.setPage(doc.getNumberOfPages());
+    doc.setFont(PDF_FONT_NAME, "normal");
+    drawApprovalStampPdf(doc, approval, PAGE_LEFT + CONTENT_WIDTH, stampY);
+  }
 
   renderFooter(doc);
   return doc;
@@ -386,7 +397,7 @@ function renderCumulative(doc: jsPDF, startY: number, data: ShiftReportData) {
     byBoc.set(r.boc || "", [...(byBoc.get(r.boc || "") || []), r]);
     groups.set(k, byBoc);
   }
-  if (groups.size === 0) return;
+  if (groups.size === 0) return startY;
   const monthLabel = `Tháng ${data.ngay.slice(5, 7)}/${data.ngay.slice(0, 4)}:`;
   const yearLabel = `Năm ${data.ngay.slice(0, 4)}:`;
   const right = PAGE_LEFT + CONTENT_WIDTH;
@@ -472,6 +483,7 @@ function renderCumulative(doc: jsPDF, startY: number, data: ShiftReportData) {
     }
   }
   doc.setTextColor(15, 23, 42);
+  return y;
 }
 
 export function buildShiftReportFileName(data: ShiftReportData): string {

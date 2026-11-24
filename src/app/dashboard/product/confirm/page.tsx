@@ -1222,6 +1222,14 @@ export default function ConfirmKienProductionPage() {
       }
       setEndShiftReportPreview(await buildShiftReport(shift));
       setEndShiftPhase("preview");
+      // Chấm công GĐ3: ghi giờ kết thúc ca vào phiếu điểm danh ca (mọi dây chuyền) — best-effort, không chặn.
+      if (isOnline) {
+        void supabase
+          .rpc("attendance_close_shift", { p_factory_id: factoryId, p_ngay: historyNgay, p_ca: historyCa })
+          .then(({ error: closeErr }) => {
+            if (closeErr) console.warn("Không ghi được giờ kết thúc ca (chấm công):", closeErr.message);
+          });
+      }
     } catch (err) {
       setEndShiftError(err instanceof Error ? err.message : tt("endShiftReportError"));
       setEndShiftPhase("confirm");

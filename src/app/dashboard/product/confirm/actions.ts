@@ -656,6 +656,8 @@ export async function loadUserShiftAssignment(factoryId: string, userId: string 
     .eq("factory_id", factoryId)
     .eq("assigned_user_id", userId)
     .eq("is_active", true)
+    // Từ 20261210 bảng phân công chứa cả mã Tổ (XLNT, CD…) — chỉ Ca A/B/C là ca sản xuất.
+    .in("ca", ["A", "B", "C"])
     .order("created_at", { ascending: true })
     .limit(1);
   return data?.[0]?.ca ?? null;

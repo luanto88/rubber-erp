@@ -5,11 +5,10 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
+import { UNIT_SELECT, type AttendanceUnit } from "@/lib/attendance/shift"
 import {
   ATTENDANCE_CA,
   ATTENDANCE_DAY_CHUYEN,
-  ATTENDANCE_TO_NHOM,
-  toNhomLabel,
   type AttendanceJobType,
   type LoaiNhanSu,
 } from "@/lib/attendance/types"
@@ -58,9 +57,48 @@ export function validateStaffAttendance(v: StaffAttendanceValue): string | null 
   if (v.thu_tu_diem_danh && !/^\d{1,4}$/.test(v.thu_tu_diem_danh.trim())) {
     return "Thứ tự điểm danh phải là số nguyên dương."
   }
-  if (!!v.to_vai_tro !== !!v.to_pham_vi) return "Chọn đủ cả vai trò lẫn tổ (hoặc để trống cả hai)."
-  if (v.to_pham_vi === "ca_san_xuat" && !v.ca_mac_dinh) return "Tổ trưởng / tổ phó ca sản xuất phải có ca mặc định."
+  // Vai trò trưởng / phó là của chính Ca/Tổ mặc định — người thường để "Không".
+  if (v.to_vai_tro && !v.ca_mac_dinh) return "Trưởng / phó phải có Ca/Tổ mặc định."
   return null
+}
+
+/** Mô tả vị trí để báo trùng (vd "Tổ trưởng · Tổ cơ điện – Bảo trì – Xe nâng · Mủ tạp"). */
+export function staffRoleLabel(
+  v: Pick<StaffAttendanceValue, "to_vai_tro" | "ca_mac_dinh" | "day_chuyen_mac_dinh">,
+  unit?: { ten: string; loai: string } | null,
+) {
+  if (!v.to_vai_tro || !v.ca_mac_dinh) return ""
+  const isTo = unit?.loai === "to"
+  const role = v.to_vai_tro === "to_truong" ? (isTo ? "Tổ trưởng" : "Ca trưởng") : isTo ? "Tổ phó" : "Ca phó"
+  return [role, unit?.ten || v.ca_mac_dinh, v.day_chuyen_mac_dinh || "cả hai dây chuyền"].join(" · ")
+}
+
+/**
+ * Chống trùng vị trí: cùng vai trò + cùng Ca/Tổ mặc định, dây chuyền giao nhau (trống = cả hai), còn đang dùng, khác chính
+ * người đang sửa. Trả tên người đang giữ hoặc null.
+ */
+export async function findRoleConflict(
+  factoryId: string,
+  editId: string | null,
+  v: StaffAttendanceValue,
+): Promise<string | null> {
+  if (!v.to_vai_tro || !v.ca_mac_dinh) return null
+  let q = supabase
+    .from("maintenance_staff")
+    .select("id, ten, day_chuyen_mac_dinh, active, ngay_nghi_viec")
+    .eq("factory_id", factoryId)
+    .eq("to_vai_tro", v.to_vai_tro)
+    .eq("ca_mac_dinh", v.ca_mac_dinh)
+  if (editId) q = q.neq("id", editId)
+  const { data, error } = await q
+  if (error) throw error
+  const hit = ((data || []) as { id: string; ten: string; day_chuyen_mac_dinh: string | null; active: boolean | null; ngay_nghi_viec: string | null }[]).find(
+    (s) =>
+      s.active !== false &&
+      !s.ngay_nghi_viec &&
+      (!s.day_chuyen_mac_dinh || !v.day_chuyen_mac_dinh || s.day_chuyen_mac_dinh === v.day_chuyen_mac_dinh),
+  )
+  return hit ? hit.ten : null
 }
 
 /** Cột ghi vào maintenance_staff. */
@@ -76,7 +114,8 @@ export function staffAttendancePayload(v: StaffAttendanceValue): Record<string, 
     ngay_nghi_viec: v.ngay_nghi_viec || null,
     cho_xac_nhan: v.cho_xac_nhan,
     to_vai_tro: v.to_vai_tro || null,
-    to_pham_vi: v.to_pham_vi || null,
+    // Từ 20261210 vai trò theo Ca/Tổ mặc định — không dùng to_pham_vi nữa.
+    to_pham_vi: null,
   }
 }
 
@@ -126,13 +165,36 @@ export function StaffAttendanceFields({
 }) {
   const [jobs, setJobs] = useState<AttendanceJobType[]>([])
   const [jobsMissing, setJobsMissing] = useState(false)
+  const [units, setUnits] = useState<AttendanceUnit[]>([])
+
+  useEffect(() => {
+    if (!factoryId) return
+    let alive = true
+    void supabase
+      .from("attendance_units")
+      .select(UNIT_SELECT)
+      .eq("factory_id", factoryId)
+      .order("sort_order")
+      .then(({ data, error }) => {
+        if (!alive) return
+        // Chưa chạy migration 20261210 ⇒ dùng tạm Ca A/B/C.
+        setUnits(
+          error
+            ? ATTENDANCE_CA.map((c, i) => ({ id: c, code: c, ten: `Ca ${c}`, ten_khmer: null, loai: "ca" as const, to_nhom: "ca_san_xuat", sort_order: i, is_active: true }))
+            : ((data || []) as AttendanceUnit[]),
+        )
+      })
+    return () => {
+      alive = false
+    }
+  }, [factoryId])
 
   useEffect(() => {
     if (!factoryId) return
     let alive = true
     void supabase
       .from("attendance_job_types")
-      .select("id, factory_id, day_chuyen, to_nhom, ten, ten_khmer, so_nguoi_goi_y, loai_xe, sort_order, is_active")
+      .select("*")
       .eq("factory_id", factoryId)
       .order("sort_order")
       .then(({ data, error }) => {
@@ -145,22 +207,35 @@ export function StaffAttendanceFields({
     }
   }, [factoryId])
 
+  // Việc mặc định (20261211): theo Ca/Tổ mặc định — tổ ⇒ việc của tổ; ca ⇒ việc ca sản xuất (theo dây chuyền mặc định
+  // nếu có). Chưa chọn Ca/Tổ ⇒ mọi việc, gom theo Ca/Tổ. Luôn giữ việc đang chọn.
   const jobGroups = useMemo(() => {
-    const shown = jobs.filter(
-      (j) => (j.is_active || j.id === value.cong_viec_mac_dinh_id) && (!value.day_chuyen_mac_dinh || j.day_chuyen === value.day_chuyen_mac_dinh),
-    )
+    const unit = units.find((u) => u.code === value.ca_mac_dinh) || null
+    const dcOk = (j: AttendanceJobType) => !value.day_chuyen_mac_dinh || !j.day_chuyen || j.day_chuyen === value.day_chuyen_mac_dinh
+    const fits = (j: AttendanceJobType) => {
+      if (!unit) return true
+      if (unit.loai === "to") return j.unit_code === unit.code
+      return !j.unit_code && j.to_nhom === "ca_san_xuat"
+    }
+    const shown = jobs.filter((j) => j.id === value.cong_viec_mac_dinh_id || (j.is_active && dcOk(j) && fits(j)))
     const groups: { key: string; label: string; rows: AttendanceJobType[] }[] = []
     for (const dc of ATTENDANCE_DAY_CHUYEN) {
-      for (const to of ATTENDANCE_TO_NHOM) {
-        const rows = shown.filter((j) => j.day_chuyen === dc && j.to_nhom === to)
-        if (rows.length) groups.push({ key: `${dc}-${to}`, label: `${dc} · ${toNhomLabel(to, dc)}`, rows })
-      }
+      const rows = shown.filter((j) => !j.unit_code && j.to_nhom === "ca_san_xuat" && j.day_chuyen === dc)
+      if (rows.length) groups.push({ key: `ca-${dc}`, label: `Ca sản xuất · ${dc}`, rows })
     }
+    for (const u of units) {
+      const rows = shown.filter((j) => j.unit_code === u.code)
+      if (rows.length) groups.push({ key: `u-${u.code}`, label: u.ten, rows })
+    }
+    const placed = new Set(groups.flatMap((g) => g.rows.map((r) => r.id)))
+    const rest = shown.filter((j) => !placed.has(j.id))
+    if (rest.length) groups.push({ key: "khac", label: "Chưa xếp Ca/Tổ", rows: rest })
     return groups
-  }, [jobs, value.day_chuyen_mac_dinh, value.cong_viec_mac_dinh_id])
+  }, [jobs, units, value.ca_mac_dinh, value.day_chuyen_mac_dinh, value.cong_viec_mac_dinh_id])
 
   const set = (patch: Partial<StaffAttendanceValue>) => onChange({ ...value, ...patch })
   const isWorker = value.loai_nhan_su === "cong_nhan"
+  const currentUnit = units.find((u) => u.code === value.ca_mac_dinh) || null
 
   return (
     <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 space-y-3">
@@ -207,12 +282,18 @@ export function StaffAttendanceFields({
           </select>
         </div>
         <div>
-          <label className={labelCls}>Ca mặc định</label>
+          <label className={labelCls}>Ca/Tổ mặc định</label>
           <select value={value.ca_mac_dinh} onChange={(e) => set({ ca_mac_dinh: e.target.value })} className={inputCls}>
-            <option value="">Chưa xếp ca</option>
-            {ATTENDANCE_CA.map((ca) => (
-              <option key={ca} value={ca}>Ca {ca}</option>
-            ))}
+            <option value="">Chưa xếp ca/tổ</option>
+            {units
+              .filter((u) => u.is_active || u.code === value.ca_mac_dinh)
+              .map((u) => (
+                <option key={u.code} value={u.code}>
+                  {u.ten}
+                  {u.is_active ? "" : " (ngừng dùng)"}
+                </option>
+              ))}
+            {value.ca_mac_dinh && !units.some((u) => u.code === value.ca_mac_dinh) ? <option value={value.ca_mac_dinh}>{value.ca_mac_dinh}</option> : null}
           </select>
         </div>
         <div>
@@ -242,25 +323,21 @@ export function StaffAttendanceFields({
           <p className="mt-1 text-xs text-amber-600">Công nhân chưa xếp ca sẽ không hiện sẵn trong danh sách điểm danh của trực ca.</p>
         ) : null}
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className={labelCls}>Vai trò trong tổ (phiếu F01/F02)</label>
-          <select value={value.to_vai_tro} onChange={(e) => set({ to_vai_tro: e.target.value as StaffAttendanceValue["to_vai_tro"] })} className={inputCls}>
-            <option value="">Không</option>
-            {(Object.keys(TO_VAI_TRO_LABEL) as (keyof typeof TO_VAI_TRO_LABEL)[]).map((k) => (
-              <option key={k} value={k}>{TO_VAI_TRO_LABEL[k]}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className={labelCls}>Của tổ</label>
-          <select value={value.to_pham_vi} onChange={(e) => set({ to_pham_vi: e.target.value as StaffAttendanceValue["to_pham_vi"] })} className={inputCls}>
-            <option value="">—</option>
-            {(Object.keys(TO_PHAM_VI_LABEL) as (keyof typeof TO_PHAM_VI_LABEL)[]).map((k) => (
-              <option key={k} value={k}>{TO_PHAM_VI_LABEL[k]}</option>
-            ))}
-          </select>
-        </div>
+      <div>
+        <label className={labelCls}>Vai trò trong {currentUnit?.loai === "to" ? "tổ" : "ca"} (phiếu TKSX)</label>
+        <select
+          value={value.to_vai_tro}
+          disabled={!value.ca_mac_dinh}
+          onChange={(e) => set({ to_vai_tro: e.target.value as StaffAttendanceValue["to_vai_tro"] })}
+          className={`${inputCls} disabled:bg-slate-100 disabled:text-slate-400`}
+        >
+          <option value="">{value.ca_mac_dinh ? "Không (người làm việc thường)" : "Chọn Ca/Tổ mặc định trước"}</option>
+          <option value="to_truong">{currentUnit?.loai === "to" ? "Tổ trưởng" : "Ca trưởng"}</option>
+          <option value="to_pho">{currentUnit?.loai === "to" ? "Tổ phó" : "Ca phó"}</option>
+        </select>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          Trưởng / phó của chính Ca/Tổ mặc định — mỗi vị trí chỉ 1 người (cùng dây chuyền). Người làm việc thường để <b>Không</b>.
+        </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>

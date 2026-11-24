@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Plus, Save, Trash2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { UNIT_SELECT, type AttendanceUnit } from "@/lib/attendance/shift"
 
 export type ShiftAssignmentUserOption = { id: string; label: string }
 
@@ -28,7 +29,7 @@ type ShiftAssignmentRow = {
 // phía client cho tới khi bấm "Lưu" thành công).
 type EditableRow = ShiftAssignmentRow & { isNew?: boolean }
 
-const CA_LIST = ["A", "B", "C"] as const
+const FALLBACK_UNITS: Pick<AttendanceUnit, "code" | "ten" | "loai" | "is_active">[] = ["A", "B", "C"].map((c) => ({ code: c, ten: `Ca ${c}`, loai: "ca" as const, is_active: true }))
 
 function emptyRow(ca: string): EditableRow {
   return {
@@ -51,7 +52,8 @@ export function ShiftAssignmentsTab({
   canManage: boolean
   userOptions: ShiftAssignmentUserOption[]
 }) {
-  const [rowsByCa, setRowsByCa] = useState<Record<string, EditableRow[]>>({ A: [], B: [], C: [] })
+  const [rowsByCa, setRowsByCa] = useState<Record<string, EditableRow[]>>({})
+  const [units, setUnits] = useState<Pick<AttendanceUnit, "code" | "ten" | "loai" | "is_active">[]>(FALLBACK_UNITS)
   const [loading, setLoading] = useState(true)
   const [savingRowId, setSavingRowId] = useState<string | null>(null)
   const [deletingRowId, setDeletingRowId] = useState<string | null>(null)
@@ -73,7 +75,9 @@ export function ShiftAssignmentsTab({
         .eq("factory_id", fid)
         .order("created_at", { ascending: true })
       if (err) { setError(err.message); return }
-      const byCa: Record<string, EditableRow[]> = { A: [], B: [], C: [] }
+      const { data: unitRows, error: ue } = await supabase.from("attendance_units").select(UNIT_SELECT).eq("factory_id", fid).order("sort_order")
+      if (!ue && unitRows && unitRows.length > 0) setUnits(unitRows as AttendanceUnit[])
+      const byCa: Record<string, EditableRow[]> = {}
       for (const row of (data || []) as ShiftAssignmentRow[]) {
         if (!byCa[row.ca]) byCa[row.ca] = []
         byCa[row.ca].push(row)
@@ -173,11 +177,11 @@ export function ShiftAssignmentsTab({
   // dropdown, không chặn cứng (vẫn có thể gán trùng nếu người dùng cố tình chọn tay).
   const usedUserIdsByCa = useMemo(() => {
     const map: Record<string, Set<string>> = {}
-    for (const ca of CA_LIST) {
+    for (const { code: ca } of units) {
       map[ca] = new Set((rowsByCa[ca] || []).map((r) => r.assigned_user_id).filter((v): v is string => !!v))
     }
     return map
-  }, [rowsByCa])
+  }, [rowsByCa, units])
 
   if (loading) {
     return <div className="p-8 text-center text-slate-400 text-sm">Đang tải...</div>
@@ -186,7 +190,7 @@ export function ShiftAssignmentsTab({
   return (
     <div>
       <p className="mb-4 text-xs text-slate-500">
-        Gán sẵn (nhiều) người luôn trực từng ca để trang quét QR xác nhận sản xuất tự động gợi ý đúng Ca sản xuất theo tài khoản đang đăng nhập.
+        Gán sẵn (nhiều) người phụ trách từng Ca/Tổ: người được gán mới mở được màn điểm danh của Ca/Tổ đó (trừ người có quyền chấm công toàn nhà máy). Với Ca A/B/C, trang quét QR xác nhận sản xuất còn tự gợi ý đúng Ca theo tài khoản đang đăng nhập.
         Nếu không tìm thấy tài khoản, có thể chỉ ghi tên hiển thị (không bắt buộc chọn tài khoản).
       </p>
 
@@ -195,12 +199,13 @@ export function ShiftAssignmentsTab({
       )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {CA_LIST.map((ca) => {
+        {units.filter((u) => u.is_active || (rowsByCa[u.code] || []).length > 0).map((u) => {
+          const ca = u.code
           const rows = rowsByCa[ca] || []
           return (
             <div key={ca} className="rounded-xl border border-slate-200 p-4">
               <div className="mb-3 flex items-center justify-between">
-                <span className="rounded-lg bg-blue-100 px-2.5 py-1 text-sm font-extrabold text-blue-700">Ca {ca}</span>
+                <span className="rounded-lg bg-blue-100 px-2.5 py-1 text-sm font-extrabold text-blue-700">{u.ten}</span>
                 {canManage && (
                   <button
                     onClick={() => addRow(ca)}
@@ -269,7 +274,7 @@ export function ShiftAssignmentsTab({
                     {canManage && (
                       confirmDeleteId === row.id ? (
                         <div className="flex items-center gap-2 rounded-lg bg-red-50 px-2 py-1.5 text-xs font-bold text-red-700">
-                          <span className="flex-1">Xóa người này khỏi ca?</span>
+                          <span className="flex-1">Xóa người này khỏi ca/tổ?</span>
                           <button
                             onClick={() => void handleDeleteRow(ca, row.id)}
                             disabled={deletingRowId === row.id}

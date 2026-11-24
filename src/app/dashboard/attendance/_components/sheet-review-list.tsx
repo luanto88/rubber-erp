@@ -10,7 +10,7 @@ import { getErrorMessage } from "@/lib/error-message"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
 import { ATTENDANCE_DAY_CHUYEN } from "@/lib/attendance/types"
-import { SECTION_SELECT, sectionLabel, type AttendanceSection } from "@/lib/attendance/shift"
+import { SECTION_SELECT, UNIT_SELECT, sectionLabel, type AttendanceSection, type AttendanceUnit } from "@/lib/attendance/shift"
 import { FilterBar } from "@/app/dashboard/_components/filter-bar"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
@@ -41,6 +41,7 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
   const [sections, setSections] = useState<AttendanceSection[]>([])
   const [counts, setCounts] = useState<LineCount[]>([])
   const [names, setNames] = useState<Map<string, string>>(new Map())
+  const [units, setUnits] = useState<Map<string, AttendanceUnit>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -81,6 +82,11 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
         if (e) throw e
         for (const r of data || []) nm.set(r.id as string, r.ten as string)
       }
+      const { data: unitRows, error: ue } = await supabase.from("attendance_units").select(UNIT_SELECT).eq("factory_id", factoryId)
+      if (ue) throw ue
+      const unitMap = new Map(((unitRows || []) as AttendanceUnit[]).map((u) => [u.code, u]))
+      setUnits(unitMap)
+      secs.sort((a, b) => (unitMap.get(a.ca || "")?.sort_order ?? 9999) - (unitMap.get(b.ca || "")?.sort_order ?? 9999))
       setSheets(sh)
       setSections(secs)
       setCounts(lc)
@@ -240,7 +246,7 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
                             const c = countBySection.get(x.id) || { co: 0, vang: 0, thay: 0 }
                             return (
                               <tr key={x.id}>
-                                <td className="font-semibold">{sectionLabel(x.loai, x.ca, s.day_chuyen)}</td>
+                                <td className="font-semibold">{sectionLabel(x.loai, x.ca, s.day_chuyen, units)}</td>
                                 <td>{x.truc_ca_staff_id ? names.get(x.truc_ca_staff_id) || "—" : "—"}</td>
                                 <td>
                                   <StatusBadge domain="attendance_sheet" status={x.trang_thai} size="xs" />

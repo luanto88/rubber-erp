@@ -176,7 +176,11 @@ export async function resolveShiftReport(factoryId: string, ngay: string): Promi
     }
   }
 
-  const live = await buildLiveShift(factoryId, ngay);
+  // Khóa đủ ca + bảng bản cứng đã có ⇒ đây là lần dựng BẢN CỨNG ⇒ có dấu "Đã duyệt" (người khóa cuối).
+  const willSnapshot = !!lockState?.fullyLocked && !lockState.unavailable;
+  const approval =
+    willSnapshot && lockState?.lastLockAt ? { ten: lockState.lastLockName || "—", luc: lockState.lastLockAt } : null;
+  const live = await buildLiveShift(factoryId, ngay, approval);
   if (!live) return null;
   if (!lockState?.fullyLocked) return live;
   if (lockState.unavailable) {
@@ -195,10 +199,14 @@ export async function shiftBundleBytes(bundle: ShiftReportBundle): Promise<Uint8
   return new Uint8Array(await pdfSourceToBlob(bundle.doc).arrayBuffer());
 }
 
-async function buildLiveShift(factoryId: string, ngay: string): Promise<ShiftReportBundle | null> {
+async function buildLiveShift(
+  factoryId: string,
+  ngay: string,
+  approval?: { ten: string; luc: string } | null,
+): Promise<ShiftReportBundle | null> {
   const shift = await loadShiftReport(factoryId, ngay);
   if (shift.sections.length === 0) return null;
-  const doc = await buildShiftReportPdf(shift);
+  const doc = await buildShiftReportPdf(shift, approval);
   return { doc, fileName: buildShiftReportFileName(shift) };
 }
 

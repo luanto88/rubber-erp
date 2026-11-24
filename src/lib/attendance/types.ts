@@ -28,8 +28,11 @@ export const LOAI_NHAN_SU_LABEL: Record<LoaiNhanSu, string> = {
 export type AttendanceJobType = {
   id: string
   factory_id: string
-  day_chuyen: AttendanceDayChuyen
+  /** NULL = việc của tổ độc lập (không theo dây chuyền). Migration 20261211. */
+  day_chuyen: AttendanceDayChuyen | null
   to_nhom: AttendanceToNhom
+  /** Mã Ca/Tổ của việc của TỔ; NULL = việc ca sản xuất theo dây chuyền. Migration 20261211. */
+  unit_code?: string | null
   ten: string
   ten_khmer: string | null
   so_nguoi_goi_y: number

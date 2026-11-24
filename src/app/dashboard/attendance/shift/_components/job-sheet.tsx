@@ -259,7 +259,7 @@ export function JobSheet({
                       <button key={s.id} type="button" onClick={() => pickReplacement(s)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50">
                         <GenderIcon gioiTinh={s.gioi_tinh} size={22} />
                         <span className="flex-1 truncate font-semibold text-slate-700">{s.ten}</span>
-                        {s.ca_mac_dinh ? <span className="text-xs text-slate-400">Ca {s.ca_mac_dinh}</span> : null}
+                        {s.ca_mac_dinh ? <span className="text-xs text-slate-400">{s.ca_mac_dinh}</span> : null}
                       </button>
                     ))}
                   </div>

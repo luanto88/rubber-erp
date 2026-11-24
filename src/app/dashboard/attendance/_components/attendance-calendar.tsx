@@ -469,11 +469,11 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
           </select>
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs font-bold text-slate-600">Ca</span>
+          <span className="mb-1 block text-xs font-bold text-slate-600">Ca/Tổ</span>
           <select value={caFilter} onChange={(e) => setCaFilter(e.target.value)} className={fieldCls}>
             <option value="">Tất cả</option>
-            {ATTENDANCE_CA.map((c) => (
-              <option key={c} value={c}>Ca {c}</option>
+            {[...new Set<string>([...ATTENDANCE_CA, ...staff.map((s) => s.ca_mac_dinh || "").filter(Boolean)])].map((c) => (
+              <option key={c} value={c}>{(ATTENDANCE_CA as readonly string[]).includes(c) ? `Ca ${c}` : c}</option>
             ))}
           </select>
         </label>
@@ -611,7 +611,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                         </button>
                         <div className="flex flex-wrap gap-1 text-[10px] text-slate-400">
                           {s.loai_nhan_su === "cong_nhan" ? <span>Công nhân</span> : <span>Nhân viên</span>}
-                          {s.ca_mac_dinh ? <span>· Ca {s.ca_mac_dinh}</span> : null}
+                          {s.ca_mac_dinh ? <span>· {(ATTENDANCE_CA as readonly string[]).includes(s.ca_mac_dinh) ? `Ca ${s.ca_mac_dinh}` : s.ca_mac_dinh}</span> : null}
                           {partial ? <span className="font-bold text-amber-600">· Tháng làm không trọn</span> : null}
                         </div>
                       </td>

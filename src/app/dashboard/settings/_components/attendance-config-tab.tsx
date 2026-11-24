@@ -10,22 +10,34 @@ import { supabase } from "@/lib/supabase"
 import { getErrorMessage } from "@/lib/error-message"
 import {
   ATTENDANCE_DAY_CHUYEN,
-  ATTENDANCE_TO_NHOM,
-  toNhomLabel,
   type AttendanceAbsenceReason,
   type AttendanceDayChuyen,
   type AttendanceJobType,
   type AttendanceToNhom,
 } from "@/lib/attendance/types"
+import { UNIT_SELECT, type AttendanceUnit } from "@/lib/attendance/shift"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { ModalShell } from "../../_components/modal-shell"
 import { AttendanceQrPointsCard } from "./attendance-qr-points-card"
+import { AttendanceUnitsCard } from "./attendance-units-card"
 
-type SubTab = "jobs" | "reasons" | "qr"
+type SubTab = "units" | "jobs" | "reasons" | "qr"
+
+// Việc thuộc đâu (migration 20261211): "ca:<dây chuyền>" = việc ca sản xuất của dây chuyền (dùng cho mọi Ca);
+// "u:<mã tổ>" = việc của tổ; "khac" = dữ liệu cũ chưa xếp Ca/Tổ.
+type JobScope = string
+
+function scopeOfJob(j: Pick<AttendanceJobType, "unit_code" | "to_nhom" | "day_chuyen">): JobScope {
+  if (j.unit_code) return `u:${j.unit_code}`
+  if (j.to_nhom === "ca_san_xuat" && j.day_chuyen) return `ca:${j.day_chuyen}`
+  return "khac"
+}
 
 type JobForm = {
   id: string | null
-  day_chuyen: AttendanceDayChuyen
+  scope: JobScope
+  /** Giữ khi sửa dòng cũ "khac" (chưa xếp Ca/Tổ). */
+  day_chuyen: AttendanceDayChuyen | null
   to_nhom: AttendanceToNhom
   ten: string
   ten_khmer: string
@@ -55,7 +67,8 @@ function tableMissingMessage(message: string) {
 
 export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: { factoryId: string | null; canManage: boolean; isAdmin?: boolean }) {
   const [subTab, setSubTab] = useState<SubTab>("jobs")
-  const [dayChuyen, setDayChuyen] = useState<AttendanceDayChuyen>("Mủ tạp")
+  const [scope, setScope] = useState<JobScope>("ca:Mủ tạp")
+  const [units, setUnits] = useState<AttendanceUnit[]>([])
   const [jobs, setJobs] = useState<AttendanceJobType[]>([])
   const [reasons, setReasons] = useState<AttendanceAbsenceReason[]>([])
   const [vehicleTypes, setVehicleTypes] = useState<string[]>([])
@@ -71,7 +84,7 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
   const load = useCallback(async (fid: string) => {
     setLoading(true)
     try {
-      const [jobRes, reasonRes, vehRes] = await Promise.all([
+      const [jobRes, reasonRes, vehRes, unitRes] = await Promise.all([
         supabase
           .from("attendance_job_types")
           .select("*")
@@ -85,7 +98,9 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
           .order("sort_order")
           .order("ten"),
         supabase.from("dispatch_vehicles").select("vehicle_type").eq("factory_id", fid),
+        supabase.from("attendance_units").select(UNIT_SELECT).eq("factory_id", fid).order("sort_order"),
       ])
+      if (!unitRes.error) setUnits((unitRes.data || []) as AttendanceUnit[])
       const err = jobRes.error || reasonRes.error
       if (err) {
         setError(tableMissingMessage(err.message))
@@ -113,17 +128,31 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
 
   const hasAnDiemDanhCol = jobs.length === 0 || "an_diem_danh" in jobs[0]
 
-  const jobsByGroup = useMemo(() => {
-    const shown = jobs.filter((j) => j.day_chuyen === dayChuyen)
-    return ATTENDANCE_TO_NHOM.map((to) => ({ to, rows: shown.filter((j) => j.to_nhom === to) })).filter((g) => g.rows.length > 0)
-  }, [jobs, dayChuyen])
+  // Lựa chọn "Thuộc": việc ca SX theo từng dây chuyền + mỗi Tổ (+ "Chưa xếp" khi còn dữ liệu cũ).
+  const scopeOptions = useMemo(() => {
+    const opts: { key: JobScope; label: string }[] = ATTENDANCE_DAY_CHUYEN.map((dc) => ({
+      key: `ca:${dc}`,
+      label: `Ca sản xuất · ${dc}`,
+    }))
+    for (const u of units) {
+      if (u.loai !== "to") continue
+      if (!u.is_active && !jobs.some((j) => j.unit_code === u.code)) continue
+      opts.push({ key: `u:${u.code}`, label: `${u.ten}${u.day_chuyen ? ` · ${u.day_chuyen}` : " · độc lập"}` })
+    }
+    if (jobs.some((j) => scopeOfJob(j) === "khac")) opts.push({ key: "khac", label: "Chưa xếp Ca/Tổ (dữ liệu cũ)" })
+    return opts
+  }, [units, jobs])
+  const scopeLabel = (k: JobScope) => scopeOptions.find((o) => o.key === k)?.label || k
+
+  const shownJobs = useMemo(() => jobs.filter((j) => scopeOfJob(j) === scope), [jobs, scope])
 
   const openNewJob = () => {
     setFormError(null)
-    const maxOrder = jobs.filter((j) => j.day_chuyen === dayChuyen).reduce((m, j) => Math.max(m, j.sort_order || 0), 0)
+    const maxOrder = shownJobs.reduce((m, j) => Math.max(m, j.sort_order || 0), 0)
     setJobForm({
       id: null,
-      day_chuyen: dayChuyen,
+      scope: scope === "khac" ? "ca:Mủ tạp" : scope,
+      day_chuyen: null,
       to_nhom: "ca_san_xuat",
       ten: "",
       ten_khmer: "",
@@ -147,13 +176,23 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
       setFormError("Số người gợi ý phải là số nguyên từ 0 đến 50.")
       return
     }
+    // Thuộc ⇒ cột lưu: ca ⇒ (dây chuyền, ca_san_xuat, không mã tổ); tổ ⇒ (mã tổ, dây chuyền của tổ hoặc NULL).
+    let place: { unit_code: string | null; day_chuyen: AttendanceDayChuyen | null; to_nhom: AttendanceToNhom }
+    if (jobForm.scope.startsWith("ca:")) {
+      place = { unit_code: null, day_chuyen: jobForm.scope.slice(3) as AttendanceDayChuyen, to_nhom: "ca_san_xuat" }
+    } else if (jobForm.scope.startsWith("u:")) {
+      const u = units.find((x) => x.code === jobForm.scope.slice(2))
+      const toNhom = (u?.to_nhom && u.to_nhom !== "ca_san_xuat" ? u.to_nhom : "co_dien") as AttendanceToNhom
+      place = { unit_code: u?.code || jobForm.scope.slice(2), day_chuyen: (u?.day_chuyen as AttendanceDayChuyen | null) || null, to_nhom: toNhom }
+    } else {
+      place = { unit_code: null, day_chuyen: jobForm.day_chuyen, to_nhom: jobForm.to_nhom }
+    }
     setSaving(true)
     setFormError(null)
     try {
       const payload = {
         factory_id: factoryId,
-        day_chuyen: jobForm.day_chuyen,
-        to_nhom: jobForm.to_nhom,
+        ...place,
         ten,
         ten_khmer: jobForm.ten_khmer.trim() || null,
         so_nguoi_goi_y: soNguoi,
@@ -169,7 +208,7 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
       if (err) {
         setFormError(
           err.code === "23505"
-            ? `Công việc "${ten}" đã có trong ${toNhomLabel(jobForm.to_nhom, jobForm.day_chuyen)} (${jobForm.day_chuyen}).`
+            ? `Công việc "${ten}" đã có trong ${scopeLabel(jobForm.scope)}.`
             : getErrorMessage(err, "Không lưu được, thử lại."),
         )
         return
@@ -249,6 +288,16 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2 border-b border-slate-100">
+        <button
+          type="button"
+          onClick={() => setSubTab("units")}
+          className={
+            "rounded-t-xl border-b-2 px-4 py-2 text-sm font-bold transition-all " +
+            (subTab === "units" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-transparent text-slate-500 hover:bg-slate-50")
+          }
+        >
+          Ca / Tổ
+        </button>
         {subTabBtn("jobs", "Công việc", jobs.length)}
         {subTabBtn("reasons", "Lý do vắng", reasons.length)}
         <button
@@ -265,20 +314,20 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
 
       {error ? <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{error}</div> : null}
 
-      {subTab === "qr" ? <AttendanceQrPointsCard factoryId={factoryId} canManage={canManage} isAdmin={isAdmin} /> : subTab === "jobs" ? (
+      {subTab === "units" ? <AttendanceUnitsCard factoryId={factoryId} canManage={canManage} /> : subTab === "qr" ? <AttendanceQrPointsCard factoryId={factoryId} canManage={canManage} isAdmin={isAdmin} /> : subTab === "jobs" ? (
         <div className="space-y-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2">
-              {ATTENDANCE_DAY_CHUYEN.map((dc) => (
+              {scopeOptions.map((o) => (
                 <button
-                  key={dc}
+                  key={o.key}
                   type="button"
-                  onClick={() => setDayChuyen(dc)}
+                  onClick={() => setScope(o.key)}
                   className={`rounded-full border px-3 py-1 text-xs font-bold ${
-                    dayChuyen === dc ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-500"
+                    scope === o.key ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-500"
                   }`}
                 >
-                  {dc} {dc === "Mủ tạp" ? "(F01)" : "(F02)"}
+                  {o.label} · {jobs.filter((j) => scopeOfJob(j) === o.key).length}
                 </button>
               ))}
             </div>
@@ -293,7 +342,8 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
             ) : null}
           </div>
           <p className="text-xs leading-5 text-slate-500">
-            Công việc hiện ở form điểm danh của trực ca theo tổ, đúng thứ tự dưới đây. <b>Số người gợi ý</b> = số dòng
+            Việc của <b>Ca sản xuất</b> theo dây chuyền (dùng cho mọi Ca A/B/C); việc của <b>Tổ</b> gắn theo tổ (tổ độc lập
+            không theo dây chuyền). Màn điểm danh chỉ hiện việc của Ca/Tổ đang điểm danh, đúng thứ tự dưới đây. <b>Số người gợi ý</b> = số dòng
             hiện sẵn như mẫu giấy (vd Ra lò 4 người). <b>Loại xe</b>: công việc lái xe thì form có thêm ô chọn xe, mặc
             định xe mà người đó là tài xế chính/phụ. Tên Khmer dùng khi trực ca chuyển sang tiếng Khmer và in phiếu
             F01/F02 song ngữ. Không dùng nữa thì <b>tắt</b> thay vì xoá.
@@ -317,18 +367,13 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-slate-400">Đang tải...</td>
                   </tr>
-                ) : jobsByGroup.length === 0 ? (
+                ) : shownJobs.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400">Chưa có công việc nào cho {dayChuyen}</td>
+                    <td colSpan={7} className="py-8 text-center text-slate-400">Chưa có công việc nào cho {scopeLabel(scope)}</td>
                   </tr>
                 ) : (
-                  jobsByGroup.map((g) => [
-                    <tr key={`h-${g.to}`} className="bg-slate-50">
-                      <td colSpan={7} className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
-                        {toNhomLabel(g.to, dayChuyen)} · {g.rows.length}
-                      </td>
-                    </tr>,
-                    ...g.rows.map((r) => (
+                  [
+                    ...shownJobs.map((r) => (
                       <tr key={r.id} className={r.is_active ? "" : "opacity-50"}>
                         <td className="font-semibold text-slate-700">{r.ten}</td>
                         <td className="text-slate-600">{r.ten_khmer || <span className="text-amber-600">Chưa có</span>}</td>
@@ -349,6 +394,7 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
                                   setFormError(null)
                                   setJobForm({
                                     id: r.id,
+                                    scope: scopeOfJob(r),
                                     day_chuyen: r.day_chuyen,
                                     to_nhom: r.to_nhom,
                                     ten: r.ten,
@@ -372,7 +418,7 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
                         ) : null}
                       </tr>
                     )),
-                  ])
+                  ]
                 )}
               </tbody>
             </table>
@@ -484,31 +530,16 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
         >
           <div className="space-y-4">
             {formError ? <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{formError}</div> : null}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className={labelCls}>Dây chuyền *</label>
-                <select
-                  value={jobForm.day_chuyen}
-                  onChange={(e) => setJobForm({ ...jobForm, day_chuyen: e.target.value as AttendanceDayChuyen })}
-                  className={inputCls}
-                >
-                  {ATTENDANCE_DAY_CHUYEN.map((dc) => (
-                    <option key={dc} value={dc}>{dc}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Tổ *</label>
-                <select
-                  value={jobForm.to_nhom}
-                  onChange={(e) => setJobForm({ ...jobForm, to_nhom: e.target.value as AttendanceToNhom })}
-                  className={inputCls}
-                >
-                  {ATTENDANCE_TO_NHOM.map((to) => (
-                    <option key={to} value={to}>{toNhomLabel(to, jobForm.day_chuyen)}</option>
-                  ))}
-                </select>
-              </div>
+            <div>
+              <label className={labelCls}>Thuộc *</label>
+              <select value={jobForm.scope} onChange={(e) => setJobForm({ ...jobForm, scope: e.target.value })} className={inputCls}>
+                {scopeOptions.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-xs text-slate-500">
+                Thêm tổ mới ở Cài đặt → Chấm công → Ca / Tổ.
+              </span>
             </div>
             <div>
               <label className={labelCls}>Tên công việc (tiếng Việt) *</label>

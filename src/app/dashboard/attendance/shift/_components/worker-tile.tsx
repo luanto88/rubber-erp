@@ -16,6 +16,7 @@ export function WorkerTile({
   replacementName,
   vangLabel,
   chuaGiaoLabel,
+  roleLabel,
   disabled,
   onClick,
 }: {
@@ -28,6 +29,8 @@ export function WorkerTile({
   replacementName: string
   vangLabel: string
   chuaGiaoLabel: string
+  /** Vị trí phụ trách đang giữ (Ca trưởng, Tổ phó…) — "" nếu không. */
+  roleLabel?: string
   disabled?: boolean
   onClick: () => void
 }) {
@@ -57,11 +60,16 @@ export function WorkerTile({
         ) : null}
       </span>
       <span className={`line-clamp-2 w-full break-words text-[12px] font-bold leading-tight ${absent ? "text-slate-400" : "text-slate-800"}`}>{ten}</span>
+      {roleLabel ? (
+        <span className="max-w-full truncate rounded-full bg-violet-600 px-1.5 text-[10px] font-semibold leading-4 text-white">{roleLabel}</span>
+      ) : null}
       {state === "co_mat" ? (
-        <span className="max-w-full truncate rounded-full bg-emerald-600 px-1.5 text-[10px] font-semibold leading-4 text-white">
-          {jobLabel}
-          {extraJobs > 0 ? ` +${extraJobs}` : ""}
-        </span>
+        jobLabel ? (
+          <span className="max-w-full truncate rounded-full bg-emerald-600 px-1.5 text-[10px] font-semibold leading-4 text-white">
+            {jobLabel}
+            {extraJobs > 0 ? ` +${extraJobs}` : ""}
+          </span>
+        ) : null
       ) : state === "vang_co_thay" ? (
         <span className="max-w-full truncate text-[10px] font-semibold leading-4 text-rose-600">→ {replacementName}</span>
       ) : state === "vang" ? (

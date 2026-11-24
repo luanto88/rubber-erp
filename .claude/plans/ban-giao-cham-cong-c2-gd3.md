@@ -18,6 +18,13 @@ Mẫu giấy: `cung_cap_dl/NMCB-QT01-F01_new.pdf`, `cung_cap_dl/NMCB-QT01-F02 _n
   xem QR có "Tải PNG" (dùng lại `OrderQrDownload`), admin có nút xoá (hard delete — không bảng nào tham chiếu điểm QR).
   (Header + xoá/PNG mới code, người dùng chưa test lại — kiểm nhanh đầu phiên.)
 
+## Tiến độ 2026-11-24
+- Mục 1–5 ĐÃ CODE (tsc + eslint sạch, CHƯA commit). 4 câu mục 1b đã chốt: (a) giữ vị trí = có mặt A; (b) người gốc bị thay ⇒
+  tự vắng, chọn phép lúc gửi; (c) cả 3 tổ; (d) Ca trưởng = Tổ trưởng ca. Chi tiết: rule 31 mục "GĐ3".
+- Migration mới `20261208_attendance_section_positions.sql` — CHƯA chạy (bắt buộc trước khi mở màn chấm công).
+- Giờ ca trên F01/F02 = giờ mở phiếu ca (`bat_dau_luc`) – giờ bấm "Kết thúc ca" (`ket_thuc_luc`) — người dùng xác nhận khi test.
+- Chưa kiểm được bằng trình duyệt thật (vẽ Canvas chỉ chạy trên trình duyệt).
+
 ## Người dùng đã chốt (KHÔNG hỏi lại)
 1. Thành viên nhóm có thẻ riêng không hiện ở thẻ Ca.
 2. Admin mở lại phiếu ca đã duyệt — CÓ (RPC đã có, cần UI).

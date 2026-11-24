@@ -51,6 +51,7 @@ import {
   StaffAttendanceFields,
   STAFF_ATTENDANCE_COLUMNS,
   emptyStaffAttendanceValue,
+  findRoleConflict,
   staffAttendanceFromRow,
   staffAttendancePayload,
   validateStaffAttendance,
@@ -1531,6 +1532,12 @@ export default function SettingsPage() {
     if (attendanceError) { setMaintError(attendanceError); return }
     setMaintSaving(true); setMaintError("")
     try {
+        // Mỗi vị trí tổ trưởng / tổ phó (cùng tổ, ca, dây chuyền) chỉ 1 người.
+        const roleHolder = await findRoleConflict(factoryId, maintEditId, staffForm.attendance)
+        if (roleHolder) {
+          setMaintError(`${roleHolder} đang giữ vị trí ${staffForm.attendance.to_vai_tro === "to_truong" ? "trưởng" : "phó"} của Ca/Tổ này (cùng dây chuyền). Bỏ vai trò của người đó trước, hoặc chọn vị trí khác.`)
+          return
+        }
         const nextProfileId = staffForm.profile_id || null
         if (nextProfileId) {
           const profileAvailability = await ensureMaintenanceProfileAvailable(nextProfileId, maintEditId)
@@ -4041,7 +4048,7 @@ export default function SettingsPage() {
                             <div className="mt-0.5 flex flex-wrap gap-1">
                               {s.loai_nhan_su === "cong_nhan" ? (
                                 <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
-                                  Công nhân{s.ca_mac_dinh ? ` · Ca ${s.ca_mac_dinh}` : ""}{s.day_chuyen_mac_dinh ? ` · ${s.day_chuyen_mac_dinh}` : ""}
+                                  Công nhân{s.ca_mac_dinh ? ` · ${s.ca_mac_dinh}` : ""}{s.day_chuyen_mac_dinh ? ` · ${s.day_chuyen_mac_dinh}` : ""}
                                 </span>
                               ) : null}
                               {s.cho_xac_nhan ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">Chờ xác nhận</span> : null}

@@ -9,22 +9,12 @@ import { Pencil, Plus, Printer, QrCode, RefreshCw, Trash2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getErrorMessage } from "@/lib/error-message"
 import { ATTENDANCE_DAY_CHUYEN } from "@/lib/attendance/types"
-import { buildAttendanceQrUrl, type AttendanceQrPoint } from "@/lib/attendance/shift"
+import { UNIT_SELECT, buildAttendanceQrUrl, type AttendanceQrPoint, type AttendanceUnit } from "@/lib/attendance/shift"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { ModalShell } from "../../_components/modal-shell"
 import { OrderQrDownload } from "../../export/_components/order-qr-download"
 
-type GroupRow = { id: string; name: string; code: string | null; hien_diem_danh: boolean; is_active: boolean; diem_danh_to_nhom?: string | null }
-
-// Loại việc hiện ở thẻ nhóm (personnel_groups.diem_danh_to_nhom, migration 20261207).
-const TAB_JOB_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "Mọi tổ (trừ ca sản xuất)" },
-  { value: "tiep_nhan", label: "Tổ tiếp nhận" },
-  { value: "co_dien", label: "Cơ điện – nâng hàng" },
-  { value: "ca_san_xuat", label: "Ca sản xuất" },
-]
-
-type Form = { id: string | null; ten_diem: string; day_chuyen_mac_dinh: string; sort_order: string; is_active: boolean }
+type Form = { id: string | null; ten_diem: string; day_chuyen_mac_dinh: string; unit_code: string; sort_order: string; is_active: boolean }
 
 const inputCls = "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
 
@@ -47,15 +37,25 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
   const [regenAck, setRegenAck] = useState(false)
   const [delRow, setDelRow] = useState<AttendanceQrPoint | null>(null)
   const [printing, setPrinting] = useState(false)
-  const [groups, setGroups] = useState<GroupRow[] | null>(null)
-  const [groupError, setGroupError] = useState<string | null>(null)
+  const [units, setUnits] = useState<AttendanceUnit[]>([])
+  const unitName = (code: string) => units.find((u) => u.code === code)?.ten || code
+
+  useEffect(() => {
+    if (!factoryId) return
+    void supabase
+      .from("attendance_units")
+      .select(UNIT_SELECT)
+      .eq("factory_id", factoryId)
+      .order("sort_order")
+      .then(({ data }) => setUnits((data || []) as AttendanceUnit[]))
+  }, [factoryId])
 
   const load = useCallback(async (fid: string) => {
     setLoading(true)
     try {
       const { data, error: e } = await supabase
         .from("attendance_qr_points")
-        .select("id, factory_id, token, ten_diem, day_chuyen_mac_dinh, is_active, sort_order")
+        .select("*")
         .eq("factory_id", fid)
         .order("sort_order")
         .order("ten_diem")
@@ -70,51 +70,11 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
     }
   }, [])
 
-  const loadGroups = useCallback(async (fid: string) => {
-    const { data, error: e } = await supabase
-      .from("personnel_groups")
-      .select("*")
-      .eq("factory_id", fid)
-      .order("sort_order")
-      .order("name")
-    if (e) {
-      setGroupError(/hien_diem_danh/.test(e.message) ? "Chưa có cột hien_diem_danh — chạy migration 20261206_attendance_c2b_grid.sql." : e.message)
-      setGroups([])
-      return
-    }
-    setGroupError(null)
-    setGroups((data || []) as GroupRow[])
-  }, [])
-
   useEffect(() => {
     if (!factoryId) return
     void load(factoryId)
-    void loadGroups(factoryId)
-  }, [factoryId, load, loadGroups])
+  }, [factoryId, load])
 
-  const toggleGroup = async (g: GroupRow) => {
-    if (!factoryId) return
-    const { error: e } = await supabase.from("personnel_groups").update({ hien_diem_danh: !g.hien_diem_danh }).eq("id", g.id).eq("factory_id", factoryId)
-    if (e) {
-      setGroupError(getErrorMessage(e, "Không lưu được."))
-      return
-    }
-    setGroups((prev) => (prev || []).map((x) => (x.id === g.id ? { ...x, hien_diem_danh: !x.hien_diem_danh } : x)))
-  }
-
-  const setGroupJobs = async (g: GroupRow, value: string) => {
-    if (!factoryId) return
-    const { error: e } = await supabase
-      .from("personnel_groups")
-      .update({ diem_danh_to_nhom: value || null })
-      .eq("id", g.id)
-      .eq("factory_id", factoryId)
-    if (e) {
-      setGroupError(/diem_danh_to_nhom/.test(e.message) ? "Chưa có cột diem_danh_to_nhom — chạy migration 20261207_attendance_tabs_snapshots.sql." : getErrorMessage(e, "Không lưu được."))
-      return
-    }
-    setGroups((prev) => (prev || []).map((x) => (x.id === g.id ? { ...x, diem_danh_to_nhom: value || null } : x)))
-  }
 
   const save = async () => {
     if (!form || !factoryId) return
@@ -128,6 +88,7 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
         factory_id: factoryId,
         ten_diem: form.ten_diem.trim(),
         day_chuyen_mac_dinh: form.day_chuyen_mac_dinh || null,
+        unit_code: form.unit_code || null,
         sort_order: Number(form.sort_order) || 0,
         is_active: form.is_active,
       }
@@ -212,7 +173,7 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
           {canManage ? (
             <button
               type="button"
-              onClick={() => setForm({ id: null, ten_diem: "", day_chuyen_mac_dinh: "", sort_order: String(rows.length + 1), is_active: true })}
+              onClick={() => setForm({ id: null, ten_diem: "", day_chuyen_mac_dinh: "", unit_code: "", sort_order: String(rows.length + 1), is_active: true })}
               className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
             >
               <Plus size={15} /> Thêm điểm QR
@@ -227,6 +188,7 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
             <tr>
               <th>Tên điểm</th>
               <th>Dây chuyền mặc định</th>
+              <th>Ca/Tổ mặc định</th>
               <th className="text-right">Thứ tự</th>
               <th>Trạng thái</th>
               <th className="text-right">Thao tác</th>
@@ -235,17 +197,18 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5} className="py-6 text-center text-slate-400">Đang tải...</td>
+                <td colSpan={6} className="py-6 text-center text-slate-400">Đang tải...</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-6 text-center text-slate-400">Chưa có điểm QR nào.</td>
+                <td colSpan={6} className="py-6 text-center text-slate-400">Chưa có điểm QR nào.</td>
               </tr>
             ) : (
               rows.map((r) => (
                 <tr key={r.id}>
                   <td className="font-semibold">{r.ten_diem}</td>
                   <td>{r.day_chuyen_mac_dinh || "— (trực ca chọn)"}</td>
+                  <td>{r.unit_code ? unitName(r.unit_code) : "— (theo phân công)"}</td>
                   <td className="text-right">{r.sort_order}</td>
                   <td>{r.is_active ? <span className="text-emerald-700">Đang dùng</span> : <span className="text-slate-400">Ngừng</span>}</td>
                   <td className="text-right">
@@ -259,7 +222,7 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
                             type="button"
                             title="Sửa"
                             onClick={() =>
-                              setForm({ id: r.id, ten_diem: r.ten_diem, day_chuyen_mac_dinh: r.day_chuyen_mac_dinh || "", sort_order: String(r.sort_order), is_active: r.is_active })
+                              setForm({ id: r.id, ten_diem: r.ten_diem, day_chuyen_mac_dinh: r.day_chuyen_mac_dinh || "", unit_code: r.unit_code || "", sort_order: String(r.sort_order), is_active: r.is_active })
                             }
                             className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100"
                           >
@@ -284,52 +247,6 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
         </table>
       </ResponsiveTableWrapper>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <div className="text-sm font-bold text-slate-800">Thẻ nhóm ở màn điểm danh</div>
-        <p className="mt-1 text-xs leading-5 text-slate-500">
-          Ngoài thẻ công nhân của ca, màn điểm danh hiện thêm 1 thẻ cho mỗi nhóm nhân sự được tick (vd Cơ điện, Bảo trì) để trực ca
-          giao việc cơ điện – nâng hàng. Thành viên nhóm quản lý ở Cài đặt → Nhân sự. Thành viên nhóm có thẻ riêng KHÔNG hiện ở
-          thẻ Ca. Mục &ldquo;Loại việc&rdquo; quyết định các việc trực ca chọn được trong thẻ đó.
-        </p>
-        {groupError ? <div className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{groupError}</div> : null}
-        <div className="mt-2 flex flex-wrap gap-2">
-          {(groups || []).filter((g) => g.is_active).map((g) => (
-            <label
-              key={g.id}
-              className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-semibold ${g.hien_diem_danh ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600"}`}
-            >
-              <input type="checkbox" checked={g.hien_diem_danh} disabled={!canManage} onChange={() => void toggleGroup(g)} />
-              {g.name}
-              {g.code ? <span className="text-xs font-normal text-slate-400">({g.code})</span> : null}
-            </label>
-          ))}
-        </div>
-        {(groups || []).some((g) => g.is_active && g.hien_diem_danh) ? (
-          <div className="mt-3 space-y-1.5">
-            <div className="text-xs font-bold text-slate-600">Loại việc của từng thẻ</div>
-            {(groups || [])
-              .filter((g) => g.is_active && g.hien_diem_danh)
-              .map((g) => (
-                <div key={g.id} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                  <span className="text-sm font-semibold text-slate-700 sm:w-48 sm:shrink-0">{g.name}</span>
-                  <select
-                    value={g.diem_danh_to_nhom || ""}
-                    disabled={!canManage}
-                    onChange={(e) => void setGroupJobs(g, e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm sm:w-72"
-                  >
-                    {TAB_JOB_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-          </div>
-        ) : null}
-      </div>
-
       {form ? (
         <ModalShell title={form.id ? "Sửa điểm QR" : "Thêm điểm QR"} onClose={() => setForm(null)} maxWidth="md">
           <div className="space-y-3 p-4">
@@ -347,6 +264,20 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-bold text-slate-600">Ca/Tổ mặc định</span>
+              <select value={form.unit_code} onChange={(e) => setForm({ ...form, unit_code: e.target.value })} className={inputCls}>
+                <option value="">— Theo phân công của người quét —</option>
+                {units
+                  .filter((u) => u.is_active || u.code === form.unit_code)
+                  .map((u) => (
+                    <option key={u.code} value={u.code}>
+                      {u.ten}
+                    </option>
+                  ))}
+              </select>
+              <span className="mt-1 block text-[11px] text-slate-400">Quét QR mở sẵn Ca/Tổ này nếu người quét được phân công (hoặc chấm toàn nhà máy).</span>
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-bold text-slate-600">Thứ tự</span>

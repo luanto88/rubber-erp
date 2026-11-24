@@ -49,6 +49,7 @@ type ExportOrderRow = {
   assignments: ExportOrderPdfAssignment[] | null
   tong_banh: number
   yeu_cau_chi_tieu: ChiTieuReq[] | null
+  nguoi_xuat_hang_ids?: string[] | null
   trang_thai: string | null
   updated_at?: string | null
   customers?: { ma_kh: string | null; ten_kh_en: string | null } | null
@@ -67,6 +68,7 @@ export default function ExportOrderDetailPage() {
 
   const [order, setOrder] = useState<ExportOrderRow | null>(null)
   const [factoryName, setFactoryName] = useState<string | null>(null)
+  const [exportStaffNames, setExportStaffNames] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
@@ -111,6 +113,14 @@ export default function ExportOrderDetailPage() {
         return
       }
       setOrder(data as ExportOrderRow)
+      const xhIds = (data as ExportOrderRow).nguoi_xuat_hang_ids || []
+      if (xhIds.length > 0) {
+        const { data: st } = await supabase.from("maintenance_staff").select("id, ten").eq("factory_id", fid).in("id", xhIds)
+        const byId = new Map(((st || []) as { id: string; ten: string }[]).map((s) => [s.id, s.ten]))
+        setExportStaffNames(xhIds.map((id) => byId.get(id) || "?"))
+      } else {
+        setExportStaffNames([])
+      }
       const { data: fac } = await supabase.from("factories").select("name").eq("id", fid).maybeSingle()
       setFactoryName((fac as { name?: string } | null)?.name ?? null)
     } catch (err) {
@@ -358,6 +368,7 @@ export default function ExportOrderDetailPage() {
                   <MetaRow label="Kèm nắp" value={order.xuat_nap ? "Có" : "Không"} />
                 )}
                 <MetaRow label="Số lô gán" value={`${new Set(assignments.map((a) => a.ma_lo)).size} lô`} />
+                <MetaRow label="Trực xuất hàng" value={exportStaffNames.length ? exportStaffNames.join(", ") : "—"} />
               </MetaList>
             </InspectorCard>
           </>

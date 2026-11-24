@@ -442,6 +442,13 @@ Vi du:
   2026-11-23: GĐ2 màn lưới + sửa sau test (thẻ ↔ loại việc, Tổ tiếp nhận, ẩn Trực xuất hàng, tóm tắt trước khi gửi, chặn người
   chưa phân công ca, Khmer, nam trước nữ sau, header + Tải PNG / xoá điểm QR) — migration 20261207 ĐÃ CHẠY, test PASS, đã commit
   (chưa push). GĐ3 + dấu duyệt / bản cứng F01/F02 + F09 + vị trí Ca trưởng / Tổ trưởng: `.claude/plans/ban-giao-cham-cong-c2-gd3.md`.
+  2026-11-24: GĐ3 mục 1–5 ĐÃ CODE (tsc + eslint sạch, CHƯA commit) — chạy migration `20261208_attendance_section_positions.sql`
+  TRƯỚC khi mở màn chấm công, rồi test tay (rule 31 mục GĐ3).
+  2026-11-24: 20261208 + 20261209 ĐÃ CHẠY, test PASS. Danh mục Ca/Tổ (`attendance_units`, XLNT / CD / TN_MT như Ca A/B/C),
+  trưởng/phó theo Ca/Tổ, mã phiếu TKSXMT/TKSXMN, tab "Phiếu TKSX" ĐÃ CODE (CHƯA commit) — chạy migration
+  `20261210_attendance_units.sql` TRƯỚC khi mở màn chấm công, rồi test tay (rule 31 mục "Ca/Tổ điểm danh").
+  2026-11-24 (sau test): bỏ thẻ nhóm ở màn điểm danh, việc gắn theo Ca/Tổ, thêm Tổ tiếp nhận mủ nước + Đội xe cơ khí —
+  chạy 20261211_attendance_unit_jobs.sql sau 20261210 (rule 31 cuối mục Ca/Tổ).
 
 ## Nhật ký các phiên cũ
 
@@ -449,6 +456,9 @@ Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguy�
 `.claude/history/claude-md-session-log-2026.md` — KHÔNG tự nạp, chỉ tra khi cần biết lý do một quyết định.
 
 ## Prompt mở đầu phiên sau
+
+Đang làm Chấm công (2026-11-24): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau".
+Prompt dưới đây (U11 KPI) để dành khi người dùng nhắc.
 
 ```
 Đọc CLAUDE.md, rule 29 và lộ trình U8–U14 trong .claude/plans/ke-hoach-dong-bo-ui-toan-app.md.
