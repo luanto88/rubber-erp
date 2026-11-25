@@ -454,8 +454,10 @@ Vi du:
   2026-11-25 (chiều): test A–H PASS; thẻ việc hiện tên, Ca/Tổ được phân công ★, tự điền "Trực ca", giờ kết thúc ca = kiện quét
   cuối (`lot_transactions.quet_luc`), duyệt phiếu ca sau khi phê duyệt ca Thành phẩm, ngăn TKSX mã đầy đủ — chạy
   20261213_attendance_shift_end_by_scan.sql, test tay (bàn giao mục 7).
-  2026-11-25 (tối): mục 6–7 test PASS, đã push `fcaa324`. C2b Truy vết (tab "Nhân sự ca" ở chi tiết lô, không migration) ĐÃ
-  CODE, CHƯA commit — test tay bàn giao mục 8; kế tiếp C3.
+  2026-11-25 (tối): mục 6–7 test PASS, đã push `fcaa324`. C2b Truy vết (tab "Nhân sự ca" ở chi tiết lô, không migration)
+  test PASS, commit `2baf33b`. C3 Có mặt tự động (nhân viên): migration 20261214 ĐÃ CHẠY, test 1–7 PASS, sửa sau test
+  (thẻ lọc rõ hơn, lọc mặc định phòng ban + Nhân viên, TKSX ca không kiện ⇒ giờ trống) — đã push main; chờ test lại 3 điểm
+  trên production (bàn giao mục 10). Kế tiếp: C4 Sổ phép + chuỗi 3 tháng.
 
 ## Nhật ký các phiên cũ
 
@@ -464,7 +466,7 @@ Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguy�
 
 ## Prompt mở đầu phiên sau
 
-Đang làm Chấm công (2026-11-24): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau".
+Đang làm Chấm công (2026-11-25, C3 xong → C4): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau".
 Prompt dưới đây (U11 KPI) để dành khi người dùng nhắc.
 
 ```

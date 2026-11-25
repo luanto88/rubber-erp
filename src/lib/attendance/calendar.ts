@@ -14,6 +14,52 @@ export type AttendanceRecord = {
   dung_phep_thuong: boolean
   updated_by: string | null
   updated_at: string
+  /** C3: thao tác app phát hiện trong ngày (migration 20261214). Thiếu cột ⇒ undefined. */
+  hoat_dong?: AttendanceActivity[] | null
+}
+
+/** 1 nguồn thao tác app trong ngày, giờ sớm nhất (do RPC attendance_sync_auto ghi). */
+export type AttendanceActivity = { nguon: string; luc: string }
+
+export const ACTIVITY_LABEL: Record<string, string> = {
+  dieu_xe: "Điều xe",
+  san_luong: "Sản lượng",
+  thanh_pham: "Thành phẩm",
+  kiem_nghiem: "Kiểm nghiệm",
+  xuat_hang: "Xuất hàng",
+  do_nhanh: "Đo nhanh",
+  bao_tri: "Bảo trì",
+  kho: "Kho vật tư",
+  de_nghi_mua: "Đề nghị mua",
+  ky_so: "Ký số",
+  iso: "ISO",
+  ghi_chu: "Ghi chú",
+  dong_ho: "Đồng hồ định mức",
+  kpi: "KPI",
+  diem_danh: "Điểm danh ca",
+  cham_diem_d: "Được chấm điểm chuyên môn",
+}
+
+export function activitiesOf(r: AttendanceRecord | undefined | null): AttendanceActivity[] {
+  return Array.isArray(r?.hoat_dong) ? r!.hoat_dong! : []
+}
+
+/** Mâu thuẫn: ngày đang chấm "Nghỉ" (nguồn cao hơn) nhưng có thao tác trên app / được chấm D. */
+export function isAttendanceConflict(r: AttendanceRecord | undefined | null): boolean {
+  return !!r && r.trang_thai !== "co_mat" && activitiesOf(r).length > 0
+}
+
+/** "Sản lượng 08:15 · Ký số 10:02" — giờ theo giờ nhà máy. */
+export function formatActivities(list: AttendanceActivity[]): string {
+  return list
+    .map((a) => {
+      const t = new Date(a.luc)
+      const hm = Number.isNaN(t.getTime())
+        ? ""
+        : t.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Ho_Chi_Minh" })
+      return `${ACTIVITY_LABEL[a.nguon] || a.nguon}${hm ? ` ${hm}` : ""}`
+    })
+    .join(" · ")
 }
 
 export type AttendanceLog = {

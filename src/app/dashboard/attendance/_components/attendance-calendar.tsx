@@ -3,8 +3,8 @@
 // Lịch công tháng (GĐ C1, 2026-11-20): lưới nhân sự × ngày, chấm tay nhiều ô (lý do bắt buộc) qua RPC
 // attendance_set_days / attendance_clear_days, nhật ký điều chỉnh bất biến. Quyền: rule 31.
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import { CalendarDays, ChevronLeft, ChevronRight, CircleAlert, History, UserCheck, Users, X } from "lucide-react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { CalendarDays, ChevronLeft, ChevronRight, CircleAlert, History, RefreshCw, TriangleAlert, UserCheck, Users, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { hasPermission, type SessionUser } from "@/lib/auth"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
@@ -16,6 +16,9 @@ import {
   ATTENDANCE_SOURCE_LABEL,
   ATTENDANCE_STATUS_LABEL,
   DEFAULT_TUA_DAYS,
+  activitiesOf,
+  formatActivities,
+  isAttendanceConflict,
   isInWorkRange,
   isPartialMonth,
   monthDays,
@@ -99,6 +102,13 @@ function fmtDateTime(ts: string) {
   }
 }
 
+const DEFAULT_LOAI = "nhan_vien"
+
+function syncMissing(message: string) {
+  return /attendance_sync_auto|attendance_collect_activity|hoat_dong/.test(message) &&
+    /does not exist|schema cache|Could not find/i.test(message)
+}
+
 function tableMissing(message: string) {
   return /attendance_(records|logs)|attendance_set_days|attendance_clear_days/.test(message) &&
     /does not exist|schema cache|Could not find/i.test(message)
@@ -110,7 +120,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   const today = getFactoryTodayISO()
   const [month, setMonth] = useState(today.slice(0, 7))
   const [deptFilter, setDeptFilter] = useState("")
-  const [loaiFilter, setLoaiFilter] = useState("")
+  const [loaiFilter, setLoaiFilter] = useState(DEFAULT_LOAI)
   const [caFilter, setCaFilter] = useState("")
   const [dcFilter, setDcFilter] = useState("")
   const [search, setSearch] = useState("")
@@ -121,6 +131,10 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  // C3: đồng bộ Có mặt tự động (nhân viên) mỗi lần tải tháng; lỗi chỉ cảnh báo, không chặn lịch.
+  const [syncWarn, setSyncWarn] = useState<string | null>(null)
+  const [syncInfo, setSyncInfo] = useState<string | null>(null)
+  const [onlyConflict, setOnlyConflict] = useState(false)
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [anchor, setAnchor] = useState<string | null>(null)
@@ -178,10 +192,41 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
           supabase.from("departments").select("id, code, name").eq("is_active", true).order("sort_order"),
         ])
         if (staffRes.error) throw staffRes.error
+        // Đồng bộ Có mặt tự động trước khi đọc (tháng đã bắt đầu, tới hôm nay).
+        if (from <= today) {
+          const { data: syncData, error: syncErr } = await supabase.rpc("attendance_sync_auto", {
+            p_factory_id: factoryId,
+            p_from: from,
+            p_to: to < today ? to : today,
+          })
+          if (!alive) return
+          if (syncErr) {
+            const msg = getErrorMessage(syncErr, "Không đồng bộ được Có mặt tự động.")
+            setSyncWarn(
+              syncMissing(msg)
+                ? "Chưa có Có mặt tự động — chạy migration 20261214_attendance_c3_auto_presence.sql."
+                : `Không đồng bộ được Có mặt tự động: ${msg}`,
+            )
+            setSyncInfo(null)
+          } else {
+            setSyncWarn(null)
+            const s = (syncData || {}) as { them?: number; cap_nhat?: number; xoa?: number }
+            const parts = [
+              s.them ? `thêm ${s.them}` : "",
+              s.cap_nhat ? `cập nhật ${s.cap_nhat}` : "",
+              s.xoa ? `bỏ ${s.xoa}` : "",
+            ].filter(Boolean)
+            setSyncInfo(parts.length ? `Đồng bộ Có mặt tự động: ${parts.join(", ")} ô.` : null)
+          }
+        } else {
+          setSyncWarn(null)
+          setSyncInfo(null)
+        }
         const recs = await fetchAllPaginated<AttendanceRecord>((a, b) =>
           supabase
             .from("attendance_records")
-            .select("id, staff_id, ngay, trang_thai, nguon, xep_loai, ly_do, dung_phep_thuong, updated_by, updated_at")
+            // "*" để vẫn chạy khi migration 20261214 (cột hoat_dong) chưa chạy.
+            .select("*")
             .eq("factory_id", factoryId)
             .gte("ngay", from)
             .lte("ngay", to)
@@ -203,7 +248,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
     return () => {
       alive = false
     }
-  }, [factoryId, month, reloadKey])
+  }, [factoryId, month, reloadKey, today])
 
   useEffect(() => {
     setSelected(new Set())
@@ -219,6 +264,13 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
     return map
   }, [records])
 
+  /** Số ô mâu thuẫn (chấm Nghỉ nhưng có thao tác app) theo nhân sự. */
+  const conflictsByStaff = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const r of records) if (isAttendanceConflict(r)) map.set(r.staff_id, (map.get(r.staff_id) || 0) + 1)
+    return map
+  }, [records])
+
   const days = useMemo(() => monthDays(month), [month])
   const stdDays = standardDays(month, DEFAULT_TUA_DAYS)
   const deptName = useMemo(() => new Map(depts.map((d) => [d.id, d.name])), [depts])
@@ -229,6 +281,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       if (!canViewStaff(s)) return false
       if (!worksInMonth(s, month)) return false
       if (!s.active && !recordsByStaff.has(s.id)) return false
+      if (onlyConflict && !conflictsByStaff.has(s.id)) return false
       if (deptFilter && s.department_id !== deptFilter) return false
       if (loaiFilter && (s.loai_nhan_su || "nhan_vien") !== loaiFilter) return false
       if (caFilter && s.ca_mac_dinh !== caFilter) return false
@@ -251,7 +304,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       if (ta !== tb) return ta - tb
       return a.ten.localeCompare(b.ten, "vi")
     })
-  }, [staff, canViewStaff, month, recordsByStaff, deptFilter, loaiFilter, caFilter, dcFilter, search, deptName])
+  }, [staff, canViewStaff, month, recordsByStaff, onlyConflict, conflictsByStaff, deptFilter, loaiFilter, caFilter, dcFilter, search, deptName])
 
   const summaries = useMemo(() => {
     const map = new Map<string, ReturnType<typeof summarizeStaffMonth>>()
@@ -268,10 +321,29 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       khongPhep += v.khongPhep
       chua += v.chuaGhiNhan
     }
-    return { coMat, khongPhep, chua }
-  }, [summaries])
+    let conflict = 0
+    for (const s of staff) if (canViewStaff(s)) conflict += conflictsByStaff.get(s.id) || 0
+    return { coMat, khongPhep, chua, conflict }
+  }, [summaries, staff, canViewStaff, conflictsByStaff])
 
-  const activeFilterCount = [deptFilter, loaiFilter, caFilter, dcFilter, search.trim()].filter(Boolean).length
+  // Bộ lọc mặc định (người dùng chốt 2026-11-25): phòng ban của người đăng nhập + Nhân viên. Đặt phòng ban 1 lần sau lần tải
+  // đầu; "Xóa lọc" đưa về mặc định; 2 giá trị mặc định không tính là đang lọc.
+  const defaultDept = myDeptId || ""
+  const deptDefaulted = useRef(false)
+  useEffect(() => {
+    if (deptDefaulted.current || loading || staff.length === 0) return
+    deptDefaulted.current = true
+    if (myDeptId) setDeptFilter(myDeptId)
+  }, [loading, staff.length, myDeptId])
+
+  const activeFilterCount = [
+    deptFilter !== defaultDept ? "1" : "",
+    loaiFilter !== DEFAULT_LOAI ? "1" : "",
+    caFilter,
+    dcFilter,
+    search.trim(),
+    onlyConflict ? "1" : "",
+  ].filter(Boolean).length
 
   // ── Chọn ô ──
   const markable = useCallback((s: StaffRow, day: string) => canMarkStaff(s) && isInWorkRange(s, day), [canMarkStaff])
@@ -493,11 +565,12 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
         <button
           type="button"
           onClick={() => {
-            setDeptFilter("")
-            setLoaiFilter("")
+            setDeptFilter(defaultDept)
+            setLoaiFilter(DEFAULT_LOAI)
             setCaFilter("")
             setDcFilter("")
             setSearch("")
+            setOnlyConflict(false)
           }}
           disabled={activeFilterCount === 0}
           className="h-10 w-full self-end rounded-xl border border-slate-200 px-3 text-sm font-bold text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
@@ -507,23 +580,49 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
         </div>
       </FilterBar>
 
-      <StatGrid cols={4}>
+      <StatGrid cols={5}>
         <StatCard icon={Users} label="Nhân sự" value={visibleStaff.length} sub={monthLabel} loading={loading} />
         <StatCard icon={UserCheck} label="Ngày có mặt" value={totals.coMat} sub={`Công chuẩn nhân viên ${stdDays} ngày/người (công nhân: theo công thực tế)`} loading={loading} valueTone="good" />
         <StatCard icon={CircleAlert} label="Nghỉ không phép" value={totals.khongPhep} loading={loading} valueTone={totals.khongPhep > 0 ? "danger" : "default"} />
         <StatCard icon={CalendarDays} label="Ô chưa ghi nhận" value={totals.chua} sub="đến hôm nay" loading={loading} valueTone={totals.chua > 0 ? "warn" : "default"} />
+        <StatCard
+          icon={TriangleAlert}
+          label="Ô mâu thuẫn"
+          value={totals.conflict}
+          sub={onlyConflict ? "đang lọc — bấm để bỏ" : "chấm Nghỉ nhưng có thao tác app"}
+          loading={loading}
+          valueTone={totals.conflict > 0 ? "warn" : "default"}
+          onClick={() => setOnlyConflict((v) => !v)}
+          active={onlyConflict}
+        />
       </StatGrid>
+
+      {syncWarn ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{syncWarn}</div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500">
         <span className="font-bold text-slate-600">Chú thích:</span>
         <Legend cls="bg-emerald-100 text-emerald-800" text="+" label="Có mặt (tự động / điểm danh)" />
+        <Legend cls="bg-emerald-100 text-emerald-800" text="+" label="Được chấm điểm chuyên môn" dot />
         <Legend cls="bg-violet-100 text-violet-800" text="+" label="Có mặt (chấm tay)" />
         <Legend cls="bg-emerald-100 text-emerald-800" text="B" label="Có mặt, xếp loại B" />
         <Legend cls="bg-sky-100 text-sky-800" text="T" label="Nghỉ tua" />
         <Legend cls="bg-amber-100 text-amber-800" text="P" label="Nghỉ có phép" />
         <Legend cls="bg-rose-100 text-rose-700" text="K" label="Nghỉ không phép" />
         <Legend cls="bg-white text-slate-300 border border-slate-200" text="·" label="Chưa ghi nhận" />
+        <Legend cls="bg-amber-100 text-amber-800 ring-2 ring-orange-500" text="P" label="Mâu thuẫn (Nghỉ nhưng có thao tác app)" />
+        <button
+          type="button"
+          onClick={() => setReloadKey((k) => k + 1)}
+          disabled={loading}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          title="Gom lại thao tác trên app của nhân viên rồi tải lại lịch"
+        >
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Đồng bộ lại
+        </button>
       </div>
+      {syncInfo ? <div className="text-xs text-slate-500">{syncInfo}</div> : null}
 
       {canMarkAny ? (
         <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
@@ -621,10 +720,12 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                         const key = cellKey(s.id, d)
                         const isSel = selected.has(key)
                         const canClick = markable(s, d)
+                        const acts = activitiesOf(r)
+                        const conflict = isAttendanceConflict(r)
                         const title = !inRange
                           ? `${fmtDay(d)}: ngoài thời gian làm việc`
                           : r
-                            ? `${fmtDay(d)}: ${ATTENDANCE_STATUS_LABEL[r.trang_thai]}${r.xep_loai ? ` — xếp loại ${r.xep_loai}` : ""}\nNguồn: ${ATTENDANCE_SOURCE_LABEL[r.nguon]}${r.ly_do ? `\nLý do: ${r.ly_do}` : ""}\nCập nhật: ${fmtDateTime(r.updated_at)}`
+                            ? `${fmtDay(d)}: ${ATTENDANCE_STATUS_LABEL[r.trang_thai]}${r.xep_loai ? ` — xếp loại ${r.xep_loai}` : ""}\nNguồn: ${ATTENDANCE_SOURCE_LABEL[r.nguon]}${r.ly_do ? `\nLý do: ${r.ly_do}` : ""}${acts.length ? `\nThao tác app: ${formatActivities(acts)}` : ""}${conflict ? "\n⚠ Mâu thuẫn: chấm Nghỉ nhưng có thao tác trên app — kiểm tra lại" : ""}\nCập nhật: ${fmtDateTime(r.updated_at)}`
                             : `${fmtDay(d)}: chưa ghi nhận`
                         return (
                           <td key={d} className={`border-b border-slate-100 p-0.5 text-center ${dayColCls(di)}`}>
@@ -634,11 +735,14 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                                 title={title}
                                 disabled={!canClick}
                                 onClick={(e) => onCellClick(s, d, e.shiftKey)}
-                                className={`h-7 w-7 rounded-md text-xs font-extrabold ${cellClass(r)} ${d > today && !r ? "opacity-40" : ""} ${
-                                  isSel ? "ring-2 ring-mod-600 ring-offset-1" : ""
+                                className={`relative h-7 w-7 rounded-md text-xs font-extrabold ${cellClass(r)} ${d > today && !r ? "opacity-40" : ""} ${
+                                  isSel ? "ring-2 ring-mod-600 ring-offset-1" : conflict ? "ring-2 ring-orange-500" : ""
                                 } ${canClick ? "cursor-pointer hover:brightness-95" : "cursor-default"}`}
                               >
                                 {cellText(r)}
+                                {r?.nguon === "cham_diem_d" ? (
+                                  <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-emerald-600" />
+                                ) : null}
                               </button>
                             ) : (
                               <span title={title} className="block h-7 w-7 rounded-md bg-slate-100 text-[10px] leading-7 text-slate-300">—</span>
@@ -824,10 +928,13 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   )
 }
 
-function Legend({ cls, text, label }: { cls: string; text: string; label: string }) {
+function Legend({ cls, text, label, dot }: { cls: string; text: string; label: string; dot?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={`inline-flex h-5 w-5 items-center justify-center rounded text-[11px] font-extrabold ${cls}`}>{text}</span>
+      <span className={`relative inline-flex h-5 w-5 items-center justify-center rounded text-[11px] font-extrabold ${cls}`}>
+        {text}
+        {dot ? <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-emerald-600" /> : null}
+      </span>
       {label}
     </span>
   )

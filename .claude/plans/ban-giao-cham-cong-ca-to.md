@@ -90,15 +90,31 @@ Thay file `ban-giao-cham-cong-c2-gd3.md` cho phần còn lại. Mô hình hiện
   phiếu"; (3) phiếu chưa duyệt ⇒ nhãn vàng; (4) ca chưa có phiếu ⇒ "Chưa có phiếu điểm danh cho ca này"; (5) thẻ "Ca sản
   xuất" bấm ⇒ mở tab (mobile chuyển sang cột tài liệu); (6) mobile bảng cuộn ngang.
 
+## 9. Cập nhật 2026-11-25 (khuya) — C2b test PASS, commit `2baf33b` (chưa push); C3 đã code (CHƯA commit)
+- TKSX: giờ bắt đầu khối Ca = sớm hơn giữa kiện quét đầu và lúc mở phiếu (người dùng chốt).
+- C3 Có mặt tự động (rule 31 mục "C3"): migration `20261214_attendance_c3_auto_presence.sql` — **chạy TRƯỚC khi test**.
+  Kế hoạch đã duyệt: `C:\Users\Software\.claude\plans\c-claude-md-rule-31-misty-waffle-of-5def5b89-e08b-439d-b530-ba415f96ac21.md`.
+- Sau migration chạy `node --env-file=.env.local scripts/check-attendance-auto.mjs --month=2026-11` (chỉ đọc) — "RPC thiếu / thừa"
+  phải = 0.
+- Test tay C3: (1) Lịch công tháng 11 ⇒ nhân viên có thao tác có ô xanh, công nhân không đổi, dòng xám "Đồng bộ Có mặt tự động:
+  thêm N ô"; (2) rê chuột ô ⇒ "Thao tác app: …" + giờ; (3) chấm tay Nghỉ 1 ngày có thao tác ⇒ viền cam, thẻ "Ô mâu thuẫn" +1, bấm
+  thẻ ⇒ chỉ còn người đó; (4) xoá phiếu duy nhất của 1 ngày rồi "Đồng bộ lại" ⇒ ô tự động mất; (5) ngày được chấm D ⇒ chấm xanh
+  nhỏ, nguồn "Được chấm điểm chuyên môn"; (6) TKSX 25/11 Ca B (chưa có bản cứng) ⇒ giờ bắt đầu = giờ kiện đầu.
+- Kế tiếp: C4 Sổ phép + chuỗi 3 tháng (kế hoạch mục 0 #3–5) → C5 KPI (gọi `attendance_sync_auto` trước khi tính).
+
+## 10. Cập nhật 2026-11-25 (cuối phiên) — C3 test 1–7 PASS, sửa sau test, ĐÃ commit + push main
+- Migration 20261214 ĐÃ CHẠY, script check-attendance-auto PASS.
+- Sửa sau test: thẻ bấm được (`StatCard` onClick, dùng chung) có hover nổi / bấm lún / icon phễu / nền khi đang lọc; Lịch công
+  lọc mặc định phòng ban của người đăng nhập + Nhân viên ("Xóa lọc" về mặc định); TKSX ca sản xuất không có kiện ⇒ giờ ca để trống.
+- Chờ test lại trên production: 3 điểm trên. TKSX 25/11 Ca A nếu ĐÃ có bản cứng thì vẫn in 16:26 (bản cứng bất biến) — xem ngày
+  khác chưa có bản cứng, hoặc admin mở lại + duyệt lại để tạo bản mới.
+
 ## Prompt phiên sau
 ```
-Đọc CLAUDE.md, rule 29, rule 31 (mục "Ca / Tổ điểm danh", "Sửa sau test production 2026-11-25", "C2b"), và ĐỌC HẾT
-.claude/plans/ban-giao-cham-cong-ca-to.md (mục 8 là trạng thái mới nhất).
-Đầu phiên: tôi báo kết quả test C2b mục 8 + quyết định giờ bắt đầu ca trên phiếu TKSX. Sửa lỗi tôi báo trước, giữ mô hình mục 2;
-hỏi tôi trước khi commit/push C2b.
-Sau đó: lên kế hoạch C3 Có mặt tự động (nhân viên) theo .claude/plans/cham-cong-2026-11-19.md (mục 2, 5) và bảng nguồn hoạt động
-ở .claude/plans/kpi-k1-chuyen-can-2026-11-19.md mục 0 — liệt kê bảng / RPC / màn hình để tôi duyệt trước khi code; điểm nào
-chưa rõ thì HỎI tôi (ngôn ngữ nghiệp vụ + ví dụ), không tự quyết.
+Đọc CLAUDE.md, rule 29, rule 31 (mục "C2b", "C3"), và ĐỌC HẾT .claude/plans/ban-giao-cham-cong-ca-to.md (mục 10 là trạng thái
+mới nhất). C3 đã push main. Đầu phiên: tôi báo kết quả test lại 3 điểm mục 10 trên production; sửa lỗi tôi báo trước.
+Sau đó: lên kế hoạch C4 Sổ phép thưởng + chuỗi 3 tháng theo .claude/plans/cham-cong-2026-11-19.md (mục 0 #3–5, mục 2) — liệt kê
+bảng / RPC / màn hình để tôi duyệt trước khi code; điểm nào chưa rõ thì HỎI tôi (ngôn ngữ nghiệp vụ + ví dụ), không tự quyết.
 Mỗi bước tsc + eslint; xong hướng dẫn test tay, DỪNG cho tôi test; hỏi tôi trước khi commit/push.
 Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI.
 Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build.

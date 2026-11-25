@@ -1,6 +1,6 @@
 "use client"
 
-import type { LucideIcon } from "lucide-react"
+import { Filter, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
 /**
@@ -53,17 +53,27 @@ export function StatCard({
       </span>
     </>
   )
-  const cls = `flex w-full items-start gap-3 rounded-xl border bg-white p-3.5 shadow-sm ${
-    active ? "border-mod-600 ring-2 ring-mod-50" : "border-slate-200"
-  }`
   if (onClick) {
+    // Thẻ bấm được: nổi lên khi rê chuột, lún nhẹ khi bấm, icon phễu góc phải báo "bấm để lọc".
     return (
-      <button type="button" onClick={onClick} aria-pressed={active} className={`${cls} transition-colors hover:border-mod-200`}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        title={active ? "Đang lọc — bấm để bỏ lọc" : "Bấm để lọc"}
+        className={`relative flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3.5 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-mod-600 hover:shadow-md active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mod-200 ${
+          active ? "border-mod-600 bg-mod-50 ring-2 ring-mod-200" : "border-slate-200 bg-white hover:bg-mod-50/60"
+        }`}
+      >
         {body}
+        <Filter
+          size={13}
+          className={`absolute right-2.5 top-2.5 ${active ? "fill-current text-mod-600" : "text-slate-300"}`}
+        />
       </button>
     )
   }
-  return <div className={cls}>{body}</div>
+  return <div className="flex w-full items-start gap-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">{body}</div>
 }
 
 /** Lưới thẻ số liệu: 2 cột (điện thoại) → 3 (sm) → 4 hoặc 5 (lg). */

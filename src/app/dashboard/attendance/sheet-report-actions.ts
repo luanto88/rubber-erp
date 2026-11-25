@@ -438,11 +438,23 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
     }
     return max
   }
+  /** Giờ bắt đầu ca sản xuất = sớm hơn giữa kiện quét đầu của ca và lúc mở phiếu (phiếu có thể mở sau khi đã quét). */
+  const startOf = (ca: string | null, openedAt: string | null): string | null => {
+    let min: string | null = openedAt
+    for (const t of txs) {
+      if ((t.ca || "") !== (ca || "")) continue
+      const at = t.quet_luc || t.created_at
+      if (at && (!min || new Date(at).getTime() < new Date(min).getTime())) min = at
+    }
+    return min
+  }
 
   // ── Mỗi Ca/Tổ 1 mục ──
   const blocks: F01Block[] = sections.map((sec) => {
     const unit = unitMap.get(sec.ca || "")
     const loai: "ca" | "to" = unit?.loai === "to" ? "to" : "ca"
+    // Ca sản xuất không quét kiện nào ⇒ để trống giờ ca (người dùng chốt 2026-11-25; giờ mở phiếu không phải giờ làm thật).
+    const caCoKien = loai === "ca" && lastScanOf(sec.ca) !== null
     const ls = lines.filter((l) => l.section_id === sec.id)
     const vt = sec.vi_tri || {}
     const stored = Object.keys(vt).length > 0
@@ -454,8 +466,8 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
       truong: stored ? holderText(vt.truong) : profileHolder(sec.ca, "to_truong"),
       pho: stored ? holderText(vt.pho) : profileHolder(sec.ca, "to_pho"),
       coViTri: true,
-      gioBatDau: fmtHm(sec.bat_dau_luc),
-      gioKetThuc: fmtHm((loai === "ca" ? lastScanOf(sec.ca) : null) || sec.ket_thuc_luc),
+      gioBatDau: loai === "ca" ? (caCoKien ? fmtHm(startOf(sec.ca, sec.bat_dau_luc)) : "") : fmtHm(sec.bat_dau_luc),
+      gioKetThuc: loai === "ca" ? (caCoKien ? fmtHm(lastScanOf(sec.ca)) : "") : fmtHm(sec.ket_thuc_luc),
       sanXuat: loai === "ca" ? productionOf(sec.ca) : [],
       rows: buildRows(unit, ls).filter((r) => r.people.length > 0),
     }

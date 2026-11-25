@@ -240,5 +240,29 @@ Không migration.
   `slotHolderText`, `isEmptyOpenSection`). Sửa quy tắc người thay / việc ở đây.
 - UI `product/lot/[id]/_components/lot-shift-staff.tsx`: tab "Nhân sự ca" (mỗi ngày + ca 1 khối, bảng Việc | Người | Xe |
   [Xếp loại], dòng Vắng) + thẻ "Ca sản xuất" cột phải (bấm ⇒ mở tab).
-- Lưu ý: phiếu TKSX dùng giờ bắt đầu = `bat_dau_luc` (lúc mở phiếu) ⇒ có thể muộn hơn kiện cuối (vd 25/11 Ca B
-  16:10–13:40) — chưa sửa, chờ người dùng quyết.
+- C2b test PASS, commit `2baf33b` (2026-11-25). Giờ bắt đầu khối Ca trên TKSX nay = sớm hơn giữa kiện quét đầu của ca và
+  `bat_dau_luc` (`startOf` trong `sheet-report-actions.ts`, người dùng chốt); tổ vẫn `bat_dau_luc`. Bản cứng cũ bất biến.
+  Ca sản xuất KHÔNG quét kiện nào trong ngày ⇒ để TRỐNG cả giờ bắt đầu lẫn kết thúc (phiếu in "……"; giờ mở phiếu không phải
+  giờ làm thật — người dùng chốt 2026-11-25).
+
+## C3 Có mặt tự động cho NHÂN VIÊN (2026-11-25, migration 20261214 ĐÃ CHẠY, test PASS, đã push)
+Người dùng chốt: chỉ thao tác GHI dữ liệu (tạo / ký / duyệt / ghi sổ) mới tính — đăng nhập / xem không tính; ngày đã chấm
+Nghỉ (nguồn cao hơn) mà có thao tác ⇒ GIỮ chấm, gắn cờ mâu thuẫn; có mặt tự động KHÔNG có xếp loại A/B.
+- Migration `20261214_attendance_c3_auto_presence.sql` (**chạy tay TRƯỚC deploy**): cột `attendance_records.hoat_dong` jsonb
+  (`[{nguon, luc}]`, giờ sớm nhất mỗi nguồn); hàm chỉ đọc `attendance_collect_activity(factory, from, to)` (service_role) gom
+  ~20 bảng nguồn (nhãn: dieu_xe, san_luong, thanh_pham, kiem_nghiem, xuat_hang, do_nhanh, bao_tri, kho, de_nghi_mua, ky_so, iso,
+  ghi_chu, dong_ho, kpi, diem_danh) + `cham_diem_d` = người ĐƯỢC chấm `kpi_daily_evaluations` theo cột `ngay`; RPC
+  `attendance_sync_auto(factory, from, to)` (cần `attendance.view`, ≤ 62 ngày, tới hôm nay): chỉ nhân viên có `profile_id`, trong
+  khoảng vào làm – nghỉ việc; chưa có dòng ⇒ Có mặt nguồn `cham_diem_d` | `auto_app`; dòng tự động cập nhật nguồn (D > app) +
+  `hoat_dong`, mất hết hoạt động ⇒ xoá; dòng `truc_ca` / `bo_sung_tay` chỉ cập nhật `hoat_dong`. Không ghi `attendance_logs`.
+  Thêm bảng nguồn mới ⇒ thêm 1 nhánh `union all` + nhãn `ACTIVITY_LABEL` (`src/lib/attendance/calendar.ts`).
+- Cờ mâu thuẫn KHÔNG lưu cột: `isAttendanceConflict` = trạng thái ≠ có mặt và `hoat_dong` không rỗng.
+- Lịch công (`attendance-calendar.tsx`): mỗi lần tải tháng (đã bắt đầu) gọi sync trước; lỗi ⇒ dải vàng, lịch vẫn hiện; nút
+  "Đồng bộ lại"; ô chấm D có chấm xanh nhỏ; ô mâu thuẫn viền cam; tooltip "Thao tác app: Sản lượng 08:15 · …"; thẻ "Ô mâu thuẫn"
+  bấm để lọc. Đọc `select("*")` để chịu được khi chưa chạy migration.
+- Bộ lọc Lịch công mặc định = phòng ban của người đăng nhập (đặt 1 lần sau lần tải đầu) + Loại "Nhân viên"; "Xóa lọc" về đúng
+  mặc định đó, 2 giá trị mặc định không tính là đang lọc. `StatCard` có `onClick` (dùng chung mọi module): nổi lên khi rê, lún
+  khi bấm, icon phễu góc phải, nền màu module khi đang lọc.
+- Vận hành: xoá chấm tay một ngày có thao tác ⇒ lần đồng bộ sau tự thành Có mặt lại; muốn ghi vắng phải chấm Nghỉ (hiện cờ).
+- Kiểm: `node --env-file=.env.local scripts/check-attendance-auto.mjs [--month=2026-11]` (chỉ đọc; đối chiếu 4 nguồn lớn bằng JS,
+  liệt kê ô mâu thuẫn / ô tự động sẽ bị bỏ). Không có cron — C5 phải gọi sync trước khi "Tính điểm tháng".
