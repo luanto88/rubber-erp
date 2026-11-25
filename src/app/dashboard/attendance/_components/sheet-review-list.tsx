@@ -17,6 +17,10 @@ import { StatusBadge } from "@/app/dashboard/_components/doc-ui/status-badge"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
 import { RowAction } from "@/app/dashboard/_components/doc-ui/row-action"
 import { ExpandableRow, ExpandAllToggle, ExpandHeaderCell } from "@/app/dashboard/_components/doc-ui/expandable-row"
+import { IconActionGroup } from "@/app/dashboard/_components/doc-ui/icon-action"
+import { ReasonConfirmDialog } from "@/app/dashboard/_components/reason-confirm-dialog"
+import { hasPermission, readCachedSessionUser, type SessionUser } from "@/lib/auth"
+import { downloadF01, resolveF01Pdf } from "@/lib/attendance/f01-client"
 import { StatCard, StatGrid } from "@/app/dashboard/_components/doc-ui/stat-card"
 
 type SheetRow = { id: string; ngay: string; day_chuyen: string; ma_phieu: string; trang_thai: string }
@@ -45,6 +49,24 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [user, setUser] = useState<SessionUser | null>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState<
+    | { kind: "sheet"; id: string; label: string }
+    | { kind: "section"; id: string; label: string; approved: boolean }
+    | null
+  >(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    try {
+      setUser(readCachedSessionUser())
+    } catch {
+      setUser(null)
+    }
+  }, [])
+  const isAdmin = user?.role === "admin"
+  const canEditAny = !!user && (isAdmin || hasPermission(user, "attendance.mark") || hasPermission(user, "attendance.mark_all"))
 
   const load = useCallback(async () => {
     if (!from || !to) return
@@ -87,8 +109,10 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
       const unitMap = new Map(((unitRows || []) as AttendanceUnit[]).map((u) => [u.code, u]))
       setUnits(unitMap)
       secs.sort((a, b) => (unitMap.get(a.ca || "")?.sort_order ?? 9999) - (unitMap.get(b.ca || "")?.sort_order ?? 9999))
+      // Phiếu ca trống (đang lập, chưa có dòng — Ca/Tổ không làm việc / chỉ mở xem) không hiện, không tính (migration 20261212).
+      const withLines = new Set(lc.map((l) => l.section_id))
       setSheets(sh)
-      setSections(secs)
+      setSections(secs.filter((s) => !(s.trang_thai === "dang_lam" && !withLines.has(s.id))))
       setCounts(lc)
       setNames(nm)
     } catch (err) {
@@ -137,6 +161,43 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
 
   const activeCount = (dayChuyen ? 1 : 0) + (status ? 1 : 0)
 
+  const downloadSheet = async (s: SheetRow) => {
+    setActionError(null)
+    setDownloadingId(s.id)
+    try {
+      const r = await resolveF01Pdf(factoryId, s.id)
+      await downloadF01(r, factoryId)
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Không tải được phiếu TKSX."))
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+  const canEditSection = (x: AttendanceSection) =>
+    (x.trang_thai === "dang_lam" || x.trang_thai === "tra_ve") && (canEditAny || (!!user && x.truc_ca_user_id === user.id))
+  const canDiscardSection = (x: AttendanceSection) =>
+    x.trang_thai === "da_duyet" ? isAdmin : canEditAny || (!!user && x.truc_ca_user_id === user.id)
+
+  const runConfirm = async (lyDo: string) => {
+    if (!confirm) return
+    setBusy(true)
+    setActionError(null)
+    try {
+      const { error: e } =
+        confirm.kind === "sheet"
+          ? await supabase.rpc("attendance_delete_sheet", { p_sheet_id: confirm.id, p_ly_do: lyDo })
+          : await supabase.rpc("attendance_discard_section", { p_section_id: confirm.id, p_ly_do: lyDo })
+      if (e) throw e
+      setConfirm(null)
+      void load()
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Không thực hiện được."))
+      setConfirm(null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <StatGrid cols={4}>
@@ -177,6 +238,8 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
           </select>
         </label>
       </FilterBar>
+
+      {actionError ? <div className="rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">{actionError}</div> : null}
 
       <div className="flex justify-end">
         <ExpandAllToggle
@@ -227,7 +290,24 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
                     onToggle={() => toggle(s.id)}
                     canExpand={secs.length > 0}
                     colSpan={9}
-                    endCell={<RowAction kind="view" label="Xem phiếu" href={`/dashboard/attendance/sheet/${s.id}`} />}
+                    endCell={
+                      <IconActionGroup>
+                        <RowAction kind="view" label="Xem phiếu" href={`/dashboard/attendance/sheet/${s.id}`} />
+                        <RowAction
+                          kind="download"
+                          label="Tải phiếu TKSX (PDF)"
+                          loading={downloadingId === s.id}
+                          disabled={secs.length === 0}
+                          onClick={() => void downloadSheet(s)}
+                        />
+                        {secs.some(canEditSection) ? (
+                          <RowAction kind="edit" label="Sửa điểm danh" href={`/dashboard/attendance/shift?section=${secs.find(canEditSection)?.id}`} />
+                        ) : null}
+                        {isAdmin ? (
+                          <RowAction kind="delete" label="Xoá phiếu ngày" onClick={() => setConfirm({ kind: "sheet", id: s.id, label: s.ma_phieu })} />
+                        ) : null}
+                      </IconActionGroup>
+                    }
                     detail={
                       <table className="enterprise-table dense">
                         <thead>
@@ -239,6 +319,7 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
                             <th className="text-right">Vắng</th>
                             <th className="text-right">Người thay</th>
                             <th>Gửi lúc</th>
+                            <th className="text-right">Thao tác</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -255,6 +336,25 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
                                 <td className="text-right">{c.vang}</td>
                                 <td className="text-right">{c.thay}</td>
                                 <td>{fmtTime(x.gui_luc)}</td>
+                                <td>
+                                  <IconActionGroup>
+                                    {canEditSection(x) ? <RowAction kind="edit" label="Sửa phiếu ca" href={`/dashboard/attendance/shift?section=${x.id}`} /> : null}
+                                    {canDiscardSection(x) ? (
+                                      <RowAction
+                                        kind="delete"
+                                        label="Bỏ phiếu ca (Ca/Tổ không làm việc)"
+                                        onClick={() =>
+                                          setConfirm({
+                                            kind: "section",
+                                            id: x.id,
+                                            label: `${sectionLabel(x.loai, x.ca, s.day_chuyen, units)} · ${s.ma_phieu}`,
+                                            approved: x.trang_thai === "da_duyet",
+                                          })
+                                        }
+                                      />
+                                    ) : null}
+                                  </IconActionGroup>
+                                </td>
                               </tr>
                             )
                           })}
@@ -282,6 +382,26 @@ export function SheetReviewList({ factoryId }: { factoryId: string }) {
           </tbody>
         </table>
       </ResponsiveTableWrapper>
+
+      {confirm ? (
+        <ReasonConfirmDialog
+          title={confirm.kind === "sheet" ? "Xoá phiếu điểm danh ngày" : "Bỏ phiếu ca"}
+          subtitle={confirm.label}
+          points={
+            confirm.kind === "sheet"
+              ? ["Xoá mọi phiếu ca và dòng điểm danh của ngày này.", "Ngày công lấy từ phiếu này được tính lại (chấm tay giữ nguyên)."]
+              : [
+                  "Dùng khi Ca/Tổ này không làm việc trong ngày — mọi dòng của phiếu ca bị xoá.",
+                  confirm.approved ? "Phiếu ca ĐÃ DUYỆT: ngày công lấy từ phiếu này được tính lại." : "Phiếu ca chưa duyệt nên chưa ghi ngày công nào.",
+                ]
+          }
+          requireReason={confirm.kind === "sheet" || confirm.approved}
+          confirmLabel={confirm.kind === "sheet" ? "Xoá phiếu" : "Bỏ phiếu ca"}
+          busy={busy}
+          onConfirm={(r) => void runConfirm(r)}
+          onCancel={() => setConfirm(null)}
+        />
+      ) : null}
     </div>
   )
 }

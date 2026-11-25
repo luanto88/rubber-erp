@@ -9,7 +9,7 @@ import { useParams } from "next/navigation"
 import { CheckCircle2, ClipboardCheck, Download, FileText, RotateCcw, Trash2, Undo2 } from "lucide-react"
 import { DocViewer } from "@/app/dashboard/_components/doc-ui/doc-viewer"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
-import { downloadPdfBytes, resolveF01Pdf, type F01Result } from "@/lib/attendance/f01-client"
+import { downloadF01, resolveF01Pdf, type F01Result } from "@/lib/attendance/f01-client"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { getErrorMessage } from "@/lib/error-message"
@@ -71,6 +71,7 @@ export default function AttendanceSheetDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [viewTab, setViewTab] = useState<"content" | "pdf">("content")
   const [f01Result, setF01Result] = useState<F01Result | null>(null)
+  const [tpLockedCas, setTpLockedCas] = useState<Set<string> | null>(null)
 
   const isAdmin = user?.role === "admin"
   const canReview = !!user && (user.role === "admin" || hasPermission(user, "attendance.approve") || hasPermission(user, "attendance.mark_all"))
@@ -101,6 +102,16 @@ export default function AttendanceSheetDetailPage() {
         setSheet(null)
         return
       }
+      // Ca đã "Phê duyệt" (khoá) ở Thành phẩm — phiếu ca sản xuất chỉ duyệt được sau đó (migration 20261213).
+      void supabase
+        .from("product_shift_locks")
+        .select("ca")
+        .eq("factory_id", factoryId)
+        .eq("ngay_sx", sh.ngay as string)
+        .eq("is_active", true)
+        .then(({ data, error: lockErr }) => {
+          if (!lockErr) setTpLockedCas(new Set(((data || []) as { ca: string }[]).map((r) => r.ca)))
+        })
       const [secRes, lnRes, staffRes, jobRes, vehRes, unitRes] = await Promise.all([
         supabase.from("attendance_sheet_sections").select(SECTION_SELECT).eq("sheet_id", sheetId),
         supabase.from("attendance_sheet_lines").select(LINE_SELECT).eq("sheet_id", sheetId).order("stt"),
@@ -114,7 +125,9 @@ export default function AttendanceSheetDetailPage() {
       const unitMap = new Map(((unitRes.data || []) as AttendanceUnit[]).map((u) => [u.code, u]))
       setUnits(unitMap)
       const order = (s: AttendanceSection) => unitMap.get(s.ca || "")?.sort_order ?? 9999
-      setSections(((secRes.data || []) as AttendanceSection[]).sort((a, b) => order(a) - order(b) || (a.ca || "").localeCompare(b.ca || "")))
+      // Phiếu ca trống (đang lập, chưa có dòng) không hiện — Ca/Tổ không làm việc / chỉ mở xem (migration 20261212).
+      const withLines = new Set(((lnRes.data || []) as DbLine[]).map((l) => l.section_id))
+      setSections(((secRes.data || []) as AttendanceSection[]).filter((s) => !(s.trang_thai === "dang_lam" && !withLines.has(s.id))).sort((a, b) => order(a) - order(b) || (a.ca || "").localeCompare(b.ca || "")))
       setLines((lnRes.data || []) as DbLine[])
       setStaffNames(new Map(((staffRes.data || []) as Named[]).map((r) => [r.id, r.ten])))
       setJobNames(new Map(((jobRes.data || []) as Named[]).map((r) => [r.id, r.ten])))
@@ -264,7 +277,7 @@ export default function AttendanceSheetDetailPage() {
               icon={<Download size={14} />}
               label="Tải PDF"
               disabled={!f01Result}
-              onClick={() => f01Result && downloadPdfBytes(f01Result.bytes, f01Result.fileName)}
+              onClick={() => f01Result && factoryId && void downloadF01(f01Result, factoryId)}
             />
           </div>
           {f01Result?.warning ? <div className="rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">{f01Result.warning}</div> : null}
@@ -318,6 +331,15 @@ export default function AttendanceSheetDetailPage() {
                   {sec.gui_luc ? <span>Gửi: {fmtTime(sec.gui_luc)}</span> : null}
                   {sec.duyet_luc ? <span>Duyệt: {fmtTime(sec.duyet_luc)}</span> : null}
                   {sec.ngoai_phan_cong ? <span className="font-semibold text-amber-700">Trực ngoài ca được phân công</span> : null}
+                  {tpLockedCas && sec.loai === "ca_san_xuat" && (units.get(sec.ca || "")?.loai || "ca") === "ca" ? (
+                    tpLockedCas.has(sec.ca || "") ? (
+                      <span className="font-semibold text-emerald-700">Thành phẩm: đã phê duyệt ca</span>
+                    ) : (
+                      <a href={`/dashboard/product/day/${sheet.ngay}`} className="font-semibold text-amber-700 underline">
+                        Thành phẩm: chưa phê duyệt ca (cần trước khi duyệt điểm danh nếu ca có kiện)
+                      </a>
+                    )
+                  ) : null}
                 </div>
                 {sec.trang_thai === "tra_ve" && sec.tra_ve_ly_do ? <div className="mt-1 text-xs font-semibold text-rose-700">Trả về: {sec.tra_ve_ly_do}</div> : null}
                 {sec.ghi_chu ? <div className="mt-1 text-xs text-slate-600">Ghi chú: {sec.ghi_chu}</div> : null}

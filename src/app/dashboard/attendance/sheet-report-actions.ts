@@ -75,11 +75,51 @@ const fmtHm = (iso: string | null) =>
 
 type ApprovalSection = { id: string; trang_thai: string; duyet_luc: string | null; duyet_boi: string | null }
 
-/** Đủ duyệt = mọi phiếu ca (≥ 1) đã duyệt. Người duyệt = duyet_boi của phiếu ca duyệt muộn nhất. */
-async function approvalOf(sections: ApprovalSection[]) {
+/** Phiếu ca "trống" = đang lập, chưa có dòng nào (chỉ mở xem / ca không làm việc) ⇒ không tính vào phiếu ngày,
+ *  không chặn duyệt — cùng quy tắc với attendance_recompute_sheet (migration 20261212). */
+function isEmptyOpenSection(s: { id: string; trang_thai: string }, sectionIdsWithLines: Set<string>) {
+  return s.trang_thai === "dang_lam" && !sectionIdsWithLines.has(s.id)
+}
+
+/**
+ * Có kiện thành phẩm của (ngày, các ca sản xuất) quét SAU mốc `luc` không? Giờ kiện = quet_luc (giờ quét thật, migration
+ * 20261213) hoặc created_at (dữ liệu cũ / nhập tay). Không tách dây chuyền — cùng quy tắc khoá ca Thành phẩm.
+ */
+async function hasScanAfter(factoryId: string, ngay: string, caCodes: string[], luc: string): Promise<boolean> {
+  if (caCodes.length === 0) return false
+  const base = () =>
+    getSupabaseAdmin()
+      .from("lot_transactions")
+      .select("id, lots!inner(factory_id)")
+      .eq("lots.factory_id", factoryId)
+      .eq("ngay_nhap", ngay)
+      .in("ca", caCodes)
+      .limit(1)
+  let { data, error } = await base().or(`quet_luc.gt.${luc},and(quet_luc.is.null,created_at.gt.${luc})`)
+  if (error) ({ data, error } = await base().gt("created_at", luc)) // migration 20261213 chưa chạy
+  if (error) throw new Error(error.message)
+  return (data || []).length > 0
+}
+
+type ApprovalCtx = { factoryId: string; ngay: string; caCodes: string[] }
+type ApprovalResult = { approved: boolean; approval: { ten: string; luc: string } | null; approvalKey: string; warning: string | null }
+
+/**
+ * Đủ duyệt = mọi phiếu ca (≥ 1) đã duyệt VÀ giờ duyệt không sớm hơn kiện thành phẩm cuối của các ca sản xuất trong ngày
+ * (người dùng chốt 2026-11-25). Người duyệt = duyet_boi của phiếu ca duyệt muộn nhất.
+ */
+async function approvalOf(sections: ApprovalSection[], ctx: ApprovalCtx): Promise<ApprovalResult> {
   const approved = sections.length > 0 && sections.every((s) => s.trang_thai === "da_duyet" && s.duyet_luc)
-  if (!approved) return { approved: false, approval: null, approvalKey: "" }
+  if (!approved) return { approved: false, approval: null, approvalKey: "", warning: null }
   const last = [...sections].sort((a, b) => (b.duyet_luc || "").localeCompare(a.duyet_luc || ""))[0]
+  if (await hasScanAfter(ctx.factoryId, ctx.ngay, ctx.caCodes, last.duyet_luc as string)) {
+    return {
+      approved: false,
+      approval: null,
+      approvalKey: "",
+      warning: "Có kiện thành phẩm quét sau giờ duyệt điểm danh — quản trị viên mở lại phiếu ca và duyệt lại để in dấu duyệt.",
+    }
+  }
   let ten = "—"
   if (last.duyet_boi) {
     const { data: p } = await getSupabaseAdmin().from("profiles").select("full_name, username").eq("id", last.duyet_boi).maybeSingle()
@@ -88,20 +128,31 @@ async function approvalOf(sections: ApprovalSection[]) {
   const approvalKey = createHash("sha256")
     .update(sections.map((s) => `${s.id}:${s.duyet_luc}`).sort().join("|"))
     .digest("hex")
-  return { approved: true, approval: { ten, luc: last.duyet_luc as string }, approvalKey }
+  return { approved: true, approval: { ten, luc: last.duyet_luc as string }, approvalKey, warning: null }
+}
+
+/** Mã ca sản xuất (đơn vị loại 'ca') của các phiếu ca — tổ không có kiện thành phẩm. */
+function productionCaCodes(sections: { ca?: string | null }[], unitLoai: Map<string, string>): string[] {
+  return Array.from(new Set(sections.map((s) => s.ca || "").filter((c) => c && (unitLoai.get(c) || "ca") === "ca")))
 }
 
 async function sheetApproval(factoryId: string, sheetId: string) {
   const sb = getSupabaseAdmin()
-  const { data: sheet, error } = await sb.from("attendance_daily_sheets").select("id, factory_id").eq("id", sheetId).maybeSingle()
+  const { data: sheet, error } = await sb.from("attendance_daily_sheets").select("id, factory_id, ngay").eq("id", sheetId).maybeSingle()
   if (error) throw new Error(error.message)
   if (!sheet || sheet.factory_id !== factoryId) throw new Error("Không tìm thấy phiếu điểm danh.")
-  const { data, error: e2 } = await sb
-    .from("attendance_sheet_sections")
-    .select("id, loai, trang_thai, duyet_luc, duyet_boi")
-    .eq("sheet_id", sheetId)
-  if (e2) throw new Error(e2.message)
-  return approvalOf(((data || []) as (ApprovalSection & { loai: string })[]).filter((s) => s.loai === "ca_san_xuat"))
+  const [{ data, error: e2 }, { data: ln, error: e3 }, { data: un, error: e4 }] = await Promise.all([
+    sb.from("attendance_sheet_sections").select("id, loai, ca, trang_thai, duyet_luc, duyet_boi").eq("sheet_id", sheetId),
+    sb.from("attendance_sheet_lines").select("section_id").eq("sheet_id", sheetId).range(0, 9999),
+    sb.from("attendance_units").select("code, loai").eq("factory_id", factoryId),
+  ])
+  for (const e of [e2, e3, e4]) if (e) throw new Error(e.message)
+  const withLines = new Set(((ln || []) as { section_id: string }[]).map((l) => l.section_id))
+  const secs = ((data || []) as (ApprovalSection & { loai: string; ca: string | null })[]).filter(
+    (s) => s.loai === "ca_san_xuat" && !isEmptyOpenSection(s, withLines),
+  )
+  const unitLoai = new Map(((un || []) as { code: string; loai: string }[]).map((u) => [u.code, u.loai]))
+  return approvalOf(secs, { factoryId, ngay: sheet.ngay as string, caCodes: productionCaCodes(secs, unitLoai) })
 }
 
 // ── Bản cứng F01/F02 (mục 5, mirror product/confirm/report-snapshots.ts) ──
@@ -241,7 +292,8 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
       .from("attendance_sheet_lines")
       .select("id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, xep_loai, diem_danh, vang_loai, ly_do, thay_the_staff_id, thay_the_ten")
       .eq("sheet_id", sheetId)
-      .order("stt"),
+      .order("stt")
+      .range(0, 9999),
     sb.from("attendance_job_types").select("*").eq("factory_id", factoryId),
     fetchAllPaginated<StaffRow>((from, to) =>
       sb
@@ -260,10 +312,11 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
 
   const unitMap = new Map(((unitRes.data || []) as UnitRow[]).map((u) => [u.code, u]))
   const unitOrder = (code: string | null) => unitMap.get(code || "")?.sort_order ?? 9999
-  const sections = ((secRes.data || []) as SectionRow[])
-    .filter((s) => s.loai === "ca_san_xuat")
-    .sort((a, b) => unitOrder(a.ca) - unitOrder(b.ca) || (a.ca || "").localeCompare(b.ca || ""))
   const lines = (lineRes.data || []) as LineRow[]
+  const withLines = new Set(lines.map((l) => l.section_id))
+  const sections = ((secRes.data || []) as SectionRow[])
+    .filter((s) => s.loai === "ca_san_xuat" && !isEmptyOpenSection(s, withLines))
+    .sort((a, b) => unitOrder(a.ca) - unitOrder(b.ca) || (a.ca || "").localeCompare(b.ca || ""))
   const jobs = ((jobRes.data || []) as JobRow[]).sort((a, b) => a.sort_order - b.sort_order)
   const jobById = new Map(jobs.map((j) => [j.id, j]))
   const staffById = new Map(staffRows.map((s) => [s.id, s]))
@@ -335,13 +388,24 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
   }
 
   // ── Giao dịch thành phẩm trong ngày (chỉ thị, ngăn, sản xuất theo ca) ──
-  type TxRow = { ca: string | null; so_banh: number | null; boc: string | null; chi_thi: string | null; ngan_id: string | null; lots: { loai_csr: string | null; loai_banh: number | null } | null }
+  type TxRow = {
+    ca: string | null
+    so_banh: number | null
+    boc: string | null
+    chi_thi: string | null
+    ngan_id: string | null
+    created_at: string | null
+    /** Giờ quét thật (migration 20261213); thiếu cột / NULL ⇒ dùng created_at. */
+    quet_luc?: string | null
+    lots: { loai_csr: string | null; loai_banh: number | null } | null
+  }
   const txs = (await fetchAllPaginated<TxRow>((from, to) =>
     // lots!inner là quan hệ nhiều-1 ⇒ trả 1 object (kiểu sinh sẵn của supabase-js báo mảng).
+    // "*" để vẫn chạy khi migration 20261213 (cột quet_luc) chưa chạy.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (sb as any)
       .from("lot_transactions")
-      .select("ca, so_banh, boc, chi_thi, ngan_id, lots!inner(factory_id, loai_csr, loai_banh)")
+      .select("*, lots!inner(factory_id, loai_csr, loai_banh)")
       .eq("lots.factory_id", factoryId)
       .eq("ngay_nhap", ngay)
       .order("id", { ascending: true })
@@ -355,7 +419,7 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
     const { data: ng, error: ngErr } = await sb.from("ngans").select("id, ten_ngan, ma_ngan").eq("factory_id", factoryId).in("id", nganIds.slice(0, 200))
     if (ngErr) throw new Error(ngErr.message)
     ngan = ((ng || []) as { ten_ngan: string | null; ma_ngan: string | null }[])
-      .map((n) => n.ten_ngan || n.ma_ngan || "")
+      .map((n) => n.ma_ngan || n.ten_ngan || "")
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b, "vi", { numeric: true }))
       .join(", ")
@@ -374,6 +438,16 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
     }
     return Array.from(map.values()).sort((a, b) => a.csr.localeCompare(b.csr) || a.boc.localeCompare(b.boc))
   }
+  /** Giờ kết thúc ca sản xuất = giờ quét kiện cuối của ca (dây chuyền của phiếu); không có kiện ⇒ giờ bấm "Kết thúc ca". */
+  const lastScanOf = (ca: string | null): string | null => {
+    let max: string | null = null
+    for (const t of txs) {
+      if ((t.ca || "") !== (ca || "")) continue
+      const at = t.quet_luc || t.created_at
+      if (at && (!max || new Date(at).getTime() > new Date(max).getTime())) max = at
+    }
+    return max
+  }
 
   // ── Mỗi Ca/Tổ 1 mục ──
   const blocks: F01Block[] = sections.map((sec) => {
@@ -391,7 +465,7 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
       pho: stored ? holderText(vt.pho) : profileHolder(sec.ca, "to_pho"),
       coViTri: true,
       gioBatDau: fmtHm(sec.bat_dau_luc),
-      gioKetThuc: fmtHm(sec.ket_thuc_luc),
+      gioKetThuc: fmtHm((loai === "ca" ? lastScanOf(sec.ca) : null) || sec.ket_thuc_luc),
       sanXuat: loai === "ca" ? productionOf(sec.ca) : [],
       rows: buildRows(unit, ls).filter((r) => r.people.length > 0),
     }
@@ -418,7 +492,12 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
   }
 
   // ── Duyệt ──
-  const { approved, approval, approvalKey } = await approvalOf(sections)
+  const unitLoai = new Map(((unitRes.data || []) as UnitRow[]).map((u) => [u.code, u.loai]))
+  const { approved, approval, approvalKey, warning: approvalWarning } = await approvalOf(sections, {
+    factoryId,
+    ngay,
+    caCodes: productionCaCodes(sections, unitLoai),
+  })
 
   return {
     form: f01FormOf(dayChuyen),
@@ -434,5 +513,6 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
     approved,
     approval,
     approvalKey,
+    approvalWarning,
   }
 }

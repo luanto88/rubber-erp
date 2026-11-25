@@ -29,6 +29,7 @@ export function JobSheet({
   candidates,
   staffById,
   readOnly,
+  jobPeople,
   onApply,
   onClose,
 }: {
@@ -44,6 +45,8 @@ export function JobSheet({
   candidates: ShiftStaff[]
   staffById: Map<string, ShiftStaff>
   readOnly: boolean
+  /** Tên người KHÁC (trong phiếu ca) đang nhận từng việc — hiện số + tên trên thẻ việc. */
+  jobPeople?: Map<string, string[]>
   /** null = bỏ giao (xoá dòng). */
   onApply: (next: SheetLineDraft | null) => void
   onClose: () => void
@@ -169,21 +172,33 @@ export function JobSheet({
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {g.jobs.map((j) => {
                       const on = draft.cong_viec_ids.includes(j.id)
+                      const others = jobPeople?.get(j.id) || []
+                      const names = on ? [person.ten, ...others] : others
+                      const n = names.length
+                      const shortNames = n > 2 ? `${names.slice(0, 2).join(", ")} +${n - 2}` : names.join(", ")
                       return (
                         <button
                           key={j.id}
                           type="button"
                           disabled={readOnly}
                           onClick={() => toggleJob(j.id)}
-                          title={bilingual(lang, j.ten, j.ten_khmer)}
-                          className={`relative flex min-h-[44px] w-full items-center justify-center rounded-xl border px-3 py-1.5 text-center text-sm font-semibold leading-tight ${on ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+                          title={[bilingual(lang, j.ten, j.ten_khmer), ...names].join("\n")}
+                          className={`relative flex min-h-[44px] w-full flex-col items-center justify-center rounded-xl border px-3 py-1.5 text-center text-sm font-semibold leading-tight ${on ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white text-slate-700"}`}
                         >
+                          {n > 0 ? (
+                            <span className={`absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-black ${on ? "bg-white text-emerald-700" : "bg-emerald-100 text-emerald-700"}`} title={T("soNguoiViec", { n })}>
+                              {n}
+                            </span>
+                          ) : null}
                           {on ? (
                             <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-emerald-600">
                               <Check size={11} strokeWidth={3} />
                             </span>
                           ) : null}
                           <span className="line-clamp-2 px-2">{bilingual(lang, j.ten, j.ten_khmer)}</span>
+                          {n > 0 ? (
+                            <span className={`mt-0.5 block w-full truncate px-2 text-[10px] font-medium ${on ? "text-emerald-50" : "text-slate-500"}`}>{shortNames}</span>
+                          ) : null}
                         </button>
                       )
                     })}

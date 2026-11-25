@@ -107,6 +107,7 @@ import {
   EyeOff,
   ListChecks,
   Scale,
+  ChevronDown,
 } from "lucide-react"
 
 type Suffix = {
@@ -1153,6 +1154,8 @@ export default function SettingsPage() {
     attendance: emptyStaffAttendanceValue(),
   })
   const [staffViewFilter, setStaffViewFilter] = useState<StaffViewFilter>("all")
+  const [showAccountPanel, setShowAccountPanel] = useState(false)
+  const [showDisabledAccounts, setShowDisabledAccounts] = useState(false)
   const [personnelLinkModal, setPersonnelLinkModal] = useState<{ profileId: string; staffId: string } | null>(null)
   const [personnelGroupForm, setPersonnelGroupForm] = useState<PersonnelGroupForm>({
     code: "",
@@ -2542,6 +2545,9 @@ export default function SettingsPage() {
     [personnelAccountAudit],
   )
 
+  const accountsNoStaffActive = useMemo(() => profilesWithoutPersonnel.filter((x) => x.profile.status !== "disabled"), [profilesWithoutPersonnel])
+  const accountsNoStaffDisabled = useMemo(() => profilesWithoutPersonnel.filter((x) => x.profile.status === "disabled"), [profilesWithoutPersonnel])
+
   const staffWithoutProfile = useMemo(
     () => maintStaff.filter((staff) => !staff.profile_id),
     [maintStaff],
@@ -3901,105 +3907,82 @@ export default function SettingsPage() {
               )}
             </div>
 
-            <div className="p-4 space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Tài khoản đã liên kết</div>
-                  <div className="mt-1 text-2xl font-extrabold text-emerald-900">{linkedProfileCount}</div>
-                  <div className="text-xs text-emerald-700/80">Tài khoản đã có hồ sơ nhân sự tương ứng.</div>
-                </div>
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <div className="text-xs font-bold uppercase tracking-wide text-amber-700">Tài khoản chưa có hồ sơ</div>
-                  <div className="mt-1 text-2xl font-extrabold text-amber-900">{profilesWithoutPersonnel.length}</div>
-                  <div className="text-xs text-amber-700/80">Có thể tạo hồ sơ mới hoặc gắn vào hồ sơ đang trống link.</div>
-                </div>
-                <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
-                  <div className="text-xs font-bold uppercase tracking-wide text-sky-700">Hồ sơ chưa liên kết</div>
-                  <div className="mt-1 text-2xl font-extrabold text-sky-900">{staffWithoutProfile.length}</div>
-                  {/* eslint-disable-next-line react/no-unescaped-entities */}
-                  <div className="text-xs text-sky-700/80">Dùng filter "Chưa liên kết" để rà soát nhanh các hồ sơ này.</div>
-                </div>
+            <div className="p-4 space-y-3">
+              {/* Tóm tắt liên kết tài khoản ↔ hồ sơ — gọn 1 hàng, bấm để rà soát (2026-11-25). */}
+              <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-emerald-700">
+                  Đã liên kết tài khoản: {linkedProfileCount}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAccountPanel((v) => !v)}
+                  className={"flex items-center gap-1 rounded-full border px-3 py-1.5 transition-all " + (showAccountPanel ? "border-amber-400 bg-amber-100 text-amber-800" : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100")}
+                >
+                  Tài khoản chưa có hồ sơ: {accountsNoStaffActive.length}
+                  {accountsNoStaffDisabled.length > 0 ? <span className="font-semibold text-amber-600/70">(+{accountsNoStaffDisabled.length} đã khoá)</span> : null}
+                  <ChevronDown size={13} className={showAccountPanel ? "rotate-180 transition-transform" : "transition-transform"} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffViewFilter("unlinked")}
+                  className={"rounded-full border px-3 py-1.5 transition-all " + (staffViewFilter === "unlinked" ? "border-sky-400 bg-sky-100 text-sky-800" : "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100")}
+                >
+                  Hồ sơ chưa liên kết tài khoản: {staffWithoutProfile.length}
+                </button>
               </div>
 
-              <div className="grid gap-4 xl:grid-cols-[1.3fr,1fr]">
-                <div className="rounded-2xl border border-amber-200 bg-amber-50/40">
-                  <div className="flex items-center justify-between border-b border-amber-200 px-4 py-3">
-                    <div>
-                      <h3 className="text-sm font-extrabold text-slate-700">Tài khoản chưa có hồ sơ</h3>
-                      <p className="text-xs text-slate-500">Admin có thể tạo hồ sơ mới hoặc gắn tài khoản này vào hồ sơ đang có.</p>
-                    </div>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-amber-700">{profilesWithoutPersonnel.length}</span>
-                  </div>
-                  <div className="divide-y divide-amber-100">
-                    {profilesWithoutPersonnel.length === 0 ? (
-                      <div className="px-4 py-6 text-sm text-slate-500">Tất cả tài khoản trong nhà máy này đã có hồ sơ nhân sự.</div>
-                    ) : profilesWithoutPersonnel.map(({ profile }) => (
-                      <div key={profile.id} className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                          <div className="font-semibold text-slate-700">{profile.full_name}</div>
-                          <div className="text-xs text-slate-500">{profile.username} • {profile.department || "Chưa có phòng ban"} • {profile.status}</div>
-                        </div>
-                        {canManageSettings && (
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              onClick={() => openNewStaffModal(profile)}
-                              className="rounded-xl bg-orange-600 px-3 py-1.5 text-xs font-bold text-white transition-all hover:bg-orange-700"
-                            >
-                              Tạo hồ sơ từ tài khoản
-                            </button>
-                            <button
-                              onClick={() => setPersonnelLinkModal({ profileId: profile.id, staffId: availableStaffForAccountLink[0]?.id || "" })}
-                              disabled={availableStaffForAccountLink.length === 0}
-                              className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition-all hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              Liên kết vào hồ sơ có sẵn
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-sky-200 bg-sky-50/40">
-                  <div className="flex items-center justify-between border-b border-sky-200 px-4 py-3">
-                    <div>
-                      <h3 className="text-sm font-extrabold text-slate-700">Hồ sơ chưa liên kết tài khoản</h3>
-                      <p className="text-xs text-slate-500">Các hồ sơ này đang dùng độc lập và nên được rà soát định kỳ.</p>
-                    </div>
-                    <button
-                      onClick={() => setStaffViewFilter("unlinked")}
-                      className="rounded-full border border-sky-200 bg-white px-2.5 py-1 text-xs font-bold text-sky-700 transition-all hover:bg-sky-100"
-                    >
-                      Lọc chưa liên kết
-                    </button>
-                  </div>
-                  <div className="divide-y divide-sky-100">
-                    {staffWithoutProfile.length === 0 ? (
-                      <div className="px-4 py-6 text-sm text-slate-500">Chưa có hồ sơ nào bị bỏ trống liên kết tài khoản.</div>
-                    ) : staffWithoutProfile.slice(0, 6).map((staff) => (
-                      <div key={staff.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                        <div>
-                          <div className="font-semibold text-slate-700">{staff.ten}</div>
-                          <div className="text-xs text-slate-500">{staff.chuc_vu || "Chưa có chức vụ"} • {staff.group_names.join(", ") || "Chưa có nhóm"}</div>
-                        </div>
-                        {canManageSettings && (
-                          <button
-                            onClick={() => openEditStaffModal(staff)}
-                            className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition-all hover:border-slate-400"
-                          >
-                            Mở hồ sơ
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {staffWithoutProfile.length > 6 && (
-                      <div className="px-4 py-3 text-xs text-slate-500">Còn {staffWithoutProfile.length - 6} hồ sơ chưa liên kết khác trong danh sách bên dưới.</div>
+              {showAccountPanel && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/40">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 px-3 py-2">
+                    <p className="text-xs text-slate-600">Tài khoản đăng nhập chưa gắn hồ sơ nhân sự — tạo hồ sơ mới hoặc liên kết vào hồ sơ có sẵn.</p>
+                    {accountsNoStaffDisabled.length > 0 && (
+                      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                        <input type="checkbox" checked={showDisabledAccounts} onChange={(e) => setShowDisabledAccounts(e.target.checked)} />
+                        Hiện tài khoản đã khoá ({accountsNoStaffDisabled.length})
+                      </label>
                     )}
                   </div>
+                  {(showDisabledAccounts ? [...accountsNoStaffActive, ...accountsNoStaffDisabled] : accountsNoStaffActive).length === 0 ? (
+                    <div className="px-3 py-4 text-sm text-slate-500">Không có tài khoản đang hoạt động nào thiếu hồ sơ nhân sự.</div>
+                  ) : (
+                    <div className="divide-y divide-amber-100">
+                      {(showDisabledAccounts ? [...accountsNoStaffActive, ...accountsNoStaffDisabled] : accountsNoStaffActive).map(({ profile }) => {
+                        const locked = profile.status === "disabled"
+                        return (
+                          <div key={profile.id} className="flex items-center gap-2 px-3 py-2">
+                            <div className="min-w-0 flex-1">
+                              <div className={"truncate text-sm font-semibold " + (locked ? "text-slate-400" : "text-slate-700")}>{profile.full_name}</div>
+                              <div className="truncate text-[11px] text-slate-500">
+                                {profile.username} · {profile.department || "Chưa có phòng ban"}
+                                {locked ? <span className="ml-1 rounded bg-slate-200 px-1 font-bold text-slate-600">Đã khoá</span> : null}
+                              </div>
+                            </div>
+                            {canManageSettings && !locked && (
+                              <div className="flex shrink-0 items-center gap-1">
+                                <button
+                                  onClick={() => openNewStaffModal(profile)}
+                                  title="Tạo hồ sơ nhân sự từ tài khoản này"
+                                  className="rounded-lg bg-orange-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-orange-700"
+                                >
+                                  Tạo hồ sơ
+                                </button>
+                                <button
+                                  onClick={() => setPersonnelLinkModal({ profileId: profile.id, staffId: availableStaffForAccountLink[0]?.id || "" })}
+                                  disabled={availableStaffForAccountLink.length === 0}
+                                  title="Liên kết vào hồ sơ có sẵn"
+                                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-bold text-slate-600 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Liên kết
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 {([
                   { key: "all", label: "Tất cả nhân sự" },
@@ -4029,19 +4012,19 @@ export default function SettingsPage() {
               </div>
 
               <ResponsiveTableWrapper>
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 border-b border-slate-200">
+                <table className="enterprise-table dense min-w-[960px]">
+                  <thead>
                     <tr>
-                      {["Tên", "Tài khoản", "Phòng ban", "Nhóm", "Chức vụ", "Giới tính", "Chức vụ chính quyền", "Chức vụ kiêm nhiệm", "Trạng thái", ""].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                      {["Tên", "Tài khoản", "Phòng ban", "Nhóm", "Chức vụ", "Giới tính", "Trạng thái", ""].map((h) => (
+                        <th key={h}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {searchedMaintStaff.length === 0 ? (
-                      <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">{searchOf("staff").trim() && filteredMaintStaff.length > 0 ? noSearchMatchText(searchOf("staff")) : "Chưa có nhân sự phù hợp"}</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">{searchOf("staff").trim() && filteredMaintStaff.length > 0 ? noSearchMatchText(searchOf("staff")) : "Chưa có nhân sự phù hợp"}</td></tr>
                     ) : searchedMaintStaff.map((s) => (
-                      <tr key={`sys-${s.id}`} className="row-hover">
+                      <tr key={`sys-${s.id}`}>
                         <td className="px-4 py-3 font-medium text-slate-700">
                           {s.ten}
                           {s.loai_nhan_su === "cong_nhan" || s.cho_xac_nhan ? (
@@ -4058,10 +4041,15 @@ export default function SettingsPage() {
                         <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
                         <td className="px-4 py-3 text-slate-600">{s.phong_ban || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{s.group_names.join(", ") || "—"}</td>
-                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu || "—"}</td>
+                        <td className="px-4 py-3 text-slate-500">
+                          <div>{s.chuc_vu || "—"}</div>
+                          {s.chuc_vu_chinh_quyen || s.chuc_vu_kim_nhiem ? (
+                            <div className="text-[11px] text-slate-400">
+                              {[s.chuc_vu_chinh_quyen ? `Chính quyền: ${s.chuc_vu_chinh_quyen}` : "", s.chuc_vu_kim_nhiem ? `Kiêm nhiệm: ${s.chuc_vu_kim_nhiem}` : ""].filter(Boolean).join(" · ")}
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{s.gioi_tinh || "—"}</td>
-                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu_chinh_quyen || "—"}</td>
-                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu_kim_nhiem || "—"}</td>
                         <td className="px-4 py-3">
                           <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (s.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{s.active ? "Đang làm" : "Ngừng"}</span>
                         </td>
@@ -5500,27 +5488,32 @@ export default function SettingsPage() {
                   />
                 </div>
                 <ResponsiveTableWrapper>
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 border-b border-slate-200">
+                <table className="enterprise-table dense min-w-[960px]">
+                  <thead>
                     <tr>
-                      {["Tên", "Tài khoản", "Phòng ban", "Nhóm", "Chức vụ", "Giới tính", "Chức vụ chính quyền", "Chức vụ kiêm nhiệm", "Trạng thái", ""].map((h) => (
-                        <th key={h} className="px-4 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wide">{h}</th>
+                      {["Tên", "Tài khoản", "Phòng ban", "Nhóm", "Chức vụ", "Giới tính", "Trạng thái", ""].map((h) => (
+                        <th key={h}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {searchedMaintStaff.length === 0 ? (
-                      <tr><td colSpan={10} className="px-4 py-8 text-center text-slate-400">{searchOf("staff").trim() && filteredMaintStaff.length > 0 ? noSearchMatchText(searchOf("staff")) : "Chưa có nhân sự phù hợp"}</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">{searchOf("staff").trim() && filteredMaintStaff.length > 0 ? noSearchMatchText(searchOf("staff")) : "Chưa có nhân sự phù hợp"}</td></tr>
                     ) : searchedMaintStaff.map((s) => (
                       <tr key={s.id} className="row-hover">
                         <td className="px-4 py-3 font-medium text-slate-700">{s.ten}</td>
                         <td className="px-4 py-3 text-slate-500">{s.profile_id ? (activeProfilesForLink.find((profile) => profile.id === s.profile_id)?.username || "Đã liên kết") : "—"}</td>
                         <td className="px-4 py-3 text-slate-600">{s.phong_ban || "—"}</td>
                         <td className="px-4 py-3 text-slate-500">{s.group_names.join(", ") || "—"}</td>
-                          <td className="px-4 py-3 text-slate-500">{s.chuc_vu || "—"}</td>
+                          <td className="px-4 py-3 text-slate-500">
+                          <div>{s.chuc_vu || "—"}</div>
+                          {s.chuc_vu_chinh_quyen || s.chuc_vu_kim_nhiem ? (
+                            <div className="text-[11px] text-slate-400">
+                              {[s.chuc_vu_chinh_quyen ? `Chính quyền: ${s.chuc_vu_chinh_quyen}` : "", s.chuc_vu_kim_nhiem ? `Kiêm nhiệm: ${s.chuc_vu_kim_nhiem}` : ""].filter(Boolean).join(" · ")}
+                            </div>
+                          ) : null}
+                        </td>
                         <td className="px-4 py-3 text-slate-500">{s.gioi_tinh || "—"}</td>
-                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu_chinh_quyen || "—"}</td>
-                        <td className="px-4 py-3 text-slate-500">{s.chuc_vu_kim_nhiem || "—"}</td>
                         <td className="px-4 py-3">
                           <span className={"px-2 py-0.5 rounded-full text-xs font-bold " + (s.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")}>{s.active ? "Đang làm" : "Ngừng"}</span>
                         </td>

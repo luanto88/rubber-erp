@@ -476,7 +476,8 @@ bộ đó đã **code xong và qua ≥1 vòng test tay** tính đến 2026-07-22
 - Fix: `20260928_submit_draft_batch_restore_ngan_sync.sql` = nguyên thân bản 20260918 + khôi phục
   vòng (diff chỉ 3 chỗ thêm) + backfill. **Chạy tay.**
 - ⚠️ Mọi `CREATE OR REPLACE submit_confirm_draft_batch` sau này PHẢI chép từ file MỚI NHẤT và giữ vòng
-  `v_touched_ngans`. File mới nhất hiện là `20260928b_fix_submit_draft_batch_ambiguous_lot_id.sql`.
+  `v_touched_ngans`. File mới nhất hiện là `20261213_attendance_shift_end_by_scan.sql` (thêm `lot_transactions.quet_luc` =
+  giờ quét thật của nháp; trước đó 20261118_lot_nap.sql).
 - 🐛 "Gửi tất cả" báo `column reference "lot_id" is ambiguous` (có từ `20260918`): hàm có
   `RETURNS TABLE (draft_id, lot_id, ma_lo, kien, so_kg)` nên dòng lan bọc
   `UPDATE lot_transactions SET boc … WHERE lot_id = v_lot_id` (không alias) mơ hồ với biến OUT; nháp

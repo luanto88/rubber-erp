@@ -50,6 +50,8 @@ export type F01Model = {
   approval: F01Approval | null
   /** sha256 của các `section_id:duyet_luc` đã sắp — khoá bản cứng. Rỗng khi chưa duyệt đủ. */
   approvalKey: string
+  /** Lý do chưa in dấu duyệt dù mọi phiếu ca đã duyệt (vd có kiện quét sau giờ duyệt). */
+  approvalWarning?: string | null
 }
 
 export const F01_DOC_CODE: Record<F01Form, string> = {

@@ -30,6 +30,7 @@ export function SubmitReview({
   jobById,
   meta,
   unassigned,
+  skipUnassignedDefault = false,
   staffById,
   reasons,
   busy,
@@ -45,6 +46,8 @@ export function SubmitReview({
   jobById: Map<string, AttendanceJobType>
   meta: SubmitMeta
   unassigned: ShiftStaff[]
+  /** Tổ (không phải Ca A/B/C): người chưa giao việc mặc định Bỏ qua (2026-11-25). Ca: mặc định Vắng có phép. */
+  skipUnassignedDefault?: boolean
   staffById: Map<string, ShiftStaff>
   reasons: AttendanceAbsenceReason[]
   busy: boolean
@@ -58,7 +61,7 @@ export function SubmitReview({
     for (const s of unassigned) init[s.id] = { vang_loai: "co_phep", ly_do_id: "", ly_do: "" }
     return init
   })
-  const [skip, setSkip] = useState<Set<string>>(new Set())
+  const [skip, setSkip] = useState<Set<string>>(() => (skipUnassignedDefault ? new Set(unassigned.map((s) => s.id)) : new Set()))
   const [newReason, setNewReason] = useState<{ staffId: string; value: string } | null>(null)
   const [err, setErr] = useState<string | null>(null)
 

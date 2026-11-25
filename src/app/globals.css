@@ -117,11 +117,11 @@ body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
 
 /* ─── Hover: Table row ───────────────────────────────────────────────────── */
 .row-hover {
-  transition: background-color 0.2s ease, transform 0.15s ease;
+  transition: background-color 0.2s ease;
 }
 .row-hover:hover {
   background-color: rgba(241, 245, 249, 0.7);
-  transform: scale(1.002);
+  /* Không transform: scale làm dòng tràn rộng ⇒ thanh cuộn ngang co giãn, dòng bị giật (2026-11-25). */
 }
 
 /* ─── Hover: Button press ────────────────────────────────────────────────── */

@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { AlertTriangle, ArrowLeft, Check, ChevronDown, ClipboardCheck, CloudOff, Eraser, Loader2, LogOut, RefreshCw, Send, Sparkles, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, ClipboardCheck, CloudOff, Eraser, Loader2, LogOut, RefreshCw, Send, SendHorizontal, Sparkles, Trash2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, signOutEverywhere, type SessionUser } from "@/lib/auth"
 import { getErrorMessage } from "@/lib/error-message"
@@ -28,6 +28,8 @@ import {
   countRoster,
   dbLineToDraft,
   defaultPositions,
+  emptyLine,
+  findTrucCaJob,
   hasStoredPositions,
   isStaffWorking,
   isJobOfUnit,
@@ -49,6 +51,8 @@ import { ATT_LANG_OPTIONS, at, bilingual, loadAttLang, storeAttLang, type AttLan
 import { WorkerTile } from "./_components/worker-tile"
 import { JobSheet, type SheetVehicle } from "./_components/job-sheet"
 import { SubmitReview } from "./_components/submit-review"
+import { SendAllDialog, type SendAllItem } from "./_components/send-all-dialog"
+import { ReasonConfirmDialog } from "@/app/dashboard/_components/reason-confirm-dialog"
 
 const STATUS_KEY: Record<string, string> = { dang_lam: "stDangLam", da_gui: "stDaGui", da_duyet: "stDaDuyet", tra_ve: "stTraVe" }
 const STATUS_CLS: Record<string, string> = {
@@ -139,6 +143,10 @@ export default function AttendanceShiftPage() {
   const [, setSheetTabKey] = useState<string>("ca")
   const [reviewOpen, setReviewOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [sendAllItems, setSendAllItems] = useState<SendAllItem[] | null>(null)
+  const [sendAllBusy, setSendAllBusy] = useState(false)
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
 
   const T = useCallback((key: string, vars?: Record<string, string | number>) => at(lang, key, vars), [lang])
 
@@ -341,6 +349,15 @@ export default function AttendanceShiftPage() {
           }
         }
       }
+      // Người đăng nhập (trực ca) tự nhận việc "Trực ca" nếu Ca/Tổ này có việc đó (Tổ cơ điện – bảo trì – xe nâng) và chưa
+      // có dòng của mình. Chỉ điền sẵn — lưu ở lần sửa đầu tiên / khi Gửi (người dùng chốt 2026-11-25).
+      if (editableNow && user?.id) {
+        const me = staff.find((x) => x.profile_id === user.id && isStaffWorking(x, sheetNgay))
+        const trucCa = findTrucCaJob(jobs, unitsRef.current.get(sheetCa) || null, sheetDc)
+        if (me && trucCa && !next.some((l) => l.staff_id === me.id || l.thay_the_staff_id === me.id)) {
+          next = [...next, emptyLine({ staff_id: me.id, cong_viec_ids: [trucCa.id], diem_danh: "co", xep_loai: "A" })]
+        }
+      }
       // Vị trí phụ trách: phiếu chưa từng lưu vị trí ⇒ điền mặc định theo hồ sơ nhân sự (lưu ở lần tự lưu kế tiếp).
       let pos: SectionPositions = hasStoredPositions(s.vi_tri) ? (s.vi_tri as SectionPositions) : {}
       let posDefaulted = false
@@ -352,14 +369,13 @@ export default function AttendanceShiftPage() {
       positionsRef.current = pos
       setLines(next)
       linesRef.current = next
-      if (suggested || posDefaulted) {
-        versionRef.current += 1
-        setVersion(versionRef.current)
-      } else {
-        setSavedVersion(versionRef.current)
-        setVersion(versionRef.current)
-        setSaveState("idle")
-      }
+      // Gợi ý / vị trí mặc định CHỈ hiển thị — không tự lưu khi chưa thao tác (tránh phiếu ca "ma" có ca trưởng có mặt khi
+      // Ca/Tổ đó không làm việc; lỗi thật 25/11/2026). Lần sửa đầu tiên sẽ lưu cả phần điền sẵn.
+      void suggested
+      void posDefaulted
+      setSavedVersion(versionRef.current)
+      setVersion(versionRef.current)
+      setSaveState("idle")
     },
     [canEditAny, user, staff, jobs],
   )
@@ -577,6 +593,127 @@ export default function AttendanceShiftPage() {
     }
   }
 
+  // ── Gửi tất cả (người chấm công toàn nhà máy) ──
+  const prepareSendAll = async () => {
+    if (!section) return
+    setError(null)
+    if (editable && dirty) {
+      const ok = await doSave()
+      if (!ok) return
+    }
+    setSendAllBusy(true)
+    try {
+      const { data: secs, error: secErr } = await supabase.from("attendance_sheet_sections").select(SECTION_SELECT).eq("sheet_id", section.sheet_id)
+      if (secErr) throw secErr
+      const list = ((secs || []) as AttendanceSection[]).filter((s) => s.loai === "ca_san_xuat")
+      const { data: ln, error: lnErr } = list.length
+        ? await supabase.from("attendance_sheet_lines").select(LINE_SELECT).in("section_id", list.map((s) => s.id)).order("stt")
+        : { data: [], error: null }
+      if (lnErr) throw lnErr
+      const bySec = new Map<string, SheetLineDraft[]>()
+      for (const l of (ln || []) as DbLine[]) {
+        const arr = bySec.get(l.section_id) || []
+        arr.push(dbLineToDraft(l))
+        bySec.set(l.section_id, arr)
+      }
+      const order = (c: string | null) => units.findIndex((u) => u.code === c)
+      const items: SendAllItem[] = list
+        .sort((a, b) => order(a.ca) - order(b.ca))
+        .map((s) => {
+          const unit = unitByCode.get(s.ca || "") || null
+          const label = unit ? bilingual(lang, unit.ten, unit.ten_khmer) : `${T("ca")} ${s.ca}`
+          const draft = bySec.get(s.id) || []
+          const base = { sectionId: s.id, label, status: s.trang_thai, co: 0, vang: 0, auto: 0, lines: [] as SheetLineDraft[], holders: [] as string[], header: { ghi_chu: s.ghi_chu || "", vi_tri: {} as SectionPositions } }
+          if (s.trang_thai !== "dang_lam" && s.trang_thai !== "tra_ve") return { ...base, send: false, note: T(STATUS_KEY[s.trang_thai]) }
+          if (draft.length === 0) return { ...base, send: false, note: T("phieuTrongBoQua") }
+          const pos = hasStoredPositions(s.vi_tri) ? (s.vi_tri as SectionPositions) : {}
+          const holders = positionHolderIds(pos)
+          const lineMap = new Map(draft.map((l) => [l.staff_id, l]))
+          let auto: SheetLineDraft[] = []
+          if (unit?.loai === "ca") {
+            const caIds = buildRosterTabs(staff, unit, dayChuyen, ngay, [...draft.map((l) => l.staff_id), ...holders]).find((t) => t.key === "ca")?.staffIds || []
+            auto = caIds
+              .filter((id) => classifyTile(lineMap.get(id), holders.has(id)) === "chua_giao")
+              .map((id) => emptyLine({ staff_id: id, diem_danh: "vang", vang_loai: "co_phep" }))
+          }
+          const fixed = draft.map((l) => (l.diem_danh === "vang" && !l.vang_loai ? { ...l, vang_loai: "co_phep" as const } : l))
+          const missingReason = fixed.find((l) => l.diem_danh === "vang" && l.vang_loai === "khong_phep" && !l.ly_do_id && !l.ly_do.trim())
+          const all = [...fixed, ...auto]
+          const coIds = new Set([...all.filter((l) => l.diem_danh === "co").map((l) => l.staff_id), ...holders])
+          return {
+            ...base,
+            send: !missingReason,
+            note: missingReason ? T("thieuLyDo", { ten: staffById.get(missingReason.staff_id)?.ten || "?" }) : "",
+            co: coIds.size,
+            vang: all.filter((l) => l.diem_danh === "vang").length,
+            auto: auto.length,
+            lines: all,
+            holders: Array.from(holders),
+            header: { ghi_chu: s.ghi_chu || "", vi_tri: pos },
+          }
+        })
+      setSendAllItems(items)
+    } catch (err) {
+      setError(isNetworkError(err) ? T("loiMang") : getErrorMessage(err, "Không tải được các phiếu ca."))
+    } finally {
+      setSendAllBusy(false)
+    }
+  }
+
+  const confirmSendAll = async () => {
+    if (!sendAllItems || !section) return
+    setSendAllBusy(true)
+    setError(null)
+    let sent = 0
+    try {
+      for (const it of sendAllItems.filter((x) => x.send)) {
+        const { error: saveErr } = await supabase.rpc("attendance_save_section", {
+          p_section_id: it.sectionId,
+          p_header: it.header,
+          p_lines: linesToPayload(it.lines, new Set(it.holders)),
+        })
+        if (saveErr) throw new Error(`${it.label}: ${saveErr.message}`)
+        const { error: subErr } = await supabase.rpc("attendance_submit_section", { p_section_id: it.sectionId })
+        if (subErr) throw new Error(`${it.label}: ${subErr.message}`)
+        sent += 1
+      }
+      setSendAllItems(null)
+      setNotice(T("daGuiTatCa", { n: sent }))
+    } catch (err) {
+      setError(isNetworkError(err) ? T("loiMang") : getErrorMessage(err, "Không gửi được."))
+      if (sent > 0) setNotice(T("daGuiTatCa", { n: sent }))
+    } finally {
+      setSendAllBusy(false)
+      await loadSection(section.id).catch(() => undefined)
+    }
+  }
+
+  // ── Bỏ phiếu ca (Ca/Tổ không làm việc hôm đó) ──
+  const isAdmin = user?.role === "admin"
+  const canDiscard = !!section && (section.trang_thai === "da_duyet" ? isAdmin : canEditAny || isMine)
+  const confirmDiscard = async (lyDo: string) => {
+    if (!section) return
+    setDiscarding(true)
+    setError(null)
+    try {
+      const { error: rpcErr } = await supabase.rpc("attendance_discard_section", { p_section_id: section.id, p_ly_do: lyDo })
+      if (rpcErr) throw rpcErr
+      setDiscardOpen(false)
+      setSection(null)
+      setLines([])
+      linesRef.current = []
+      setPositions({})
+      positionsRef.current = {}
+      setSavedVersion(versionRef.current)
+      setVersion(versionRef.current)
+      setNotice(T("daBoPhieuCa"))
+    } catch (err) {
+      setError(isNetworkError(err) ? T("loiMang") : getErrorMessage(err, "Không bỏ được phiếu ca."))
+    } finally {
+      setDiscarding(false)
+    }
+  }
+
   const [signingOut, setSigningOut] = useState(false)
   const handleLogout = async () => {
     setMenuOpen(false)
@@ -607,6 +744,20 @@ export default function AttendanceShiftPage() {
     [jobs, currentUnit, dayChuyen],
   )
 
+  // Tên người KHÁC đang nhận từng việc trong phiếu ca (thẻ việc hiện số + tên, 2026-11-25).
+  const jobPeopleExcept = (staffId: string) => {
+    const m = new Map<string, string[]>()
+    for (const l of lines) {
+      if (l.staff_id === staffId) continue
+      let ten: string
+      if (l.diem_danh === "co") ten = staffById.get(l.staff_id)?.ten || ""
+      else if (l.thay_the_staff_id) ten = staffById.get(l.thay_the_staff_id)?.ten || ""
+      else if (l.thay_the_ten) ten = `${l.thay_the_ten} (tạm)`
+      else continue
+      for (const j of l.cong_viec_ids) m.set(j, [...(m.get(j) || []), ten])
+    }
+    return m
+  }
   const sheetPerson = sheetFor ? staffById.get(sheetFor) : undefined
   const replacementCandidates = useMemo(() => {
     if (!sheetFor) return []
@@ -766,11 +917,16 @@ export default function AttendanceShiftPage() {
             aria-label={T("caTo")}
             className="max-w-[60vw] rounded-lg border border-white/30 bg-white/10 px-2 py-1 font-bold text-white [&>option]:text-slate-800"
           >
-            {unitChoices.map((u) => (
-              <option key={u.code} value={u.code}>
-                {bilingual(lang, u.ten, u.ten_khmer)}
-              </option>
-            ))}
+            {unitChoices.map((u) => {
+              // Ca/Tổ người đăng nhập được phân công: in đậm + ★ (mobile bỏ qua font-weight trong option).
+              const mine = assignedCas.includes(u.code)
+              return (
+                <option key={u.code} value={u.code} style={{ fontWeight: mine ? 700 : 400 }}>
+                  {bilingual(lang, u.ten, u.ten_khmer)}
+                  {mine ? " ★" : ""}
+                </option>
+              )
+            })}
             {!unitChoices.some((u) => u.code === ca) ? <option value={ca}>{currentUnit ? bilingual(lang, currentUnit.ten, currentUnit.ten_khmer) : ca}</option> : null}
           </select>
           <div className="flex overflow-hidden rounded-lg border border-white/30">
@@ -841,6 +997,17 @@ export default function AttendanceShiftPage() {
               </div>
             ) : null}
             {lockReason ? <div className="rounded-xl bg-slate-100 p-3 text-sm font-semibold text-slate-600">{lockReason}</div> : null}
+            {canDiscard ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDiscardOpen(true)}
+                  className="flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-50"
+                >
+                  <Trash2 size={13} /> {T("boPhieuCa")}
+                </button>
+              </div>
+            ) : null}
             {suggestedFrom && editable ? (
               <div className="flex items-center gap-2 rounded-xl bg-violet-50 p-3 text-sm font-semibold text-violet-800">
                 <Sparkles size={16} className="shrink-0" />
@@ -925,19 +1092,40 @@ export default function AttendanceShiftPage() {
               </div>
             )}
           </>
+        ) : catalogReady && !fatal ? (
+          <div className="space-y-2 rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
+            <div>{T("chuaMoPhieu")}</div>
+            <button type="button" onClick={() => void openCurrent()} className="mx-auto flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white">
+              <RefreshCw size={13} /> {T("moLaiPhieu")}
+            </button>
+          </div>
         ) : null}
       </main>
 
-      {section && editable ? (
+      {section && (editable || canEditAny) ? (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-          <button
-            type="button"
-            onClick={openReview}
-            disabled={submitting}
-            className="mx-auto flex w-full max-w-5xl items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-base font-bold text-white disabled:opacity-60"
-          >
-            <Send size={18} /> {T("guiChamCong")}
-          </button>
+          <div className="mx-auto flex max-w-5xl gap-2">
+            {canEditAny ? (
+              <button
+                type="button"
+                onClick={() => void prepareSendAll()}
+                disabled={sendAllBusy || submitting}
+                className={"flex items-center justify-center gap-1.5 rounded-xl border border-emerald-600 bg-white px-3 py-3 text-sm font-bold text-emerald-700 disabled:opacity-60 " + (editable ? "shrink-0" : "flex-1")}
+              >
+                {sendAllBusy && !sendAllItems ? <Loader2 size={16} className="animate-spin" /> : <SendHorizontal size={16} />} {T("guiTatCa")}
+              </button>
+            ) : null}
+            {editable ? (
+              <button
+                type="button"
+                onClick={openReview}
+                disabled={submitting}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-base font-bold text-white disabled:opacity-60"
+              >
+                <Send size={18} /> {T("guiChamCong")}
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -954,12 +1142,38 @@ export default function AttendanceShiftPage() {
           candidates={replacementCandidates}
           staffById={staffById}
           readOnly={!editable}
+          jobPeople={jobPeopleExcept(sheetPerson.id)}
           onApply={(next) => applyLine(sheetPerson.id, next)}
           onClose={() => setSheetFor(null)}
         />
       ) : null}
 
       {signOutOverlay}
+
+      {sendAllItems ? (
+        <SendAllDialog
+          T={T}
+          items={sendAllItems}
+          meta={`${dcLabel(dayChuyen)} · ${fmtDdMm(ngay)}${maPhieu ? ` · ${maPhieu}` : ""}`}
+          busy={sendAllBusy}
+          onCancel={() => setSendAllItems(null)}
+          onConfirm={() => void confirmSendAll()}
+        />
+      ) : null}
+
+      {discardOpen && section ? (
+        <ReasonConfirmDialog
+          title={T("boPhieuCa")}
+          subtitle={`${currentUnit ? bilingual(lang, currentUnit.ten, currentUnit.ten_khmer) : ca} · ${dcLabel(dayChuyen)} · ${fmtDdMm(ngay)}`}
+          points={[T("boPhieuY1"), section.trang_thai === "da_duyet" ? T("boPhieuY2Duyet") : T("boPhieuY2")]}
+          requireReason={section.trang_thai === "da_duyet"}
+          reasonPlaceholder={T("boPhieuLyDo")}
+          confirmLabel={T("boPhieuCa")}
+          busy={discarding}
+          onConfirm={(r) => void confirmDiscard(r)}
+          onCancel={() => setDiscardOpen(false)}
+        />
+      ) : null}
 
       {reviewOpen ? (
         <SubmitReview
@@ -970,6 +1184,7 @@ export default function AttendanceShiftPage() {
           jobById={jobById}
           meta={{ dayChuyen: dcLabel(dayChuyen), ca, ngay, maPhieu }}
           unassigned={unassignedCa}
+          skipUnassignedDefault={currentUnit?.loai !== "ca"}
           staffById={staffById}
           reasons={reasons}
           busy={submitting}

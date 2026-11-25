@@ -195,3 +195,36 @@ ngày + cùng dây chuyền ⇒ chung 1 phiếu.
   `attendance_job_types.unit_code` (việc của tổ, `day_chuyen` NULL được), việc ca = `unit_code` NULL + `ca_san_xuat` + dây chuyền;
   hàm `isJobOfUnit` / `jobsForUnit` (shift.ts). Migration chuyển việc tiếp nhận MT → TN_MT, MN → TN_MN, "Trực hồ XLNT" → XLNT,
   cơ điện → CD (bản Mủ nước trùng tên tắt). Cài đặt → Công việc: chip theo "Thuộc" (Ca sản xuất · dây chuyền / từng tổ).
+### Sửa sau test production (2026-11-25, chờ chạy migration 20261212 + test tay)
+- Lỗi 25/11 (TKSXMT-251126): mở màn điểm danh ⇒ RPC open tạo phiếu Ca A (đơn vị mặc định) + TỰ LƯU vị trí Ca trưởng mặc
+  định ⇒ phiếu Ca A có 1 dòng ⇒ phiếu ngày không "đủ duyệt" ⇒ TKSX không có dấu duyệt; phải gửi Ca A với 21 người "có phép" (sai).
+  Sửa: (a) màn điểm danh KHÔNG tự lưu khi chỉ điền sẵn vị trí / gợi ý phiếu trước — lần sửa đầu mới lưu; (b) phiếu ca TRỐNG
+  (dang_lam, 0 dòng) không tính vào trạng thái phiếu ngày (`attendance_recompute_sheet`, migration
+  `20261212_attendance_empty_sections.sql`) / dấu duyệt + mô hình TKSX (`sheet-report-actions.ts`) / danh sách + chi tiết;
+  (c) RPC `attendance_discard_section` "Bỏ phiếu ca" (Ca/Tổ không làm việc): chưa duyệt ⇒ người lập / mark / mark_all / admin;
+  đã duyệt ⇒ chỉ admin + lý do, ngày công tính lại như xoá phiếu ngày. Mọi `CREATE OR REPLACE attendance_recompute_sheet` chép từ 20261212.
+  Dữ liệu 25/11: admin bấm "Bỏ phiếu ca" ở dòng Ca A (tab Phiếu TKSX, dòng xổ).
+- Migration 20261212 xoá công việc ĐÃ TẮT chưa dòng / hồ sơ nào dùng (16 việc mẫu cũ, kiểm 2026-11-25: 0 tham chiếu).
+- Màn điểm danh: thẻ việc hiện SỐ người đang nhận việc đó; "Gửi tất cả" (admin / mark / mark_all) gửi mọi phiếu ca đang lập /
+  trả về có dòng của phiếu ngày — Ca A/B/C người chưa giao tự VẮNG CÓ PHÉP, tổ bỏ qua; phiếu thiếu lý do không phép không gửi
+  (`shift/_components/send-all-dialog.tsx`). Bước gửi 1 phiếu: Ca ⇒ người chưa giao mặc định Vắng có phép, Tổ ⇒ mặc định Bỏ qua.
+- Tab Phiếu TKSX: thao tác dòng = Xem · Tải PDF · Sửa (mở phiếu ca sửa được đầu tiên) · Xoá phiếu ngày (admin); dòng phiếu ca:
+  Sửa · Bỏ phiếu ca. Tải PDF trên mobile lỗi "tải xuống không thành công" do thu hồi blob URL ngay sau click ⇒ `downloadF01`
+  (`f01-client.ts`): bản cứng tải qua Signed URL có tên file, bản dựng trực tiếp giữ blob 60 giây.
+- Cài đặt: Phân công điểm danh hiển thị dòng gọn sau khi lưu (Sửa / Xoá); Nhân sự gọn (chip tóm tắt, panel tài khoản thu gọn,
+  ẩn tài khoản đã khoá, bảng `enterprise-table`, gộp 3 cột chức vụ); `.row-hover` bỏ `transform: scale` (làm bảng cuộn ngang giật).
+- Sau test A–H (2026-11-25, chờ chạy migration `20261213_attendance_shift_end_by_scan.sql` + test tay):
+  - Tấm chọn việc: mỗi thẻ việc hiện số + dòng tên "A, B +n" (PC rê chuột thấy đủ tên) — prop `jobPeople`.
+  - Dropdown Ca/Tổ: đơn vị người đăng nhập được phân công in đậm + "★".
+  - Mở phiếu Ca/Tổ có việc tên "Trực ca" (`findTrucCaJob`, hiện là Tổ cơ điện) ⇒ người đăng nhập tự có dòng "Trực ca" có mặt
+    A (chỉ điền sẵn, lưu ở lần sửa đầu / khi Gửi).
+  - `lot_transactions.quet_luc` = giờ quét kiện thật (giờ tạo nháp); `submit_confirm_draft_batch` chép từ 20261213 (mọi CREATE
+    OR REPLACE về sau chép từ file này). TKSX: giờ kết thúc khối ca = kiện quét cuối của ca (`quet_luc ?? created_at`, dây
+    chuyền của phiếu); không có kiện ⇒ giờ "Kết thúc ca".
+  - Trigger `trg_attendance_guard_shift_approve`: phiếu Ca sản xuất (đơn vị loại ca) chỉ sang `da_duyet` khi ngày + ca có kiện
+    TP thì ca đó đã "Phê duyệt" ở Thành phẩm (`product_shift_is_locked`, không tách dây chuyền). Dấu duyệt TKSX bỏ khi có kiện
+    quét sau giờ duyệt (`hasScanAfter`, cảnh báo vàng). Chi tiết phiếu hiện "Thành phẩm: đã / chưa phê duyệt ca".
+  - Ngăn trên TKSX = `ma_ngan` đầy đủ.
+- Tài khoản test + đã khoá: `scripts/delete-disabled-accounts.mjs` (xem trước → `--apply`; bảng nghiệp vụ không ON DELETE
+  ⇒ tài khoản có lịch sử tự bị giữ lại). ĐÃ `--apply` 2026-11-25: xoá 3 (Chau Kim Sêne, Nguyễn Trung Cường, User Test),
+  giữ 6 (5 tài khoản E2E + Vương Nguyễn Phương Lâm — có lịch sử).

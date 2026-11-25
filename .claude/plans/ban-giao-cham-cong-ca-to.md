@@ -57,13 +57,37 @@ Thay file `ban-giao-cham-cong-c2-gd3.md` cho phần còn lại. Mô hình hiện
 - Bảng lớn ⇒ `fetchAllPaginated` + `.order()` ổn định; `.in()` chia lô 200. Ngày nghiệp vụ `getFactoryTodayISO()`.
 - File `cung_cap_dl/*` (ảnh xoá, `du_lieu_cu/`, `load.jpg`) KHÔNG nằm trong commit — để người dùng tự quyết.
 
+## 6. Cập nhật 2026-11-25 (sau test production 1–7 PASS) — CHƯA commit
+- Migration `20261212_attendance_empty_sections.sql` — **chạy TRƯỚC khi test**: phiếu ca trống không tính, RPC
+  `attendance_discard_section`, xoá 16 việc đã tắt không ai dùng, tính lại trạng thái mọi phiếu ngày.
+- Code: màn điểm danh (không tự lưu phần điền sẵn, số người/việc, Gửi tất cả, Bỏ phiếu ca, tổ mặc định Bỏ qua người chưa giao),
+  tab Phiếu TKSX (thao tác inline, ẩn phiếu ca trống), tải PDF mobile, Cài đặt Nhân sự + Phân công gọn, `.row-hover`.
+- Dữ liệu 25/11: sau migration, admin bỏ phiếu Ca A của TKSXMT-251126 (lý do "Ca A không làm việc") ⇒ dấu duyệt TKSX dựng lại.
+- Tài khoản: `scripts/delete-disabled-accounts.mjs` xem trước liệt kê 9 tài khoản (6 TEST + Chau Kim Sêne, Nguyễn Trung Cường,
+  Vương Nguyễn Phương Lâm) — CHỜ người dùng xác nhận rồi mới `--apply`.
+- Test tay (chi tiết ở câu trả lời phiên 2026-11-25): A) bỏ phiếu Ca A 25/11; B) mở màn điểm danh Ca/Tổ không làm việc rồi đổi
+  sang ca khác ⇒ không sinh dòng, phiếu ngày vẫn duyệt đủ được; C) số người trên thẻ việc; D) Gửi tất cả; E) bước gửi tổ mặc
+  định Bỏ qua; F) Tải PDF TKSX trên điện thoại; G) thao tác inline; H) Cài đặt Phân công + Nhân sự (cuộn ngang không giật).
+
+## 7. Cập nhật 2026-11-25 (chiều) — test A–H PASS localhost (G chờ deploy) — CHƯA commit
+- Migration `20261213_attendance_shift_end_by_scan.sql` — **chạy TRƯỚC khi test** (sau 20261212): `lot_transactions.quet_luc`,
+  trigger chặn duyệt phiếu ca khi Thành phẩm chưa phê duyệt ca, `submit_confirm_draft_batch` (chép 20261118 + quet_luc).
+- Đã xoá tài khoản: 3 xoá, 6 giữ (có lịch sử) — rule 31.
+- Code: thẻ việc hiện tên người; Ca/Tổ được phân công đậm + ★; tự điền "Trực ca" cho người đăng nhập ở tổ có việc này;
+  TKSX giờ kết thúc = kiện quét cuối, bỏ dấu duyệt nếu có kiện sau giờ duyệt, ngăn = mã đầy đủ; chi tiết phiếu hiện trạng thái
+  phê duyệt ca Thành phẩm.
+- Test tay: (1) thẻ việc PC rê chuột / mobile dòng tên; (2) dropdown ★; (3) trực ca mở Tổ cơ điện thấy sẵn mình ở "Trực ca",
+  chỉ mở rồi đổi tổ ⇒ không sinh dòng; (4) quét 2 lượt cách vài phút rồi Gửi tất cả ⇒ TKSX giờ kết thúc = giờ quét kiện cuối
+  (chỉ áp kiện quét SAU migration); (5) duyệt phiếu Ca A khi TP chưa phê duyệt ca A ⇒ báo lỗi; phê duyệt TP rồi duyệt ⇒ OK;
+  (6) Ngăn TKSX mã đầy đủ. Lưu ý: hàng đợi mất mạng gửi nháp lúc có mạng ⇒ quet_luc = giờ nháp lên server, không phải giờ quét.
+
 ## Prompt phiên sau
 ```
-Đọc CLAUDE.md, rule 29, rule 31 (mục GĐ3 + "Ca / Tổ điểm danh"), và ĐỌC HẾT .claude/plans/ban-giao-cham-cong-ca-to.md.
-Trạng thái: Chấm công GĐ3 + Ca/Tổ điểm danh đã push main; migration 20261208–20261210 đã chạy; 20261211 tôi sẽ xác nhận
-đầu phiên (nếu chưa chạy, nhắc tôi chạy trước khi test).
-Đầu phiên: tôi báo kết quả test tay mục 1 trong file bàn giao (test trên mobile, bản deploy). Sửa lỗi tôi báo trước,
-giữ đúng mô hình mục 2 (không đưa lại thẻ nhóm, không gắn tổ độc lập vào dây chuyền).
+Đọc CLAUDE.md, rule 29, rule 31 (mục GĐ3, "Ca / Tổ điểm danh", "Sửa sau test production 2026-11-25"), và ĐỌC HẾT
+.claude/plans/ban-giao-cham-cong-ca-to.md (mục 6 là trạng thái mới nhất).
+Trạng thái: sửa sau test production 2026-11-25 đã code (tsc + eslint sạch); migration 20261212 tôi sẽ xác nhận đã chạy.
+Đầu phiên: tôi báo kết quả test A–H mục 6 (test trên mobile, bản deploy). Sửa lỗi tôi báo trước, giữ đúng mô hình mục 2.
+Xoá tài khoản test/đã khoá: chỉ chạy scripts/delete-disabled-accounts.mjs --apply khi tôi xác nhận danh sách.
 Sau khi test PASS: đề xuất kế hoạch C2b Truy vết (khối nhân sự ca ở chi tiết lô) rồi C3 — lên plan liệt kê bảng / RPC / màn
 hình để tôi duyệt trước khi code; điểm nào chưa rõ thì HỎI tôi (ngôn ngữ nghiệp vụ + ví dụ), không tự quyết.
 Mỗi bước tsc + eslint; xong hướng dẫn test tay, DỪNG cho tôi test; hỏi tôi trước khi commit/push.

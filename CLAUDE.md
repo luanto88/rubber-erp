@@ -449,6 +449,11 @@ Vi du:
   `20261210_attendance_units.sql` TRƯỚC khi mở màn chấm công, rồi test tay (rule 31 mục "Ca/Tổ điểm danh").
   2026-11-24 (sau test): bỏ thẻ nhóm ở màn điểm danh, việc gắn theo Ca/Tổ, thêm Tổ tiếp nhận mủ nước + Đội xe cơ khí —
   chạy 20261211_attendance_unit_jobs.sql sau 20261210 (rule 31 cuối mục Ca/Tổ).
+  2026-11-25: test production PASS 1–7; sửa sau test (phiếu ca trống, Bỏ phiếu ca, Gửi tất cả, số người/việc, tải PDF mobile,
+  thao tác inline, Cài đặt Nhân sự / Phân công gọn) — chạy 20261212_attendance_empty_sections.sql (rule 31 mục cuối).
+  2026-11-25 (chiều): test A–H PASS; thẻ việc hiện tên, Ca/Tổ được phân công ★, tự điền "Trực ca", giờ kết thúc ca = kiện quét
+  cuối (`lot_transactions.quet_luc`), duyệt phiếu ca sau khi phê duyệt ca Thành phẩm, ngăn TKSX mã đầy đủ — chạy
+  20261213_attendance_shift_end_by_scan.sql, test tay (bàn giao mục 7).
 
 ## Nhật ký các phiên cũ
 

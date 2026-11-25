@@ -48,7 +48,7 @@ export async function resolveF01Pdf(factoryId: string, sheetId: string): Promise
   const model = await loadF01Model(t, factoryId, sheetId)
   const bytes = await buildF01PdfBytes(model)
   const fileName = f01FileName(model)
-  if (!model.approved) return { bytes, fileName, kind: "preview", snapshot: null, warning: null }
+  if (!model.approved) return { bytes, fileName, kind: "preview", snapshot: null, warning: model.approvalWarning || null }
   if (state?.unavailable) {
     return { bytes, fileName, kind: "live", snapshot: null, warning: "Chưa cấu hình lưu bản cứng (migration 20261207) — đang xem bản dựng trực tiếp." }
   }
@@ -66,13 +66,36 @@ export async function resolveF01Pdf(factoryId: string, sheetId: string): Promise
   }
 }
 
-export function downloadPdfBytes(bytes: Uint8Array, fileName: string) {
-  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/pdf" }))
+/**
+ * Tải PDF phiếu TKSX. Bản cứng đã lưu ⇒ tải qua Signed URL có Content-Disposition (ổn định trên mobile / WebView).
+ * Bản dựng trực tiếp ⇒ blob URL; KHÔNG thu hồi URL ngay sau click (Chrome Android tải bất đồng bộ ⇒ báo
+ * "1 tệp tải xuống không thành công" — lỗi thật 2026-11-25), giữ 60 giây rồi mới thu hồi.
+ */
+export async function downloadF01(result: F01Result, factoryId: string): Promise<void> {
+  if (result.kind === "hard" && result.snapshot) {
+    try {
+      const url = await getSheetSnapshotUrl(await token(), factoryId, result.snapshot.id, true)
+      triggerDownload(url, result.fileName)
+      return
+    } catch (err) {
+      console.warn("Không lấy được link tải bản cứng, tải bản trong máy:", err)
+    }
+  }
+  downloadPdfBytes(result.bytes, result.fileName)
+}
+
+function triggerDownload(url: string, fileName: string) {
   const a = document.createElement("a")
   a.href = url
   a.download = fileName
+  a.rel = "noopener"
   document.body.appendChild(a)
   a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => a.remove(), 1000)
+}
+
+export function downloadPdfBytes(bytes: Uint8Array, fileName: string) {
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/pdf" }))
+  triggerDownload(url, fileName)
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }

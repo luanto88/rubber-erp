@@ -363,6 +363,18 @@ export function jobsForUnit<
   return jobs.filter((j) => keep.has(j.id) || (j.is_active && !j.an_diem_danh && isJobOfUnit(j, unit, dayChuyen)))
 }
 
+/**
+ * Việc "Trực ca" của Ca/Tổ đang điểm danh (hiện thuộc Tổ cơ điện – bảo trì – xe nâng). Nhận diện theo TÊN đã bỏ dấu
+ * ("truc ca") để không hard-code mã tổ / id việc. null = đơn vị không có việc này.
+ */
+export function findTrucCaJob<
+  J extends { id: string; ten: string; day_chuyen: string | null; to_nhom: string; unit_code?: string | null; is_active: boolean },
+>(jobs: J[], unit: Pick<AttendanceUnit, "code" | "loai"> | null, dayChuyen: string): J | null {
+  const norm = (s: string) =>
+    s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/\s+/g, " ").trim()
+  return jobs.find((j) => j.is_active && norm(j.ten) === "truc ca" && isJobOfUnit(j, unit, dayChuyen)) || null
+}
+
 export type TileState = "chua_giao" | "co_mat" | "vang_co_thay" | "vang"
 
 /** `isHolder` = đang giữ vị trí phụ trách ⇒ có mặt dù không có việc (quy tắc (a)). */

@@ -10,7 +10,7 @@
 // và đổi UI từ 1 form/ca sang danh sách nhiều dòng/ca (thêm/sửa/xóa từng người).
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Plus, Save, Trash2 } from "lucide-react"
+import { Pencil, Plus, Save, Trash2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { UNIT_SELECT, type AttendanceUnit } from "@/lib/attendance/shift"
 
@@ -65,6 +65,16 @@ export function ShiftAssignmentsTab({
   // dùng sửa lại bất kỳ field nào của dòng đó (updateRow) — tránh hiện "Đã lưu" sai khi dữ liệu
   // trên form đã khác với dữ liệu thật trong DB.
   const [savedRowIds, setSavedRowIds] = useState<Set<string>>(new Set())
+  // Dòng đã lưu hiển thị GỌN 1 dòng (2026-11-25); chỉ dòng mới / đang bấm Sửa mới hiện form.
+  const [editingIds, setEditingIds] = useState<Set<string>>(new Set())
+  const stopEditing = (id: string) =>
+    setEditingIds((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  const userLabel = useMemo(() => new Map(userOptions.map((u) => [u.id, u.label])), [userOptions])
 
   const loadData = useCallback(async (fid: string) => {
     setLoading(true)
@@ -132,6 +142,7 @@ export function ShiftAssignmentsTab({
           .single()
         if (err) { setError(err.message); return }
         updateRow(ca, rowId, { id: data.id, isNew: false })
+        stopEditing(rowId)
         setSavedRowIds((prev) => new Set(prev).add(data.id))
       } else {
         const { error: err } = await supabase
@@ -139,6 +150,7 @@ export function ShiftAssignmentsTab({
           .update(payload)
           .eq("id", row.id)
         if (err) { setError(err.message); return }
+        stopEditing(row.id)
         setSavedRowIds((prev) => new Set(prev).add(row.id))
       }
       void loadData(factoryId)
@@ -216,12 +228,43 @@ export function ShiftAssignmentsTab({
                 )}
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {rows.length === 0 && (
                   <p className="text-xs text-slate-400">Chưa có ai được phân công.</p>
                 )}
-                {rows.map((row) => (
-                  <div key={row.id} className="space-y-2 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                {rows.map((row) => !row.isNew && !editingIds.has(row.id) ? (
+                  <div key={row.id} className={"flex items-center gap-2 rounded-lg border px-2.5 py-1.5 " + (row.is_active ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50 opacity-70")}>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold text-slate-700">
+                        {(row.assigned_user_id && userLabel.get(row.assigned_user_id)) || row.assigned_name || "(chưa chọn người)"}
+                      </div>
+                      {row.ghi_chu || !row.is_active || (row.assigned_user_id && row.assigned_name) ? (
+                        <div className="truncate text-[11px] text-slate-500">
+                          {[!row.is_active ? "Tạm ngưng" : "", row.assigned_user_id && row.assigned_name ? row.assigned_name : "", row.ghi_chu || ""].filter(Boolean).join(" · ")}
+                        </div>
+                      ) : null}
+                    </div>
+                    {savedRowIds.has(row.id) ? <span className="text-[11px] font-bold text-emerald-600">Đã lưu</span> : null}
+                    {canManage && (confirmDeleteId === row.id ? (
+                      <span className="flex items-center gap-1 text-[11px] font-bold">
+                        <button onClick={() => void handleDeleteRow(ca, row.id)} disabled={deletingRowId === row.id} className="rounded bg-red-600 px-2 py-1 text-white disabled:opacity-50">
+                          {deletingRowId === row.id ? "..." : "Xóa"}
+                        </button>
+                        <button onClick={() => setConfirmDeleteId(null)} className="rounded border border-slate-300 px-2 py-1 text-slate-600">Hủy</button>
+                      </span>
+                    ) : (
+                      <span className="flex shrink-0 items-center">
+                        <button onClick={() => setEditingIds((prev) => new Set(prev).add(row.id))} title="Sửa" className="rounded-lg p-1.5 text-blue-600 hover:bg-blue-50">
+                          <Pencil size={13} />
+                        </button>
+                        <button onClick={() => setConfirmDeleteId(row.id)} title="Xóa" className="rounded-lg p-1.5 text-red-500 hover:bg-red-50">
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div key={row.id} className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/40 p-3">
                     <div>
                       <label className="mb-1 block text-xs font-bold text-slate-600">Tài khoản trực ca</label>
                       <select
@@ -298,6 +341,18 @@ export function ShiftAssignmentsTab({
                           >
                             <Save size={13} /> {savingRowId === row.id ? "Đang lưu..." : "Lưu"}
                           </button>
+                          {!row.isNew ? (
+                            <button
+                              onClick={() => {
+                                stopEditing(row.id)
+                                if (factoryId) void loadData(factoryId)
+                              }}
+                              title="Bỏ sửa"
+                              className="flex items-center justify-center rounded-xl border border-slate-300 px-3 text-slate-600 hover:bg-slate-100"
+                            >
+                              <X size={14} />
+                            </button>
+                          ) : null}
                           <button
                             onClick={() => setConfirmDeleteId(row.id)}
                             className="flex items-center justify-center rounded-xl border border-red-200 px-3 text-red-600 hover:bg-red-50"
@@ -306,9 +361,6 @@ export function ShiftAssignmentsTab({
                           </button>
                         </div>
                       )
-                    )}
-                    {savedRowIds.has(row.id) && !row.isNew && (
-                      <p className="text-center text-xs font-bold text-emerald-600">Đã lưu</p>
                     )}
                   </div>
                 ))}
