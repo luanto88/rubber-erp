@@ -109,12 +109,22 @@ Thay file `ban-giao-cham-cong-c2-gd3.md` cho phần còn lại. Mô hình hiện
 - Chờ test lại trên production: 3 điểm trên. TKSX 25/11 Ca A nếu ĐÃ có bản cứng thì vẫn in 16:26 (bản cứng bất biến) — xem ngày
   khác chưa có bản cứng, hoặc admin mở lại + duyệt lại để tạo bản mới.
 
+## 12. Cập nhật 2026-11-25 (cuối phiên) — test PASS, ĐÃ commit
+- Migration 20261215 ĐÃ CHẠY; test thẻ lọc + bộ lọc Lịch công PASS; C4 test 1–8 PASS (người test Chau Nho, năm 2025).
+- Dữ liệu test: đã xoá 92 ô ngày công T9–T12/2025 của Chau Nho. Sổ phép (4 dòng nam 2025) + 93 dòng nhật ký T9–T12/2025 có
+  trigger chặn xoá — xoá bằng SQL Editor (khối SQL trong câu trả lời phiên 2026-11-25), chưa xác nhận đã chạy.
+- Kế tiếp: C5 KPI dùng chuyên cần mới (kế hoạch `cham-cong-2026-11-19.md` mục 0 #1–2, 7–8, mục 5 dòng C5).
+
 ## Prompt phiên sau
 ```
-Đọc CLAUDE.md, rule 29, rule 31 (mục "C2b", "C3"), và ĐỌC HẾT .claude/plans/ban-giao-cham-cong-ca-to.md (mục 10 là trạng thái
-mới nhất). C3 đã push main. Đầu phiên: tôi báo kết quả test lại 3 điểm mục 10 trên production; sửa lỗi tôi báo trước.
-Sau đó: lên kế hoạch C4 Sổ phép thưởng + chuỗi 3 tháng theo .claude/plans/cham-cong-2026-11-19.md (mục 0 #3–5, mục 2) — liệt kê
-bảng / RPC / màn hình để tôi duyệt trước khi code; điểm nào chưa rõ thì HỎI tôi (ngôn ngữ nghiệp vụ + ví dụ), không tự quyết.
+Đọc CLAUDE.md, rule 27 (KPI), rule 31 (mục "C3", "C4"), và ĐỌC HẾT .claude/plans/ban-giao-cham-cong-ca-to.md (mục 12 là trạng thái
+mới nhất) + .claude/plans/cham-cong-2026-11-19.md (mục 0, 2, 5) + .claude/plans/kpi-k1-chuyen-can-2026-11-19.md (mục 2).
+C4 Sổ phép thưởng đã commit. Đầu phiên: hỏi tôi đã chạy SQL xoá sổ phép + nhật ký test 2025 của Chau Nho chưa.
+Sau đó: lên kế hoạch C5 — KPI dùng hệ số chuyên cần mới từ module Chấm công (kpi_compute_monthly_scores chép từ migration MỚI NHẤT
+định nghĩa hàm này, chỉ đổi khối hệ số; gọi attendance_sync_auto + attendance_leave_recompute trước khi tính; công nhân không có
+công chuẩn; tháng làm không trọn không tính; tháng KPI đã khoá giữ nguyên; chi_tiet.cong_thuc_version = 2; script so hệ số cũ/mới
+từng người tháng 10–11/2026). Liệt kê bảng / RPC / màn hình để tôi duyệt trước khi code; điểm nào chưa rõ thì HỎI tôi (ngôn ngữ
+nghiệp vụ + ví dụ), không tự quyết.
 Mỗi bước tsc + eslint; xong hướng dẫn test tay, DỪNG cho tôi test; hỏi tôi trước khi commit/push.
 Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI.
 Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build.

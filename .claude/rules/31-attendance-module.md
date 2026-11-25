@@ -266,3 +266,24 @@ Nghỉ (nguồn cao hơn) mà có thao tác ⇒ GIỮ chấm, gắn cờ mâu th
 - Vận hành: xoá chấm tay một ngày có thao tác ⇒ lần đồng bộ sau tự thành Có mặt lại; muốn ghi vắng phải chấm Nghỉ (hiện cờ).
 - Kiểm: `node --env-file=.env.local scripts/check-attendance-auto.mjs [--month=2026-11]` (chỉ đọc; đối chiếu 4 nguồn lớn bằng JS,
   liệt kê ô mâu thuẫn / ô tự động sẽ bị bỏ). Không có cron — C5 phải gọi sync trước khi "Tính điểm tháng".
+
+## C4 Sổ phép thưởng + chuỗi 3 tháng (2026-11-25, migration 20261215 ĐÃ CHẠY, test PASS)
+Người dùng chốt: chỉ NHÂN VIÊN quốc tịch VIỆT NAM (`maintenance_staff.quoc_tich` VN | KH | KHAC, để trống ⇒ chưa xét, admin tự
+khai — Cài đặt → Nhân sự lọc "Chưa khai quốc tịch"); tháng đủ = có mặt MỌI ngày lịch (tua, phép, ô trống, vào làm / nghỉ việc giữa
+tháng đều đứt chuỗi); đủ 3 tháng liên tiếp trong năm ⇒ +1 phép, đếm lại; dùng phép = người chấm tick "Dùng phép thưởng" khi chấm
+Nghỉ có phép (phiếu ca duyệt không tự trừ); sửa ngược làm tháng hết đủ ⇒ tự thu hồi (dòng −1), đã dùng ⇒ số dư âm; chỉ admin
+cộng / trừ tay (lý do); xem theo quyền Lịch công.
+- Migration `20261215_attendance_c4_bonus_leave.sql` (**chạy tay TRƯỚC deploy**): `attendance_leave_ledger` (insert-only; loai
+  tich_luy | thu_hoi | dieu_chinh; `chuoi_key` "2026-01..2026-03"; `hieu_luc_tu` = đầu tháng sau chuỗi, điều chỉnh = 01/01); hàm
+  `attendance_leave_flags_internal` (nội bộ) / `attendance_leave_month_flags` (lọc người xem được), RPC `attendance_leave_recompute`
+  (idempotent, so net theo chuỗi), `attendance_leave_adjust` (admin). `attendance_set_days` bản 7 tham số (`p_dung_phep_thuong`,
+  bản 6 tham số đã DROP) — kiểm số dư theo năm + chỉ dùng phép đã có hiệu lực tới ngày đó. Mọi `CREATE OR REPLACE
+  attendance_set_days` về sau chép từ file này.
+- Số ngày ĐÃ DÙNG không ghi sổ: đếm `attendance_records.dung_phep_thuong` trong năm ⇒ đổi trạng thái / xoá chấm / duyệt phiếu ca
+  đè ⇒ tự hoàn phép. Số dư = Σ sổ năm − đã dùng. Phép năm N chỉ dùng trong năm N (chuỗi T10–T12 hiệu lực 01/01 năm sau ⇒ mất).
+- Thuần: `src/lib/attendance/leave.ts`. Lịch công gọi recompute mỗi lần tải tháng, hộp chấm có ô tick + số dư, ô dùng phép có chấm
+  vàng. Tab "Sổ phép" (`?tab=leave`, `_components/bonus-leave-book.tsx`): 12 ô tháng, chuỗi hiện tại, Đạt / Thu hồi / Điều chỉnh /
+  Đã dùng / Số dư, dòng xổ lịch sử sổ, "Xét lại chuỗi" (đồng bộ auto đầu tháng trước → nay rồi recompute), admin "Điều chỉnh".
+- Kiểm: `node --env-file=.env.local scripts/check-attendance-leave.mjs [--nam=2026]` (chỉ đọc) — sau khi mở tab Sổ phép, lệch = 0.
+- Lịch công (sau test mục 10, 2026-11-25): mọi thẻ số liệu bấm được để lọc (Nhân sự = bỏ lọc thẻ, Có mặt, Không phép, Chưa ghi
+  nhận, Mâu thuẫn); bộ lọc Tìm → Tháng → Phòng ban (rộng) → … → Xóa lọc (hẹp).

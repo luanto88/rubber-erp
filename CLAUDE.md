@@ -458,6 +458,8 @@ Vi du:
   test PASS, commit `2baf33b`. C3 Có mặt tự động (nhân viên): migration 20261214 ĐÃ CHẠY, test 1–7 PASS, sửa sau test
   (thẻ lọc rõ hơn, lọc mặc định phòng ban + Nhân viên, TKSX ca không kiện ⇒ giờ trống) — đã push main; chờ test lại 3 điểm
   trên production (bàn giao mục 10). Kế tiếp: C4 Sổ phép + chuỗi 3 tháng.
+  2026-11-25 (phiên sau): sửa thẻ lọc + bộ lọc Lịch công; C4 Sổ phép thưởng migration 20261215 ĐÃ CHẠY,
+  test PASS, đã commit (bàn giao mục 12). Kế tiếp: C5 KPI dùng chuyên cần mới.
 
 ## Nhật ký các phiên cũ
 
@@ -466,7 +468,7 @@ Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguy�
 
 ## Prompt mở đầu phiên sau
 
-Đang làm Chấm công (2026-11-25, C3 xong → C4): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau".
+Đang làm Chấm công (2026-11-25, C4 xong → C5): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau".
 Prompt dưới đây (U11 KPI) để dành khi người dùng nhắc.
 
 ```

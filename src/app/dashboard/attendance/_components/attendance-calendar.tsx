@@ -32,6 +32,7 @@ import {
   type AttendanceRecord,
   type AttendanceStatus,
 } from "@/lib/attendance/calendar"
+import { LEAVE_MIGRATION_HINT, balanceOf, isLeaveEligible, leaveMissing, type LeaveLedgerRow } from "@/lib/attendance/leave"
 import { FilterBar } from "../../_components/filter-bar"
 import { ModalShell } from "../../_components/modal-shell"
 import { StatCard, StatGrid } from "../../_components/doc-ui/stat-card"
@@ -52,6 +53,7 @@ type StaffRow = {
   ngay_vao_lam: string | null
   ngay_nghi_viec: string | null
   thu_tu_diem_danh: number | null
+  quoc_tich?: string | null
 }
 
 type Dept = { id: string; code: string; name: string }
@@ -104,6 +106,8 @@ function fmtDateTime(ts: string) {
 
 const DEFAULT_LOAI = "nhan_vien"
 
+type CardFilter = "" | "co_mat" | "khong_phep" | "chua" | "conflict"
+
 function syncMissing(message: string) {
   return /attendance_sync_auto|attendance_collect_activity|hoat_dong/.test(message) &&
     /does not exist|schema cache|Could not find/i.test(message)
@@ -134,7 +138,8 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   // C3: đồng bộ Có mặt tự động (nhân viên) mỗi lần tải tháng; lỗi chỉ cảnh báo, không chặn lịch.
   const [syncWarn, setSyncWarn] = useState<string | null>(null)
   const [syncInfo, setSyncInfo] = useState<string | null>(null)
-  const [onlyConflict, setOnlyConflict] = useState(false)
+  // Lọc theo thẻ số liệu (bấm thẻ để lọc, bấm lại để bỏ). "" = không lọc thẻ.
+  const [cardFilter, setCardFilter] = useState<CardFilter>("")
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [anchor, setAnchor] = useState<string | null>(null)
@@ -142,6 +147,11 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   const [markStatus, setMarkStatus] = useState<AttendanceStatus>("co_mat")
   const [markXep, setMarkXep] = useState<"A" | "B">("A")
   const [markReason, setMarkReason] = useState("")
+  const [markUseLeave, setMarkUseLeave] = useState(false)
+  const [leaveLedger, setLeaveLedger] = useState<LeaveLedgerRow[]>([])
+  const [leaveUsed, setLeaveUsed] = useState<Map<string, number>>(new Map())
+  const [leaveReady, setLeaveReady] = useState(false)
+  const [leaveWarn, setLeaveWarn] = useState<string | null>(null)
   // Chấm "Có mặt" xếp loại A không bắt buộc lý do (khớp RPC attendance_set_days, migration 20261203).
   const reasonOptional = markStatus === "co_mat" && markXep === "A"
   const [markError, setMarkError] = useState<string | null>(null)
@@ -184,9 +194,8 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
         const [staffRes, deptRes] = await Promise.all([
           supabase
             .from("maintenance_staff")
-            .select(
-              "id, ten, profile_id, loai_nhan_su, ma_nhan_su, ca_mac_dinh, day_chuyen_mac_dinh, department_id, phong_ban, active, ngay_vao_lam, ngay_nghi_viec, thu_tu_diem_danh",
-            )
+            // "*" để vẫn chạy khi migration 20261215 (cột quoc_tich) chưa chạy.
+            .select("*")
             .eq("factory_id", factoryId)
             .order("ten"),
           supabase.from("departments").select("id, code, name").eq("is_active", true).order("sort_order"),
@@ -234,10 +243,48 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
             .order("id")
             .range(a, b),
         )
+        // Sổ phép thưởng (C4): xét lại chuỗi năm đang xem rồi đọc sổ + số ngày đã dùng. Lỗi không chặn lịch.
+        const nam = Number(month.slice(0, 4))
+        let ledger: LeaveLedgerRow[] = []
+        const used = new Map<string, number>()
+        let leaveOk = true
+        let leaveErr: string | null = null
+        try {
+          const { error: rcErr } = await supabase.rpc("attendance_leave_recompute", { p_factory_id: factoryId, p_nam: nam })
+          if (rcErr) throw rcErr
+          const { data: lData, error: lErr } = await supabase
+            .from("attendance_leave_ledger")
+            .select("*")
+            .eq("factory_id", factoryId)
+            .eq("nam", nam)
+            .order("created_at")
+          if (lErr) throw lErr
+          ledger = (lData || []) as LeaveLedgerRow[]
+          const usedRows = await fetchAllPaginated<{ id: string; staff_id: string }>((a, b) =>
+            supabase
+              .from("attendance_records")
+              .select("id, staff_id")
+              .eq("factory_id", factoryId)
+              .eq("dung_phep_thuong", true)
+              .gte("ngay", `${nam}-01-01`)
+              .lte("ngay", `${nam}-12-31`)
+              .order("id")
+              .range(a, b),
+          )
+          for (const u of usedRows) used.set(u.staff_id, (used.get(u.staff_id) || 0) + 1)
+        } catch (e) {
+          leaveOk = false
+          const msg = getErrorMessage(e, "Không tải được sổ phép thưởng.")
+          leaveErr = leaveMissing(msg) ? LEAVE_MIGRATION_HINT : `Không tải được sổ phép thưởng: ${msg}`
+        }
         if (!alive) return
         setStaff((staffRes.data || []) as StaffRow[])
         setDepts((deptRes.data || []) as Dept[])
         setRecords(recs)
+        setLeaveLedger(ledger)
+        setLeaveUsed(used)
+        setLeaveReady(leaveOk)
+        setLeaveWarn(leaveErr)
       } catch (e) {
         if (alive) setError(tableMissing(getErrorMessage(e, "Không tải được dữ liệu chấm công.")))
       } finally {
@@ -276,12 +323,12 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   const deptName = useMemo(() => new Map(depts.map((d) => [d.id, d.name])), [depts])
   const nameByProfile = useMemo(() => new Map(staff.filter((s) => s.profile_id).map((s) => [s.profile_id as string, s.ten])), [staff])
 
-  const visibleStaff = useMemo(() => {
+  // Danh sách theo bộ lọc thường (chưa lọc theo thẻ) — thẻ số liệu tính trên tập này.
+  const baseStaff = useMemo(() => {
     const rows = staff.filter((s) => {
       if (!canViewStaff(s)) return false
       if (!worksInMonth(s, month)) return false
       if (!s.active && !recordsByStaff.has(s.id)) return false
-      if (onlyConflict && !conflictsByStaff.has(s.id)) return false
       if (deptFilter && s.department_id !== deptFilter) return false
       if (loaiFilter && (s.loai_nhan_su || "nhan_vien") !== loaiFilter) return false
       if (caFilter && s.ca_mac_dinh !== caFilter) return false
@@ -304,13 +351,25 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       if (ta !== tb) return ta - tb
       return a.ten.localeCompare(b.ten, "vi")
     })
-  }, [staff, canViewStaff, month, recordsByStaff, onlyConflict, conflictsByStaff, deptFilter, loaiFilter, caFilter, dcFilter, search, deptName])
+  }, [staff, canViewStaff, month, recordsByStaff, deptFilter, loaiFilter, caFilter, dcFilter, search, deptName])
 
   const summaries = useMemo(() => {
     const map = new Map<string, ReturnType<typeof summarizeStaffMonth>>()
-    for (const s of visibleStaff) map.set(s.id, summarizeStaffMonth(s, month, recordsByStaff.get(s.id) || new Map(), today))
+    for (const s of baseStaff) map.set(s.id, summarizeStaffMonth(s, month, recordsByStaff.get(s.id) || new Map(), today))
     return map
-  }, [visibleStaff, month, recordsByStaff, today])
+  }, [baseStaff, month, recordsByStaff, today])
+
+  const visibleStaff = useMemo(() => {
+    if (!cardFilter) return baseStaff
+    return baseStaff.filter((s) => {
+      const v = summaries.get(s.id)
+      if (cardFilter === "conflict") return conflictsByStaff.has(s.id)
+      if (!v) return false
+      if (cardFilter === "co_mat") return v.coMat > 0
+      if (cardFilter === "khong_phep") return v.khongPhep > 0
+      return v.chuaGhiNhan > 0
+    })
+  }, [baseStaff, cardFilter, summaries, conflictsByStaff])
 
   const totals = useMemo(() => {
     let coMat = 0
@@ -322,9 +381,11 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       chua += v.chuaGhiNhan
     }
     let conflict = 0
-    for (const s of staff) if (canViewStaff(s)) conflict += conflictsByStaff.get(s.id) || 0
+    for (const s of baseStaff) conflict += conflictsByStaff.get(s.id) || 0
     return { coMat, khongPhep, chua, conflict }
-  }, [summaries, staff, canViewStaff, conflictsByStaff])
+  }, [summaries, baseStaff, conflictsByStaff])
+
+  const toggleCard = (key: CardFilter) => setCardFilter((cur) => (cur === key ? "" : key))
 
   // Bộ lọc mặc định (người dùng chốt 2026-11-25): phòng ban của người đăng nhập + Nhân viên. Đặt phòng ban 1 lần sau lần tải
   // đầu; "Xóa lọc" đưa về mặc định; 2 giá trị mặc định không tính là đang lọc.
@@ -342,7 +403,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
     caFilter,
     dcFilter,
     search.trim(),
-    onlyConflict ? "1" : "",
+    cardFilter,
   ].filter(Boolean).length
 
   // ── Chọn ô ──
@@ -394,10 +455,33 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
     return selectedCells.some((c) => workerIds.has(c.staffId))
   }, [staff, selectedCells])
 
+  // Số dư phép thưởng (năm đang xem) theo nhân sự + điều kiện hiện ô "Dùng phép thưởng".
+  const leaveBalanceOf = useCallback(
+    (staffId: string) => balanceOf(leaveLedger.filter((l) => l.staff_id === staffId), leaveUsed.get(staffId) || 0),
+    [leaveLedger, leaveUsed],
+  )
+  const leaveInfo = useMemo(() => {
+    const byStaff = new Map<string, number>()
+    for (const c of selectedCells) {
+      if (recordsByStaff.get(c.staffId)?.get(c.day)?.dung_phep_thuong) continue // đã dùng sẵn, không trừ thêm
+      byStaff.set(c.staffId, (byStaff.get(c.staffId) || 0) + 1)
+    }
+    const staffIds = [...new Set(selectedCells.map((c) => c.staffId))]
+    const people = staffIds.map((id) => {
+      const s = staff.find((x) => x.id === id)
+      const bal = leaveBalanceOf(id)
+      return { id, ten: s?.ten || "?", eligible: !!s && isLeaveEligible(s), soDu: bal.soDu, can: byStaff.get(id) || 0 }
+    })
+    const allEligible = people.length > 0 && people.every((p) => p.eligible)
+    const enough = people.every((p) => p.soDu >= p.can)
+    return { people, allEligible, enough, allowed: leaveReady && allEligible && enough }
+  }, [selectedCells, recordsByStaff, staff, leaveBalanceOf, leaveReady])
+
   const openMark = () => {
     setMarkError(null)
     setMarkReason("")
     setMarkXep("A")
+    setMarkUseLeave(false)
     setMarkStatus(selectedHasFuture ? (selectedHasWorker ? "nghi_co_phep" : "nghi_tua") : "co_mat")
     setMarkOpen(true)
   }
@@ -426,6 +510,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       setMarkError('Không chấm "Có mặt" cho ngày chưa tới — bỏ chọn các ngày sau hôm nay.')
       return
     }
+    const useLeave = mode === "set" && markStatus === "nghi_co_phep" && markUseLeave && leaveInfo.allowed
     setSaving(true)
     setMarkError(null)
     try {
@@ -440,6 +525,8 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                 p_trang_thai: markStatus,
                 p_xep_loai: markStatus === "co_mat" ? markXep : null,
                 p_ly_do: reason || null,
+                // Chỉ gửi khi dùng phép — giữ chạy được với RPC cũ 6 tham số nếu migration 20261215 chưa chạy.
+                ...(useLeave ? { p_dung_phep_thuong: true } : {}),
               })
             : await supabase.rpc("attendance_clear_days", {
                 p_factory_id: factoryId,
@@ -509,8 +596,12 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   return (
     <div className="space-y-4">
       <FilterBar layout="grid" activeCount={activeFilterCount}>
-        {/* Lưới riêng: ô Tháng rộng hơn các ô khác 20% (1.2fr), 7 ô vừa 1 hàng trên màn rộng. */}
-        <div className="col-span-full grid grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-[1.2fr_1fr_1fr_1fr] xl:grid-cols-[1.2fr_repeat(6,minmax(0,1fr))]">
+        {/* Lưới riêng: Tìm đầu tiên, Phòng ban rộng nhất, nút Xóa lọc chỉ rộng theo chữ (người dùng chốt 2026-11-25). */}
+        <div className="col-span-full grid grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-[1.3fr_1.2fr_1.5fr_1fr] xl:grid-cols-[1.3fr_1.2fr_1.5fr_1fr_1fr_1fr_auto]">
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold text-slate-600">Tìm tên / mã</span>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="VD: Sok" className={fieldCls} />
+        </label>
         <div className="block">
           <span className="mb-1 block text-xs font-bold text-slate-600">Tháng</span>
           <div className="flex h-10 items-center gap-1">
@@ -558,10 +649,6 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
             ))}
           </select>
         </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-bold text-slate-600">Tìm tên / mã</span>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="VD: Sok" className={fieldCls} />
-        </label>
         <button
           type="button"
           onClick={() => {
@@ -570,10 +657,10 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
             setCaFilter("")
             setDcFilter("")
             setSearch("")
-            setOnlyConflict(false)
+            setCardFilter("")
           }}
           disabled={activeFilterCount === 0}
-          className="h-10 w-full self-end rounded-xl border border-slate-200 px-3 text-sm font-bold text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+          className="h-10 w-full self-end whitespace-nowrap rounded-xl border border-slate-200 px-4 sm:w-auto text-sm font-bold text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
         >
           Xóa lọc
         </button>
@@ -581,19 +668,53 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       </FilterBar>
 
       <StatGrid cols={5}>
-        <StatCard icon={Users} label="Nhân sự" value={visibleStaff.length} sub={monthLabel} loading={loading} />
-        <StatCard icon={UserCheck} label="Ngày có mặt" value={totals.coMat} sub={`Công chuẩn nhân viên ${stdDays} ngày/người (công nhân: theo công thực tế)`} loading={loading} valueTone="good" />
-        <StatCard icon={CircleAlert} label="Nghỉ không phép" value={totals.khongPhep} loading={loading} valueTone={totals.khongPhep > 0 ? "danger" : "default"} />
-        <StatCard icon={CalendarDays} label="Ô chưa ghi nhận" value={totals.chua} sub="đến hôm nay" loading={loading} valueTone={totals.chua > 0 ? "warn" : "default"} />
+        <StatCard
+          icon={Users}
+          label="Nhân sự"
+          value={visibleStaff.length}
+          sub={cardFilter ? `${visibleStaff.length}/${baseStaff.length} người — bấm để bỏ lọc thẻ` : monthLabel}
+          loading={loading}
+          onClick={() => setCardFilter("")}
+        />
+        <StatCard
+          icon={UserCheck}
+          label="Ngày có mặt"
+          value={totals.coMat}
+          sub={cardFilter === "co_mat" ? "đang lọc người có ngày có mặt" : `Công chuẩn nhân viên ${stdDays} ngày/người (công nhân: theo công thực tế)`}
+          loading={loading}
+          valueTone="good"
+          onClick={() => toggleCard("co_mat")}
+          active={cardFilter === "co_mat"}
+        />
+        <StatCard
+          icon={CircleAlert}
+          label="Nghỉ không phép"
+          value={totals.khongPhep}
+          sub={cardFilter === "khong_phep" ? "đang lọc — bấm để bỏ" : "bấm để xem người nghỉ không phép"}
+          loading={loading}
+          valueTone={totals.khongPhep > 0 ? "danger" : "default"}
+          onClick={() => toggleCard("khong_phep")}
+          active={cardFilter === "khong_phep"}
+        />
+        <StatCard
+          icon={CalendarDays}
+          label="Ô chưa ghi nhận"
+          value={totals.chua}
+          sub={cardFilter === "chua" ? "đang lọc — bấm để bỏ" : "đến hôm nay"}
+          loading={loading}
+          valueTone={totals.chua > 0 ? "warn" : "default"}
+          onClick={() => toggleCard("chua")}
+          active={cardFilter === "chua"}
+        />
         <StatCard
           icon={TriangleAlert}
           label="Ô mâu thuẫn"
           value={totals.conflict}
-          sub={onlyConflict ? "đang lọc — bấm để bỏ" : "chấm Nghỉ nhưng có thao tác app"}
+          sub={cardFilter === "conflict" ? "đang lọc — bấm để bỏ" : "chấm Nghỉ nhưng có thao tác app"}
           loading={loading}
           valueTone={totals.conflict > 0 ? "warn" : "default"}
-          onClick={() => setOnlyConflict((v) => !v)}
-          active={onlyConflict}
+          onClick={() => toggleCard("conflict")}
+          active={cardFilter === "conflict"}
         />
       </StatGrid>
 
@@ -609,6 +730,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
         <Legend cls="bg-emerald-100 text-emerald-800" text="B" label="Có mặt, xếp loại B" />
         <Legend cls="bg-sky-100 text-sky-800" text="T" label="Nghỉ tua" />
         <Legend cls="bg-amber-100 text-amber-800" text="P" label="Nghỉ có phép" />
+        <Legend cls="bg-amber-100 text-amber-800" text="P" label="Nghỉ có phép, dùng phép thưởng" goldDot />
         <Legend cls="bg-rose-100 text-rose-700" text="K" label="Nghỉ không phép" />
         <Legend cls="bg-white text-slate-300 border border-slate-200" text="·" label="Chưa ghi nhận" />
         <Legend cls="bg-amber-100 text-amber-800 ring-2 ring-orange-500" text="P" label="Mâu thuẫn (Nghỉ nhưng có thao tác app)" />
@@ -623,6 +745,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
         </button>
       </div>
       {syncInfo ? <div className="text-xs text-slate-500">{syncInfo}</div> : null}
+      {leaveWarn ? <div className="text-xs text-amber-700">{leaveWarn}</div> : null}
 
       {canMarkAny ? (
         <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
@@ -725,7 +848,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                         const title = !inRange
                           ? `${fmtDay(d)}: ngoài thời gian làm việc`
                           : r
-                            ? `${fmtDay(d)}: ${ATTENDANCE_STATUS_LABEL[r.trang_thai]}${r.xep_loai ? ` — xếp loại ${r.xep_loai}` : ""}\nNguồn: ${ATTENDANCE_SOURCE_LABEL[r.nguon]}${r.ly_do ? `\nLý do: ${r.ly_do}` : ""}${acts.length ? `\nThao tác app: ${formatActivities(acts)}` : ""}${conflict ? "\n⚠ Mâu thuẫn: chấm Nghỉ nhưng có thao tác trên app — kiểm tra lại" : ""}\nCập nhật: ${fmtDateTime(r.updated_at)}`
+                            ? `${fmtDay(d)}: ${ATTENDANCE_STATUS_LABEL[r.trang_thai]}${r.dung_phep_thuong ? " — dùng phép thưởng" : ""}${r.xep_loai ? ` — xếp loại ${r.xep_loai}` : ""}\nNguồn: ${ATTENDANCE_SOURCE_LABEL[r.nguon]}${r.ly_do ? `\nLý do: ${r.ly_do}` : ""}${acts.length ? `\nThao tác app: ${formatActivities(acts)}` : ""}${conflict ? "\n⚠ Mâu thuẫn: chấm Nghỉ nhưng có thao tác trên app — kiểm tra lại" : ""}\nCập nhật: ${fmtDateTime(r.updated_at)}`
                             : `${fmtDay(d)}: chưa ghi nhận`
                         return (
                           <td key={d} className={`border-b border-slate-100 p-0.5 text-center ${dayColCls(di)}`}>
@@ -740,6 +863,9 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                                 } ${canClick ? "cursor-pointer hover:brightness-95" : "cursor-default"}`}
                               >
                                 {cellText(r)}
+                                {r?.dung_phep_thuong ? (
+                                  <span className="absolute left-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-yellow-500 ring-1 ring-white" />
+                                ) : null}
                                 {r?.nguon === "cham_diem_d" ? (
                                   <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-emerald-600" />
                                 ) : null}
@@ -904,6 +1030,34 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                 </div>
               </div>
             ) : null}
+            {markStatus === "nghi_co_phep" && leaveReady && leaveInfo.allEligible ? (
+              <div className="rounded-xl border border-yellow-200 bg-yellow-50/60 px-3 py-2.5">
+                <label className={`flex items-start gap-2 text-sm font-bold ${leaveInfo.enough ? "text-slate-700" : "text-slate-400"}`}>
+                  <input
+                    type="checkbox"
+                    checked={markUseLeave && leaveInfo.enough}
+                    disabled={!leaveInfo.enough}
+                    onChange={(e) => setMarkUseLeave(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 accent-yellow-600"
+                  />
+                  Dùng phép thưởng (bù công cho ngày nghỉ này)
+                </label>
+                <ul className="mt-1.5 space-y-0.5 pl-6 text-xs text-slate-600">
+                  {leaveInfo.people.slice(0, 6).map((p) => (
+                    <li key={p.id} className={p.soDu < p.can ? "text-amber-700" : ""}>
+                      {p.ten}: còn <b>{p.soDu}</b> ngày phép năm {month.slice(0, 4)}
+                      {p.can > 0 ? ` · cần ${p.can}` : ""}
+                    </li>
+                  ))}
+                  {leaveInfo.people.length > 6 ? <li>… và {leaveInfo.people.length - 6} người khác</li> : null}
+                </ul>
+                {!leaveInfo.enough ? (
+                  <p className="mt-1.5 text-xs font-semibold text-amber-700">Không đủ phép thưởng — vẫn chấm Nghỉ có phép được nhưng không bù công.</p>
+                ) : (
+                  <p className="mt-1.5 text-xs text-slate-500">Phép năm nào chỉ dùng trong năm đó, cho ngày từ đầu tháng sau chuỗi đạt.</p>
+                )}
+              </div>
+            ) : null}
             <label className="block">
               <span className="mb-1.5 block text-xs font-bold text-slate-600">
                 {reasonOptional ? "Lý do (không bắt buộc khi chấm Có mặt – A; bắt buộc khi Xoá chấm)" : "Lý do *"}
@@ -928,12 +1082,13 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   )
 }
 
-function Legend({ cls, text, label, dot }: { cls: string; text: string; label: string; dot?: boolean }) {
+function Legend({ cls, text, label, dot, goldDot }: { cls: string; text: string; label: string; dot?: boolean; goldDot?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={`relative inline-flex h-5 w-5 items-center justify-center rounded text-[11px] font-extrabold ${cls}`}>
         {text}
         {dot ? <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-emerald-600" /> : null}
+        {goldDot ? <span className="absolute left-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-yellow-500 ring-1 ring-white" /> : null}
       </span>
       {label}
     </span>

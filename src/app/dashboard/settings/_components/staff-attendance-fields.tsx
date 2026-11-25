@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { UNIT_SELECT, type AttendanceUnit } from "@/lib/attendance/shift"
+import { QUOC_TICH_OPTIONS } from "@/lib/attendance/leave"
 import {
   ATTENDANCE_CA,
   ATTENDANCE_DAY_CHUYEN,
@@ -26,6 +27,8 @@ export type StaffAttendanceValue = {
   /** Vai trò in trên phiếu F01/F02 (migration 20261206). */
   to_vai_tro: "" | "to_truong" | "to_pho"
   to_pham_vi: "" | "tiep_nhan" | "co_dien" | "ca_san_xuat"
+  /** Quốc tịch (migration 20261215): VN | KH | KHAC, "" = chưa khai. Phép thưởng chỉ cho nhân viên VN. */
+  quoc_tich: "" | "VN" | "KH" | "KHAC"
 }
 
 export const TO_VAI_TRO_LABEL = { to_truong: "Tổ trưởng", to_pho: "Tổ phó" } as const
@@ -47,6 +50,7 @@ export const emptyStaffAttendanceValue = (): StaffAttendanceValue => ({
   cho_xac_nhan: false,
   to_vai_tro: "",
   to_pham_vi: "",
+  quoc_tich: "",
 })
 
 /** Lỗi nhập liệu (null = hợp lệ). */
@@ -116,6 +120,7 @@ export function staffAttendancePayload(v: StaffAttendanceValue): Record<string, 
     to_vai_tro: v.to_vai_tro || null,
     // Từ 20261210 vai trò theo Ca/Tổ mặc định — không dùng to_pham_vi nữa.
     to_pham_vi: null,
+    quoc_tich: v.quoc_tich || null,
   }
 }
 
@@ -133,6 +138,7 @@ type StaffRowLike = {
   cho_xac_nhan?: boolean | null
   to_vai_tro?: string | null
   to_pham_vi?: string | null
+  quoc_tich?: string | null
 }
 
 export function staffAttendanceFromRow(row: StaffRowLike): StaffAttendanceValue {
@@ -148,6 +154,7 @@ export function staffAttendanceFromRow(row: StaffRowLike): StaffAttendanceValue 
     cho_xac_nhan: !!row.cho_xac_nhan,
     to_vai_tro: row.to_vai_tro === "to_truong" || row.to_vai_tro === "to_pho" ? row.to_vai_tro : "",
     to_pham_vi: row.to_pham_vi === "tiep_nhan" || row.to_pham_vi === "co_dien" || row.to_pham_vi === "ca_san_xuat" ? row.to_pham_vi : "",
+    quoc_tich: row.quoc_tich === "VN" || row.quoc_tich === "KH" || row.quoc_tich === "KHAC" ? row.quoc_tich : "",
   }
 }
 
@@ -270,6 +277,16 @@ export function StaffAttendanceFields({
           <label className={labelCls}>Mã nhân sự</label>
           <input value={value.ma_nhan_su} onChange={(e) => set({ ma_nhan_su: e.target.value.toUpperCase() })} className={inputCls} placeholder="Không bắt buộc, VD: CN001" />
         </div>
+      </div>
+      <div>
+        <label className={labelCls}>Quốc tịch</label>
+        <select value={value.quoc_tich} onChange={(e) => set({ quoc_tich: e.target.value as StaffAttendanceValue["quoc_tich"] })} className={inputCls}>
+          <option value="">Chưa khai</option>
+          {QUOC_TICH_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-slate-500">Phép thưởng (đủ ngày công 3 tháng liên tiếp ⇒ +1 ngày phép) chỉ áp dụng cho nhân viên quốc tịch Việt Nam.</p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>

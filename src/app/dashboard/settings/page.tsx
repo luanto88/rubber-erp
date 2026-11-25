@@ -299,9 +299,10 @@ type MaintenanceStaffRow = {
   ngay_vao_lam?: string | null
   ngay_nghi_viec?: string | null
   cho_xac_nhan?: boolean | null
+  quoc_tich?: string | null
 }
 
-type StaffViewFilter = "all" | "maintenance" | "unlinked" | "worker" | "pending_confirm"
+type StaffViewFilter = "all" | "maintenance" | "unlinked" | "worker" | "pending_confirm" | "no_nationality"
 
 type PersonnelAccountAuditRow = {
   profile: ProfileRow
@@ -1571,9 +1572,13 @@ export default function SettingsPage() {
           result.error.code === "PGRST204" ||
           /schema cache|does not exist|42703/i.test(result.error.message))
       ) {
-        // Cột mới chưa có (chưa chạy migration) ⇒ bỏ các cột tuỳ chọn rồi lưu lại.
+        // Cột mới chưa có (chưa chạy migration) ⇒ bỏ các cột tuỳ chọn rồi lưu lại. Chỉ thiếu quoc_tich (20261215) ⇒ bỏ
+        // riêng cột đó để không mất các cột chấm công khác.
         const fallbackPayload = { ...payload }
-        for (const col of ["phong_ban", "department_id", "mac_dinh_ky", ...STAFF_ATTENDANCE_COLUMNS]) delete fallbackPayload[col]
+        const cols = /quoc_tich/.test(result.error.message)
+          ? ["quoc_tich"]
+          : ["phong_ban", "department_id", "mac_dinh_ky", ...STAFF_ATTENDANCE_COLUMNS]
+        for (const col of cols) delete fallbackPayload[col]
         result = maintEditId
           ? await supabase.from("maintenance_staff").update(fallbackPayload).eq("id", maintEditId).eq("factory_id", factoryId).select("id").single()
           : await supabase.from("maintenance_staff").insert(fallbackPayload).select("id").single()
@@ -2588,6 +2593,9 @@ export default function SettingsPage() {
     }
     if (staffViewFilter === "pending_confirm") {
       return maintStaff.filter((staff) => !!staff.cho_xac_nhan)
+    }
+    if (staffViewFilter === "no_nationality") {
+      return maintStaff.filter((staff) => staff.active && !staff.quoc_tich)
     }
     return maintStaff
   }, [maintStaff, staffViewFilter])
@@ -3991,6 +3999,10 @@ export default function SettingsPage() {
                   { key: "worker", label: `Công nhân (${maintStaff.filter((x) => x.loai_nhan_su === "cong_nhan").length})` },
                   ...(maintStaff.some((x) => x.cho_xac_nhan)
                     ? [{ key: "pending_confirm" as const, label: `Chờ xác nhận (${maintStaff.filter((x) => x.cho_xac_nhan).length})` }]
+                    : []),
+                  // Cột quoc_tich có sau migration 20261215 — chưa có cột thì ẩn bộ lọc.
+                  ...(maintStaff.some((x) => "quoc_tich" in x)
+                    ? [{ key: "no_nationality" as const, label: `Chưa khai quốc tịch (${maintStaff.filter((x) => x.active && !x.quoc_tich).length})` }]
                     : []),
                 ] as const).map((filter) => (
                   <button
