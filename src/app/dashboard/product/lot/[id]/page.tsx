@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
-import { Boxes, ClipboardList, Download, FileText, FlaskConical, Package, QrCode, Truck, Warehouse } from "lucide-react"
+import { Boxes, ClipboardList, Download, FileText, FlaskConical, Package, QrCode, Truck, Users, Warehouse } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { hasPermission, hydrateActiveSession } from "@/lib/auth"
+import { getFreshAuthSession, hasPermission, hydrateActiveSession } from "@/lib/auth"
 import { formatStorageDate } from "@/lib/storage-detail"
 import { getLoaiBanhConfig } from "@/lib/product-lot-config"
 import type { GradeConfig } from "@/lib/product-grade"
@@ -30,6 +30,8 @@ import { InspectorCard, MetaList, MetaRow, StatusSummaryBar } from "@/app/dashbo
 import { SignActionBox, type SignAction } from "@/app/dashboard/_components/doc-ui/sign-action-box"
 import { SegmentedTabs } from "@/app/dashboard/_components/doc-ui/segmented-tabs"
 import { ListState } from "@/app/dashboard/_components/doc-ui/list-state"
+import { loadLotShiftStaff, type LotShiftStaffResult } from "./shift-staff-actions"
+import { LotShiftStaffView, LotShiftSummary } from "./_components/lot-shift-staff"
 
 /**
  * Trang chi tiết lô thành phẩm (rule 29 mục C, 2026-10-18). Chỉ XEM — thêm/sửa/xoá giao dịch,
@@ -112,7 +114,11 @@ export default function ProductLotDetailPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [mobileTab, setMobileTab] = useState<"doc" | "info">("info")
-  const [docTab, setDocTab] = useState<"file" | "tx" | "export">("file")
+  const [docTab, setDocTab] = useState<"file" | "tx" | "export" | "staff">("file")
+  // C2b Truy vết: nhân sự các ca đã làm ra lô (phiếu điểm danh ca) — tải sau khi có lô.
+  const [shiftStaff, setShiftStaff] = useState<LotShiftStaffResult | null>(null)
+  const [shiftStaffLoading, setShiftStaffLoading] = useState(false)
+  const [shiftStaffError, setShiftStaffError] = useState<string | null>(null)
   const [origin, setOrigin] = useState("")
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null)
 
@@ -217,6 +223,26 @@ export default function ProductLotDetailPage() {
   useEffect(() => {
     void loadLot()
   }, [loadLot])
+
+  const lotFactoryId = lot?.factory_id || ""
+  const lotRowId = lot?.id || ""
+  const loadShiftStaff = useCallback(async () => {
+    if (!lotFactoryId || !lotRowId) return
+    setShiftStaffLoading(true)
+    setShiftStaffError(null)
+    try {
+      const token = (await getFreshAuthSession())?.access_token ?? null
+      setShiftStaff(await loadLotShiftStaff(token, lotFactoryId, lotRowId))
+    } catch (err) {
+      setShiftStaffError(err instanceof Error ? err.message : "Không tải được nhân sự ca.")
+    } finally {
+      setShiftStaffLoading(false)
+    }
+  }, [lotFactoryId, lotRowId])
+
+  useEffect(() => {
+    void loadShiftStaff()
+  }, [loadShiftStaff])
 
   const nganLabel = useCallback(
     (id: string | null | undefined) => {
@@ -427,6 +453,7 @@ export default function ProductLotDetailPage() {
                 { key: "file", label: "Bản PDF", icon: FileText },
                 { key: "tx", label: "Giao dịch nhập", icon: Boxes, count: txs.length },
                 { key: "export", label: "Xuất hàng", icon: Truck, count: exportsList.length },
+                { key: "staff", label: "Nhân sự ca", icon: Users, count: shiftStaff?.blocks.length ?? 0 },
               ]}
             />
             {docTab === "file" ? (
@@ -439,7 +466,14 @@ export default function ProductLotDetailPage() {
                 fileExt="pdf"
                 label={`Lô ${lot.ma_lo} · Bản xem trước PDF`}
               />
-            ) : docTab === "tx" ? txTable : exportTable}
+            ) : docTab === "tx" ? txTable : docTab === "export" ? exportTable : (
+              <LotShiftStaffView
+                data={shiftStaff}
+                loading={shiftStaffLoading}
+                error={shiftStaffError}
+                onRetry={() => void loadShiftStaff()}
+              />
+            )}
           </>
         }
         inspector={
@@ -495,6 +529,17 @@ export default function ProductLotDetailPage() {
                 <MetaRow label="Kết quả mới nhất" value={qcText} />
                 <MetaRow label="Đã gán xuất" value={`${exportedBanh.toLocaleString("vi-VN")} bành / ${exportsList.length} đơn`} />
               </MetaList>
+            </InspectorCard>
+            <InspectorCard title="Ca sản xuất" icon={Users}>
+              <LotShiftSummary
+                data={shiftStaff}
+                loading={shiftStaffLoading}
+                error={shiftStaffError}
+                onOpen={() => {
+                  setDocTab("staff")
+                  setMobileTab("doc")
+                }}
+              />
             </InspectorCard>
           </>
         }

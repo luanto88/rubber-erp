@@ -911,3 +911,7 @@ sản xuất trong ngày in mỗi bọc có trong năm thành 1 nhóm ("CSR10 ·
   `20261120_product_opening_stock_luy_ke.sql`, chạy tay; tick ở Cài đặt → Tồn đầu kỳ thành phẩm, cột "Tính lũy kế SX năm sau").
   Kiểm bằng code thật 31/10/2026: trơn lúc SX 732,060 t, nhãn chế biến 9.284,415, thay bọc 7.092 bành, tổng 10.031,595 (+0,770 khi tick
   dòng 31/12/2025 "Sản xuất bù 22 bành lô 54m" ⇒ 10.032,365).
+
+## 4.27. Tab "Nhân sự ca" ở chi tiết lô (C2b Truy vết, 2026-11-25, chờ test tay)
+Trang `/dashboard/product/lot/[id]` có tab "Nhân sự ca" + thẻ "Ca sản xuất": ai làm việc gì, xe nào trong các ca đã làm ra lô
+(theo phiếu điểm danh ca). Chi tiết + quyền: rule 31 mục "C2b".

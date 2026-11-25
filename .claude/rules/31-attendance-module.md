@@ -228,3 +228,17 @@ ngày + cùng dây chuyền ⇒ chung 1 phiếu.
 - Tài khoản test + đã khoá: `scripts/delete-disabled-accounts.mjs` (xem trước → `--apply`; bảng nghiệp vụ không ON DELETE
   ⇒ tài khoản có lịch sử tự bị giữ lại). ĐÃ `--apply` 2026-11-25: xoá 3 (Chau Kim Sêne, Nguyễn Trung Cường, User Test),
   giữ 6 (5 tài khoản E2E + Vương Nguyễn Phương Lâm — có lịch sử).
+## C2b Truy vết nhân sự ca ở chi tiết lô (2026-11-25, chờ test tay)
+Người dùng chốt: tab + thẻ tóm tắt; người chỉ có quyền Thành phẩm thấy Việc + Người + Xe; xếp loại A/B, người vắng, link
+"Mở phiếu" CHỈ cho người có attendance.view|approve|mark_all|shift_check (hoặc admin); phiếu chưa duyệt vẫn hiện + nhãn vàng.
+Không migration.
+- Server action `product/lot/[id]/shift-staff-actions.ts` `loadLotShiftStaff(token, factoryId, lotId)` (service role — RLS
+  attendance_* chặn người chỉ có product.view): giao dịch của lô gom theo (ngày, ca) → kiện, bành, kg; phiếu ngày theo
+  dây chuyền của lô (`lots.day_chuyen || dayChuyenForCsr`) → phiếu Ca sản xuất cùng mã ca (bỏ phiếu ca trống). Giờ ca =
+  sớm hơn giữa kiện quét đầu của CẢ ca và lúc mở phiếu → kiện quét cuối (dự phòng `ket_thuc_luc`).
+- Quy tắc đọc dòng dùng chung F01/F02 + C2b: `src/lib/attendance/section-people.ts` (`linePerson`, `lineJobIds`,
+  `slotHolderText`, `isEmptyOpenSection`). Sửa quy tắc người thay / việc ở đây.
+- UI `product/lot/[id]/_components/lot-shift-staff.tsx`: tab "Nhân sự ca" (mỗi ngày + ca 1 khối, bảng Việc | Người | Xe |
+  [Xếp loại], dòng Vắng) + thẻ "Ca sản xuất" cột phải (bấm ⇒ mở tab).
+- Lưu ý: phiếu TKSX dùng giờ bắt đầu = `bat_dau_luc` (lúc mở phiếu) ⇒ có thể muộn hơn kiện cuối (vd 25/11 Ca B
+  16:10–13:40) — chưa sửa, chờ người dùng quyết.

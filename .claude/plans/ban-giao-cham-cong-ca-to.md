@@ -81,15 +81,24 @@ Thay file `ban-giao-cham-cong-c2-gd3.md` cho phần còn lại. Mô hình hiện
   (chỉ áp kiện quét SAU migration); (5) duyệt phiếu Ca A khi TP chưa phê duyệt ca A ⇒ báo lỗi; phê duyệt TP rồi duyệt ⇒ OK;
   (6) Ngăn TKSX mã đầy đủ. Lưu ý: hàng đợi mất mạng gửi nháp lúc có mạng ⇒ quet_luc = giờ nháp lên server, không phải giờ quét.
 
+## 8. Cập nhật 2026-11-25 (tối) — mục 6–7 đã push `fcaa324`; C2b đã code (tsc + eslint sạch, CHƯA commit)
+- C2b Truy vết: tab "Nhân sự ca" + thẻ "Ca sản xuất" ở `/dashboard/product/lot/[id]` (rule 31 mục "C2b"). Không migration.
+- Kiểm code thật: F01 TKSXMT-251126 giống hệt trước/sau tách helper `section-people.ts`; lô 2119cs/26 ⇒ 24/11 Ca A "Chưa có
+  phiếu", 25/11 Ca B đã duyệt, 22 người, xe X02; giả lập chỉ quyền Thành phẩm ⇒ không lộ xếp loại / người vắng.
+- Treo chờ quyết: giờ bắt đầu ca trên phiếu TKSX = lúc mở phiếu ⇒ 25/11 Ca B in "16:10–13:40" (C2b đã dùng kiện quét đầu).
+- Test tay C2b: (1) lô 2 ca ⇒ 2 khối đúng kiện; (2) tài khoản chỉ product.view ⇒ không thấy cột Xếp loại, dòng Vắng, "Mở
+  phiếu"; (3) phiếu chưa duyệt ⇒ nhãn vàng; (4) ca chưa có phiếu ⇒ "Chưa có phiếu điểm danh cho ca này"; (5) thẻ "Ca sản
+  xuất" bấm ⇒ mở tab (mobile chuyển sang cột tài liệu); (6) mobile bảng cuộn ngang.
+
 ## Prompt phiên sau
 ```
-Đọc CLAUDE.md, rule 29, rule 31 (mục GĐ3, "Ca / Tổ điểm danh", "Sửa sau test production 2026-11-25"), và ĐỌC HẾT
-.claude/plans/ban-giao-cham-cong-ca-to.md (mục 6 là trạng thái mới nhất).
-Trạng thái: sửa sau test production 2026-11-25 đã code (tsc + eslint sạch); migration 20261212 tôi sẽ xác nhận đã chạy.
-Đầu phiên: tôi báo kết quả test A–H mục 6 (test trên mobile, bản deploy). Sửa lỗi tôi báo trước, giữ đúng mô hình mục 2.
-Xoá tài khoản test/đã khoá: chỉ chạy scripts/delete-disabled-accounts.mjs --apply khi tôi xác nhận danh sách.
-Sau khi test PASS: đề xuất kế hoạch C2b Truy vết (khối nhân sự ca ở chi tiết lô) rồi C3 — lên plan liệt kê bảng / RPC / màn
-hình để tôi duyệt trước khi code; điểm nào chưa rõ thì HỎI tôi (ngôn ngữ nghiệp vụ + ví dụ), không tự quyết.
+Đọc CLAUDE.md, rule 29, rule 31 (mục "Ca / Tổ điểm danh", "Sửa sau test production 2026-11-25", "C2b"), và ĐỌC HẾT
+.claude/plans/ban-giao-cham-cong-ca-to.md (mục 8 là trạng thái mới nhất).
+Đầu phiên: tôi báo kết quả test C2b mục 8 + quyết định giờ bắt đầu ca trên phiếu TKSX. Sửa lỗi tôi báo trước, giữ mô hình mục 2;
+hỏi tôi trước khi commit/push C2b.
+Sau đó: lên kế hoạch C3 Có mặt tự động (nhân viên) theo .claude/plans/cham-cong-2026-11-19.md (mục 2, 5) và bảng nguồn hoạt động
+ở .claude/plans/kpi-k1-chuyen-can-2026-11-19.md mục 0 — liệt kê bảng / RPC / màn hình để tôi duyệt trước khi code; điểm nào
+chưa rõ thì HỎI tôi (ngôn ngữ nghiệp vụ + ví dụ), không tự quyết.
 Mỗi bước tsc + eslint; xong hướng dẫn test tay, DỪNG cho tôi test; hỏi tôi trước khi commit/push.
 Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI.
 Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build.

@@ -19,6 +19,13 @@ import {
   type F01Model,
   type F01Production,
 } from "@/lib/attendance/f01-model"
+import {
+  isEmptyOpenSection,
+  lineJobIds as jobIds,
+  linePerson,
+  slotHolderText,
+  type SectionSlot as Slot,
+} from "@/lib/attendance/section-people"
 
 const ATTENDANCE_REPORT_VIEW_PERMISSIONS = [
   "attendance.view",
@@ -27,7 +34,6 @@ const ATTENDANCE_REPORT_VIEW_PERMISSIONS = [
   "attendance.shift_check",
 ]
 
-type Slot = { staff_id: string | null; goc_staff_id: string | null }
 type SectionRow = {
   id: string
   loai: string
@@ -74,12 +80,6 @@ const fmtHm = (iso: string | null) =>
   iso ? new Intl.DateTimeFormat("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : ""
 
 type ApprovalSection = { id: string; trang_thai: string; duyet_luc: string | null; duyet_boi: string | null }
-
-/** Phiếu ca "trống" = đang lập, chưa có dòng nào (chỉ mở xem / ca không làm việc) ⇒ không tính vào phiếu ngày,
- *  không chặn duyệt — cùng quy tắc với attendance_recompute_sheet (migration 20261212). */
-function isEmptyOpenSection(s: { id: string; trang_thai: string }, sectionIdsWithLines: Set<string>) {
-  return s.trang_thai === "dang_lam" && !sectionIdsWithLines.has(s.id)
-}
 
 /**
  * Có kiện thành phẩm của (ngày, các ca sản xuất) quét SAU mốc `luc` không? Giờ kiện = quet_luc (giờ quét thật, migration
@@ -264,11 +264,6 @@ export async function getSheetSnapshotUrl(accessToken: string | null, factoryId:
   return url
 }
 
-function jobIds(l: LineRow): string[] {
-  if (l.cong_viec_ids && l.cong_viec_ids.length > 0) return l.cong_viec_ids
-  return l.cong_viec_id ? [l.cong_viec_id] : []
-}
-
 export async function loadF01Model(accessToken: string | null, factoryId: string, sheetId: string): Promise<F01Model> {
   await assertProductAccess(accessToken, factoryId, ATTENDANCE_REPORT_VIEW_PERMISSIONS, "xem phiếu điểm danh")
   const sb = getSupabaseAdmin()
@@ -323,11 +318,7 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
   const name = (id: string | null | undefined) => (id ? staffById.get(id)?.ten || "" : "")
 
   // ── Vị trí phụ trách (trưởng / phó của chính ca/tổ) ──
-  const holderText = (slot: Slot | undefined): string => {
-    if (!slot?.staff_id) return ""
-    const n = name(slot.staff_id)
-    return slot.goc_staff_id && slot.goc_staff_id !== slot.staff_id ? `${n} (thay ${name(slot.goc_staff_id)})` : n
-  }
+  const holderText = (slot: Slot | undefined): string => slotHolderText(slot, name)
   const working = (s: StaffRow) =>
     s.active !== false && (!s.ngay_vao_lam || ngay >= s.ngay_vao_lam) && (!s.ngay_nghi_viec || ngay <= s.ngay_nghi_viec)
   /** Phiếu chưa lưu vị trí ⇒ người có vai trò trưởng/phó của ca/tổ trong hồ sơ; không có ⇒ trống. */
@@ -342,10 +333,9 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
 
   // ── Dòng theo việc ──
   const personOf = (l: LineRow): { ten: string; xepLoai: string; thayCho?: string } | null => {
-    if (l.diem_danh === "co") return { ten: name(l.staff_id), xepLoai: l.xep_loai || "A" }
-    if (l.thay_the_staff_id) return { ten: name(l.thay_the_staff_id), xepLoai: "A", thayCho: name(l.staff_id) }
-    if (l.thay_the_ten) return { ten: `${l.thay_the_ten} (tạm)`, xepLoai: "", thayCho: name(l.staff_id) }
-    return null
+    const p = linePerson(l, name)
+    if (!p) return null
+    return p.thayCho !== undefined ? { ten: p.ten, xepLoai: p.xepLoai, thayCho: p.thayCho } : { ten: p.ten, xepLoai: p.xepLoai }
   }
   /** Việc của Ca/Tổ (20261211): tổ ⇒ unit_code; ca ⇒ việc ca sản xuất của dây chuyền. Việc khác có người ⇒ thêm cuối. */
   const isJobOfUnit = (j: JobRow, unit: UnitRow | undefined) =>

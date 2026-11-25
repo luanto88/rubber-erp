@@ -454,6 +454,8 @@ Vi du:
   2026-11-25 (chiều): test A–H PASS; thẻ việc hiện tên, Ca/Tổ được phân công ★, tự điền "Trực ca", giờ kết thúc ca = kiện quét
   cuối (`lot_transactions.quet_luc`), duyệt phiếu ca sau khi phê duyệt ca Thành phẩm, ngăn TKSX mã đầy đủ — chạy
   20261213_attendance_shift_end_by_scan.sql, test tay (bàn giao mục 7).
+  2026-11-25 (tối): mục 6–7 test PASS, đã push `fcaa324`. C2b Truy vết (tab "Nhân sự ca" ở chi tiết lô, không migration) ĐÃ
+  CODE, CHƯA commit — test tay bàn giao mục 8; kế tiếp C3.
 
 ## Nhật ký các phiên cũ
 
