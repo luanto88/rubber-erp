@@ -460,6 +460,8 @@ Vi du:
   trên production (bàn giao mục 10). Kế tiếp: C4 Sổ phép + chuỗi 3 tháng.
   2026-11-25 (phiên sau): sửa thẻ lọc + bộ lọc Lịch công; C4 Sổ phép thưởng migration 20261215 ĐÃ CHẠY,
   test PASS, đã commit (bàn giao mục 12). Kế tiếp: C5 KPI dùng chuyên cần mới.
+  2026-11-26: C5 (migration 20261216, rule 27 "Hệ số chuyên cần", rule 31 "C5") test localhost PASS, CHƯA commit. Kế tiếp
+  (bàn giao mục 13): header mobile màn điểm danh + cấu hình chuyên cần theo tháng.
 
 ## Nhật ký các phiên cũ
 
@@ -468,7 +470,7 @@ Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguy�
 
 ## Prompt mở đầu phiên sau
 
-Đang làm Chấm công (2026-11-25, C4 xong → C5): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau".
+Đang làm Chấm công (2026-11-26, C5 test PASS chưa commit → header mobile điểm danh + cấu hình chuyên cần theo tháng): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau".
 Prompt dưới đây (U11 KPI) để dành khi người dùng nhắc.
 
 ```

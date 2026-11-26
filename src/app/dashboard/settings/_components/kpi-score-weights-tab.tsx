@@ -30,8 +30,15 @@ type FormState = {
   trong_so_5s: string
   trong_so_chuyen_mon: string
   ngay_chuan_chuyen_can: string
+  so_ngay_nghi_tua_chuan: string
+  he_so_phat_khong_phep: string
   he_so_chuyen_can_min: string
   he_so_chuyen_can_max: string
+}
+
+function numOr(v: string, fallback: number): number {
+  const n = Number(v)
+  return v.trim() === "" || !Number.isFinite(n) ? fallback : n
 }
 
 function emptyForm(groupId?: string): FormState {
@@ -43,6 +50,8 @@ function emptyForm(groupId?: string): FormState {
     trong_so_5s: String(d.trong_so_5s),
     trong_so_chuyen_mon: String(d.trong_so_chuyen_mon),
     ngay_chuan_chuyen_can: String(d.ngay_chuan_chuyen_can),
+    so_ngay_nghi_tua_chuan: String(d.so_ngay_nghi_tua_chuan),
+    he_so_phat_khong_phep: String(d.he_so_phat_khong_phep),
     he_so_chuyen_can_min: String(d.he_so_chuyen_can_min),
     he_so_chuyen_can_max: String(d.he_so_chuyen_can_max),
   }
@@ -56,6 +65,8 @@ function rowToForm(w: KpiScoreWeights): FormState {
     trong_so_5s: String(w.trong_so_5s),
     trong_so_chuyen_mon: String(w.trong_so_chuyen_mon),
     ngay_chuan_chuyen_can: String(w.ngay_chuan_chuyen_can),
+    so_ngay_nghi_tua_chuan: String(w.so_ngay_nghi_tua_chuan ?? 6),
+    he_so_phat_khong_phep: String(w.he_so_phat_khong_phep ?? 0.02),
     he_so_chuyen_can_min: String(w.he_so_chuyen_can_min),
     he_so_chuyen_can_max: String(w.he_so_chuyen_can_max),
   }
@@ -133,6 +144,8 @@ export function KpiScoreWeightsTab({ factoryId, canManage }: { factoryId: string
         ngayChuanChuyenCan: Number(form.ngay_chuan_chuyen_can) || 24,
         heSoChuyenCanMin: Number(form.he_so_chuyen_can_min) || 0.75,
         heSoChuyenCanMax: Number(form.he_so_chuyen_can_max) || 1.1,
+        soNgayNghiTuaChuan: numOr(form.so_ngay_nghi_tua_chuan, 6),
+        heSoPhatKhongPhep: numOr(form.he_so_phat_khong_phep, 0.02),
       }
       if (editId) {
         await updateKpiScoreWeights(editId, shared)
@@ -183,7 +196,8 @@ export function KpiScoreWeightsTab({ factoryId, canManage }: { factoryId: string
             <span className="rounded-lg bg-violet-100 px-2 py-0.5 font-bold text-violet-700">Chuyên môn {dd}%</span>
           </div>
           <div className="mt-1 text-[11px] text-slate-400">
-            Ngày chuẩn chuyên cần: {w?.ngay_chuan_chuyen_can ?? d.ngay_chuan_chuyen_can} · Hệ số chuyên cần:{" "}
+            Công chuẩn = ngày lịch − {w?.so_ngay_nghi_tua_chuan ?? d.so_ngay_nghi_tua_chuan} ngày tua · Trừ{" "}
+            {w?.he_so_phat_khong_phep ?? d.he_so_phat_khong_phep} / ngày nghỉ không phép · Hệ số chuyên cần:{" "}
             {w?.he_so_chuyen_can_min ?? d.he_so_chuyen_can_min}–{w?.he_so_chuyen_can_max ?? d.he_so_chuyen_can_max}
             {!w && " (dùng hằng số mặc định, chưa cấu hình riêng)"}
           </div>
@@ -325,13 +339,32 @@ export function KpiScoreWeightsTab({ factoryId, canManage }: { factoryId: string
             <div className={`rounded-xl px-3 py-2 text-xs font-bold ${totalWeight === 100 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
               Tổng: {totalWeight}% {totalWeight !== 100 && "— phải bằng 100 mới lưu được"}
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+              Hệ số chuyên cần = (Có mặt + Phép thưởng bù) ÷ Công chuẩn − mức trừ × ngày nghỉ không phép, giới hạn
+              trong [min; max]. Công chuẩn = số ngày lịch của tháng − số ngày nghỉ tua chuẩn. Số liệu lấy từ module
+              Chấm công; công nhân / tài khoản chưa có hồ sơ Nhân sự = 1,00; tháng làm không trọn không có điểm KPI.
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div>
-                <label className="mb-1 block text-xs font-bold text-slate-600">Ngày chuẩn chuyên cần</label>
+                <label className="mb-1 block text-xs font-bold text-slate-600">Ngày nghỉ tua chuẩn / tháng</label>
                 <input
                   type="number"
-                  value={form.ngay_chuan_chuyen_can}
-                  onChange={(e) => setForm((f) => ({ ...f, ngay_chuan_chuyen_can: e.target.value }))}
+                  min={0}
+                  max={10}
+                  value={form.so_ngay_nghi_tua_chuan}
+                  onChange={(e) => setForm((f) => ({ ...f, so_ngay_nghi_tua_chuan: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-600">Trừ / ngày nghỉ không phép</label>
+                <input
+                  type="number"
+                  step="0.005"
+                  min={0}
+                  max={0.2}
+                  value={form.he_so_phat_khong_phep}
+                  onChange={(e) => setForm((f) => ({ ...f, he_so_phat_khong_phep: e.target.value }))}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
                 />
               </div>

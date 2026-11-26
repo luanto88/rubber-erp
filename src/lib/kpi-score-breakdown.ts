@@ -21,6 +21,8 @@
 //   D) không còn mặc định = 100 — bị loại khỏi công thức, các thành phần còn lại được
 //   RENORMALIZE theo đúng tỷ trọng tương ứng (chia cho tổng trọng số của các thành phần CÒN LẠI,
 //   không phải chia cho 100). Nếu CẢ 4 thành phần đều thiếu dữ liệu, tháng đó không có điểm nào.
+//   Hệ số chuyên cần (C5, migration 20261216): KHÔNG tính ở file này — lấy từ RPC
+//   kpi_attendance_month_summary (module Chấm công), cùng hàm SQL mà kpi_compute_monthly_scores dùng.
 //   Xem .claude/rules/27-kpi-module.md mục "Công thức tính điểm" (đầu file) để biết đầy đủ.
 
 import { supabase } from "@/lib/supabase"

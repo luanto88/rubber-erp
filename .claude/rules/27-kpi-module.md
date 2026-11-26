@@ -185,11 +185,24 @@ trần điểm chỉ 10/15 ≈ 66.7% dù làm tốt 100% — bất công. Chia t
 
 ### Hệ số chuyên cần
 
-```
-Hệ số chuyên cần = CLAMP(Số ngày có chấm D trong tháng ÷ Ngày chuẩn, 0.75, 1.10)
-```
+**Từ C5 (2026-11-25, migration `20261216_kpi_c5_attendance_factor.sql`) — lấy từ module Chấm công:**
 
-`Ngày chuẩn` mặc định 24 (cấu hình Settings). Sàn 0.75, trần 1.10.
+```
+Công chuẩn = số ngày lịch − so_ngay_nghi_tua_chuan (mặc định 6)
+Hệ số      = CLAMP((Có mặt + Phép thưởng bù) ÷ Công chuẩn − he_so_phat_khong_phep (0,02) × ngày nghỉ không phép; min 0,75; max 1,10)
+```
+- Nguồn DUY NHẤT: hàm SQL `kpi_attendance_summary_internal` (bản giao diện `kpi_attendance_month_summary`), dùng chung cho
+  `kpi_compute_monthly_scores`, tab "Chi tiết cách tính điểm" và `scripts/compare-kpi-attendance-factor.mjs`.
+- "Chưa ghi nhận" / nghỉ tua / có phép không bù: không cộng tử số, không phạt. Tháng chưa hết: chia công chuẩn cả tháng,
+  `tam_tinh = true` (nhãn "Tạm tính"). Làm không trọn tháng ⇒ KHÔNG có dòng điểm (dòng chưa khoá bị xoá). Công nhân / tài
+  khoản chưa có hồ sơ Nhân sự ⇒ 1,00 + `khong_xet`. Tháng đã khoá không tính lại.
+- RPC tính điểm tự gọi `attendance_sync_auto_internal` + `attendance_leave_recompute_internal` trước khi tính; kiểm đúng nhà máy.
+- `chi_tiet.cong_thuc_version = 2` + `chi_tiet.chuyen_can`; dòng không có version = công thức cũ v1 bên dưới.
+- ⚠️ Mọi `CREATE OR REPLACE kpi_compute_monthly_scores` về sau chép từ 20261216.
+- Cấu hình hiện theo nhóm chính / mặc định, KHÔNG theo tháng ⇒ đổi cấu hình rồi bấm tính lại tháng cũ CHƯA khoá sẽ tính
+  theo cấu hình mới (tháng đã khoá an toàn — không có RPC mở khoá). Cấu hình theo tháng: việc treo (bàn giao mục 13).
+
+Công thức cũ v1 (trước C5): `CLAMP(Số ngày có chấm D ÷ Ngày chuẩn (24), 0.75, 1.10)` — cột `ngay_chuan_chuyen_can` nay LEGACY.
 
 ## Database Schema (khung sườn Phase 0 — xem cảnh báo đầu file)
 

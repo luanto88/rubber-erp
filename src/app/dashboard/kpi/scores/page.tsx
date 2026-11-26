@@ -30,6 +30,7 @@
 //   {Hạng, điểm, có phải bạn không} qua 2 RPC SECURITY DEFINER, không lộ tên người khác.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { ArrowLeft, Award, Calculator, Eye, Flag, History, ListTree, Lock, ListOrdered, TrendingUp } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
@@ -45,6 +46,7 @@ import { sendKpiNotify } from "@/lib/kpi-notify"
 import {
   computeKpiMonthlyScores,
   defaultKpiScoreWeights,
+  fetchKpiAttendanceSummary,
   fetchKpiMonthlyScores,
   fetchKpiScoreAdjustments,
   fetchKpiScoreRankingByDepartment,
@@ -52,6 +54,7 @@ import {
   fetchKpiScoreWeights,
   fetchMyKpiMonthlyScores,
   lockKpiMonthlyScore,
+  type KpiAttendanceSummary,
   type KpiMonthlyScore,
   type KpiScoreAdjustment,
   type KpiScoreRankingRow,
@@ -469,7 +472,7 @@ export default function KpiScoresPage() {
                             <td className="px-2 py-2 text-slate-500">{s.diem_dung_han ?? "—"}</td>
                             <td className="px-2 py-2 text-slate-500">{s.diem_5s ?? "—"}</td>
                             <td className="px-2 py-2 text-slate-500">{s.diem_chuyen_mon ?? "—"}</td>
-                            <td className="px-2 py-2 text-slate-500">{s.he_so_chuyen_can ?? "—"}</td>
+                            <td className="px-2 py-2 text-slate-500" title={attendanceSummaryText(s)}>{s.he_so_chuyen_can ?? "—"}</td>
                             <td className="px-2 py-2 text-right text-base font-extrabold text-violet-700">{s.diem_tong ?? "—"}</td>
                             <td className="py-2 pl-2">
                               <div className="flex items-center gap-1.5 whitespace-nowrap">
@@ -586,10 +589,22 @@ function ScoreBreakdown({ score }: { score: KpiMonthlyScore }) {
         <div className="text-2xl font-extrabold text-slate-800">{score.diem_tong ?? "—"}</div>
       </div>
       <div className="mt-1 text-[11px] text-slate-400">
-        Hệ số chuyên cần: {score.he_so_chuyen_can ?? "—"} · Số ngày có chấm chuyên môn: {score.so_ngay_co_cham ?? 0}
+        Hệ số chuyên cần: {score.he_so_chuyen_can ?? "—"} · {attendanceSummaryText(score)}
       </div>
     </div>
   )
+}
+
+/** Dòng tóm tắt chuyên cần của 1 dòng điểm đã lưu — v2 (C5) theo ngày công, v1 theo ngày chấm D. */
+function attendanceSummaryText(score: KpiMonthlyScore): string {
+  const cc = score.chi_tiet?.cong_thuc_version === 2 ? score.chi_tiet.chuyen_can : undefined
+  if (!cc) return `Số ngày có chấm chuyên môn: ${score.so_ngay_co_cham ?? 0} (công thức cũ)`
+  if (cc.khong_xet) return cc.khong_xet
+  const parts = [`Có mặt ${(cc.co_mat ?? 0) + (cc.phep_thuong_bu ?? 0)}/${cc.cong_chuan ?? "—"} công chuẩn`]
+  if (cc.phep_thuong_bu) parts.push(`gồm ${cc.phep_thuong_bu} ngày phép thưởng bù`)
+  if (cc.khong_phep) parts.push(`${cc.khong_phep} ngày nghỉ không phép`)
+  if (cc.tam_tinh) parts.push("tạm tính — tháng chưa kết thúc")
+  return parts.join(" · ")
 }
 
 const METRIC_COLOR: Record<string, string> = {
@@ -640,6 +655,7 @@ function MyScoreExplain({
   const [tasks, setTasks] = useState<BreakdownTask[]>([])
   const [evals5s, setEvals5s] = useState<Breakdown5s[]>([])
   const [daily, setDaily] = useState<BreakdownDailyEvaluation[]>([])
+  const [att, setAtt] = useState<KpiAttendanceSummary | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -647,12 +663,13 @@ function MyScoreExplain({
       setLoadingBd(true)
       setBdError("")
       try {
-        const [pg, w, t, e5s, d] = await Promise.all([
+        const [pg, w, t, e5s, d, attRows] = await Promise.all([
           fetchMyPrimaryGroup(factoryId, userId),
           fetchKpiScoreWeights(factoryId),
           fetchScoreBreakdownTasks(factoryId, userId, nam, thang),
           fetchScoreBreakdown5s(factoryId, userId, nam, thang),
           fetchScoreBreakdownDaily(factoryId, userId, nam, thang),
+          fetchKpiAttendanceSummary(factoryId, nam, thang, userId),
         ])
         if (!alive) return
         setPrimaryGroup(pg)
@@ -660,6 +677,7 @@ function MyScoreExplain({
         setTasks(t)
         setEvals5s(e5s)
         setDaily(d)
+        setAtt(attRows[0] ?? null)
       } catch (err) {
         if (alive) setBdError(getKpiErrorMessage(err, "Không tải được chi tiết cách tính điểm."))
       } finally {
@@ -682,7 +700,8 @@ function MyScoreExplain({
   const wB = applicable?.trong_so_dung_han ?? d.trong_so_dung_han
   const wC = applicable?.trong_so_5s ?? d.trong_so_5s
   const wD = applicable?.trong_so_chuyen_mon ?? d.trong_so_chuyen_mon
-  const ngayChuan = applicable?.ngay_chuan_chuyen_can ?? d.ngay_chuan_chuyen_can
+  const tuaChuan = applicable?.so_ngay_nghi_tua_chuan ?? d.so_ngay_nghi_tua_chuan
+  const mucPhat = applicable?.he_so_phat_khong_phep ?? d.he_so_phat_khong_phep
   const heSoMin = applicable?.he_so_chuyen_can_min ?? d.he_so_chuyen_can_min
   const heSoMax = applicable?.he_so_chuyen_can_max ?? d.he_so_chuyen_can_max
 
@@ -710,14 +729,17 @@ function MyScoreExplain({
   const hasD = dayScores.length > 0
   const scoreD = hasD ? round1(dayScores.reduce((s, dsc) => s + dsc.pctNgay, 0) / dayScores.length) : null
 
-  const heSoChuyenCan = Math.min(heSoMax, Math.max(heSoMin, dayScores.length / (ngayChuan || 1)))
+  // C5: hệ số chuyên cần lấy từ module Chấm công (cùng hàm SQL mà RPC tính điểm dùng).
+  // Không có dòng tổng hợp (tài khoản không active) ⇒ 1,00. Tháng làm không trọn ⇒ không có điểm.
+  const khongTron = att?.khong_tron === true
+  const heSoChuyenCan = att ? (att.he_so ?? 1) : 1
   const wAEff = hasA ? wA : 0
   const wBEff = hasB ? wB : 0
   const wCEff = hasC ? wC : 0
   const wDEff = hasD ? wD : 0
   const wSumEff = wAEff + wBEff + wCEff + wDEff
   const diemTong =
-    wSumEff > 0
+    wSumEff > 0 && !khongTron
       ? round1((((scoreA ?? 0) * wAEff + (scoreB ?? 0) * wBEff + (scoreC ?? 0) * wCEff + (scoreD ?? 0) * wDEff) / wSumEff) * heSoChuyenCan)
       : null
 
@@ -738,7 +760,8 @@ function MyScoreExplain({
           <Metric label="Chuyên môn (D)" value={wD} color="violet" />
         </div>
         <div className="mt-2 text-[11px] text-slate-400">
-          Ngày chuẩn chuyên cần: {ngayChuan} · Hệ số chuyên cần: {heSoMin}–{heSoMax}
+          Công chuẩn = ngày lịch − {tuaChuan} ngày tua · Trừ {mucPhat} / ngày nghỉ không phép · Hệ số chuyên cần:{" "}
+          {heSoMin}–{heSoMax}
         </div>
       </div>
 
@@ -897,9 +920,15 @@ function MyScoreExplain({
         )}
       </div>
 
+      <AttendanceFactorCard att={att} subjectName={subjectName} />
+
       <div className="hover-lift rounded-2xl border border-violet-200 bg-violet-50 p-4 shadow-sm">
         <div className="mb-2 text-sm font-extrabold text-violet-700">Kết quả cuối cùng (tính lại real-time)</div>
-        {wSumEff === 0 ? (
+        {khongTron ? (
+          <p className="text-sm text-slate-600">
+            Tháng làm không trọn (vào làm / nghỉ việc giữa tháng) — không tính KPI tháng này.
+          </p>
+        ) : wSumEff === 0 ? (
           <p className="text-sm text-slate-600">
             Chưa đủ dữ liệu để chấm điểm tháng này — {subjectName === "bạn" ? "Bạn" : subjectName}{" "}
             không có việc nào, không có việc đến hạn, không phụ trách 5S, và không có ngày chấm
@@ -922,6 +951,75 @@ function MyScoreExplain({
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+// C5 — khối "Hệ số chuyên cần" ở Chi tiết cách tính điểm (số liệu từ module Chấm công).
+function AttendanceFactorCard({ att, subjectName }: { att: KpiAttendanceSummary | null; subjectName: string }) {
+  const who = subjectName === "bạn" ? "Bạn" : subjectName
+  const tuSo = att ? att.co_mat + att.phep_thuong_bu : 0
+  return (
+    <div className="hover-lift rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm font-extrabold text-slate-700">
+        <span>Hệ số chuyên cần (từ Chấm công)</span>
+        <span className="flex items-center gap-2">
+          {att?.tam_tinh && (
+            <span className="rounded-lg bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+              Tạm tính — tháng chưa kết thúc
+            </span>
+          )}
+          <span className="text-emerald-600">{att?.khong_tron ? "—" : (att?.he_so ?? 1).toFixed(3)}</span>
+        </span>
+      </div>
+      {!att ? (
+        <div className="py-2 text-xs text-slate-400">Không có số liệu chấm công cho tài khoản này — hệ số 1,00.</div>
+      ) : att.khong_tron ? (
+        <div className="py-2 text-xs text-slate-500">
+          {who} vào làm / nghỉ việc giữa tháng (tháng làm không trọn) ⇒ không xếp loại, không tính KPI tháng này.
+        </div>
+      ) : att.khong_xet ? (
+        <div className="py-2 text-xs text-slate-500">{att.khong_xet} ⇒ hệ số 1,00 (không thưởng, không trừ).</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+            <AttCell
+              label="Có mặt"
+              value={att.co_mat}
+              hint={`tự động ${att.co_mat_tu_dong} · trực ca ${att.co_mat_truc_ca} · chấm tay ${att.co_mat_cham_tay}`}
+            />
+            <AttCell label="Phép thưởng bù" value={att.phep_thuong_bu} />
+            <AttCell label="Nghỉ không phép" value={att.khong_phep} />
+            <AttCell label="Công chuẩn" value={att.cong_chuan} hint={`${att.so_ngay_lich} ngày lịch − ${att.tua_chuan} tua`} />
+            <AttCell label="Nghỉ tua" value={att.nghi_tua} />
+            <AttCell label="Nghỉ có phép" value={att.co_phep} />
+            <AttCell label="Chưa ghi nhận" value={att.chua_ghi_nhan} hint={`trong ${att.so_ngay_da_qua} ngày đã qua`} />
+          </div>
+          <div className="mt-3 text-sm text-slate-700">
+            ({tuSo} ÷ {att.cong_chuan}){att.khong_phep > 0 ? ` − ${att.khong_phep} × ${att.muc_phat}` : ""} ={" "}
+            {(tuSo / att.cong_chuan - att.khong_phep * att.muc_phat).toFixed(3)} → giới hạn [{att.he_so_min}; {att.he_so_max}] ={" "}
+            <strong className="text-emerald-700">{(att.he_so ?? 1).toFixed(3)}</strong>
+          </div>
+          <p className="mt-2 text-[11px] text-slate-500">
+            Ngày &quot;chưa ghi nhận&quot; (không thao tác trên app, chưa ai chấm) không cộng vào có mặt nhưng không bị trừ.
+            Nghỉ tua / nghỉ có phép không bù cũng không cộng. Có mặt tự động được đồng bộ khi mở Lịch công hoặc khi bấm
+            &quot;Tính điểm tháng&quot;.{" "}
+            <Link href="/dashboard/attendance" className="font-bold text-emerald-700 hover:underline">
+              Mở Lịch công tháng
+            </Link>
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+function AttCell({ label, value, hint }: { label: string; value: number; hint?: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 px-3 py-2">
+      <div className="text-[10px] font-bold uppercase text-slate-400">{label}</div>
+      <div className="text-lg font-extrabold text-slate-700">{value}</div>
+      {hint && <div className="text-[10px] text-slate-400">{hint}</div>}
     </div>
   )
 }

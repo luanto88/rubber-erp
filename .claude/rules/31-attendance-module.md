@@ -287,3 +287,14 @@ cộng / trừ tay (lý do); xem theo quyền Lịch công.
 - Kiểm: `node --env-file=.env.local scripts/check-attendance-leave.mjs [--nam=2026]` (chỉ đọc) — sau khi mở tab Sổ phép, lệch = 0.
 - Lịch công (sau test mục 10, 2026-11-25): mọi thẻ số liệu bấm được để lọc (Nhân sự = bỏ lọc thẻ, Có mặt, Không phép, Chưa ghi
   nhận, Mâu thuẫn); bộ lọc Tìm → Tháng → Phòng ban (rộng) → … → Xóa lọc (hẹp).
+
+## C5 KPI dùng hệ số chuyên cần mới (2026-11-25, migration 20261216 ĐÃ CHẠY localhost, test PASS)
+Công thức + quy tắc: rule 27 mục "Hệ số chuyên cần". Migration `20261216_kpi_c5_attendance_factor.sql` (chạy tay TRƯỚC deploy):
+- Lõi KHÔNG kiểm quyền `attendance_sync_auto_internal` / `attendance_leave_recompute_internal(…, p_actor)` (chỉ service_role +
+  gọi nội bộ); `attendance_sync_auto` / `attendance_leave_recompute` thành vỏ kiểm quyền. Mọi `CREATE OR REPLACE` 2 lõi này về
+  sau chép từ 20261216.
+- `kpi_attendance_summary_internal(factory, nam, thang)` gom `attendance_records` theo tài khoản (1 hồ sơ / tài khoản: ưu tiên
+  nhân viên, đang dùng); `kpi_attendance_month_summary` = bản giao diện (chính mình / admin / kpi.view_all / kpi.manage_config).
+- `kpi_score_weights.so_ngay_nghi_tua_chuan`, `he_so_phat_khong_phep` (Cài đặt → KPI & 5S → Trọng số).
+- Script chỉ đọc `scripts/compare-kpi-attendance-factor.mjs [--months=2026-10,2026-11]` (tự kiểm JS ↔ SQL; dòng v2 lệch).
+- Lưu ý vận hành: ngày không thao tác app + chưa ai chấm ⇒ "chưa ghi nhận" ⇒ hệ số thấp (T10: nhiều người 0,75–0,84).

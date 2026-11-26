@@ -22,15 +22,20 @@ export type KpiScoreWeights = {
   trong_so_dung_han: number
   trong_so_5s: number
   trong_so_chuyen_mon: number
+  /** LEGACY (công thức v1) — từ C5 dùng so_ngay_nghi_tua_chuan. */
   ngay_chuan_chuyen_can: number
   he_so_chuyen_can_min: number
   he_so_chuyen_can_max: number
+  /** C5: công chuẩn tháng = số ngày lịch − giá trị này. */
+  so_ngay_nghi_tua_chuan: number
+  /** C5: trừ vào hệ số cho mỗi ngày nghỉ không phép. */
+  he_so_phat_khong_phep: number
   created_at: string
   updated_at: string
 }
 
 const WEIGHTS_COLS =
-  "id, factory_id, group_id, trong_so_hoan_thanh, trong_so_dung_han, trong_so_5s, trong_so_chuyen_mon, ngay_chuan_chuyen_can, he_so_chuyen_can_min, he_so_chuyen_can_max, created_at, updated_at"
+  "id, factory_id, group_id, trong_so_hoan_thanh, trong_so_dung_han, trong_so_5s, trong_so_chuyen_mon, ngay_chuan_chuyen_can, he_so_chuyen_can_min, he_so_chuyen_can_max, so_ngay_nghi_tua_chuan, he_so_phat_khong_phep, created_at, updated_at"
 
 export function defaultKpiScoreWeights(): Omit<KpiScoreWeights, "id" | "factory_id" | "group_id" | "created_at" | "updated_at"> {
   return {
@@ -41,6 +46,8 @@ export function defaultKpiScoreWeights(): Omit<KpiScoreWeights, "id" | "factory_
     ngay_chuan_chuyen_can: 24,
     he_so_chuyen_can_min: 0.75,
     he_so_chuyen_can_max: 1.1,
+    so_ngay_nghi_tua_chuan: 6,
+    he_so_phat_khong_phep: 0.02,
   }
 }
 
@@ -64,6 +71,8 @@ export type KpiScoreWeightsInput = {
   ngayChuanChuyenCan: number
   heSoChuyenCanMin: number
   heSoChuyenCanMax: number
+  soNgayNghiTuaChuan: number
+  heSoPhatKhongPhep: number
 }
 
 function validateWeightsSum(input: Pick<KpiScoreWeightsInput, "trongSoHoanThanh" | "trongSoDungHan" | "trongSo5s" | "trongSoChuyenMon">) {
@@ -87,6 +96,8 @@ export async function createKpiScoreWeights(input: KpiScoreWeightsInput): Promis
       ngay_chuan_chuyen_can: input.ngayChuanChuyenCan,
       he_so_chuyen_can_min: input.heSoChuyenCanMin,
       he_so_chuyen_can_max: input.heSoChuyenCanMax,
+      so_ngay_nghi_tua_chuan: input.soNgayNghiTuaChuan,
+      he_so_phat_khong_phep: input.heSoPhatKhongPhep,
     })
     .select(WEIGHTS_COLS)
     .single()
@@ -106,6 +117,8 @@ export async function updateKpiScoreWeights(id: string, input: Omit<KpiScoreWeig
       ngay_chuan_chuyen_can: input.ngayChuanChuyenCan,
       he_so_chuyen_can_min: input.heSoChuyenCanMin,
       he_so_chuyen_can_max: input.heSoChuyenCanMax,
+      so_ngay_nghi_tua_chuan: input.soNgayNghiTuaChuan,
+      he_so_phat_khong_phep: input.heSoPhatKhongPhep,
     })
     .eq("id", id)
   if (error) throw error
@@ -129,7 +142,31 @@ export type KpiMonthlyScoreDetail = {
   co_du_lieu?: { a: boolean; b: boolean; c: boolean; d: boolean }
   he_so_chuyen_can: number
   so_ngay_co_cham: number
+  /** v1: ngày chuẩn chuyên cần; v2: công chuẩn tháng. */
   ngay_chuan: number
+  /** C5 — có từ migration 20261216; thiếu = công thức v1 (số ngày chấm D ÷ ngày chuẩn). */
+  cong_thuc_version?: number
+  chuyen_can?: KpiScoreAttendanceDetail
+}
+
+/** chi_tiet.chuyen_can (công thức v2 — hệ số chuyên cần từ module Chấm công). */
+export type KpiScoreAttendanceDetail = {
+  loai: "nhan_vien" | "cong_nhan" | "khong_ho_so" | null
+  khong_xet: string | null
+  tam_tinh: boolean | null
+  so_ngay_lich: number | null
+  tua_chuan: number | null
+  cong_chuan: number | null
+  muc_phat: number | null
+  co_mat: number | null
+  co_mat_tu_dong: number | null
+  co_mat_truc_ca: number | null
+  co_mat_cham_tay: number | null
+  phep_thuong_bu: number | null
+  co_phep: number | null
+  khong_phep: number | null
+  nghi_tua: number | null
+  chua_ghi_nhan: number | null
 }
 
 export type KpiMonthlyScore = {
@@ -189,6 +226,58 @@ export async function computeKpiMonthlyScores(factoryId: string, nam: number, th
   })
   if (error) throw error
   return (data as number) || 0
+}
+
+// ── C5: tổng hợp chuyên cần từ module Chấm công (RPC kpi_attendance_month_summary) ──
+// Nguồn DUY NHẤT số liệu + hệ số chuyên cần — chính hàm SQL mà kpi_compute_monthly_scores dùng.
+// RPC trả của chính mình; admin / kpi.view_all / kpi.manage_config được xem mọi người.
+export type KpiAttendanceSummary = {
+  profile_id: string
+  staff_id: string | null
+  loai: "nhan_vien" | "cong_nhan" | "khong_ho_so"
+  khong_tron: boolean
+  tam_tinh: boolean
+  so_ngay_lich: number
+  so_ngay_da_qua: number
+  tua_chuan: number
+  cong_chuan: number
+  muc_phat: number
+  he_so_min: number
+  he_so_max: number
+  co_mat: number
+  co_mat_tu_dong: number
+  co_mat_truc_ca: number
+  co_mat_cham_tay: number
+  phep_thuong_bu: number
+  co_phep: number
+  khong_phep: number
+  nghi_tua: number
+  chua_ghi_nhan: number
+  khong_xet: string | null
+  /** NULL khi tháng làm không trọn (không có điểm KPI). */
+  he_so: number | null
+}
+
+export async function fetchKpiAttendanceSummary(
+  factoryId: string,
+  nam: number,
+  thang: number,
+  profileId?: string,
+): Promise<KpiAttendanceSummary[]> {
+  const { data, error } = await supabase.rpc("kpi_attendance_month_summary", {
+    p_factory_id: factoryId,
+    p_nam: nam,
+    p_thang: thang,
+  })
+  if (error) throw error
+  const rows = ((data || []) as KpiAttendanceSummary[]).map((r) => ({
+    ...r,
+    muc_phat: Number(r.muc_phat),
+    he_so_min: Number(r.he_so_min),
+    he_so_max: Number(r.he_so_max),
+    he_so: r.he_so == null ? null : Number(r.he_so),
+  }))
+  return profileId ? rows.filter((r) => r.profile_id === profileId) : rows
 }
 
 // ── Phase 5: Khóa sổ + audit điều chỉnh ─────────────────────────────────────────
