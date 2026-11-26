@@ -143,8 +143,8 @@
     {
       "day_chuyen": "Mủ tạp",
       "to_nhom": "ca_san_xuat",
-      "ten": "Vệ sinh tạp vụ",
-      "ten_khmer": "សម្អាត",
+      "ten": "Vệ sinh dây chuyền",
+      "ten_khmer": "សម្អាតខ្សែសង្វាក់",
       "so_nguoi_goi_y": 1,
       "nguon": "mau_F01_new"
     },
@@ -384,8 +384,8 @@
     {
       "day_chuyen": "Mủ nước",
       "to_nhom": "ca_san_xuat",
-      "ten": "Vệ sinh tạp vụ",
-      "ten_khmer": "សម្អាត",
+      "ten": "Vệ sinh dây chuyền",
+      "ten_khmer": "សម្អាតខ្សែសង្វាក់",
       "so_nguoi_goi_y": 1,
       "nguon": "mau_F02_new"
     }

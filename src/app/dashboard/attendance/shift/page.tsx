@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { AlertTriangle, ArrowLeft, Check, ChevronDown, ClipboardCheck, CloudOff, Eraser, Loader2, LogOut, RefreshCw, Send, SendHorizontal, Sparkles, Trash2, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Check, ClipboardCheck, CloudOff, Eraser, Loader2, LogOut, RefreshCw, Send, SendHorizontal, Sparkles, Trash2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, signOutEverywhere, type SessionUser } from "@/lib/auth"
 import { getErrorMessage } from "@/lib/error-message"
@@ -37,7 +37,6 @@ import {
   linesToPayload,
   positionHolderIds,
   positionsOfStaff,
-  shortJobLabel,
   suggestFromPrevious,
   type AttendanceSection,
   type DbLine,
@@ -784,9 +783,8 @@ export default function AttendanceShiftPage() {
   const meStaff = user ? staff.find((s) => s.profile_id === user.id) : undefined
   const myName = user?.full_name || user?.username || ""
   const myRole = (meStaff?.chuc_vu_chinh_quyen || meStaff?.chuc_vu || "").trim() || T("trucCa")
-  const qrTitle = qrName
-    ? T("qrDiemDanh", { ten: lang === "vi" ? qrName.charAt(0).toLowerCase() + qrName.slice(1) : qrName })
-    : T("appTitle")
+  // Chữ cái đầu của TÊN (từ cuối họ tên) cho vòng tròn avatar.
+  const myInitial = (myName.trim().split(/\s+/).pop() || "?").charAt(0).toLocaleUpperCase("vi")
 
   const signOutOverlay = signingOut
     ? createPortal(
@@ -847,63 +845,87 @@ export default function AttendanceShiftPage() {
   }
   const dcLabel = (dc: string) => (dc === "Mủ tạp" ? T("dcMuTap") : dc === "Mủ nước" ? T("dcMuNuoc") : dc)
 
+  // Trạng thái tự lưu — hiện ở thanh đáy (nền trắng); không có thanh đáy thì hiện ở dải trạng thái đầu nội dung.
   const saveBadge =
     saveState === "saving" ? (
-      <span className="flex items-center gap-1 text-white/80">
+      <span className="flex items-center gap-1 font-semibold text-slate-500">
         <Loader2 size={12} className="animate-spin" /> {T("dangLuuNhap")}
       </span>
     ) : saveState === "error" ? (
-      <button type="button" onClick={() => void doSave()} className="flex items-center gap-1 font-bold text-amber-200">
+      <button type="button" onClick={() => void doSave()} className="flex items-center gap-1 font-bold text-amber-700">
         <CloudOff size={12} /> {T("luuLoi")}
       </button>
     ) : savedAt && !dirty ? (
-      <span className="flex items-center gap-1 text-white/80">
+      <span className="flex items-center gap-1 font-semibold text-emerald-700">
         <Check size={12} /> {T("daLuuLuc", { gio: fmtHm(savedAt) })}
       </span>
     ) : null
+  const showBottomBar = !!section && (editable || canEditAny)
 
   return (
     <div className="min-h-screen bg-slate-50 pb-28">
       <header className="sticky top-0 z-30 bg-gradient-to-r from-[#1c3a32] to-[#2f5d52] text-white shadow">
-        <div className="mx-auto flex max-w-5xl items-center gap-2 px-3 pt-2.5">
-          <ClipboardCheck size={20} className="shrink-0" />
-          <div className="min-w-0 flex-1 truncate text-sm font-bold">
-            {qrTitle}
-            {maPhieu ? <span className="ml-1.5 text-xs font-semibold text-white/70">{maPhieu}</span> : null}
-          </div>
-          <div className="flex overflow-hidden rounded-lg border border-white/30">
-            {ATT_LANG_OPTIONS.map((o) => (
-              <button key={o.code} type="button" onClick={() => changeLang(o.code)} className={`px-2 py-1 text-xs font-bold ${lang === o.code ? "bg-white text-[#1c3a32]" : "text-white"}`}>
-                {o.label}
+        {/* Dòng 1: tiêu đề · ngày · nút đổi ngôn ngữ · avatar */}
+        <div className="mx-auto flex max-w-5xl items-center gap-1.5 px-3 pt-2.5">
+          <ClipboardCheck size={18} className="shrink-0 text-emerald-200" />
+          <div className="min-w-0 flex-1 whitespace-nowrap text-sm font-bold">{T("qrDiemDanhNgan")}</div>
+          <input
+            type="date"
+            value={ngay}
+            max={getFactoryTodayISO()}
+            onChange={(e) => {
+              const v = e.target.value
+              if (v) void flushThen(() => setNgay(v))
+            }}
+            aria-label={T("ngaySx")}
+            className="h-8 shrink-0 rounded-lg border border-white/30 bg-white/10 px-1.5 text-xs font-semibold text-white [color-scheme:dark]"
+          />
+          {/* 1 nút: hiện ngôn ngữ SẼ chuyển sang (đang VI ⇒ "ខ្មែរ", đang Khmer ⇒ "VI") — gọn để dòng 1 không rớt ở 360 px. */}
+          {(() => {
+            const next = ATT_LANG_OPTIONS.find((o) => o.code !== lang) || ATT_LANG_OPTIONS[0]
+            return (
+              <button
+                type="button"
+                onClick={() => changeLang(next.code)}
+                title={next.code === "km" ? "ភាសាខ្មែរ" : "Tiếng Việt"}
+                aria-label={next.code === "km" ? "ភាសាខ្មែរ" : "Tiếng Việt"}
+                className="flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-white/30 bg-white/10 px-2 text-xs font-bold text-white"
+              >
+                {next.label}
               </button>
-            ))}
-          </div>
-          <div className="relative">
+            )
+          })()}
+          <div className="relative shrink-0">
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
-              className="flex max-w-[150px] items-center gap-1.5 rounded-lg bg-white/15 py-1 pl-2 pr-1.5 text-left sm:max-w-[220px]"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-300 text-sm font-black text-emerald-950 shadow"
               aria-label="Menu"
+              title={myName}
             >
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-bold leading-4">{myName}</span>
-                <span className="block truncate text-[10px] leading-3 text-white/75">{myRole}</span>
-              </span>
-              <ChevronDown size={15} className="shrink-0" />
+              {myInitial}
             </button>
             {menuOpen ? (
-              <div className="absolute right-0 top-full z-40 mt-1 w-48 overflow-hidden rounded-xl bg-white text-sm text-slate-700 shadow-xl">
-                <button type="button" onClick={() => void flushThen(() => window.location.assign("/dashboard/attendance"))} className="flex w-full items-center gap-2 px-3 py-2.5 hover:bg-slate-50">
-                  <ArrowLeft size={15} /> {T("backToDashboard")}
-                </button>
-                <button type="button" onClick={() => void flushThen(() => void handleLogout())} className="flex w-full items-center gap-2 px-3 py-2.5 text-rose-600 hover:bg-rose-50">
-                  <LogOut size={15} /> {T("logout")}
-                </button>
-              </div>
+              <>
+                <button type="button" aria-label={T("close")} className="fixed inset-0 z-30 cursor-default" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-full z-40 mt-1.5 w-60 overflow-hidden rounded-xl bg-white text-sm text-slate-700 shadow-xl">
+                  <div className="border-b border-slate-100 px-3 py-2.5">
+                    <div className="break-words font-bold leading-5 text-slate-800">{myName}</div>
+                    <div className="break-words text-xs leading-4 text-slate-500">{myRole}</div>
+                  </div>
+                  <button type="button" onClick={() => void flushThen(() => window.location.assign("/dashboard/attendance"))} className="flex w-full items-center gap-2 px-3 py-2.5 hover:bg-slate-50">
+                    <ArrowLeft size={15} /> {T("backToDashboard")}
+                  </button>
+                  <button type="button" onClick={() => void flushThen(() => void handleLogout())} className="flex w-full items-center gap-2 px-3 py-2.5 text-rose-600 hover:bg-rose-50">
+                    <LogOut size={15} /> {T("logout")}
+                  </button>
+                </div>
+              </>
             ) : null}
           </div>
         </div>
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-1.5 px-3 pb-2.5 pt-2 text-xs">
+        {/* Dòng 2: Ca/Tổ (giãn) · dây chuyền */}
+        <div className="mx-auto flex max-w-5xl items-center gap-1.5 px-3 pb-2.5 pt-2">
           <select
             value={ca}
             onChange={(e) => {
@@ -915,7 +937,7 @@ export default function AttendanceShiftPage() {
               })
             }}
             aria-label={T("caTo")}
-            className="max-w-[60vw] rounded-lg border border-white/30 bg-white/10 px-2 py-1 font-bold text-white [&>option]:text-slate-800"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-white/30 bg-white/10 px-2 text-xs font-bold text-white [&>option]:text-slate-800"
           >
             {unitChoices.map((u) => {
               // Ca/Tổ người đăng nhập được phân công: in đậm + ★ (mobile bỏ qua font-weight trong option).
@@ -929,7 +951,7 @@ export default function AttendanceShiftPage() {
             })}
             {!unitChoices.some((u) => u.code === ca) ? <option value={ca}>{currentUnit ? bilingual(lang, currentUnit.ten, currentUnit.ten_khmer) : ca}</option> : null}
           </select>
-          <div className="flex overflow-hidden rounded-lg border border-white/30">
+          <div className="flex h-9 shrink-0 overflow-hidden rounded-lg border border-white/30 text-xs">
             {ATTENDANCE_DAY_CHUYEN.map((dc) => (
               <button
                 key={dc}
@@ -937,28 +959,24 @@ export default function AttendanceShiftPage() {
                 disabled={!!currentUnit?.day_chuyen && currentUnit.day_chuyen !== dc}
                 title={currentUnit?.day_chuyen && currentUnit.day_chuyen !== dc ? ` chỉ thuộc ${currentUnit.day_chuyen}` : undefined}
                 onClick={() => void flushThen(() => setDayChuyen(dc))}
-                className={`px-2.5 py-1 font-bold disabled:cursor-not-allowed disabled:opacity-30 ${dayChuyen === dc ? "bg-white text-[#1c3a32]" : "text-white"}`}
+                className={`whitespace-nowrap px-2.5 font-bold disabled:cursor-not-allowed disabled:opacity-30 ${dayChuyen === dc ? "bg-white text-[#1c3a32]" : "text-white"}`}
               >
                 {dcLabel(dc)}
               </button>
             ))}
           </div>
-          <input
-            type="date"
-            value={ngay}
-            max={getFactoryTodayISO()}
-            onChange={(e) => {
-              const v = e.target.value
-              if (v) void flushThen(() => setNgay(v))
-            }}
-            className="rounded-lg border border-white/30 bg-white/10 px-2 py-1 font-semibold text-white [color-scheme:dark]"
-          />
-          {section ? <span className={`rounded-full px-2 py-0.5 font-bold ${STATUS_CLS[section.trang_thai]}`}>{T(STATUS_KEY[section.trang_thai])}</span> : null}
-          <span className="ml-auto">{saveBadge}</span>
         </div>
       </header>
 
       <main className="mx-auto max-w-5xl space-y-3 px-3 py-3">
+        {section || maPhieu || qrName ? (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            {section ? <span className={`rounded-full px-2 py-0.5 font-bold ${STATUS_CLS[section.trang_thai]}`}>{T(STATUS_KEY[section.trang_thai])}</span> : null}
+            {maPhieu ? <span className="font-mono font-semibold text-slate-500">{maPhieu}</span> : null}
+            {qrName ? <span className="text-slate-400">· {T("qrPoint")}: {qrName}</span> : null}
+            {!showBottomBar && saveBadge ? <span className="ml-auto">{saveBadge}</span> : null}
+          </div>
+        ) : null}
         {fatal ? <div className="rounded-xl bg-rose-50 p-4 text-sm font-semibold text-rose-700">{fatal}</div> : null}
         {error ? (
           <div className="flex items-start gap-2 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">
@@ -1075,7 +1093,7 @@ export default function AttendanceShiftPage() {
                       ten={s.ten}
                       gioiTinh={s.gioi_tinh}
                       state={state}
-                      jobLabel={firstJob ? shortJobLabel(bilingual(lang, firstJob.ten, firstJob.ten_khmer)) : ""}
+                      jobLabel={firstJob ? bilingual(lang, firstJob.ten, firstJob.ten_khmer) : ""}
                       extraJobs={Math.max(0, (line?.cong_viec_ids.length || 0) - 1)}
                       xepB={line?.xep_loai === "B"}
                       replacementName={rep}
@@ -1102,8 +1120,9 @@ export default function AttendanceShiftPage() {
         ) : null}
       </main>
 
-      {section && (editable || canEditAny) ? (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      {showBottomBar ? (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1.5">
+          {saveBadge ? <div className="mx-auto mb-1.5 flex max-w-5xl text-[11px]">{saveBadge}</div> : null}
           <div className="mx-auto flex max-w-5xl gap-2">
             {canEditAny ? (
               <button

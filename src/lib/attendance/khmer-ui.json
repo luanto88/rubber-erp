@@ -11,6 +11,7 @@
     { "key": "close", "nhom": "Chung", "vi": "Đóng", "km": "បិទ", "nguon": "may_dich" },
     { "key": "noPermission", "nhom": "Chung", "vi": "Bạn không có quyền điểm danh ca.", "km": "អ្នកមិនមានសិទ្ធិស្រង់វត្តមានវេនទេ។", "nguon": "may_dich" },
     { "key": "qrDiemDanh", "nhom": "Đầu trang", "vi": "QR điểm danh {ten}", "km": "QR ស្រង់វត្តមាន {ten}", "nguon": "may_dich" },
+    { "key": "qrDiemDanhNgan", "nhom": "Đầu trang", "vi": "QR điểm danh", "km": "QR ស្រង់វត្តមាន", "nguon": "may_dich" },
     { "key": "qrPoint", "nhom": "Chọn phần", "vi": "Điểm QR", "km": "ចំណុច QR", "nguon": "may_dich" },
     { "key": "qrInvalid", "nhom": "Chọn phần", "vi": "Mã QR điểm danh không hợp lệ hoặc đã ngừng dùng.", "km": "កូដ QR មិនត្រឹមត្រូវ ឬឈប់ប្រើហើយ។", "nguon": "may_dich" },
     { "key": "dayChuyen", "nhom": "Chọn phần", "vi": "Dây chuyền", "km": "ខ្សែផលិតកម្ម", "nguon": "may_dich" },

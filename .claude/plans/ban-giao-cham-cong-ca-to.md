@@ -162,24 +162,75 @@ Yêu cầu người dùng:
   tiết cách tính điểm ghi "Cấu hình áp dụng: từ tháng MM/YYYY".
 - Script so sánh cập nhật theo cấu hình tháng; test: T11 tua 6 / T12 tua 8 ⇒ công chuẩn 24 / 23.
 
+## 14. Cập nhật 2026-11-26 (cuối phiên) — C5 ĐÃ commit `ef099a4`; A1 test PASS, ĐÃ commit; CHƯA push
+- A1 (header + thẻ người + đổi tên việc): migration `20261217_attendance_rename_ve_sinh.sql` ĐÃ CHẠY localhost
+  ("Vệ sinh tạp vụ" → "Vệ sinh dây chuyền", Mủ tạp + Mủ nước). Production: chạy 20261216 + 20261217 TRƯỚC deploy.
+- Header màn điểm danh (`attendance/shift/page.tsx`): đúng 2 dòng — dòng 1 [icon "QR điểm danh"] … [ngày] [1 nút ngôn ngữ hiện
+  ngôn ngữ SẼ chuyển sang: VI ⇒ "ខ្មែរ", Khmer ⇒ "VI"] [vòng tròn chữ cái đầu tên]; dòng 2 [Ca/Tổ giãn ★][Mủ tạp|Mủ nước],
+  cùng chiều cao. Menu vòng tròn: họ tên + chức vụ + Về trang chính + Đăng xuất. Trạng thái phiếu + mã phiếu + điểm QR = dải
+  đầu nội dung; trạng thái tự lưu ở thanh đáy (trên nút Gửi). Key mới `qrDiemDanhNgan` (khmer-ui.json).
+- Thẻ người (`worker-tile.tsx`): nhãn việc đủ chữ (tối đa 2 dòng), huy hiệu vàng (Briefcase) khi đã giao việc, icon giữ màu
+  giới tính. Đã bỏ dùng `shortJobLabel` ở màn này.
+- Bản mẫu người dùng: `cung_cap_dl/so_sanh_bo_cuc_diem_danh_mobile.html` (+ `cung_cap_dl/kq_test/Sơ đồ mới_app.png`) — nguồn
+  bố cục + 19 icon SVG nét mảnh cho sơ đồ dây chuyền (A3).
+
+### Đã chốt với người dùng 2026-11-26 (CHƯA làm)
+**A2 — Mọi việc của TỔ phải chọn ca (chọn được nhiều).** "Phân công bất kỳ công việc nào cũng phải chọn ca, có thể chọn cả 2 vì
+XLNT, sửa chữa cơ khí, bảo trì trực cả ngày." Migration mới: `attendance_sheet_lines.ca_lam text[]` (mã đơn vị loại `ca`);
+`CREATE OR REPLACE attendance_save_section` chép từ migration MỚI NHẤT có hàm này (grep, hiện 20261210): section của đơn vị
+loại `to` ⇒ dòng có mặt bắt buộc `ca_lam` khác rỗng, giá trị = đơn vị `ca` đang dùng; section ca ⇒ bỏ qua. `job-sheet.tsx` thêm
+chip "Làm ca" A/B/C (nhiều) + "Cả ngày"; `shift.ts` (`SheetLineDraft.ca_lam`, `lineToPayload`, `dbLineToDraft`,
+`suggestFromPrevious`); bước gửi + "Gửi tất cả" chặn dòng tổ thiếu ca; TKSX in "(Ca A, B)" / "Cả ngày"; chi tiết phiếu cột "Ca".
+Dòng tổ cũ `ca_lam` NULL hiện "—".
+
+**A3 — Khung "Sơ đồ dây chuyền" (Mủ tạp) dưới lưới thẻ người**, bố cục + icon theo file HTML mẫu: hàng trực (Trực ca, Vận hành
+lò sấy, Bảo trì máy, Trực hồ XLNT, Sửa chữa cơ khí, Lái xe nâng); Tiếp nhận mủ tạp (Vận hành xe xúc → Xé nhỏ - Lưu kho → Vệ
+sinh kho); Ca 3 dải viên thuốc + mũi tên cong: (Xe xúc tiếp liệu → Tiếp liệu & vận hành máy xé → Vận hành máy cán) / (Vận hành
+băm tinh → Phả mủ → Ra lò → Cân ép bành mủ) / (Vệ sinh dây chuyền ← Cắt mẫu - Vô kiện ← Vô bao dán nhãn).
+- Gắn ô ↔ việc: cột `attendance_job_types.so_do_vi_tri` (seed theo tên, khớp 1-1 danh mục F01 Mủ tạp), ô chọn "Vị trí trên sơ
+  đồ" ở Cài đặt → Chấm công → Công việc. Việc không gắn ⇒ khung "Việc khác"; Mủ nước ⇒ "Chưa có sơ đồ". Nếu Đội xe cơ khí chưa
+  có việc "Sửa chữa cơ khí" ⇒ báo người dùng thêm (không tự tạo).
+- Chip Ca A/B/C đầu sơ đồ: đổi ca ⇒ cập nhật TOÀN BỘ tổ + tiếp nhận + dải Ca theo giá trị thực của ca đó (tổ: dòng có `ca_lam`
+  chứa ca; vị trí không đổi người thì giữ nguyên).
+- Kéo-thả / chạm-chọn-rồi-chạm-ô THEO QUYỀN: chỉ có quyền ca mình (shift_check + phân công) ⇒ chỉ thả trong Ca/Tổ đó; quyền chấm
+  công tất cả (mark_all / mark / admin) ⇒ thả mọi ô (khác section ⇒ open + save cả 2 section; vào ô tổ ⇒ `ca_lam` = [ca đang xem]).
+  Phiếu đã gửi/duyệt ⇒ khoá. Thẻ người: huy hiệu đổi thành icon vị trí sơ đồ.
+- Đọc mọi section + dòng của phiếu ngày: kiểm RLS cho người chỉ có shift_check; bị chặn ⇒ RPC chỉ đọc SECURITY DEFINER.
+- File dự kiến: `src/lib/attendance/diagram.ts` (thuần), `shift/_components/diagram-icons.tsx`, `shift/_components/line-diagram.tsx`.
+
+**B — Tua chuẩn theo tháng + chỉ số phụ "Chuyên cần".** Người dùng chốt: (1) chỉ "ngày nghỉ tua chuẩn" theo tháng (trọng số
+A–D, mức trừ, min/max vẫn chung); (2) toàn nhà máy + riêng theo nhóm chuyên môn (nhóm chính); (3) tháng không đặt ⇒ về cấu
+hình chung (6); (4) CHẶN sửa/xoá cấu hình tháng đã có điểm KPI khoá; (5) bắt buộc lý do + nhật ký (insert-only).
+- "Ô mâu thuẫn" tách 2 thẻ ở Lịch công: **Chuyên cần** = ngày Nghỉ tua mà vẫn thao tác app ĐÚNG việc của NHÓM CHÍNH (viền
+  xanh); **Mâu thuẫn** = Nghỉ có phép / không phép mà có thao tác (viền cam). Nghỉ tua + thao tác ngoài nhóm chính ⇒ chỉ tooltip.
+- Chuyên cần là CHỈ SỐ PHỤ (không vào công thức hệ số) — dùng so sánh khi 2 người bằng điểm: bảng xếp hạng ORDER BY diem_tong
+  DESC, ngay_chuyen_can DESC.
+- Migration dự kiến: `kpi_attendance_month_config` (factory, group NULL = chung, thang = ngày 1, so_ngay_nghi_tua_chuan 0..10,
+  ly_do NOT NULL) + `kpi_attendance_month_config_logs`; RPC save/delete (admin | kpi.manage_config, chặn tháng có da_khoa);
+  `personnel_groups.nguon_hoat_dong text[]` (nguồn thao tác app của nhóm — nhãn `ACTIVITY_LABEL`, chọn ở Cài đặt → Nhân sự;
+  trống ⇒ không đếm); `kpi_attendance_summary_internal` + `kpi_attendance_month_summary` + `kpi_compute_monthly_scores` chép
+  từ 20261216, CHỈ đổi phần chọn tua (coalesce tháng-nhóm → tháng-chung → trọng số nhóm → trọng số chung → 6) + thêm
+  `tua_nguon`, `tua_ly_do`, `ngay_chuyen_can` vào kết quả / `chi_tiet.chuyen_can`; RPC xếp hạng (gốc 20260814) thêm tie-break.
+- UI: Cài đặt → KPI & 5S → Trọng số khối "Tua chuẩn theo tháng" (lý do qua `ReasonConfirmDialog`, dòng xổ nhật ký); KPI scores
+  ghi "Cấu hình áp dụng: tháng MM/YYYY — lý do" + "Ngày chuyên cần"; script so sánh dùng cấu hình tháng (T11 tua 6 / T12 tua 8 ⇒
+  công chuẩn 24 / 23).
+
 ## Prompt phiên sau
 ```
-Đọc CLAUDE.md, rule 27 (mục "Hệ số chuyên cần"), rule 29, rule 31 (mục "C2", "Ca / Tổ điểm danh", "C5"), và ĐỌC HẾT
-.claude/plans/ban-giao-cham-cong-ca-to.md (mục 13 là trạng thái mới nhất + 2 việc A, B). Xem ảnh cung_cap_dl/kq_test/mobile.jpg.
-C5 (KPI dùng hệ số chuyên cần mới) đã test localhost PASS nhưng CHƯA commit — đầu phiên hỏi tôi có commit C5 trước không
-(git status: migration 20261216, kpi-scores.ts, kpi-score-weights-tab.tsx, kpi/scores/page.tsx, kpi-score-breakdown.ts,
-scripts/compare-kpi-attendance-factor.mjs, rule 27, rule 31, file bàn giao). File cung_cap_dl/* không đưa vào commit.
+Đọc CLAUDE.md, rule 29, rule 31 (mục "C2", "Ca / Tổ điểm danh", "C5"), rule 27 (mục "Hệ số chuyên cần"), và ĐỌC HẾT
+.claude/plans/ban-giao-cham-cong-ca-to.md mục 14 (trạng thái mới nhất + đã chốt A2, A3, B). Mở file mẫu
+cung_cap_dl/so_sanh_bo_cuc_diem_danh_mobile.html (bố cục + icon SVG sơ đồ dây chuyền) và cung_cap_dl/kq_test/Sơ đồ mới_app.png.
+C5 (ef099a4) + A1 đã commit, CHƯA push — đầu phiên hỏi tôi có push không (production phải chạy migration 20261216 + 20261217
+TRƯỚC deploy).
 
-Việc A — header màn điểm danh mobile (attendance/shift/page.tsx): làm theo đúng yêu cầu mục 13A (2 dòng cân đối, cùng chiều
-cao, tiêu đề "QR điểm danh", avatar chữ cái đầu ⇒ bấm hiện họ tên + chức vụ + Về trang chính + Đăng xuất, không cắt chữ). Đọc
-lại đúng đoạn header trước khi sửa, đưa tôi phác thảo bố cục (ASCII 360 px) để duyệt trước; chỗ nào không đủ chỗ thì HỎI tôi,
-không tự cắt chữ. Giữ nguyên logic flushThen / khoá dây chuyền / ★ / Khmer.
-
-Việc B — cấu hình chuyên cần theo tháng (mục 13B): KHÔNG code trước khi hỏi tôi 5 câu ở mục 13B (ngôn ngữ nghiệp vụ + ví dụ),
-rồi liệt kê bảng / RPC / màn hình để tôi duyệt. kpi_compute_monthly_scores và kpi_attendance_summary_internal chép từ migration
-MỚI NHẤT (20261216), chỉ đổi phần chọn cấu hình.
-
-Mỗi việc: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay, DỪNG cho tôi test; hỏi trước khi commit/push.
+Làm lần lượt, mỗi giai đoạn DỪNG cho tôi test, hỏi trước khi commit/push:
+1. A2 — mọi việc của tổ phải chọn ca (ca_lam, chọn nhiều / "Cả ngày"). Đọc lại đúng attendance_save_section bản MỚI NHẤT
+   trước khi viết migration.
+2. A3 — khung "Sơ đồ dây chuyền" Mủ tạp + kéo-thả theo quyền + đổi Ca A/B cập nhật toàn bộ. Đưa tôi phác thảo bố cục 360 px
+   trước khi code; chỗ nào thiếu việc trong danh mục (vd "Sửa chữa cơ khí") thì HỎI.
+3. B — tua chuẩn theo tháng + thẻ Chuyên cần / Mâu thuẫn + chỉ số phụ. Liệt kê bảng / RPC / màn hình để tôi duyệt trước khi code;
+   các hàm KPI chép từ migration 20261216, chỉ đổi phần chọn cấu hình.
+Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay (360/390/430 px + Khmer với màn điểm danh).
 Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
 Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
 ```

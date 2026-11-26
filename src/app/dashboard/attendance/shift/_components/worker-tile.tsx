@@ -3,6 +3,7 @@
 // 1 ô người trên lưới điểm danh (C2 làm lại GĐ2). 4 trạng thái: chưa giao (viền đứt), có mặt (viền xanh + chip việc,
 // "B" góc phải khi xếp B), vắng có người thay (icon mờ + gạch chéo đỏ + "→ người thay"), vắng (chip đỏ).
 
+import { Briefcase } from "lucide-react"
 import { GenderIcon } from "./gender-icon"
 import type { TileState } from "@/lib/attendance/shift"
 
@@ -53,6 +54,12 @@ export function WorkerTile({
       ) : null}
       <span className="relative">
         <GenderIcon gioiTinh={gioiTinh} muted={absent} />
+        {state === "co_mat" && jobLabel ? (
+          // Huy hiệu việc: giữ màu giới tính của icon, gắn thêm dấu "đã giao việc" (A3 thay bằng icon vị trí sơ đồ).
+          <span className="absolute -bottom-0.5 -right-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-white bg-amber-500 text-white shadow-sm">
+            <Briefcase size={10} strokeWidth={2.5} />
+          </span>
+        ) : null}
         {state === "vang_co_thay" ? (
           <svg className="pointer-events-none absolute inset-0" viewBox="0 0 34 34" aria-hidden>
             <line x1="4" y1="4" x2="30" y2="30" stroke="#e11d48" strokeWidth="3" strokeLinecap="round" />
@@ -61,17 +68,17 @@ export function WorkerTile({
       </span>
       <span className={`line-clamp-2 w-full break-words text-[12px] font-bold leading-tight ${absent ? "text-slate-400" : "text-slate-800"}`}>{ten}</span>
       {roleLabel ? (
-        <span className="max-w-full truncate rounded-full bg-violet-600 px-1.5 text-[10px] font-semibold leading-4 text-white">{roleLabel}</span>
+        <span className="line-clamp-2 max-w-full break-words rounded-lg bg-violet-600 px-1.5 text-[10px] font-semibold leading-4 text-white">{roleLabel}</span>
       ) : null}
       {state === "co_mat" ? (
         jobLabel ? (
-          <span className="max-w-full truncate rounded-full bg-emerald-600 px-1.5 text-[10px] font-semibold leading-4 text-white">
+          <span className="line-clamp-2 max-w-full break-words rounded-lg bg-emerald-600 px-1.5 py-px text-[10px] font-semibold leading-[13px] text-white">
             {jobLabel}
             {extraJobs > 0 ? ` +${extraJobs}` : ""}
           </span>
         ) : null
       ) : state === "vang_co_thay" ? (
-        <span className="max-w-full truncate text-[10px] font-semibold leading-4 text-rose-600">→ {replacementName}</span>
+        <span className="line-clamp-2 max-w-full break-words text-[10px] font-semibold leading-[13px] text-rose-600">→ {replacementName}</span>
       ) : state === "vang" ? (
         <span className="rounded-full bg-rose-600 px-1.5 text-[10px] font-semibold leading-4 text-white">{vangLabel}</span>
       ) : (

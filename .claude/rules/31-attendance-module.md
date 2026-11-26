@@ -298,3 +298,12 @@ Công thức + quy tắc: rule 27 mục "Hệ số chuyên cần". Migration `20
 - `kpi_score_weights.so_ngay_nghi_tua_chuan`, `he_so_phat_khong_phep` (Cài đặt → KPI & 5S → Trọng số).
 - Script chỉ đọc `scripts/compare-kpi-attendance-factor.mjs [--months=2026-10,2026-11]` (tự kiểm JS ↔ SQL; dòng v2 lệch).
 - Lưu ý vận hành: ngày không thao tác app + chưa ai chấm ⇒ "chưa ghi nhận" ⇒ hệ số thấp (T10: nhiều người 0,75–0,84).
+
+## Màn điểm danh — header 2 dòng + thẻ người (A1, 2026-11-26, test PASS)
+- Header `attendance/shift/page.tsx` ĐÚNG 2 dòng, không cắt chữ: [icon "QR điểm danh"] … [ngày][1 nút ngôn ngữ hiện ngôn ngữ sẽ
+  chuyển sang][vòng tròn chữ cái đầu tên → menu họ tên + chức vụ + Về trang chính + Đăng xuất] / [Ca/Tổ giãn ★][Mủ tạp|Mủ nước].
+  Trạng thái phiếu + mã phiếu + điểm QR = dải đầu nội dung; trạng thái tự lưu ở thanh đáy. Thêm nút vào header phải kiểm 360 px + Khmer.
+- Thẻ người: nhãn việc đủ chữ (≤ 2 dòng), huy hiệu khi đã giao việc, icon giữ màu giới tính; Nam → Nữ → chưa khai (`compareStaffOrder`).
+- Việc "Vệ sinh tạp vụ" đổi tên "Vệ sinh dây chuyền" (migration `20261217_attendance_rename_ve_sinh.sql`, cả Mủ tạp + Mủ nước).
+- Đã chốt chưa làm (bàn giao `ban-giao-cham-cong-ca-to.md` mục 14): A2 việc của tổ phải chọn ca (`ca_lam`), A3 sơ đồ dây chuyền
+  kéo-thả theo quyền, B tua chuẩn theo tháng + thẻ Chuyên cần (chỉ số phụ KPI).
