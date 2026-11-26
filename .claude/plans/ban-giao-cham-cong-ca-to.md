@@ -183,6 +183,15 @@ chip "Làm ca" A/B/C (nhiều) + "Cả ngày"; `shift.ts` (`SheetLineDraft.ca_la
 `suggestFromPrevious`); bước gửi + "Gửi tất cả" chặn dòng tổ thiếu ca; TKSX in "(Ca A, B)" / "Cả ngày"; chi tiết phiếu cột "Ca".
 Dòng tổ cũ `ca_lam` NULL hiện "—".
 
+**A2b — Mở ngày mới lấy ngày gần nhất của Ca, KỂ CẢ người thay** (người dùng nhắc 2026-11-26). Hiện `suggestFromPrevious`
+(`src/lib/attendance/shift.ts`) chỉ chép việc + xe cho người CÓ trong danh sách Ca/Tổ, bỏ qua: (a) người mượn từ ca/tổ khác đã
+làm thay (thẻ "Khác"), (b) dòng vắng có người thay (`thay_the_staff_id` / `thay_the_ten`). Yêu cầu: phiếu ca/tổ mới chưa có dòng ⇒
+chép NGUYÊN bố trí của phiếu gần nhất cùng Ca/Tổ + dây chuyền: việc, xe, người thay (cả người mượn ngoài danh sách — hiện ở thẻ
+"Khác"; tên gõ tay "(tạm)"), người vắng được thay (để trực ca chỉ cần xác nhận lại). KHÔNG chép xếp loại A/B, lý do vắng, có / không
+phép (người vắng vẫn chọn ở bước gửi). Người đã nghỉ việc / ngoài khoảng làm việc ⇒ bỏ. Banner "Xoá hết việc" giữ nguyên.
+Làm cùng A2 (chép luôn `ca_lam` cho dòng tổ). Kiểm: Ca A hôm qua có X thay Y (X mượn Ca B) ⇒ mở Ca A hôm nay thấy Y vắng → X, X ở
+thẻ "Khác" có đúng việc.
+
 **A3 — Khung "Sơ đồ dây chuyền" (Mủ tạp) dưới lưới thẻ người**, bố cục + icon theo file HTML mẫu: hàng trực (Trực ca, Vận hành
 lò sấy, Bảo trì máy, Trực hồ XLNT, Sửa chữa cơ khí, Lái xe nâng); Tiếp nhận mủ tạp (Vận hành xe xúc → Xé nhỏ - Lưu kho → Vệ
 sinh kho); Ca 3 dải viên thuốc + mũi tên cong: (Xe xúc tiếp liệu → Tiếp liệu & vận hành máy xé → Vận hành máy cán) / (Vận hành
@@ -225,7 +234,7 @@ TRƯỚC deploy).
 
 Làm lần lượt, mỗi giai đoạn DỪNG cho tôi test, hỏi trước khi commit/push:
 1. A2 — mọi việc của tổ phải chọn ca (ca_lam, chọn nhiều / "Cả ngày"). Đọc lại đúng attendance_save_section bản MỚI NHẤT
-   trước khi viết migration.
+   trước khi viết migration. Kèm A2b: mở ngày mới chép bố trí ngày gần nhất của Ca/Tổ KỂ CẢ người thay (mục 14).
 2. A3 — khung "Sơ đồ dây chuyền" Mủ tạp + kéo-thả theo quyền + đổi Ca A/B cập nhật toàn bộ. Đưa tôi phác thảo bố cục 360 px
    trước khi code; chỗ nào thiếu việc trong danh mục (vd "Sửa chữa cơ khí") thì HỎI.
 3. B — tua chuẩn theo tháng + thẻ Chuyên cần / Mâu thuẫn + chỉ số phụ. Liệt kê bảng / RPC / màn hình để tôi duyệt trước khi code;
