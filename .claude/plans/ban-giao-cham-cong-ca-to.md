@@ -287,3 +287,29 @@ Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay (36
 Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
 Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
 ```
+
+## 17. Cập nhật 2026-11-27 (phiên sau) — A3 Sơ đồ dây chuyền: test localhost PASS, ĐÃ commit + push main
+- Production đã chạy đủ 20261215 → 20261220 (người dùng xác nhận đầu phiên).
+- Migration `20261221_attendance_job_diagram.sql` ĐÃ CHẠY localhost (19 dòng `so_do_vi_tri`). Production: PHẢI chạy trên Supabase
+  SQL Editor (Vercel tự deploy khi push main ⇒ chạy NGAY; chưa chạy thì màn điểm danh vẫn mở được nhưng sơ đồ trống ô — mọi việc rơi
+  vào "Việc khác" — và Cài đặt ẩn ô "Vị trí trên sơ đồ").
+- Sau test: gỡ người khỏi ô bằng dấu X trên tên hoặc kéo tên ra khoảng trống khung sơ đồ (rule 31 mục A3).
+- Chi tiết + quyết định: rule 31 mục "A3". Kế hoạch phiên: `C:\Users\Software\.claude\plans\pasted-content-id-00b9-c-clau-elegant-newell-of-3a944494-5f2e-47c3-9f5c-b970da2fa9af.md`.
+- Kế tiếp sau khi A3 test PASS: B (liệt kê bảng / RPC / màn hình cho người dùng duyệt trước khi code — mục 14).
+
+## Prompt phiên sau (2026-11-27, sau A3 — thay các prompt cũ ở trên)
+```
+Đọc CLAUDE.md, rule 29, rule 31 (mục "A2", "Sửa sau test A2 lần 2", "A3", "C5"), rule 27 (mục "Hệ số chuyên cần"), và
+.claude/plans/ban-giao-cham-cong-ca-to.md mục 14 (đã chốt B) + mục 17 (trạng thái mới nhất). A3 (sơ đồ dây chuyền Mủ tạp) đã
+push main 2026-11-27 — đầu phiên hỏi tôi production đã chạy migration 20261221_attendance_job_diagram.sql chưa, và test A3 trên
+production (360/390/430 px + Khmer) có lỗi gì không.
+
+Việc tiếp theo: B — tua chuẩn theo tháng + thẻ Chuyên cần / Mâu thuẫn ở Lịch công + chỉ số phụ "ngày chuyên cần" (tie-break xếp
+hạng KPI). TRƯỚC khi code: liệt kê bảng / cột / RPC / màn hình / script để tôi duyệt (mục 14: kpi_attendance_month_config + logs,
+RPC lưu/xoá chặn tháng có điểm khoá + lý do bắt buộc, personnel_groups.nguon_hoat_dong, 3 hàm KPI chép từ migration 20261216 chỉ
+đổi phần chọn tua chuẩn, RPC xếp hạng gốc 20260814 thêm tie-break). Hỏi tôi bằng ngôn ngữ nghiệp vụ + ví dụ nếu còn chỗ chưa rõ.
+Dừng cho tôi test, hỏi trước khi commit/push.
+Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay.
+Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
+Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
+```

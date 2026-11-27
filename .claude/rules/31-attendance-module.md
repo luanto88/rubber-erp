@@ -357,3 +357,24 @@ Người dùng chốt:
 - Người thay: người CÙNG Ca/Tổ đang có mặt thay được người vắng của chính ca (1 người nhiều vị trí); 1 người thay được nhiều người.
   Chỉ loại chính người vắng + người đang vắng trong phiếu. Danh sách: người cùng ca đứng đầu, nhãn "Cùng ca · việc đang làm".
   A2b chép cả trường hợp người thay có dòng riêng.
+
+## A3 Sơ đồ dây chuyền Mủ tạp (2026-11-27, chờ chạy migration 20261221 + test tay)
+Người dùng chốt: điện thoại = chạm ô → tấm chọn người (thẻ người vẫn mở tấm chọn việc); chạm tên trong ô = chọn, chạm ô khác =
+chuyển (bỏ việc ô cũ, nhận việc ô mới, giữ việc khác); máy tính kéo-thả thêm (thẻ người / tên trong ô). Người có mark / mark_all /
+admin ghi thẳng phiếu Ca/Tổ khác (mở + đọc lại dòng mới nhất ngay trước khi lưu; phiếu đã gửi/duyệt ⇒ khoá); chỉ shift_check ⇒
+chỉ ô của Ca/Tổ đang mở. Ô "Sửa chữa cơ khí" = việc "Sửa chữa xe, cơ khí" (XE_CK).
+- Migration `20261221_attendance_job_diagram.sql` (**chạy tay TRƯỚC deploy**; không đổi RPC): `attendance_job_types.so_do_vi_tri`
+  (19 khoá, CHECK + UNIQUE (factory, ô) khi đang dùng), seed theo tên. Cài đặt → Chấm công → Công việc có ô "Vị trí trên sơ đồ".
+- Thuần `src/lib/attendance/diagram.ts` (`STATION_KEYS`, `buildDiagram`, `toLineVisible`, `addJobForWorker`, `moveJobOnLine`,
+  `removeJobFromLine`, `lineOfWorkerJob`); UI `shift/_components/line-diagram.tsx`, `station-picker.tsx`, `diagram-icons.tsx`
+  (19 SVG chép từ bản mẫu HTML); thẻ người: huy hiệu = icon ô của việc đầu tiên có ô.
+- Sơ đồ đọc MỌI phiếu Ca/Tổ của phiếu ngày (RLS SELECT đủ cho shift_check), phiếu đang mở dùng dòng đang sửa. Chip Ca A/B/C:
+  dải Ca = phiếu ca đó; tổ ghi giờ hiện người có giờ làm giao khung kiện quét của ca (24h luôn hiện); tổ khác theo
+  `assignToProductionCa(giao_luc)`; ca chưa có kiện quét ⇒ hiện mọi người của tổ + chú thích.
+- Khung kiện quét: server action `shift/diagram-actions.ts` `loadProductionWindows` (service role + `assertProductAccess`), cùng
+  cách tính `prodWindows` của TKSX (F01 KHÔNG đổi, chưa dùng chung hàm). Tải lại sơ đồ + khung mỗi 60 giây.
+- Việc có ô nhưng sai phiếu / việc không có ô ⇒ khung "Việc khác". Mủ nước ⇒ "Chưa có sơ đồ".
+- Rủi ro chấp nhận: ghi phiếu tổ khác đúng cùng giây với trực ca tổ đó ⇒ bên lưu sau đè (máy kia thấy sau khi tải lại).
+- Sau test 2026-11-27 (migration 20261221 ĐÃ CHẠY localhost, test PASS): gỡ người khỏi ô = dấu X trên tên (mọi thiết bị) hoặc
+  kéo tên thả ra khoảng trống của khung sơ đồ (máy tính, khung viền đỏ "Thả ra đây để gỡ khỏi ô") — chỉ bỏ việc của ô đó,
+  việc khác giữ; dòng hết việc thì xoá dòng (người giữ vị trí vẫn có mặt). Ô tự chặn lan sự kiện kéo.

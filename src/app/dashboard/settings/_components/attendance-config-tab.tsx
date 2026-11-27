@@ -16,6 +16,7 @@ import {
   type AttendanceToNhom,
 } from "@/lib/attendance/types"
 import { UNIT_SELECT, type AttendanceUnit } from "@/lib/attendance/shift"
+import { STATION_KEYS, STATION_LABEL, isStationKey, type StationKey } from "@/lib/attendance/diagram"
 import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapper"
 import { ModalShell } from "../../_components/modal-shell"
 import { AttendanceQrPointsCard } from "./attendance-qr-points-card"
@@ -46,6 +47,8 @@ type JobForm = {
   sort_order: string
   is_active: boolean
   an_diem_danh: boolean
+  /** A3 — ô trên Sơ đồ dây chuyền ("" = không có ô). */
+  so_do_vi_tri: string
 }
 
 type ReasonForm = {
@@ -127,6 +130,8 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
   }, [factoryId, load])
 
   const hasAnDiemDanhCol = jobs.length === 0 || "an_diem_danh" in jobs[0]
+  // Cột có từ migration 20261221 (A3) — chưa chạy thì ẩn ô "Vị trí trên sơ đồ".
+  const hasSoDoCol = jobs.length > 0 && "so_do_vi_tri" in jobs[0]
 
   // Lựa chọn "Thuộc": việc ca SX theo từng dây chuyền + mỗi Tổ (+ "Chưa xếp" khi còn dữ liệu cũ).
   const scopeOptions = useMemo(() => {
@@ -161,6 +166,7 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
       sort_order: String(maxOrder + 10),
       is_active: true,
       an_diem_danh: false,
+      so_do_vi_tri: "",
     })
   }
 
@@ -187,6 +193,14 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
     } else {
       place = { unit_code: null, day_chuyen: jobForm.day_chuyen, to_nhom: jobForm.to_nhom }
     }
+    const soDo = jobForm.so_do_vi_tri || null
+    if (soDo && jobForm.is_active) {
+      const clash = jobs.find((j) => j.id !== jobForm.id && j.is_active && j.so_do_vi_tri === soDo)
+      if (clash) {
+        setFormError(`Ô "${STATION_LABEL[soDo as StationKey] || soDo}" đã gắn việc "${clash.ten}". Bỏ gắn việc đó trước.`)
+        return
+      }
+    }
     setSaving(true)
     setFormError(null)
     try {
@@ -201,13 +215,16 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
         is_active: jobForm.is_active,
         // Cột có từ migration 20261207 — chưa chạy thì không gửi (giữ form chạy như cũ).
         ...(hasAnDiemDanhCol ? { an_diem_danh: jobForm.an_diem_danh } : {}),
+        ...(hasSoDoCol ? { so_do_vi_tri: soDo } : {}),
       }
       const { error: err } = jobForm.id
         ? await supabase.from("attendance_job_types").update(payload).eq("id", jobForm.id).eq("factory_id", factoryId)
         : await supabase.from("attendance_job_types").insert(payload)
       if (err) {
         setFormError(
-          err.code === "23505"
+          err.code === "23505" && /so_do/.test(err.message)
+            ? "Ô sơ đồ này đã gắn việc khác."
+            : err.code === "23505"
             ? `Công việc "${ten}" đã có trong ${scopeLabel(jobForm.scope)}.`
             : getErrorMessage(err, "Không lưu được, thử lại."),
         )
@@ -383,6 +400,7 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
                         <td>
                           {r.is_active ? "Đang dùng" : "Đã tắt"}
                           {r.an_diem_danh ? <span className="ml-1.5 rounded bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-500">Ẩn ở điểm danh</span> : null}
+                          {isStationKey(r.so_do_vi_tri) ? <span className="ml-1.5 rounded bg-teal-50 px-1.5 text-[11px] font-semibold text-teal-700">Sơ đồ: {STATION_LABEL[r.so_do_vi_tri]}</span> : null}
                         </td>
                         {canManage ? (
                           <td className="text-right">
@@ -404,6 +422,7 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
                                     sort_order: String(r.sort_order ?? 0),
                                     is_active: r.is_active,
                                     an_diem_danh: !!r.an_diem_danh,
+                                    so_do_vi_tri: r.so_do_vi_tri || "",
                                   })
                                 }}
                                 className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
@@ -581,6 +600,24 @@ export function AttendanceConfigTab({ factoryId, canManage, isAdmin = false }: {
                 <input type="number" value={jobForm.sort_order} onChange={(e) => setJobForm({ ...jobForm, sort_order: e.target.value })} className={inputCls} />
               </div>
             </div>
+            {hasSoDoCol ? (
+              <div>
+                <label className={labelCls}>Vị trí trên sơ đồ dây chuyền</label>
+                <select value={jobForm.so_do_vi_tri} onChange={(e) => setJobForm({ ...jobForm, so_do_vi_tri: e.target.value })} className={inputCls}>
+                  <option value="">Không có ô (hiện ở khung &quot;Việc khác&quot;)</option>
+                  {STATION_KEYS.map((k) => {
+                    const used = jobs.find((j) => j.id !== jobForm.id && j.is_active && j.so_do_vi_tri === k)
+                    return (
+                      <option key={k} value={k} disabled={!!used}>
+                        {STATION_LABEL[k]}
+                        {used ? ` — đang gắn "${used.ten}"` : ""}
+                      </option>
+                    )
+                  })}
+                </select>
+                <span className="mt-1 block text-xs text-slate-500">Sơ đồ ở màn điểm danh (dây chuyền Mủ tạp). Mỗi ô 1 việc đang dùng.</span>
+              </div>
+            ) : null}
             <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
               <input type="checkbox" checked={jobForm.is_active} onChange={(e) => setJobForm({ ...jobForm, is_active: e.target.checked })} />
               Đang dùng

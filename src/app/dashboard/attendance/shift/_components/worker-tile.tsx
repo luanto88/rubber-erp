@@ -6,6 +6,8 @@
 import { Briefcase } from "lucide-react"
 import { GenderIcon } from "./gender-icon"
 import type { TileState } from "@/lib/attendance/shift"
+import type { StationKey } from "@/lib/attendance/diagram"
+import { StationIcon } from "./diagram-icons"
 
 export function WorkerTile({
   ten,
@@ -21,6 +23,8 @@ export function WorkerTile({
   caLabel,
   missingCa,
   disabled,
+  stationKey,
+  onDragStart,
   onClick,
 }: {
   ten: string
@@ -39,6 +43,10 @@ export function WorkerTile({
   /** A2 — tổ có việc mà chưa chọn ca ⇒ chấm cam (sẽ bị chặn khi gửi). */
   missingCa?: boolean
   disabled?: boolean
+  /** A3 — ô sơ đồ của việc đầu tiên ⇒ huy hiệu là icon ô; null ⇒ huy hiệu cặp hồ sơ như cũ. */
+  stationKey?: StationKey | null
+  /** A3 — máy tính: kéo thẻ người thả vào ô sơ đồ. */
+  onDragStart?: (e: React.DragEvent) => void
   onClick: () => void
 }) {
   const border =
@@ -53,6 +61,8 @@ export function WorkerTile({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      draggable={!!onDragStart && !disabled}
+      onDragStart={onDragStart}
       className={`relative flex min-h-[104px] flex-col items-center gap-1 rounded-xl px-1.5 pb-1.5 pt-2 text-center transition active:scale-[0.97] disabled:cursor-default ${border}`}
     >
       {state === "co_mat" && xepB ? (
@@ -61,10 +71,16 @@ export function WorkerTile({
       <span className="relative">
         <GenderIcon gioiTinh={gioiTinh} muted={absent} />
         {state === "co_mat" && jobLabel ? (
-          // Huy hiệu việc: giữ màu giới tính của icon, gắn thêm dấu "đã giao việc" (A3 thay bằng icon vị trí sơ đồ).
-          <span className="absolute -bottom-0.5 -right-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-white bg-amber-500 text-white shadow-sm">
-            <Briefcase size={10} strokeWidth={2.5} />
-          </span>
+          // Huy hiệu việc: icon ô sơ đồ của việc đầu tiên (A3); việc không có ô ⇒ dấu "đã giao việc".
+          stationKey ? (
+            <span className="absolute -bottom-1 -right-3 flex h-[22px] min-w-[22px] items-center justify-center rounded-full border-2 border-white bg-amber-50 px-0.5 shadow-sm">
+              <StationIcon station={stationKey} height={16} />
+            </span>
+          ) : (
+            <span className="absolute -bottom-0.5 -right-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-white bg-amber-500 text-white shadow-sm">
+              <Briefcase size={10} strokeWidth={2.5} />
+            </span>
+          )
         ) : null}
         {state === "vang_co_thay" ? (
           <svg className="pointer-events-none absolute inset-0" viewBox="0 0 34 34" aria-hidden>

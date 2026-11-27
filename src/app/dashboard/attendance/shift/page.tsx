@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { AlertTriangle, ArrowLeft, Check, ClipboardCheck, CloudOff, Eraser, Loader2, LogOut, RefreshCw, Send, SendHorizontal, Sparkles, Trash2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { getActiveFactoryId, hasPermission, hydrateActiveSession, signOutEverywhere, type SessionUser } from "@/lib/auth"
+import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, signOutEverywhere, type SessionUser } from "@/lib/auth"
 import { getErrorMessage } from "@/lib/error-message"
 import { getFactoryTodayISO } from "@/lib/date-utils"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
@@ -31,6 +31,7 @@ import {
   emptyLine,
   findTrucCaJob,
   hasStoredPositions,
+  compareStaffOrder,
   isStaffWorking,
   isJobOfUnit,
   jobsForUnit,
@@ -55,6 +56,25 @@ import { JobSheet, type SheetVehicle } from "./_components/job-sheet"
 import { SubmitReview } from "./_components/submit-review"
 import { SendAllDialog, type SendAllItem } from "./_components/send-all-dialog"
 import { ReasonConfirmDialog } from "@/app/dashboard/_components/reason-confirm-dialog"
+import {
+  DIAGRAM_DAY_CHUYEN,
+  addJobForWorker,
+  buildDiagram,
+  isStationKey,
+  lineOfWorkerJob,
+  moveJobOnLine,
+  removeJobFromLine,
+  type DiagramCell,
+  type DiagramLine,
+  type DiagramPerson,
+  type DiagramSectionInput,
+  type LineEditResult,
+  type ProdWindow,
+  type StationKey,
+} from "@/lib/attendance/diagram"
+import { LineDiagram, setDiagramDrag, type DiagramDragPayload } from "./_components/line-diagram"
+import { StationPicker, type PickerGroup } from "./_components/station-picker"
+import { loadProductionWindows } from "./diagram-actions"
 
 const STATUS_KEY: Record<string, string> = { dang_lam: "stDangLam", da_gui: "stDaGui", da_duyet: "stDaDuyet", tra_ve: "stTraVe" }
 const STATUS_CLS: Record<string, string> = {
@@ -817,6 +837,349 @@ export default function AttendanceShiftPage() {
     return [s.ca_mac_dinh ? unitByCode.get(s.ca_mac_dinh)?.ten || s.ca_mac_dinh : "", jobText].filter(Boolean).join(" · ")
   }
 
+  // ── A3: Sơ đồ dây chuyền (Mủ tạp) ──
+  // Đọc MỌI phiếu Ca/Tổ của phiếu ngày (RLS SELECT cho trực ca đọc cả phiếu ngày). Phiếu đang mở dùng dòng đang sửa.
+  const [diagData, setDiagData] = useState<{ sec: AttendanceSection; lines: DiagramLine[] }[]>([])
+  const [windows, setWindows] = useState<ProdWindow[]>([])
+  const [chipChoice, setChipChoice] = useState<{ forCa: string; code: string } | null>(null)
+  const [selPerson, setSelPerson] = useState<DiagramPerson | null>(null)
+  const [pickerCell, setPickerCell] = useState<DiagramCell | null>(null)
+  const [diagBusy, setDiagBusy] = useState<string | null>(null)
+  const showDiagram = !!section && dayChuyen === DIAGRAM_DAY_CHUYEN
+
+  const loadDiagram = useCallback(async (sheetId: string) => {
+    const { data: secs, error: secErr } = await supabase.from("attendance_sheet_sections").select(SECTION_SELECT).eq("sheet_id", sheetId)
+    if (secErr) throw secErr
+    const list = ((secs || []) as AttendanceSection[]).filter((s) => s.loai === "ca_san_xuat" && !!s.ca)
+    const { data: ln, error: lnErr } = list.length
+      ? await supabase.from("attendance_sheet_lines").select(LINE_SELECT).in("section_id", list.map((s) => s.id)).order("stt")
+      : { data: [], error: null }
+    if (lnErr) throw lnErr
+    const bySec = new Map<string, DiagramLine[]>()
+    for (const l of (ln || []) as DbLine[]) {
+      const arr = bySec.get(l.section_id) || []
+      arr.push({ ...dbLineToDraft(l), giao_luc: l.giao_luc || null })
+      bySec.set(l.section_id, arr)
+    }
+    setDiagData(list.map((s) => ({ sec: s, lines: bySec.get(s.id) || [] })))
+  }, [])
+
+  const refreshWindows = useCallback(async () => {
+    if (!factoryId) return
+    try {
+      const token = (await getFreshAuthSession())?.access_token ?? null
+      setWindows(await loadProductionWindows(token, factoryId, ngay, dayChuyen))
+    } catch {
+      // Không lấy được khung kiện quét ⇒ hiện mọi người của tổ (sơ đồ vẫn dùng được).
+      setWindows([])
+    }
+  }, [factoryId, ngay, dayChuyen])
+
+  const sheetIdForDiagram = showDiagram ? section?.sheet_id || null : null
+  useEffect(() => {
+    if (!sheetIdForDiagram) return
+    let alive = true
+    const run = () => {
+      if (!alive) return
+      void loadDiagram(sheetIdForDiagram).catch(() => undefined)
+      void refreshWindows()
+    }
+    run()
+    const t = window.setInterval(run, 60_000)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+    }
+  }, [sheetIdForDiagram, loadDiagram, refreshWindows])
+
+  const caUnits = useMemo(() => units.filter((u) => u.is_active && u.loai === "ca"), [units])
+  const defaultChip = useMemo(() => {
+    if (currentUnit?.loai === "ca") return currentUnit.code
+    const assigned = assignedCas.find((c) => unitByCode.get(c)?.loai === "ca")
+    if (assigned) return assigned
+    const now = Date.now()
+    const live = windows.find((w) => new Date(w.start).getTime() <= now && now <= new Date(w.end).getTime() + 3600_000)
+    return live?.ca || caUnits[0]?.code || "A"
+  }, [currentUnit, assignedCas, unitByCode, windows, caUnits])
+  const chipCa = chipChoice && chipChoice.forCa === ca ? chipChoice.code : defaultChip
+
+  const diagInput: DiagramSectionInput[] = useMemo(() => {
+    const out: DiagramSectionInput[] = diagData
+      .filter((d) => !section || d.sec.id !== section.id)
+      .map((d) => ({ id: d.sec.id, ca: d.sec.ca || "", trang_thai: d.sec.trang_thai, lines: d.lines }))
+    if (section) {
+      const giao = new Map((diagData.find((d) => d.sec.id === section.id)?.lines || []).map((l) => [l.id, l.giao_luc]))
+      out.push({ id: section.id, ca: section.ca || ca, trang_thai: section.trang_thai, lines: lines.map((l) => ({ ...l, giao_luc: giao.get(l.id) || null })) })
+    }
+    return out
+  }, [diagData, section, lines, ca])
+  const diagStatusByUnit = useMemo(() => new Map(diagInput.map((d) => [d.ca, d.trang_thai])), [diagInput])
+
+  const diagram = useMemo(
+    () =>
+      buildDiagram({
+        jobs,
+        units,
+        sections: diagInput,
+        chipCa,
+        windows,
+        ngay,
+        dayChuyen,
+        staffById,
+        tempSuffix: T("tam"),
+      }),
+    [jobs, units, diagInput, chipCa, windows, ngay, dayChuyen, staffById, T],
+  )
+  /** Ô sơ đồ của từng việc — huy hiệu thẻ người. */
+  const stationOfJobId = useMemo(() => {
+    const m = new Map<string, StationKey>()
+    for (const j of jobs) if (j.is_active && isStationKey(j.so_do_vi_tri)) m.set(j.id, j.so_do_vi_tri)
+    return m
+  }, [jobs])
+
+  const unitEditable = (unitCode: string | null): boolean => {
+    if (!section || !unitCode) return false
+    const st = diagStatusByUnit.get(unitCode)
+    if (st && st !== "dang_lam" && st !== "tra_ve") return false
+    if (canEditAny) return true
+    return unitCode === ca && editable
+  }
+  const canEditCell = (cell: DiagramCell) => !!cell.job && unitEditable(cell.unitCode)
+  const unitLabel = (code: string) => {
+    const u = unitByCode.get(code)
+    return u ? bilingual(lang, u.ten, u.ten_khmer) : code
+  }
+  const editOptsFor = (unitCode: string) => ({
+    hours: defaultWorkHours(unitByCode.get(unitCode)?.khung_mac_dinh),
+    vehicleOf: (id: string) => vehicleByStaff.get(id) || "",
+    jobById,
+  })
+  const reportEditError = (r: LineEditResult, workerId: string | null, unitCode: string) => {
+    if (r.error === "absent") setError(T("sdNguoiVang", { ten: (workerId && staffById.get(workerId)?.ten) || "?", phieu: unitLabel(unitCode) }))
+    else if (r.error) setError(T("sdKhoa"))
+  }
+
+  /** Ghi 1 thay đổi vào phiếu Ca/Tổ `unitCode`: phiếu đang mở ⇒ sửa tại chỗ (tự lưu); phiếu khác ⇒ mở + đọc lại + lưu ngay. */
+  const writeSection = async (unitCode: string, fn: (ls: SheetLineDraft[]) => LineEditResult, workerId: string | null): Promise<boolean> => {
+    if (section && unitCode === ca) {
+      if (!editable) {
+        setError(T("sdKhoa"))
+        return false
+      }
+      const r = fn(linesRef.current)
+      if (r.error) {
+        reportEditError(r, workerId, unitCode)
+        return false
+      }
+      setLines(r.lines)
+      linesRef.current = r.lines
+      markChanged()
+      return true
+    }
+    if (!canEditAny || !factoryId) {
+      setError(T("sdKhoa"))
+      return false
+    }
+    const label = unitLabel(unitCode)
+    setDiagBusy(T("sdDangGhi", { ten: label }))
+    try {
+      const { data: sid, error: openErr } = await supabase.rpc("attendance_open_section", {
+        p_factory_id: factoryId,
+        p_ngay: ngay,
+        p_day_chuyen: dayChuyen,
+        p_loai: "ca_san_xuat",
+        p_ca: unitCode,
+      })
+      if (openErr) throw openErr
+      // Đọc lại dòng MỚI NHẤT ngay trước khi lưu (trực ca tổ đó có thể đang sửa trên máy khác).
+      const [{ data: sec, error: secErr }, { data: ln, error: lnErr }] = await Promise.all([
+        supabase.from("attendance_sheet_sections").select(SECTION_SELECT).eq("id", sid as string).single(),
+        supabase.from("attendance_sheet_lines").select(LINE_SELECT).eq("section_id", sid as string).order("stt"),
+      ])
+      if (secErr) throw secErr
+      if (lnErr) throw lnErr
+      const s = sec as AttendanceSection
+      if (s.trang_thai !== "dang_lam" && s.trang_thai !== "tra_ve") {
+        setError(T("sdKhoa"))
+        return false
+      }
+      const r = fn(((ln || []) as DbLine[]).map(dbLineToDraft))
+      if (r.error) {
+        reportEditError(r, workerId, unitCode)
+        return false
+      }
+      const holders = positionHolderIds(hasStoredPositions(s.vi_tri) ? (s.vi_tri as SectionPositions) : {})
+      const { error: saveErr } = await supabase.rpc("attendance_save_section", {
+        p_section_id: s.id,
+        p_header: { ghi_chu: s.ghi_chu || "" },
+        p_lines: linesToPayload(r.lines, holders),
+      })
+      if (saveErr) throw saveErr
+      setNotice(T("sdDaGhi", { ten: label }))
+      return true
+    } catch (err) {
+      setError(isNetworkError(err) ? T("loiMang") : getErrorMessage(err, "Không ghi được phiếu."))
+      return false
+    } finally {
+      setDiagBusy(null)
+    }
+  }
+
+  const afterRemoteWrite = () => {
+    if (section?.sheet_id) void loadDiagram(section.sheet_id).catch(() => undefined)
+  }
+
+  /** Chuyển 1 người từ ô của họ sang ô `cell`: bỏ việc ô cũ, nhận việc ô mới, giữ việc khác (chốt 2026-11-27). */
+  const moveToCell = async (p: DiagramPerson, cell: DiagramCell) => {
+    const job = cell.job
+    const target = cell.unitCode
+    setSelPerson(null)
+    if (!job || !target) return
+    if (p.jobId === job.id && p.unitCode === target) return
+    if (!canEditCell(cell) || !unitEditable(p.unitCode)) {
+      setError(T("sdKhoa"))
+      return
+    }
+    const remote = p.unitCode !== ca || target !== ca
+    if (p.unitCode === target) {
+      const worker = p.workerId || p.lineStaffId
+      await writeSection(target, (ls) => moveJobOnLine(ls, p.lineId, p.jobId, job.id, editOptsFor(target), worker), p.workerId)
+    } else {
+      const workerId = p.workerId
+      if (!workerId) {
+        setError(T("sdTamKhongChuyen"))
+        return
+      }
+      const ok = await writeSection(target, (ls) => addJobForWorker(ls, workerId, job.id, editOptsFor(target)), workerId)
+      if (ok) await writeSection(p.unitCode, (ls) => removeJobFromLine(ls, p.lineId, p.jobId), workerId)
+    }
+    if (remote) afterRemoteWrite()
+  }
+
+  /** Gỡ người khỏi ô (dấu X / kéo ra khoảng trống): bỏ đúng việc của ô đó, giữ việc khác. */
+  const removeFromCell = async (p: DiagramPerson) => {
+    setSelPerson(null)
+    if (!unitEditable(p.unitCode)) {
+      setError(T("sdKhoa"))
+      return
+    }
+    const ok = await writeSection(p.unitCode, (ls) => removeJobFromLine(ls, p.lineId, p.jobId), p.workerId)
+    if (ok && p.unitCode !== ca) afterRemoteWrite()
+  }
+
+  const onDiagramCellTap = (cell: DiagramCell) => {
+    if (!cell.job) return
+    if (selPerson) {
+      void moveToCell(selPerson, cell)
+      return
+    }
+    if (!canEditCell(cell)) {
+      setError(T("sdKhoa"))
+      return
+    }
+    setPickerCell(cell)
+  }
+
+  const onDiagramDrop = (cell: DiagramCell, payload: DiagramDragPayload) => {
+    if (payload.type === "person") {
+      const all = [...Object.values(diagram.cells).flatMap((c) => c.people), ...diagram.others.flatMap((o) => o.people)]
+      const p = all.find((x) => x.key === payload.key)
+      if (p) void moveToCell(p, cell)
+      return
+    }
+    const job = cell.job
+    const target = cell.unitCode
+    if (!job || !target || !canEditCell(cell)) {
+      setError(T("sdKhoa"))
+      return
+    }
+    void writeSection(target, (ls) => addJobForWorker(ls, payload.staffId, job.id, editOptsFor(target)), payload.staffId).then((ok) => {
+      if (ok && target !== ca) afterRemoteWrite()
+    })
+  }
+
+  /** Việc đang làm hôm nay của từng người (mọi phiếu Ca/Tổ) — nhãn phụ ở tấm chọn người. */
+  const todayJobsOf = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const d of diagInput) {
+      for (const l of d.lines) {
+        const w = l.diem_danh === "co" ? l.staff_id : l.thay_the_staff_id
+        if (!w) continue
+        for (const jid of l.cong_viec_ids) {
+          const j = jobById.get(jid)
+          if (!j) continue
+          m.set(w, [...(m.get(w) || []), `${unitByCode.get(d.ca)?.ten || d.ca} · ${bilingual(lang, j.ten, j.ten_khmer)}`])
+        }
+      }
+    }
+    return m
+  }, [diagInput, jobById, unitByCode, lang])
+
+  const pickerGroups: PickerGroup[] = useMemo(() => {
+    const unitCode = pickerCell?.unitCode
+    if (!unitCode) return []
+    const uLabel = unitByCode.get(unitCode) ? bilingual(lang, unitByCode.get(unitCode)!.ten, unitByCode.get(unitCode)!.ten_khmer) : unitCode
+    const secLines = diagInput.find((d) => d.ca === unitCode)?.lines || []
+    const absent = new Set(secLines.filter((l) => l.diem_danh === "vang").map((l) => l.staff_id))
+    const inSection = new Set(secLines.map((l) => (l.diem_danh === "co" ? l.staff_id : l.thay_the_staff_id)).filter(Boolean))
+    const presentToday = new Set(todayJobsOf.keys())
+    const pool = staff.filter(
+      (s) => isStaffWorking(s, ngay) && !s.cho_xac_nhan && (s.loai_nhan_su === "cong_nhan" || !!s.ca_mac_dinh || presentToday.has(s.id) || inSection.has(s.id)),
+    )
+    const item = (s: ShiftStaff) => ({
+      staffId: s.id,
+      ten: s.ten,
+      gioiTinh: s.gioi_tinh,
+      note: (todayJobsOf.get(s.id) || []).join(", "),
+      disabledNote: absent.has(s.id) ? T("sdNguoiVang", { ten: s.ten, phieu: uLabel }) : undefined,
+    })
+    const g1 = pool.filter((s) => s.ca_mac_dinh === unitCode || inSection.has(s.id) || absent.has(s.id)).sort(compareStaffOrder)
+    const g1ids = new Set(g1.map((s) => s.id))
+    const g2 = pool.filter((s) => !g1ids.has(s.id) && presentToday.has(s.id)).sort(compareStaffOrder)
+    const g2ids = new Set(g2.map((s) => s.id))
+    const g3 = pool.filter((s) => !g1ids.has(s.id) && !g2ids.has(s.id)).sort((a, b) => a.ten.localeCompare(b.ten, "vi"))
+    return [
+      { label: `${T("sdCungDonVi")} · ${uLabel}`, items: g1.map(item) },
+      { label: T("sdCoMatHomNay"), items: g2.map(item) },
+      { label: T("sdNguoiKhac"), items: g3.map(item) },
+    ].filter((g) => g.items.length > 0)
+  }, [pickerCell, unitByCode, lang, diagInput, todayJobsOf, staff, ngay, T])
+
+  const applyPicker = async (selected: Set<string>) => {
+    const cell = pickerCell
+    const job = cell?.job
+    const unitCode = cell?.unitCode
+    if (!cell || !job || !unitCode) return
+    const before = new Set(cell.people.map((p) => p.workerId).filter((x): x is string => !!x))
+    const toAdd = Array.from(selected).filter((id) => !before.has(id))
+    const toRemove = Array.from(before).filter((id) => !selected.has(id))
+    if (toAdd.length === 0 && toRemove.length === 0) {
+      setPickerCell(null)
+      return
+    }
+    const opt = editOptsFor(unitCode)
+    const ok = await writeSection(
+      unitCode,
+      (ls) => {
+        let cur = ls
+        for (const id of toRemove) {
+          const l = lineOfWorkerJob(cur, id, job.id)
+          if (l) cur = removeJobFromLine(cur, l.id, job.id).lines
+        }
+        for (const id of toAdd) {
+          const r = addJobForWorker(cur, id, job.id, opt)
+          if (!r.error) cur = r.lines
+        }
+        return { lines: cur }
+      },
+      null,
+    )
+    if (ok) {
+      setPickerCell(null)
+      if (unitCode !== ca) afterRemoteWrite()
+    }
+  }
+
   // ── Render ──
   if (booting) {
     return (
@@ -1156,6 +1519,8 @@ export default function AttendanceShiftPage() {
                       roleLabel={roleLabel}
                       caLabel={khungTileLabel(line)}
                       missingCa={!!khungMode && !!line && line.cong_viec_ids.length > 0 && (!line.gio_bd || !line.gio_kt)}
+                      stationKey={showDiagram ? line?.cong_viec_ids.map((j) => stationOfJobId.get(j)).find((k): k is StationKey => !!k) || null : null}
+                      onDragStart={showDiagram && editable ? (e) => setDiagramDrag(e, { type: "staff", staffId: id }) : undefined}
                       onClick={() => {
                         setSheetTabKey(currentTab?.key || "ca")
                         setSheetFor(id)
@@ -1164,6 +1529,34 @@ export default function AttendanceShiftPage() {
                   )
                 })}
               </div>
+            )}
+
+            {dayChuyen !== DIAGRAM_DAY_CHUYEN ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-3 text-center text-xs font-medium text-slate-400">
+                {T("sdChuaCoSoDo", { dc: dcLabel(dayChuyen) })}
+              </div>
+            ) : (
+              <LineDiagram
+                lang={lang}
+                T={T}
+                model={diagram}
+                chipOptions={caUnits.map((u) => ({ code: u.code, label: bilingual(lang, u.ten, u.ten_khmer), star: assignedCas.includes(u.code) }))}
+                chipCa={chipCa}
+                onChipCa={(code) => {
+                  setSelPerson(null)
+                  setChipChoice({ forCa: ca, code })
+                }}
+                tnTitle={unitByCode.get("TN_MT") ? bilingual(lang, unitByCode.get("TN_MT")!.ten, unitByCode.get("TN_MT")!.ten_khmer) : T("toTiepNhan")}
+                caTitle={unitLabel(chipCa)}
+                selected={selPerson}
+                onSelect={setSelPerson}
+                canEdit={canEditCell}
+                onCellTap={onDiagramCellTap}
+                onDrop={onDiagramDrop}
+                onRemove={(p) => void removeFromCell(p)}
+                vehicleCode={(vid) => vehicles.find((v) => v.id === vid)?.code || ""}
+                busyText={diagBusy}
+              />
             )}
           </>
         ) : catalogReady && !fatal ? (
@@ -1226,6 +1619,20 @@ export default function AttendanceShiftPage() {
       ) : null}
 
       {signOutOverlay}
+
+      {pickerCell?.job ? (
+        <StationPicker
+          key={`${pickerCell.unitCode}:${pickerCell.job.id}`}
+          T={T}
+          title={T("sdXepNguoi", { viec: `${bilingual(lang, pickerCell.job.ten, pickerCell.job.ten_khmer)} · ${unitLabel(pickerCell.unitCode || "")}` })}
+          groups={pickerGroups}
+          initial={pickerCell.people.map((p) => p.workerId).filter((x): x is string => !!x)}
+          fixedNames={pickerCell.people.filter((p) => !p.workerId).map((p) => p.name)}
+          busy={!!diagBusy}
+          onApply={(sel) => void applyPicker(sel)}
+          onClose={() => setPickerCell(null)}
+        />
+      ) : null}
 
       {sendAllItems ? (
         <SendAllDialog

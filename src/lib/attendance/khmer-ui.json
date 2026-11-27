@@ -185,6 +185,24 @@
     { "key": "pKhongPhep", "nhom": "Phiếu F01/F02", "vi": "Không phép", "km": "គ្មានច្បាប់", "nguon": "may_dich" },
     { "key": "pChuaCoNguoi", "nhom": "Phiếu F01/F02", "vi": "Chưa có người", "km": "មិនទាន់មានអ្នក", "nguon": "may_dich" },
     { "key": "pThay", "nhom": "Phiếu F01/F02", "vi": "thay", "km": "ជំនួស", "nguon": "may_dich" },
-    { "key": "pDaDuyet", "nhom": "Phiếu F01/F02", "vi": "Đã duyệt", "km": "បានអនុម័ត", "nguon": "may_dich" }
+    { "key": "pDaDuyet", "nhom": "Phiếu F01/F02", "vi": "Đã duyệt", "km": "បានអនុម័ត", "nguon": "may_dich" },
+    { "key": "sdTitle", "nhom": "Sơ đồ dây chuyền", "vi": "Sơ đồ dây chuyền", "km": "ដ្យាក្រាមខ្សែសង្វាក់", "nguon": "may_dich" },
+    { "key": "sdTrucHoTro", "nhom": "Sơ đồ dây chuyền", "vi": "Trực & hỗ trợ", "km": "យាម និងជំនួយ", "nguon": "may_dich" },
+    { "key": "sdViecKhac", "nhom": "Sơ đồ dây chuyền", "vi": "Việc khác", "km": "ការងារផ្សេងទៀត", "nguon": "may_dich" },
+    { "key": "sdChuaCoSoDo", "nhom": "Sơ đồ dây chuyền", "vi": "Chưa có sơ đồ cho dây chuyền {dc}.", "km": "មិនទាន់មានដ្យាក្រាមសម្រាប់ខ្សែ {dc} ទេ។", "nguon": "may_dich" },
+    { "key": "sdDangChon", "nhom": "Sơ đồ dây chuyền", "vi": "Đang chọn {ten} — chạm ô đích để chuyển.", "km": "កំពុងជ្រើស {ten} — ចុចប្រអប់គោលដៅដើម្បីផ្លាស់ទី។", "nguon": "may_dich" },
+    { "key": "sdXepNguoi", "nhom": "Sơ đồ dây chuyền", "vi": "Xếp người vào: {viec}", "km": "ដាក់មនុស្សទៅ៖ {viec}", "nguon": "may_dich" },
+    { "key": "sdChuaKien", "nhom": "Sơ đồ dây chuyền", "vi": "Chưa có kiện quét của {ca} — hiện mọi người của tổ.", "km": "មិនទាន់មានកញ្ចប់ស្កេនរបស់ {ca} — បង្ហាញមនុស្សទាំងអស់ក្នុងក្រុម។", "nguon": "may_dich" },
+    { "key": "sdKhoa", "nhom": "Sơ đồ dây chuyền", "vi": "Không sửa được ô này (phiếu Ca/Tổ khác hoặc đã gửi).", "km": "មិនអាចកែប្រអប់នេះបាន (បញ្ជីវេន/ក្រុមផ្សេង ឬបានផ្ញើហើយ)។", "nguon": "may_dich" },
+    { "key": "sdDaGhi", "nhom": "Sơ đồ dây chuyền", "vi": "Đã ghi vào phiếu {ten}.", "km": "បានកត់ទៅក្នុងបញ្ជី {ten}។", "nguon": "may_dich" },
+    { "key": "sdTamKhongChuyen", "nhom": "Sơ đồ dây chuyền", "vi": "Người gõ tay (tạm) không chuyển sang Ca/Tổ khác được.", "km": "អ្នកវាយឈ្មោះដោយដៃ (បណ្តោះអាសន្ន) មិនអាចផ្លាស់ទៅវេន/ក្រុមផ្សេងបានទេ។", "nguon": "may_dich" },
+    { "key": "sdNguoiVang", "nhom": "Sơ đồ dây chuyền", "vi": "{ten} đang vắng trong phiếu {phieu} — mở thẻ người để sửa.", "km": "{ten} អវត្តមានក្នុងបញ្ជី {phieu} — បើកកាតមនុស្សដើម្បីកែ។", "nguon": "may_dich" },
+    { "key": "sdCungDonVi", "nhom": "Sơ đồ dây chuyền", "vi": "Cùng Ca/Tổ", "km": "វេន/ក្រុមដដែល", "nguon": "may_dich" },
+    { "key": "sdCoMatHomNay", "nhom": "Sơ đồ dây chuyền", "vi": "Đang có mặt hôm nay", "km": "មានវត្តមានថ្ងៃនេះ", "nguon": "may_dich" },
+    { "key": "sdNguoiKhac", "nhom": "Sơ đồ dây chuyền", "vi": "Người khác", "km": "អ្នកផ្សេងទៀត", "nguon": "may_dich" },
+    { "key": "sdKhongCoNguoi", "nhom": "Sơ đồ dây chuyền", "vi": "Không có người phù hợp.", "km": "គ្មានអ្នកសមស្របទេ។", "nguon": "may_dich" },
+    { "key": "sdDangGhi", "nhom": "Sơ đồ dây chuyền", "vi": "Đang ghi phiếu {ten}...", "km": "កំពុងកត់បញ្ជី {ten}...", "nguon": "may_dich" },
+    { "key": "sdGoKhoiO", "nhom": "Sơ đồ dây chuyền", "vi": "Gỡ khỏi ô", "km": "ដកចេញពីប្រអប់", "nguon": "may_dich" },
+    { "key": "sdThaDeGo", "nhom": "Sơ đồ dây chuyền", "vi": "Thả ra đây để gỡ khỏi ô", "km": "ទម្លាក់ទីនេះដើម្បីដកចេញពីប្រអប់", "nguon": "may_dich" }
   ]
 }

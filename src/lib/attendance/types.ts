@@ -41,6 +41,8 @@ export type AttendanceJobType = {
   is_active: boolean
   /** true ⇒ không hiện ở màn điểm danh (vd Trực xuất hàng — chọn ở đơn xuất). Migration 20261207. */
   an_diem_danh?: boolean
+  /** Ô trên Sơ đồ dây chuyền Mủ tạp (A3, migration 20261221). NULL = không có ô. */
+  so_do_vi_tri?: string | null
 }
 
 export type AttendanceAbsenceReason = {
