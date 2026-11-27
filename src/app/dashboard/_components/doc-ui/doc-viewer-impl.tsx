@@ -243,7 +243,9 @@ export default function DocViewerImpl({
         const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw)
         const pdfjsLib = await import("pdfjs-dist")
         ensurePdfjsWorker(pdfjsLib)
-        const doc = await pdfjsLib.getDocument({ data: bytes }).promise
+        // pdf.js CHUYỂN (transfer) ArrayBuffer sang worker ⇒ mảng gốc bị tách rời (length 0). Đưa bản sao để mảng của
+        // người gọi (vd F01Result.bytes dùng cho nút Tải PDF) còn nguyên — lỗi thật 2026-11-27: PDF tải về 0 byte.
+        const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise
         loaded = doc
         if (cancelled) { void doc.destroy(); return }
         const list: PageSize[] = []

@@ -126,6 +126,7 @@ export function useOfflineQueue(params: {
             ghiChu: item.ghiChu,
             nap: item.nap ?? null,
             unverified: item.unverified,
+            savedOffline: item.savedOffline === true,
           });
         } catch {
           // Server action ném lỗi = không tới được server (mạng). Lỗi nghiệp vụ luôn là success:false.
@@ -238,6 +239,7 @@ export function useOfflineQueue(params: {
         ...input,
         owner,
         status: readOnline() ? "cho_dong_bo" : "tren_may",
+        savedOffline: !readOnline(),
         error: null,
         scannedAt: new Date().toISOString(),
       };

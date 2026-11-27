@@ -31,6 +31,8 @@ export function SubmitReview({
   meta,
   unassigned,
   skipUnassignedDefault = false,
+  missingKhungNames = [],
+  khungLabelOf,
   staffById,
   reasons,
   busy,
@@ -48,6 +50,10 @@ export function SubmitReview({
   unassigned: ShiftStaff[]
   /** Tổ (không phải Ca A/B/C): người chưa giao việc mặc định Bỏ qua (2026-11-25). Ca: mặc định Vắng có phép. */
   skipUnassignedDefault?: boolean
+  /** A2 — người của tổ theo khung có việc mà chưa chọn khung ⇒ khoá nút gửi. */
+  missingKhungNames?: string[]
+  /** A2 — nhãn khung giờ của dòng (chỉ tổ theo khung). */
+  khungLabelOf?: (l: SheetLineDraft) => string
   staffById: Map<string, ShiftStaff>
   reasons: AttendanceAbsenceReason[]
   busy: boolean
@@ -77,26 +83,29 @@ export function SubmitReview({
     const present = allLines.filter((l) => l.diem_danh === "co" && l.cong_viec_ids.length > 0)
     const replaced = absentLines.filter((l) => l.thay_the_staff_id || l.thay_the_ten)
     const vangCount = absentLines.length + unassigned.filter((s) => !skip.has(s.id)).length
-    const byJob = new Map<string, { name: string; b: boolean; note: string }[]>()
-    const push = (jobId: string, entry: { name: string; b: boolean; note: string }) => {
+    const byJob = new Map<string, { name: string; b: boolean; note: string; ca: string }[]>()
+    const push = (jobId: string, entry: { name: string; b: boolean; note: string; ca: string }) => {
       const list = byJob.get(jobId) || []
       list.push(entry)
       byJob.set(jobId, list)
     }
     for (const l of present) {
       const ten = staffById.get(l.staff_id)?.ten || "?"
-      for (const j of l.cong_viec_ids) push(j, { name: ten, b: l.xep_loai === "B", note: "" })
+      const ca = khungLabelOf ? khungLabelOf(l) : ""
+      for (const j of l.cong_viec_ids) push(j, { name: ten, b: l.xep_loai === "B", note: "", ca })
     }
     for (const l of replaced) {
       const rep = l.thay_the_staff_id ? staffById.get(l.thay_the_staff_id)?.ten || "?" : `${l.thay_the_ten} (${T("tam")})`
       const ten = staffById.get(l.staff_id)?.ten || "?"
-      for (const j of l.cong_viec_ids) push(j, { name: rep, b: false, note: T("thayCho", { ten }) })
+      const ca = khungLabelOf ? khungLabelOf(l) : ""
+      for (const j of l.cong_viec_ids) push(j, { name: rep, b: false, note: T("thayCho", { ten }), ca })
     }
     const rows = Array.from(byJob.entries())
       .map(([jobId, people]) => ({ job: jobById.get(jobId), jobId, people }))
       .sort((a, b) => (a.job?.sort_order ?? 9999) - (b.job?.sort_order ?? 9999) || (a.job?.ten || "").localeCompare(b.job?.ten || "", "vi"))
     return { coCount: present.length, vangCount, thayCount: replaced.length, rows }
-  }, [allLines, absentLines, unassigned, skip, staffById, jobById, T])
+  }, [allLines, absentLines, unassigned, skip, staffById, jobById, T, khungLabelOf])
+  const blockedByCa = missingKhungNames.length > 0
 
   const patch = (id: string, p: Partial<Choice>) => setChoices((c) => ({ ...c, [id]: { ...c[id], ...p } }))
 
@@ -258,6 +267,7 @@ export function SubmitReview({
                             <span className="font-semibold">{p.name}</span>
                             {p.b ? <span className="ml-1 rounded bg-amber-100 px-1 text-[11px] font-black text-amber-700">B</span> : null}
                             {p.note ? <span className="ml-1 text-xs text-violet-600">{p.note}</span> : null}
+                            {p.ca ? <span className="ml-1 text-xs font-bold text-sky-700">· {p.ca}</span> : null}
                           </div>
                         ))}
                       </td>
@@ -289,11 +299,16 @@ export function SubmitReview({
         ) : null}
         {err ? <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">{err}</div> : null}
       </div>
+      {blockedByCa ? (
+        <div className="border-t border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-800">
+          <div className="mx-auto max-w-2xl">{T("chuaCoGioLam", { ten: missingKhungNames.join(", ") })}</div>
+        </div>
+      ) : null}
       <div className="border-t border-slate-200 bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <button
           type="button"
           onClick={confirm}
-          disabled={busy}
+          disabled={busy || blockedByCa}
           className="mx-auto flex w-full max-w-2xl items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-base font-bold text-white disabled:opacity-60"
         >
           {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />} {T("xacNhanGuiBtn")}

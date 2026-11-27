@@ -915,3 +915,7 @@ sản xuất trong ngày in mỗi bọc có trong năm thành 1 nhóm ("CSR10 ·
 ## 4.27. Tab "Nhân sự ca" ở chi tiết lô (C2b Truy vết, 2026-11-25, chờ test tay)
 Trang `/dashboard/product/lot/[id]` có tab "Nhân sự ca" + thẻ "Ca sản xuất": ai làm việc gì, xe nào trong các ca đã làm ra lô
 (theo phiếu điểm danh ca). Chi tiết + quyền: rule 31 mục "C2b".
+
+## 4.28. Phải điểm danh Ca trước khi quét thành phẩm (2026-11-26, chờ test tay)
+Lưu tạm kiện bị từ chối khi phiếu điểm danh Ca sản xuất (ngày + ca + dây chuyền) chưa có người; Hub có banner + khoá nút quét.
+Mất mạng không chặn. Chi tiết: rule 31 mục "Sửa sau test A2".

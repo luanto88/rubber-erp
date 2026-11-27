@@ -67,3 +67,6 @@ Lịch sử đầy đủ (GĐ0–6 Doc-UI, U0–U4, Pastel Rừng Cao Su, ảnh 
 
 ## Chưa quyết định
 - Kéo-thả mobile: sơ đồ Kho thành phẩm, đặt chữ ký ISO (react-draggable) — hỏi người dùng hướng xử lý trước khi làm.
+
+- `DocViewer` / pdf.js: `getDocument({ data })` CHUYỂN ArrayBuffer sang worker ⇒ mảng gốc thành 0 byte. Luôn đưa bản sao
+  (`bytes.slice()`, đã sửa trong `doc-viewer-impl.tsx` 2026-11-27); không tái dùng bytes đã đưa cho pdf.js để tải / chia sẻ.

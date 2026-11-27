@@ -14,7 +14,7 @@ import { ResponsiveTableWrapper } from "../../_components/responsive-table-wrapp
 import { ModalShell } from "../../_components/modal-shell"
 import { OrderQrDownload } from "../../export/_components/order-qr-download"
 
-type Form = { id: string | null; ten_diem: string; day_chuyen_mac_dinh: string; unit_code: string; sort_order: string; is_active: boolean }
+type Form = { id: string | null; ten_diem: string; day_chuyen_mac_dinh: string; unit_code: string; unit_codes: string[]; sort_order: string; is_active: boolean }
 
 const inputCls = "w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
 
@@ -82,6 +82,10 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
       setError("Nhập tên điểm QR.")
       return
     }
+    if (form.unit_code && form.unit_codes.length > 0 && !form.unit_codes.includes(form.unit_code)) {
+      setError("Ca/Tổ mặc định phải nằm trong danh sách Ca/Tổ được mở bằng QR này.")
+      return
+    }
     setSaving(true)
     try {
       const payload = {
@@ -89,6 +93,7 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
         ten_diem: form.ten_diem.trim(),
         day_chuyen_mac_dinh: form.day_chuyen_mac_dinh || null,
         unit_code: form.unit_code || null,
+        unit_codes: form.unit_codes.length > 0 ? form.unit_codes : null,
         sort_order: Number(form.sort_order) || 0,
         is_active: form.is_active,
       }
@@ -173,7 +178,7 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
           {canManage ? (
             <button
               type="button"
-              onClick={() => setForm({ id: null, ten_diem: "", day_chuyen_mac_dinh: "", unit_code: "", sort_order: String(rows.length + 1), is_active: true })}
+              onClick={() => setForm({ id: null, ten_diem: "", day_chuyen_mac_dinh: "", unit_code: "", unit_codes: [], sort_order: String(rows.length + 1), is_active: true })}
               className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
             >
               <Plus size={15} /> Thêm điểm QR
@@ -208,7 +213,12 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
                 <tr key={r.id}>
                   <td className="font-semibold">{r.ten_diem}</td>
                   <td>{r.day_chuyen_mac_dinh || "— (trực ca chọn)"}</td>
-                  <td>{r.unit_code ? unitName(r.unit_code) : "— (theo phân công)"}</td>
+                  <td>
+                    {r.unit_code ? unitName(r.unit_code) : "— (theo phân công)"}
+                    {r.unit_codes && r.unit_codes.length > 0 ? (
+                      <div className="mt-0.5 text-[11px] text-slate-500">Mở được: {r.unit_codes.map(unitName).join(", ")}</div>
+                    ) : null}
+                  </td>
                   <td className="text-right">{r.sort_order}</td>
                   <td>{r.is_active ? <span className="text-emerald-700">Đang dùng</span> : <span className="text-slate-400">Ngừng</span>}</td>
                   <td className="text-right">
@@ -222,7 +232,7 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
                             type="button"
                             title="Sửa"
                             onClick={() =>
-                              setForm({ id: r.id, ten_diem: r.ten_diem, day_chuyen_mac_dinh: r.day_chuyen_mac_dinh || "", unit_code: r.unit_code || "", sort_order: String(r.sort_order), is_active: r.is_active })
+                              setForm({ id: r.id, ten_diem: r.ten_diem, day_chuyen_mac_dinh: r.day_chuyen_mac_dinh || "", unit_code: r.unit_code || "", unit_codes: r.unit_codes || [], sort_order: String(r.sort_order), is_active: r.is_active })
                             }
                             className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100"
                           >
@@ -279,6 +289,35 @@ export function AttendanceQrPointsCard({ factoryId, canManage, isAdmin = false }
               </select>
               <span className="mt-1 block text-[11px] text-slate-400">Quét QR mở sẵn Ca/Tổ này nếu người quét được phân công (hoặc chấm toàn nhà máy).</span>
             </label>
+            <div>
+              <span className="mb-1 block text-xs font-bold text-slate-600">Ca/Tổ được mở bằng QR này</span>
+              <div className="flex flex-wrap gap-1.5">
+                {units
+                  .filter(
+                    (u) =>
+                      (u.is_active || form.unit_codes.includes(u.code)) &&
+                      (!form.day_chuyen_mac_dinh || !u.day_chuyen || u.day_chuyen === form.day_chuyen_mac_dinh),
+                  )
+                  .map((u) => {
+                    const on = form.unit_codes.includes(u.code)
+                    return (
+                      <button
+                        key={u.code}
+                        type="button"
+                        onClick={() =>
+                          setForm({ ...form, unit_codes: on ? form.unit_codes.filter((c) => c !== u.code) : [...form.unit_codes, u.code] })
+                        }
+                        className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${on ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white text-slate-600"}`}
+                      >
+                        {u.ten}
+                      </button>
+                    )
+                  })}
+              </div>
+              <span className="mt-1 block text-[11px] text-slate-400">
+                Không chọn = mọi Ca/Tổ. Quét QR chỉ thấy các Ca/Tổ đã chọn; QR có dây chuyền mặc định thì khoá luôn dây chuyền đó.
+              </span>
+            </div>
             <label className="block">
               <span className="mb-1 block text-xs font-bold text-slate-600">Thứ tự</span>
               <input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: e.target.value })} className={inputCls} />

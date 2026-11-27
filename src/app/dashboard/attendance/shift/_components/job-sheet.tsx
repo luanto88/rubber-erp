@@ -30,6 +30,8 @@ export function JobSheet({
   staffById,
   readOnly,
   jobPeople,
+  workHours = null,
+  candidateNote,
   onApply,
   onClose,
 }: {
@@ -47,10 +49,15 @@ export function JobSheet({
   readOnly: boolean
   /** Tên người KHÁC (trong phiếu ca) đang nhận từng việc — hiện số + tên trên thẻ việc. */
   jobPeople?: Map<string, string[]>
+  /** A2 — tổ ghi giờ làm: giờ mặc định (theo giờ điểm danh / XLNT 05–05 / cơ khí 05–17); null = đơn vị thường. */
+  workHours?: { bd: string; kt: string } | null
+  /** Nhãn phụ của ứng viên người thay ("Cùng ca · Phả mủ" / "Ca A"). */
+  candidateNote?: (s: ShiftStaff) => string
   /** null = bỏ giao (xoá dòng). */
   onApply: (next: SheetLineDraft | null) => void
   onClose: () => void
 }) {
+  const isKhung = !!workHours
   const [draft, setDraft] = useState<SheetLineDraft>(() => line ?? emptyLine({ staff_id: person.id }))
   const [search, setSearch] = useState(draft.thay_the_ten || "")
 
@@ -84,11 +91,17 @@ export function JobSheet({
   const toggleJob = (id: string) => {
     if (readOnly) return
     setDraft((d) => {
-      const on = d.cong_viec_ids.includes(id)
-      const ids = on ? d.cong_viec_ids.filter((x) => x !== id) : [...d.cong_viec_ids, id]
+      const ids = d.cong_viec_ids.includes(id) ? d.cong_viec_ids.filter((x) => x !== id) : [...d.cong_viec_ids, id]
       const needsVehicle = ids.some((x) => jobById.get(x)?.loai_xe)
       const vehicle = needsVehicle ? d.vehicle_id || (workerId ? vehicleByStaff.get(workerId) || "" : "") : ""
-      return { ...d, cong_viec_ids: ids, vehicle_id: vehicle }
+      // A2: có việc mà chưa có giờ làm ⇒ điền giờ mặc định; bỏ hết việc ⇒ xoá giờ.
+      const gio =
+        ids.length === 0
+          ? { gio_bd: "", gio_kt: "" }
+          : workHours && (!d.gio_bd || !d.gio_kt)
+            ? { gio_bd: d.gio_bd || workHours.bd, gio_kt: d.gio_kt || workHours.kt }
+            : {}
+      return { ...d, cong_viec_ids: ids, vehicle_id: vehicle, ...gio }
     })
   }
 
@@ -120,15 +133,20 @@ export function JobSheet({
   const exactMatch = matches.some((s) => normalizeSearchText(s.ten) === normalizeSearchText(search))
 
   const done = () => {
+    // Tổ ghi giờ làm: dòng cũ có việc chưa có giờ ⇒ điền giờ mặc định.
+    let d = draft
+    if (isKhung && workHours && d.cong_viec_ids.length > 0 && (!d.gio_bd || !d.gio_kt)) {
+      d = { ...d, gio_bd: d.gio_bd || workHours.bd, gio_kt: d.gio_kt || workHours.kt }
+    }
     if (hasReplacement) {
-      onApply({ ...draft, diem_danh: "vang", vang_loai: line?.diem_danh === "vang" ? line.vang_loai : "" })
+      onApply({ ...d, diem_danh: "vang", vang_loai: line?.diem_danh === "vang" ? line.vang_loai : "" })
       return
     }
-    if (draft.cong_viec_ids.length === 0) {
+    if (d.cong_viec_ids.length === 0) {
       onApply(null)
       return
     }
-    onApply({ ...draft, diem_danh: "co", vang_loai: "", ly_do_id: "", ly_do: "" })
+    onApply({ ...d, diem_danh: "co", vang_loai: "", ly_do_id: "", ly_do: "" })
   }
 
   const absentNoReplacement = () => {
@@ -136,6 +154,8 @@ export function JobSheet({
       ...draft,
       diem_danh: "vang",
       cong_viec_ids: [],
+      gio_bd: "",
+      gio_kt: "",
       vehicle_id: "",
       thay_the_staff_id: "",
       thay_the_ten: "",
@@ -164,49 +184,75 @@ export function JobSheet({
 
         <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
           <section>
-            <div className="mb-1.5 text-xs font-bold text-slate-500">{hasReplacement ? T("viecNguoiThay") : T("chonViec")}</div>
-            <div className="space-y-2.5">
-              {grouped.map((g) => (
-                <div key={g.to}>
-                  <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">{T(TO_KEY[g.to])}</div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {g.jobs.map((j) => {
-                      const on = draft.cong_viec_ids.includes(j.id)
-                      const others = jobPeople?.get(j.id) || []
-                      const names = on ? [person.ten, ...others] : others
-                      const n = names.length
-                      const shortNames = n > 2 ? `${names.slice(0, 2).join(", ")} +${n - 2}` : names.join(", ")
-                      return (
-                        <button
-                          key={j.id}
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() => toggleJob(j.id)}
-                          title={[bilingual(lang, j.ten, j.ten_khmer), ...names].join("\n")}
-                          className={`relative flex min-h-[44px] w-full flex-col items-center justify-center rounded-xl border px-3 py-1.5 text-center text-sm font-semibold leading-tight ${on ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white text-slate-700"}`}
-                        >
-                          {n > 0 ? (
-                            <span className={`absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-black ${on ? "bg-white text-emerald-700" : "bg-emerald-100 text-emerald-700"}`} title={T("soNguoiViec", { n })}>
-                              {n}
-                            </span>
-                          ) : null}
-                          {on ? (
-                            <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-emerald-600">
-                              <Check size={11} strokeWidth={3} />
-                            </span>
-                          ) : null}
-                          <span className="line-clamp-2 px-2">{bilingual(lang, j.ten, j.ten_khmer)}</span>
-                          {n > 0 ? (
-                            <span className={`mt-0.5 block w-full truncate px-2 text-[10px] font-medium ${on ? "text-emerald-50" : "text-slate-500"}`}>{shortNames}</span>
-                          ) : null}
-                        </button>
-                      )
-                    })}
-                  </div>
+                <div className="mb-1.5 text-xs font-bold text-slate-500">{hasReplacement ? T("viecNguoiThay") : T("chonViec")}</div>
+                <div className="space-y-2.5">
+                  {grouped.map((g) => (
+                    <div key={g.to}>
+                      <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">{T(TO_KEY[g.to])}</div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {g.jobs.map((j) => {
+                          const on = draft.cong_viec_ids.includes(j.id)
+                          const others = jobPeople?.get(j.id) || []
+                          const names = on ? [person.ten, ...others] : others
+                          const n = names.length
+                          const shortNames = n > 2 ? `${names.slice(0, 2).join(", ")} +${n - 2}` : names.join(", ")
+                          return (
+                            <button
+                              key={j.id}
+                              type="button"
+                              disabled={readOnly}
+                              onClick={() => toggleJob(j.id)}
+                              title={[bilingual(lang, j.ten, j.ten_khmer), ...names].join("\n")}
+                              className={`relative flex min-h-[44px] w-full flex-col items-center justify-center rounded-xl border px-3 py-1.5 text-center text-sm font-semibold leading-tight ${on ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white text-slate-700"}`}
+                            >
+                              {n > 0 ? (
+                                <span className={`absolute left-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] font-black ${on ? "bg-white text-emerald-700" : "bg-emerald-100 text-emerald-700"}`} title={T("soNguoiViec", { n })}>
+                                  {n}
+                                </span>
+                              ) : null}
+                              {on ? (
+                                <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white text-emerald-600">
+                                  <Check size={11} strokeWidth={3} />
+                                </span>
+                              ) : null}
+                              <span className="line-clamp-2 px-2">{bilingual(lang, j.ten, j.ten_khmer)}</span>
+                              {n > 0 ? (
+                                <span className={`mt-0.5 block w-full truncate px-2 text-[10px] font-medium ${on ? "text-emerald-50" : "text-slate-500"}`}>{shortNames}</span>
+                              ) : null}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
           </section>
+
+          {isKhung && draft.cong_viec_ids.length > 0 ? (
+            // A2 — giờ làm của người (tự điền theo giờ điểm danh / XLNT 05–05 / cơ khí 05–17), sửa được.
+            <section>
+              <div className="mb-1.5 text-xs font-bold text-slate-500">{T("gioLam")}</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="time"
+                  value={draft.gio_bd}
+                  disabled={readOnly}
+                  onChange={(e) => setDraft((d) => ({ ...d, gio_bd: e.target.value }))}
+                  aria-label={T("tuGio")}
+                  className="h-11 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-base"
+                />
+                <span className="text-slate-400">–</span>
+                <input
+                  type="time"
+                  value={draft.gio_kt}
+                  disabled={readOnly}
+                  onChange={(e) => setDraft((d) => ({ ...d, gio_kt: e.target.value }))}
+                  aria-label={T("denGio")}
+                  className="h-11 min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 text-base"
+                />
+              </div>
+            </section>
+          ) : null}
 
           {draft.cong_viec_ids.some((x) => jobById.get(x)?.loai_xe) ? (
             <section>
@@ -274,7 +320,11 @@ export function JobSheet({
                       <button key={s.id} type="button" onClick={() => pickReplacement(s)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50">
                         <GenderIcon gioiTinh={s.gioi_tinh} size={22} />
                         <span className="flex-1 truncate font-semibold text-slate-700">{s.ten}</span>
-                        {s.ca_mac_dinh ? <span className="text-xs text-slate-400">{s.ca_mac_dinh}</span> : null}
+                        {candidateNote ? (
+                          <span className="max-w-[45%] truncate text-xs text-slate-400">{candidateNote(s)}</span>
+                        ) : s.ca_mac_dinh ? (
+                          <span className="text-xs text-slate-400">{s.ca_mac_dinh}</span>
+                        ) : null}
                       </button>
                     ))}
                   </div>

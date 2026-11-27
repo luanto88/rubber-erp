@@ -15,10 +15,13 @@ import {
   f01FormOf,
   pushPerson,
   type F01Block,
+  type F01JobGroup,
   type F01JobRow,
   type F01Model,
+  type F01Person,
   type F01Production,
 } from "@/lib/attendance/f01-model"
+import { assignToProductionCa, workHoursLabel, type KhungMode } from "@/lib/attendance/shift"
 import {
   isEmptyOpenSection,
   lineJobIds as jobIds,
@@ -61,8 +64,22 @@ type LineRow = {
   ly_do: string | null
   thay_the_staff_id: string | null
   thay_the_ten: string | null
+  /** A2 (20261219/20261220) — giờ giao việc (tổ thường ⇒ xếp vào Ca A/B) + giờ làm (tổ ghi giờ). */
+  giao_luc?: string | null
+  gio_bd?: string | null
+  gio_kt?: string | null
 }
-type UnitRow = { code: string; ten: string; ten_khmer: string | null; loai: string; to_nhom: string | null; sort_order: number }
+type UnitRow = {
+  code: string
+  ten: string
+  ten_khmer: string | null
+  loai: string
+  to_nhom: string | null
+  sort_order: number
+  is_active?: boolean | null
+  day_chuyen?: string | null
+  khung_mac_dinh?: KhungMode | null
+}
 type JobRow = { id: string; ten: string; ten_khmer: string | null; to_nhom: string; sort_order: number; an_diem_danh: boolean | null; day_chuyen: string | null; unit_code?: string | null; is_active?: boolean | null }
 type StaffRow = {
   id: string
@@ -285,7 +302,7 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
       .eq("sheet_id", sheetId),
     sb
       .from("attendance_sheet_lines")
-      .select("id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, xep_loai, diem_danh, vang_loai, ly_do, thay_the_staff_id, thay_the_ten")
+      .select("id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, xep_loai, diem_danh, vang_loai, ly_do, thay_the_staff_id, thay_the_ten, giao_luc, gio_bd, gio_kt")
       .eq("sheet_id", sheetId)
       .order("stt")
       .range(0, 9999),
@@ -301,7 +318,7 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
     ),
     sb.from("factories").select("name, ten_khmer").eq("id", factoryId).maybeSingle(),
     loadGradeConfigServer(factoryId),
-    sb.from("attendance_units").select("code, ten, ten_khmer, loai, to_nhom, sort_order").eq("factory_id", factoryId),
+    sb.from("attendance_units").select("code, ten, ten_khmer, loai, to_nhom, sort_order, is_active, day_chuyen, khung_mac_dinh").eq("factory_id", factoryId),
   ])
   for (const r of [secRes, lineRes, jobRes, facRes, unitRes]) if (r.error) throw new Error(r.error.message)
 
@@ -332,10 +349,12 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
     )?.ten || ""
 
   // ── Dòng theo việc ──
-  const personOf = (l: LineRow): { ten: string; xepLoai: string; thayCho?: string } | null => {
+  const personOf = (l: LineRow): F01Person | null => {
     const p = linePerson(l, name)
     if (!p) return null
-    return p.thayCho !== undefined ? { ten: p.ten, xepLoai: p.xepLoai, thayCho: p.thayCho } : { ten: p.ten, xepLoai: p.xepLoai }
+    const out: F01Person = { ten: p.ten, xepLoai: p.xepLoai }
+    if (p.thayCho !== undefined) out.thayCho = p.thayCho
+    return out
   }
   /** Việc của Ca/Tổ (20261211): tổ ⇒ unit_code; ca ⇒ việc ca sản xuất của dây chuyền. Việc khác có người ⇒ thêm cuối. */
   const isJobOfUnit = (j: JobRow, unit: UnitRow | undefined) =>
@@ -450,6 +469,64 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
   }
 
   // ── Mỗi Ca/Tổ 1 mục ──
+  // ── A2: nhóm con của khối tổ ──
+  // Khung giờ thật của từng ca sản xuất trong ngày (kiện quét đầu → cuối, cùng dây chuyền).
+  const prodWindows: { ca: string; start: string; end: string }[] = []
+  for (const sec of sections) {
+    if (unitMap.get(sec.ca || "")?.loai === "to" || !sec.ca) continue
+    const end = lastScanOf(sec.ca)
+    const start = end ? startOf(sec.ca, null) : null
+    if (start && end) prodWindows.push({ ca: sec.ca, start, end })
+  }
+  prodWindows.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
+  const prodCaLabel = (ca: string) => {
+    const sec = sections.find((x) => x.ca === ca)
+    const vt = sec?.vi_tri || {}
+    const truong = sec ? (Object.keys(vt).length > 0 ? holderText(vt.truong) : profileHolder(ca, "to_truong")) : ""
+    const ten = unitMap.get(ca)?.ten || `Ca ${ca}`
+    return truong ? `${ten} (${truong})` : ten
+  }
+  /** Tổ theo khung ⇒ nhóm theo khung giờ; tổ khác ⇒ nhóm theo ca sản xuất (giờ giao việc). undefined = in phẳng như cũ. */
+  const groupsOf = (sec: SectionRow, unit: UnitRow | undefined, ls: LineRow[]): F01JobGroup[] | undefined => {
+    if (unit?.loai !== "to") return undefined
+    const clean = (rows: F01JobRow[]) => rows.filter((r) => r.people.length > 0)
+    if (unit.khung_mac_dinh) {
+      // Tổ ghi giờ làm: mỗi khung giờ (bd–kt) 1 nhóm, sắp theo giờ bắt đầu; dòng thiếu giờ ⇒ nhóm không tiêu đề cuối.
+      const byGio = new Map<string, LineRow[]>()
+      const noGio: LineRow[] = []
+      for (const l of ls) {
+        const label = workHoursLabel(l.gio_bd, l.gio_kt)
+        if (!label) noGio.push(l)
+        else byGio.set(label, [...(byGio.get(label) || []), l])
+      }
+      const out: F01JobGroup[] = []
+      for (const label of Array.from(byGio.keys()).sort()) {
+        const rows = clean(buildRows(unit, byGio.get(label) || []))
+        if (rows.length > 0) out.push({ label: `Giờ làm ${label}`, rows })
+      }
+      const rest = clean(buildRows(unit, noGio))
+      if (rest.length > 0) out.push({ label: "", rows: rest })
+      return out.length > 0 ? out : undefined
+    }
+    if (prodWindows.length === 0) return undefined
+    const byCa = new Map<string, LineRow[]>()
+    const none: LineRow[] = []
+    for (const l of ls) {
+      const ca = assignToProductionCa(l.giao_luc, prodWindows)
+      if (!ca) none.push(l)
+      else byCa.set(ca, [...(byCa.get(ca) || []), l])
+    }
+    if (byCa.size === 0) return undefined
+    const out: F01JobGroup[] = []
+    for (const w of prodWindows) {
+      const rows = clean(buildRows(unit, byCa.get(w.ca) || []))
+      if (rows.length > 0) out.push({ label: prodCaLabel(w.ca), rows })
+    }
+    const rest = clean(buildRows(unit, none))
+    if (rest.length > 0) out.push({ label: "", rows: rest })
+    return out
+  }
+
   const blocks: F01Block[] = sections.map((sec) => {
     const unit = unitMap.get(sec.ca || "")
     const loai: "ca" | "to" = unit?.loai === "to" ? "to" : "ca"
@@ -470,6 +547,7 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
       gioKetThuc: loai === "ca" ? (caCoKien ? fmtHm(lastScanOf(sec.ca)) : "") : fmtHm(sec.ket_thuc_luc),
       sanXuat: loai === "ca" ? productionOf(sec.ca) : [],
       rows: buildRows(unit, ls).filter((r) => r.people.length > 0),
+      groups: groupsOf(sec, unit, ls),
     }
   })
 
@@ -489,6 +567,15 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
     if (!row) {
       row = { ten: xhJob.ten, tenKm: xhJob.ten_khmer, people: [] }
       target.rows.push(row)
+    }
+    // Khối đang in theo nhóm (A2) ⇒ trực xuất hàng vào nhóm không tiêu đề cuối khối.
+    if (target.groups && !target.groups.some((g) => g.rows.includes(row as F01JobRow))) {
+      let tail = target.groups.find((g) => g.label === "")
+      if (!tail) {
+        tail = { label: "", rows: [] }
+        target.groups.push(tail)
+      }
+      tail.rows.push(row)
     }
     for (const id of exportStaff) pushPerson(row, { ten: name(id), xepLoai: "" })
   }

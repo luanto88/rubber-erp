@@ -18,6 +18,7 @@ import {
   POSITION_KEYS,
   SECTION_SELECT,
   UNIT_SELECT,
+  workHoursLabel,
   hasStoredPositions,
   jobIdsOf,
   positionLabelKey,
@@ -302,6 +303,10 @@ export default function AttendanceSheetDetailPage() {
       {viewTab === "content" && sections.length === 0 ? <ListState kind="empty" message="Phiếu chưa có phiếu ca nào." /> : null}
       {viewTab === "content" && sections.map((sec) => {
         const ls = linesBySection.get(sec.id) || []
+        const secUnit = units.get(sec.ca || "")
+        // A2: tổ theo khung giờ ⇒ cột "Khung"; tổ khác ⇒ cột "Giao lúc" (TKSX xếp vào Ca A/B theo giờ này).
+        const khungMode = secUnit?.khung_mac_dinh || null
+        const secIsTo = secUnit?.loai === "to"
         return (
           <section key={sec.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -363,6 +368,7 @@ export default function AttendanceSheetDetailPage() {
                     <th className="text-right">STT</th>
                     <th>Người</th>
                     <th>Công việc</th>
+                    {secIsTo ? <th>{khungMode ? "Giờ làm" : "Giao lúc"}</th> : null}
                     <th>Xe</th>
                     <th>Điểm danh</th>
                     <th>Người thay</th>
@@ -371,7 +377,7 @@ export default function AttendanceSheetDetailPage() {
                 </thead>
                 <tbody>
                   {ls.length === 0 ? (
-                    <ListState kind="empty" message="Chưa có dòng nào." asRow colSpan={7} />
+                    <ListState kind="empty" message="Chưa có dòng nào." asRow colSpan={secIsTo ? 8 : 7} />
                   ) : (
                     ls.map((l, i) => (
                       <tr key={l.id}>
@@ -393,6 +399,21 @@ export default function AttendanceSheetDetailPage() {
                             <span className="text-slate-400">—</span>
                           )}
                         </td>
+                        {secIsTo ? (
+                          <td className="whitespace-nowrap">
+                            {jobIdsOf(l).length > 0 ? (
+                              khungMode ? (
+                                <span className={l.gio_bd ? "text-xs font-semibold text-sky-700" : "text-slate-400"}>
+                                  {workHoursLabel(l.gio_bd, l.gio_kt) || "—"}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-600">{l.giao_luc ? fmtTime(l.giao_luc) : "—"}</span>
+                              )
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                        ) : null}
                         <td>{l.vehicle_id ? vehicles.get(l.vehicle_id) || "—" : ""}</td>
                         <td>
                           {l.diem_danh === "co" ? (

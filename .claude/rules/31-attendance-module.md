@@ -308,3 +308,52 @@ Công thức + quy tắc: rule 27 mục "Hệ số chuyên cần". Migration `20
 - Đã chốt chưa làm (bàn giao `ban-giao-cham-cong-ca-to.md` mục 14): A2 việc của tổ phải chọn ca (`ca_lam`) + A2b mở ngày mới
   chép ngày gần nhất của Ca/Tổ kể cả người thay, A3 sơ đồ dây chuyền
   kéo-thả theo quyền, B tua chuẩn theo tháng + thẻ Chuyên cần (chỉ số phụ KPI).
+
+## A2 Tổ theo KHUNG GIỜ / theo GIỜ GIAO VIỆC + A2b chép bố trí (2026-11-26, chờ chạy migration 20261219 + test tay)
+Bản đầu (20261218, chip Ca A/B + "Cả ngày") đã BỎ — hiểu sai: Ca A/B/C là ĐỘI (Ca A Shok Khoeun, Ca B Binh Ban), không phải
+khung giờ; và 20261218 lỗi `record "v_sec" has no field "ca"` ở MỌI lần lưu (`attendance_lock_section_for_edit` không trả `ca`).
+Người dùng chốt:
+- Ca sản xuất: giờ bắt đầu / kết thúc theo kiện quét thật (không đổi).
+- Tổ theo KHUNG GIỜ (`attendance_units.khung_mac_dinh`, chỉ seed, KHÔNG có giao diện cài đặt): TN_MT + XE_CK = `auto` (ngày/đêm),
+  XLNT = `24h`. Giờ khung chung cho phiếu tổ (`attendance_sheet_sections.khung_gio`), mặc định ngày 05:00–17:00 / đêm 17:00–05:00
+  / 24h 05:00–05:00, sửa được; khung mặc định khi giao việc theo giờ hiện tại (5h–17h ⇒ ngày). Mỗi người chọn khung (ngày và/hoặc
+  đêm), việc RIÊNG từng khung (`attendance_sheet_lines.viec_theo_khung`, `cong_viec_ids` = hợp). Ca đêm thuộc phiếu ngày bắt đầu.
+- Tổ khác (Cơ điện – Bảo trì – Xe nâng…): không chọn gì. `attendance_sheet_lines.giao_luc` = lần đầu được giao việc (server giữ
+  theo id dòng / người khi lưu lại). TKSX xếp vào Ca A / Ca B bằng `assignToProductionCa` (khung kiện quét đầu → cuối từng ca;
+  chồng ⇒ ca bắt đầu muộn nhất; trước mọi ca ⇒ ca bắt đầu kế tiếp; sau ⇒ ca kết thúc gần nhất). Không có kiện ⇒ in phẳng như cũ.
+- TKSX: khối tổ có nhóm con (`F01Block.groups`): "Khung ngày (05:00–17:00)" / "Khung đêm (…)" / "24h (…)" hoặc "Ca A (Ca trưởng)".
+  Chi tiết phiếu: cột "Khung giờ" (tổ theo khung) / "Giao lúc" (tổ khác).
+- Nhãn QR: `attendance_qr_points.unit_codes` (Cài đặt → Điểm QR, chip chọn nhiều) giới hạn Ca/Tổ khi quét; QR có dây chuyền mặc định
+  ⇒ khoá dây chuyền. `attendance_resolve_qr` trả thêm `unit_codes`.
+- Tự lưu lỗi không còn chặn đổi Ca/Tổ / dây chuyền / ngày (hỏi xác nhận).
+- Migration `20261219_attendance_unit_time_frames.sql` (chạy tay; mọi `CREATE OR REPLACE attendance_save_section / submit_section`
+  về sau chép từ file này). `ca_lam` của 20261218 để lại (LEGACY, không đọc).
+- A2b `suggestFromPrevious(prevLines, staffById, ngay, activeJobIds)`: phiếu Ca/Tổ mới chưa có dòng ⇒ chép phiếu cùng Ca/Tổ +
+  dây chuyền gần nhất: có mặt có việc (kể cả người ngoài danh sách ⇒ thẻ "Khác") + vắng CÓ người thay (cả "(tạm)"), việc + việc
+  theo khung + xe. KHÔNG chép xếp loại, phép, lý do, `giao_luc` (tính lúc lưu ⇒ các dòng gợi ý lưu cùng lúc mang cùng 1 giờ giao).
+
+### Sửa sau test A2 (2026-11-26, chờ chạy migration 20261220 + test tay)
+- BỎ khối "Khung giờ" trên màn điểm danh và thẻ Ngày/Đêm khi phân việc. Tổ ghi giờ làm (`khung_mac_dinh`: TN_MT `auto`, XLNT `24h`,
+  XE_CK `ngay`) ⇒ sau khi chọn việc, tấm phân việc hiện "Giờ làm" từ–đến của NGƯỜI ĐÓ, tự điền: auto ⇒ theo giờ điểm danh (5h–17h ⇒
+  05:00–17:00, còn lại 17:00–05:00); XLNT 05:00–05:00; cơ khí 05:00–17:00; sửa được. Lưu `attendance_sheet_lines.gio_bd/gio_kt`.
+  Thuần: `defaultWorkHours`, `workHoursLabel`, `linesMissingHours`. Gửi phiếu thiếu giờ ⇒ "Chưa có giờ làm cho: …".
+- TKSX khối tổ ghi giờ: nhóm "Giờ làm 05:00 – 17:00" / "Giờ làm 17:00 – 05:00" (sắp theo giờ). Chi tiết phiếu cột "Giờ làm".
+- Migration `20261220_attendance_line_work_hours.sql` (chạy tay sau 20261219; mọi CREATE OR REPLACE save/submit về sau chép từ
+  file này). `viec_theo_khung`, `attendance_sheet_sections.khung_gio` = LEGACY.
+- **Phải điểm danh Ca trước khi quét thành phẩm** (người dùng chốt; không ngoại lệ, kể cả admin; mất mạng thì không chặn):
+  `saveDraftKien` từ chối nếu phiếu Ca sản xuất (ngày + ca + dây chuyền của kiện) chưa có dòng người nào
+  (`product/confirm/shift-attendance.ts` `shiftAttendanceStatus`; chỉ áp mã ca là đơn vị loại `ca`). Hub màn quét: banner đỏ +
+  khoá nút Quét QR + nút "Điểm danh ngay" (`loadShiftAttendanceStatus`, kiểm lại mỗi 60 giây). Mục lưu lúc mất mạng có
+  `savedOffline` ⇒ đồng bộ sau không bị chặn.
+- Lỗi "Pak Sorphoun không hiện": dữ liệu thật chỉ có dòng Tổ trưởng không việc ở phiếu Đội xe cơ khí đã duyệt (việc chưa từng
+  được lưu do lỗi v_sec của 20261218) ⇒ admin "Mở lại để sửa" rồi giao việc lại.
+
+### Sửa sau test A2 lần 2 (2026-11-27, không migration, chờ test tay)
+- PDF TKSX tải về 0 byte: `DocViewer` đưa thẳng bytes cho pdf.js ⇒ ArrayBuffer bị chuyển sang worker, `F01Result.bytes` rỗng ⇒
+  nút Tải PDF ra file trống. Sửa chung ở `doc-viewer-impl.tsx` (`bytes.slice()`); `downloadF01` dựng lại nếu bytes rỗng.
+- Không thêm nút "Lưu tạm" (người dùng chốt: tự lưu 2 giây là đủ).
+- "Gửi tất cả" mở bằng QR có `unit_codes` ⇒ khối vàng liệt kê Ca/Tổ của QR (đang dùng, đúng dây chuyền) chưa điểm danh; CHỈ cảnh
+  báo, vẫn gửi được phiếu đã có.
+- Người thay: người CÙNG Ca/Tổ đang có mặt thay được người vắng của chính ca (1 người nhiều vị trí); 1 người thay được nhiều người.
+  Chỉ loại chính người vắng + người đang vắng trong phiếu. Danh sách: người cùng ca đứng đầu, nhãn "Cùng ca · việc đang làm".
+  A2b chép cả trường hợp người thay có dòng riêng.

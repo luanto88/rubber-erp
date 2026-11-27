@@ -22,7 +22,8 @@ import {
   REPORT_SHIFT_PERMISSIONS,
 } from "@/app/dashboard/product/confirm/report-access";
 import { normalizeLotStatus } from "@/app/dashboard/product/shared";
-import { getLoaiBanhConfig } from "@/lib/product-lot-config";
+import { dayChuyenForCsr, getLoaiBanhConfig } from "@/lib/product-lot-config";
+import { shiftAttendanceStatus, type ShiftAttendanceStatus } from "@/app/dashboard/product/confirm/shift-attendance";
 import type { PackagingConfig } from "@/lib/product-packaging";
 import { loadPackagingConfigServer } from "@/lib/product-packaging-server";
 import { loadPalletComponentsServer } from "@/lib/pallet-components-server";
@@ -1356,6 +1357,24 @@ function compareCaCode(a: string, b: string): number {
 // Tên ca theo ca trưởng, hiệu lực tại `ngay` (mặc định hôm nay theo giờ nhà máy) — nguồn là bảng
 // lịch sử production_shift_names (Cài đặt → Danh mục → Thông tin công ty), xem shift-names.ts.
 // Dùng cho tiêu đề section phiếu báo thành phẩm lẫn dropdown "Ca sản xuất" ở trang quét QR.
+/**
+ * A2 — màn quét: Ca đang chọn đã điểm danh chưa (banner + khoá Lưu tạm). Xác thực token như Lưu tạm.
+ * Lỗi ⇒ trả "không áp" (không chặn nhầm; server vẫn kiểm lại lúc Lưu tạm).
+ */
+export async function loadShiftAttendanceStatus(
+  accessToken: string | null,
+  factoryId: string,
+  ngay: string,
+  ca: string,
+): Promise<ShiftAttendanceStatus> {
+  try {
+    await assertProductAccess(accessToken, factoryId, PRODUCT_CREATE_PERMISSIONS, "kiểm điểm danh");
+    return await shiftAttendanceStatus(factoryId, ngay, ca);
+  } catch {
+    return { applies: false, taken: true, dayChuyens: [] };
+  }
+}
+
 export async function loadFactoryShiftNames(
   factoryId: string,
   ngay?: string,
@@ -1624,6 +1643,8 @@ export type SaveDraftKienInput = {
    * ngăn/CSR/loại bành, nên server đối chiếu lại với dự đoán và từ chối nếu lệch.
    */
   unverified?: boolean;
+  /** A2: mục lưu lúc mất mạng ⇒ không kiểm "đã điểm danh Ca" (người dùng chốt 2026-11-26). */
+  savedOffline?: boolean;
 };
 
 // GĐ3B: kiểm nắp của nháp ở server — mã phải là thành phần nắp; pallet không cần nắp ⇒ bỏ nắp.
@@ -1684,6 +1705,16 @@ export async function saveDraftKien(input: SaveDraftKienInput): Promise<SaveDraf
     // Ca đã phê duyệt (khoá) ⇒ chặn ngay khi lưu tạm, không đợi tới lúc "Gửi tất cả" (admin vẫn qua).
     // Đặt SAU nhánh alreadySaved: nháp đã lưu trước khi khoá vẫn được xác nhận lại bình thường.
     await assertShiftNotLocked({ factoryId: input.factoryId, ngaySx: input.ngaySx, ca: input.ca, actorUserId: userId });
+
+    // A2 (chốt 2026-11-26): phải điểm danh Ca trước khi quét thành phẩm — phiếu Ca này (ngày + dây chuyền của kiện) phải có
+    // ít nhất 1 người. Không ngoại lệ (kể cả admin); mục lưu lúc mất mạng thì bỏ qua.
+    if (!input.savedOffline) {
+      const dc = input.dayChuyen || dayChuyenForCsr(input.loaiCsr, await loadGradeConfigServer(input.factoryId));
+      const att = await shiftAttendanceStatus(input.factoryId, input.ngaySx, input.ca, dc ? [dc] : []);
+      if (att.applies && !att.taken) {
+        return { success: false, error: `Chưa điểm danh Ca ${input.ca} ngày ${input.ngaySx.split("-").reverse().join("/")}${dc ? ` (${dc})` : ""} — trực ca điểm danh trước rồi mới quét thành phẩm.` };
+      }
+    }
 
     const config = getLoaiBanhConfig(input.loaiCsr, input.loaiBanh, await loadGradeConfigServer(input.factoryId));
     const soKg = Math.round(input.soBanh * input.loaiBanh * 100) / 100;

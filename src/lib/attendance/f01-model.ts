@@ -13,6 +13,9 @@ export type F01Person = {
 
 export type F01JobRow = { ten: string; tenKm: string | null; people: F01Person[] }
 
+/** A2 — nhóm con của khối tổ: khung giờ ("Khung ngày (05:00–17:00)") hoặc ca sản xuất ("Ca A (Shok Khoeun)"). "" = không tiêu đề. */
+export type F01JobGroup = { label: string; rows: F01JobRow[] }
+
 export type F01Production = { csr: string; banh: number; loaiBanh: number | null; boc: string }
 
 /** 1 mục trên phiếu = 1 Ca/Tổ đã điểm danh (thứ tự theo danh mục Ca/Tổ). */
@@ -30,6 +33,8 @@ export type F01Block = {
   gioKetThuc: string
   sanXuat: F01Production[]
   rows: F01JobRow[]
+  /** A2 — có thì in theo nhóm (thay cho `rows`). */
+  groups?: F01JobGroup[]
 }
 
 export type F01Approval = { ten: string; luc: string }

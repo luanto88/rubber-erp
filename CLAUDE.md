@@ -463,6 +463,9 @@ Vi du:
   2026-11-26: C5 (migration 20261216, rule 27 "Hệ số chuyên cần", rule 31 "C5") test PASS, đã commit `ef099a4`. A1 header
   màn điểm danh 2 dòng + thẻ người + đổi tên "Vệ sinh dây chuyền" (migration 20261217 ĐÃ CHẠY) test PASS, đã commit; CHƯA push.
   Kế tiếp (bàn giao mục 14, đã chốt): A2 việc tổ chọn ca → A3 sơ đồ dây chuyền kéo-thả → B tua chuẩn theo tháng + Chuyên cần.
+  2026-11-27: A2 (tổ ghi giờ làm / theo giờ giao việc, QR chọn Ca/Tổ, phải điểm danh Ca trước khi quét TP) + A2b + sửa
+  PDF TKSX 0 byte + người thay cùng ca — test PASS, ĐÃ push main. Production chạy 20261215 → 20261220 TRƯỚC deploy (rule 31,
+  bàn giao mục 16). Kế tiếp: A3 → B.
 
 ## Nhật ký các phiên cũ
 
@@ -471,7 +474,7 @@ Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguy�
 
 ## Prompt mở đầu phiên sau
 
-Đang làm Chấm công (2026-11-26, C5 + A1 đã commit chưa push → A2 / A3 sơ đồ dây chuyền / B tua theo tháng): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau".
+Đang làm Chấm công (2026-11-27, C4/C5/A1/A2 + A2b đã push main → A3 sơ đồ dây chuyền / B tua theo tháng): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau (2026-11-27)".
 Prompt dưới đây (U11 KPI) để dành khi người dùng nhắc.
 
 ```

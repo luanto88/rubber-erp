@@ -34,7 +34,10 @@ import {
   isStaffWorking,
   isJobOfUnit,
   jobsForUnit,
+  defaultWorkHours,
+  linesMissingHours,
   linesToPayload,
+  workHoursLabel,
   positionHolderIds,
   positionsOfStaff,
   suggestFromPrevious,
@@ -109,6 +112,9 @@ export default function AttendanceShiftPage() {
   const [qrName, setQrName] = useState<string | null>(null)
   const qrDayChuyenRef = useRef<string | null>(null)
   const qrUnitRef = useRef<string | null>(null)
+  const qrUnitCodesRef = useRef<string[]>([])
+  /** Mở qua QR: dây chuyền khoá theo QR + Ca/Tổ chỉ trong danh sách của QR (20261219). */
+  const [qrLock, setQrLock] = useState<{ dc: string | null; units: string[] }>({ dc: null, units: [] })
   const initialSectionRef = useRef<string | null>(null)
 
   // Phiếu ca đang mở
@@ -143,6 +149,7 @@ export default function AttendanceShiftPage() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [sendAllItems, setSendAllItems] = useState<SendAllItem[] | null>(null)
+  const [sendAllMissing, setSendAllMissing] = useState<string[]>([])
   const [sendAllBusy, setSendAllBusy] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
   const [discarding, setDiscarding] = useState(false)
@@ -160,6 +167,9 @@ export default function AttendanceShiftPage() {
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs])
   const lineByStaff = useMemo(() => new Map(lines.map((l) => [l.staff_id, l])), [lines])
   const holderIds = useMemo(() => positionHolderIds(positions), [positions])
+  /** Tên người LÀM thật của dòng: người thay nếu có, ngược lại chính người đó. */
+  const workerNameOf = (l: SheetLineDraft) =>
+    l.thay_the_staff_id ? staffById.get(l.thay_the_staff_id)?.ten || "?" : l.thay_the_ten ? `${l.thay_the_ten} (${T("tam")})` : staffById.get(l.staff_id)?.ten || "?"
 
   useEffect(() => {
     linesRef.current = lines
@@ -198,6 +208,8 @@ export default function AttendanceShiftPage() {
             setQrName(point.ten_diem as string)
             qrDayChuyenRef.current = (point.day_chuyen_mac_dinh as string | null) || null
             qrUnitRef.current = (point.unit_code as string | null) || null
+            qrUnitCodesRef.current = ((point.unit_codes as string[] | null) || []).filter(Boolean)
+            setQrLock({ dc: qrDayChuyenRef.current, units: ((point.unit_codes as string[] | null) || []).filter(Boolean) })
           }
         }
       } catch (err) {
@@ -255,12 +267,14 @@ export default function AttendanceShiftPage() {
     if (!initialSectionRef.current) {
       // Ca/Tổ mặc định: của điểm QR (nếu được phép) → ca/tổ đầu tiên được phân công → đơn vị đầu danh mục.
       const editAll = !!u0 && (u0.role === "admin" || hasPermission(u0, "attendance.mark") || hasPermission(u0, "attendance.mark_all"))
-      const allowed = editAll ? activeCodes : cas
+      const qrUnits = qrUnitCodesRef.current
+      const allowed = (editAll ? activeCodes : cas).filter((c) => qrUnits.length === 0 || qrUnits.includes(c))
       const qrUnit = qrUnitRef.current
       const pick = qrUnit && allowed.includes(qrUnit) ? qrUnit : allowed[0]
       if (pick) setCa(pick)
       const me = staffRows.find((s) => s.profile_id && s.profile_id === uid)
-      const dc = me?.day_chuyen_mac_dinh || qrDayChuyenRef.current
+      // QR có dây chuyền ⇒ khoá theo QR (ưu tiên hơn dây chuyền mặc định của người đăng nhập).
+      const dc = qrDayChuyenRef.current || me?.day_chuyen_mac_dinh
       const fixedDc = unitRows.find((u) => u.code === pick)?.day_chuyen || null
       if (fixedDc) setDayChuyen(fixedDc)
       else if (dc && (ATTENDANCE_DAY_CHUYEN as readonly string[]).includes(dc)) setDayChuyen(dc)
@@ -281,6 +295,10 @@ export default function AttendanceShiftPage() {
     () => buildRosterTabs(staff, currentUnit, dayChuyen, ngay, [...lines.map((l) => l.staff_id), ...holderIds]),
     [staff, currentUnit, dayChuyen, ngay, lines, holderIds],
   )
+  /** A2 — Ca/Tổ ghi giờ làm từng người (Tổ tiếp nhận mủ tạp: theo giờ điểm danh; XLNT 05–05; cơ khí 05–17). null = không. */
+  const khungMode = currentUnit?.khung_mac_dinh || null
+  /** Giờ làm trên ô người: "05:00 – 17:00". */
+  const khungTileLabel = (l: SheetLineDraft | undefined) => (khungMode && l ? workHoursLabel(l.gio_bd, l.gio_kt) : "")
 
   // ── Mở / nạp phiếu ca ──
   const loadSection = useCallback(
@@ -335,9 +353,8 @@ export default function AttendanceShiftPage() {
               const these = all.filter((l) => secIds.has(l.section_id))
               if (these.length === 0) continue
               const sheetUnit = unitsRef.current.get(sheetCa) || null
-              const roster = new Set(buildRosterTabs(staff, sheetUnit, sheetDc, sheetNgay, []).flatMap((t) => t.staffIds))
               const activeJobs = new Set(jobs.filter((j) => j.is_active && !j.an_diem_danh && isJobOfUnit(j, sheetUnit, sheetDc)).map((j) => j.id))
-              const sug = suggestFromPrevious(these, roster, activeJobs)
+              const sug = suggestFromPrevious(these, new Map(staff.map((x) => [x.id, x])), sheetNgay, activeJobs)
               if (sug.length > 0) {
                 next = sug
                 suggested = true
@@ -480,7 +497,8 @@ export default function AttendanceShiftPage() {
   const flushThen = async (fn: () => void) => {
     if (editable && dirty) {
       const ok = await doSave()
-      if (!ok) return
+      // Lưu lỗi KHÔNG được chặn chuyển phiếu (lỗi thật 26/11: kẹt, phải tải lại trang) — hỏi rồi cho đi.
+      if (!ok && !window.confirm(T("luuLoiVanChuyen"))) return
     }
     fn()
   }
@@ -637,12 +655,17 @@ export default function AttendanceShiftPage() {
           }
           const fixed = draft.map((l) => (l.diem_danh === "vang" && !l.vang_loai ? { ...l, vang_loai: "co_phep" as const } : l))
           const missingReason = fixed.find((l) => l.diem_danh === "vang" && l.vang_loai === "khong_phep" && !l.ly_do_id && !l.ly_do.trim())
+          const missingKhung = linesMissingHours(fixed, unit?.khung_mac_dinh)
           const all = [...fixed, ...auto]
           const coIds = new Set([...all.filter((l) => l.diem_danh === "co").map((l) => l.staff_id), ...holders])
           return {
             ...base,
-            send: !missingReason,
-            note: missingReason ? T("thieuLyDo", { ten: staffById.get(missingReason.staff_id)?.ten || "?" }) : "",
+            send: !missingReason && missingKhung.length === 0,
+            note: missingReason
+              ? T("thieuLyDo", { ten: staffById.get(missingReason.staff_id)?.ten || "?" })
+              : missingKhung.length > 0
+                ? T("chuaCoGioLam", { ten: missingKhung.map((l) => workerNameOf(l)).join(", ") })
+                : "",
             co: coIds.size,
             vang: all.filter((l) => l.diem_danh === "vang").length,
             auto: auto.length,
@@ -651,6 +674,14 @@ export default function AttendanceShiftPage() {
             header: { ghi_chu: s.ghi_chu || "", vi_tri: pos },
           }
         })
+      // QR có danh sách Ca/Tổ ⇒ cảnh báo các đơn vị (đang dùng, đúng dây chuyền) chưa có phiếu ca nào có người.
+      const doneCodes = new Set<string>(items.filter((it) => it.lines.length > 0 || it.holders.length > 0 || it.status !== "dang_lam").map((it) => String(list.find((s) => s.id === it.sectionId)?.ca || "")))
+      setSendAllMissing(
+        qrLock.units
+          .map((c) => unitByCode.get(c))
+          .filter((u): u is AttendanceUnit => !!u && u.is_active && (!u.day_chuyen || u.day_chuyen === dayChuyen) && !doneCodes.has(u.code))
+          .map((u) => bilingual(lang, u.ten, u.ten_khmer)),
+      )
       setSendAllItems(items)
     } catch (err) {
       setError(isNetworkError(err) ? T("loiMang") : getErrorMessage(err, "Không tải được các phiếu ca."))
@@ -735,7 +766,9 @@ export default function AttendanceShiftPage() {
   const currentTab = tabs.find((t) => t.key === activeTab) || tabs[0]
   const tileIds = (currentTab?.staffIds || []).filter((id) => !onlyUnassigned || classifyTile(lineByStaff.get(id), holderIds.has(id)) === "chua_giao")
   // Ca/Tổ chọn được: người chấm toàn nhà máy ⇒ mọi ca/tổ đang dùng; trực ca ⇒ chỉ ca/tổ được phân công.
-  const unitChoices = units.filter((u) => u.is_active && (canEditAny || assignedCas.includes(u.code)))
+  const unitChoices = units.filter(
+    (u) => u.is_active && (canEditAny || assignedCas.includes(u.code)) && (qrLock.units.length === 0 || qrLock.units.includes(u.code)),
+  )
 
   const jobsForSheet = useCallback(
     // Mọi người (kể cả người thay mượn từ ca/tổ khác) chỉ nhận việc của Ca/Tổ đang điểm danh.
@@ -760,15 +793,29 @@ export default function AttendanceShiftPage() {
   const sheetPerson = sheetFor ? staffById.get(sheetFor) : undefined
   const replacementCandidates = useMemo(() => {
     if (!sheetFor) return []
-    const taken = new Set<string>(lines.map((l) => l.staff_id))
-    for (const l of lines) if (l.thay_the_staff_id && l.staff_id !== sheetFor) taken.add(l.thay_the_staff_id)
-    taken.add(sheetFor)
+    // Người thay (chốt 2026-11-27): người CÙNG Ca/Tổ đang có mặt cũng thay được (1 người làm nhiều vị trí) và 1 người thay được
+    // nhiều người. Chỉ loại: chính người vắng + người đang VẮNG trong phiếu. Người ngoài: của Ca/Tổ khác hoặc công nhân chưa gán.
+    const absent = new Set<string>(lines.filter((l) => l.diem_danh === "vang").map((l) => l.staff_id))
+    absent.add(sheetFor)
+    const roster = new Set(tabs.find((t) => t.key === "ca")?.staffIds || [])
     return staff
-      .filter((s) => !taken.has(s.id) && isStaffWorking(s, ngay) && !s.cho_xac_nhan)
-      // Người của ca/tổ khác (có Ca/Tổ mặc định) hoặc công nhân chưa gán ca/tổ.
-      .filter((s) => s.ca_mac_dinh !== ca && (s.loai_nhan_su === "cong_nhan" || !!s.ca_mac_dinh))
-      .sort((a, b) => a.ten.localeCompare(b.ten, "vi"))
-  }, [sheetFor, lines, staff, ngay, ca])
+      .filter((s) => !absent.has(s.id) && isStaffWorking(s, ngay) && !s.cho_xac_nhan)
+      .filter((s) => roster.has(s.id) || s.ca_mac_dinh === ca || s.loai_nhan_su === "cong_nhan" || !!s.ca_mac_dinh)
+      .sort((a, b) => {
+        const sa = roster.has(a.id) || a.ca_mac_dinh === ca ? 0 : 1
+        const sb = roster.has(b.id) || b.ca_mac_dinh === ca ? 0 : 1
+        return sa - sb || a.ten.localeCompare(b.ten, "vi")
+      })
+  }, [sheetFor, lines, staff, ngay, ca, tabs])
+  /** Nhãn phụ trong danh sách người thay: "Cùng ca · Phả mủ" (người cùng Ca/Tổ, kèm việc đang làm). */
+  const candidateNote = (s: ShiftStaff): string => {
+    const sameUnit = s.ca_mac_dinh === ca || (tabs.find((t) => t.key === "ca")?.staffIds || []).includes(s.id)
+    const l = lineByStaff.get(s.id)
+    const job = l && l.diem_danh === "co" && l.cong_viec_ids[0] ? jobById.get(l.cong_viec_ids[0]) : undefined
+    const jobText = job ? bilingual(lang, job.ten, job.ten_khmer) : ""
+    if (sameUnit) return [T("cungCa"), jobText].filter(Boolean).join(" · ")
+    return [s.ca_mac_dinh ? unitByCode.get(s.ca_mac_dinh)?.ten || s.ca_mac_dinh : "", jobText].filter(Boolean).join(" · ")
+  }
 
   // ── Render ──
   if (booting) {
@@ -956,8 +1003,14 @@ export default function AttendanceShiftPage() {
               <button
                 key={dc}
                 type="button"
-                disabled={!!currentUnit?.day_chuyen && currentUnit.day_chuyen !== dc}
-                title={currentUnit?.day_chuyen && currentUnit.day_chuyen !== dc ? ` chỉ thuộc ${currentUnit.day_chuyen}` : undefined}
+                disabled={(!!currentUnit?.day_chuyen && currentUnit.day_chuyen !== dc) || (!!qrLock.dc && qrLock.dc !== dc)}
+                title={
+                  qrLock.dc && qrLock.dc !== dc
+                    ? T("qrKhoaDayChuyen", { dc: qrLock.dc })
+                    : currentUnit?.day_chuyen && currentUnit.day_chuyen !== dc
+                      ? ` chỉ thuộc ${currentUnit.day_chuyen}`
+                      : undefined
+                }
                 onClick={() => void flushThen(() => setDayChuyen(dc))}
                 className={`whitespace-nowrap px-2.5 font-bold disabled:cursor-not-allowed disabled:opacity-30 ${dayChuyen === dc ? "bg-white text-[#1c3a32]" : "text-white"}`}
               >
@@ -1038,6 +1091,7 @@ export default function AttendanceShiftPage() {
 
             <PositionBlock T={T} unitLoai={currentUnit?.loai || null} positions={positions} staffById={staffById} candidates={positionCandidates} readOnly={!editable} onChange={changePosition} />
 
+
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs font-bold">
                 <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700">
@@ -1100,6 +1154,8 @@ export default function AttendanceShiftPage() {
                       vangLabel={T("vang")}
                       chuaGiaoLabel={T("chuaGiao")}
                       roleLabel={roleLabel}
+                      caLabel={khungTileLabel(line)}
+                      missingCa={!!khungMode && !!line && line.cong_viec_ids.length > 0 && (!line.gio_bd || !line.gio_kt)}
                       onClick={() => {
                         setSheetTabKey(currentTab?.key || "ca")
                         setSheetFor(id)
@@ -1162,6 +1218,8 @@ export default function AttendanceShiftPage() {
           staffById={staffById}
           readOnly={!editable}
           jobPeople={jobPeopleExcept(sheetPerson.id)}
+          workHours={defaultWorkHours(khungMode)}
+          candidateNote={candidateNote}
           onApply={(next) => applyLine(sheetPerson.id, next)}
           onClose={() => setSheetFor(null)}
         />
@@ -1175,6 +1233,7 @@ export default function AttendanceShiftPage() {
           items={sendAllItems}
           meta={`${dcLabel(dayChuyen)} · ${fmtDdMm(ngay)}${maPhieu ? ` · ${maPhieu}` : ""}`}
           busy={sendAllBusy}
+          missingUnits={sendAllMissing}
           onCancel={() => setSendAllItems(null)}
           onConfirm={() => void confirmSendAll()}
         />
@@ -1204,6 +1263,8 @@ export default function AttendanceShiftPage() {
           meta={{ dayChuyen: dcLabel(dayChuyen), ca, ngay, maPhieu }}
           unassigned={unassignedCa}
           skipUnassignedDefault={currentUnit?.loai !== "ca"}
+          missingKhungNames={linesMissingHours(lines, khungMode).map(workerNameOf)}
+          khungLabelOf={khungMode ? khungTileLabel : undefined}
           staffById={staffById}
           reasons={reasons}
           busy={submitting}

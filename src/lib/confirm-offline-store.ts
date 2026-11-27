@@ -37,6 +37,8 @@ export type ConfirmQueueItem = {
   nap?: string | null;
   /** Mã không có trong gói tải sẵn — người dùng tự chọn ngăn/CSR/bành, server đối chiếu lại. */
   unverified: boolean;
+  /** A2: lưu lúc MẤT MẠNG ⇒ server bỏ qua kiểm "đã điểm danh Ca" khi đồng bộ (người dùng chốt 2026-11-26). */
+  savedOffline?: boolean;
   scannedAt: string;
   status: ConfirmQueueStatus;
   error?: string | null;

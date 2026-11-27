@@ -5,7 +5,7 @@
 // không gửi, không chặn duyệt phiếu ngày.
 
 import { createPortal } from "react-dom"
-import { Loader2, SendHorizontal, X } from "lucide-react"
+import { AlertTriangle, Loader2, SendHorizontal, X } from "lucide-react"
 import type { SectionPositions, SheetLineDraft } from "@/lib/attendance/shift"
 
 export type SendAllItem = {
@@ -28,6 +28,7 @@ export function SendAllDialog({
   items,
   meta,
   busy,
+  missingUnits = [],
   onCancel,
   onConfirm,
 }: {
@@ -35,6 +36,8 @@ export function SendAllDialog({
   items: SendAllItem[]
   meta: string
   busy: boolean
+  /** Ca/Tổ của QR chưa điểm danh (chỉ cảnh báo, không chặn — chốt 2026-11-27). */
+  missingUnits?: string[]
   onCancel: () => void
   onConfirm: () => void
 }) {
@@ -53,6 +56,12 @@ export function SendAllDialog({
           </button>
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3">
+          {missingUnits.length > 0 ? (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span>{T("chuaDiemDanhDonVi", { ds: missingUnits.join(", ") })}</span>
+            </div>
+          ) : null}
           {items.length === 0 ? <p className="text-sm text-slate-500">{T("chuaMoPhieu")}</p> : null}
           {items.map((it) => (
             <div key={it.sectionId} className={"rounded-xl border px-3 py-2 " + (it.send ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-slate-50 opacity-75")}>

@@ -243,3 +243,47 @@ Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay (36
 Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
 Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
 ```
+
+## 15. Cập nhật 2026-11-26 (phiên sau) — A2 LÀM LẠI (khung giờ / giờ giao việc) + A2b ĐÃ CODE, CHƯA commit, CHƯA push
+- Bản A2 đầu (20261218, chip Ca A/B) bỏ — xem rule 31 mục "A2". Chạy `20261219_attendance_unit_time_frames.sql` NGAY trên localhost
+  (20261218 làm hỏng MỌI lần lưu phiếu). Production: 20261215 → 20261219 TRƯỚC deploy (20261218 vẫn chạy, 20261219 ghi đè hàm).
+- 4 commit cũ (C4, C5, A1, bàn giao) vẫn CHƯA push.
+- A3 cần lưu ý: tổ theo khung không gắn ca ⇒ sơ đồ đổi Ca A/B: tổ theo khung hiện theo khung ngày/đêm; tổ khác lọc theo ca tính từ
+  `giao_luc`. Kế tiếp: A3 (phác thảo 360 px trước), rồi B.
+- 2026-11-26 (sau test A2): bỏ khung ngày/đêm → giờ làm từng người (migration 20261220, chạy sau 20261219); chặn quét thành phẩm
+  khi Ca chưa điểm danh. Production phải chạy 20261215 → 20261220 TRƯỚC deploy. Vẫn CHƯA commit/push.
+- 2026-11-27: sửa PDF TKSX 0 byte (DocViewer), cảnh báo Gửi tất cả theo QR, người thay cùng ca. Không migration. CHƯA commit/push.
+
+## 16. Cập nhật 2026-11-27 (cuối phiên) — A2 + A2b + sửa sau test lần 2: test PASS, ĐÃ commit + push main
+- Đã push cả 4 commit cũ (C4, C5, A1, bàn giao) + commit A2. Production PHẢI chạy (Supabase SQL Editor, theo thứ tự) nếu chưa:
+  20261215 → 20261216 → 20261217 → 20261218 → 20261219 → 20261220. Chưa chạy ⇒ Lịch công / Sổ phép / KPI tính điểm / màn điểm
+  danh / chi tiết phiếu lỗi (thiếu cột gio_bd, unit_codes, khung_mac_dinh…). Quét thành phẩm không bị chặn nhầm khi bảng thiếu
+  (shift-attendance.ts lỗi ⇒ không áp).
+- Mô hình A2 cuối cùng (rule 31 mục "A2" + "Sửa sau test A2" + "lần 2"): Ca A/B/C = ĐỘI; tổ ghi giờ làm (TN_MT auto theo giờ điểm
+  danh, XLNT 05:00–05:00, XE_CK 05:00–17:00) ⇒ "Giờ làm" từng người (`gio_bd/gio_kt`); tổ khác xếp vào Ca A/B trên TKSX theo
+  `giao_luc` so với khung kiện quét của ca; QR `unit_codes` giới hạn Ca/Tổ + khoá dây chuyền; phải điểm danh Ca trước khi quét
+  thành phẩm; người cùng ca thay được người vắng của chính ca. Không có nút "Lưu tạm" (tự lưu 2 giây — người dùng chốt).
+- Lưu ý cho A3: tổ ghi giờ làm KHÔNG gắn ca ⇒ sơ đồ đổi Ca A/B: tổ ghi giờ hiện theo giờ làm của từng người (ngày 05–17 / đêm
+  17–05 / 24h); tổ khác lọc theo `assignToProductionCa(giao_luc, khung kiện quét)` (shift.ts). Kéo người sang ô tổ ghi giờ ⇒ điền
+  `defaultWorkHours(khung_mac_dinh)`. `viec_theo_khung`, `khung_gio`, `ca_lam` = LEGACY (không đọc).
+- Kế tiếp: A3 (phác thảo 360 px trước khi code), rồi B (mục 14).
+
+## Prompt phiên sau (2026-11-27, thay prompt cũ ở trên)
+```
+Đọc CLAUDE.md, rule 29, rule 31 (mục "C2", "Ca / Tổ điểm danh", "C5", "A2", "Sửa sau test A2", "Sửa sau test A2 lần 2"),
+rule 27 (mục "Hệ số chuyên cần"), và .claude/plans/ban-giao-cham-cong-ca-to.md mục 14 (đã chốt A3, B) + mục 16 (trạng thái mới
+nhất). Mở cung_cap_dl/so_sanh_bo_cuc_diem_danh_mobile.html (bố cục + icon SVG sơ đồ dây chuyền) và
+cung_cap_dl/kq_test/Sơ đồ mới_app.png. A2 + A2b đã push main 2026-11-27 — đầu phiên hỏi tôi production đã chạy đủ migration
+20261215 → 20261220 chưa.
+
+Làm lần lượt, mỗi giai đoạn DỪNG cho tôi test, hỏi trước khi commit/push:
+1. A3 — khung "Sơ đồ dây chuyền" Mủ tạp dưới lưới thẻ người + kéo-thả / chạm-chọn theo quyền + chip Ca A/B đổi toàn bộ. Tổ ghi
+   giờ làm hiện theo giờ làm từng người, tổ khác theo giao_luc (mục 16). Đưa tôi phác thảo bố cục 360 px TRƯỚC khi code; việc nào
+   thiếu trong danh mục (vd "Sửa chữa cơ khí", "Vận hành lò sấy") thì HỎI, không tự tạo. Đọc attendance_save_section bản mới nhất
+   (20261220) trước khi viết migration nếu cần.
+2. B — tua chuẩn theo tháng + thẻ Chuyên cần / Mâu thuẫn + chỉ số phụ. Liệt kê bảng / RPC / màn hình để tôi duyệt trước khi
+   code; hàm KPI chép từ migration 20261216, chỉ đổi phần chọn cấu hình.
+Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay (360/390/430 px + Khmer với màn điểm danh).
+Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
+Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
+```

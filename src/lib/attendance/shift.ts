@@ -15,6 +15,8 @@ export type AttendanceQrPoint = {
   day_chuyen_mac_dinh: AttendanceDayChuyen | null
   /** Mã Ca/Tổ mở sẵn khi quét (migration 20261210). */
   unit_code?: string | null
+  /** Ca/Tổ được mở khi quét QR này (20261219). NULL/rỗng = mọi Ca/Tổ. */
+  unit_codes?: string[] | null
   is_active: boolean
   sort_order: number
 }
@@ -66,8 +68,10 @@ export type AttendanceUnit = {
   day_chuyen?: string | null
   sort_order: number
   is_active: boolean
+  /** A2 (20261219): NULL = tổ/ca thường; "auto" = chấm theo khung ngày/đêm; "24h" = khung 24 giờ. */
+  khung_mac_dinh?: KhungMode | null
 }
-export const UNIT_SELECT = "id, code, ten, ten_khmer, loai, to_nhom, day_chuyen, sort_order, is_active"
+export const UNIT_SELECT = "id, code, ten, ten_khmer, loai, to_nhom, day_chuyen, sort_order, is_active, khung_mac_dinh"
 
 // ── Vị trí phụ trách: trưởng / phó của CHÍNH ca/tổ (người dùng chốt 2026-11-23/24) ──
 // (a) người giữ vị trí tính CÓ MẶT A dù không có việc; (b) người gốc bị thay ⇒ tự VẮNG, người thay = người giữ mới.
@@ -188,13 +192,16 @@ export type SheetLineDraft = {
   thay_the_ten: string
   ghi_chu: string
   la_them_ngoai: boolean
+  /** A2 — tổ ghi giờ làm: giờ bắt đầu / kết thúc (HH:MM). "" ở đơn vị khác. */
+  gio_bd: string
+  gio_kt: string
 }
 
 export const SECTION_SELECT =
   "id, sheet_id, factory_id, loai, ca, ca_truong_ten, to_truong_staff_id, to_pho_staff_id, truc_ca_user_id, truc_ca_staff_id, ngoai_phan_cong, bat_dau_luc, ket_thuc_luc, trang_thai, gui_luc, duyet_luc, duyet_boi, tra_ve_ly_do, tra_ve_luc, ghi_chu, vi_tri"
 
 export const LINE_SELECT =
-  "id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, vehicle_id, xep_loai, diem_danh, vang_loai, ly_do_id, ly_do, thay_the_staff_id, thay_the_ten, ghi_chu, la_them_ngoai"
+  "id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, vehicle_id, xep_loai, diem_danh, vang_loai, ly_do_id, ly_do, thay_the_staff_id, thay_the_ten, ghi_chu, la_them_ngoai, giao_luc, gio_bd, gio_kt"
 
 export const SECTION_STATUS_LABEL: Record<SectionStatus, string> = {
   dang_lam: "Đang điểm danh",
@@ -236,8 +243,60 @@ export function emptyLine(patch: Partial<SheetLineDraft> = {}): SheetLineDraft {
     thay_the_ten: "",
     ghi_chu: "",
     la_them_ngoai: false,
+    gio_bd: "",
+    gio_kt: "",
     ...patch,
   }
+}
+
+// ── A2: tổ chấm theo GIỜ LÀM của từng người (20261220) ──
+// auto (Tổ tiếp nhận mủ tạp) ⇒ theo giờ điểm danh; 24h (Tổ XLNT) ⇒ 05:00–05:00; ngay (Đội xe cơ khí) ⇒ 05:00–17:00.
+export type KhungMode = "auto" | "24h" | "ngay"
+
+/** Giờ ở múi giờ nhà máy (0–23) của 1 thời điểm. */
+export function factoryHour(d: Date = new Date()): number {
+  const h = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone: "Asia/Ho_Chi_Minh" }).format(d)
+  return Number(h) || 0
+}
+
+/** Giờ làm mặc định khi giao việc (sửa được). null = đơn vị không ghi giờ làm. */
+export function defaultWorkHours(mode: KhungMode | null | undefined, now: Date = new Date()): { bd: string; kt: string } | null {
+  if (mode === "24h") return { bd: "05:00", kt: "05:00" }
+  if (mode === "ngay") return { bd: "05:00", kt: "17:00" }
+  if (mode !== "auto") return null
+  const h = factoryHour(now)
+  return h >= 5 && h < 17 ? { bd: "05:00", kt: "17:00" } : { bd: "17:00", kt: "05:00" }
+}
+
+/** "05:00 – 17:00" ("" nếu thiếu). */
+export function workHoursLabel(bd: string | null | undefined, kt: string | null | undefined): string {
+  return bd && kt ? `${bd} – ${kt}` : ""
+}
+
+/** Dòng tổ ghi giờ làm có việc mà thiếu giờ (bắt buộc khi gửi). */
+export function linesMissingHours(lines: SheetLineDraft[], mode: KhungMode | null | undefined): SheetLineDraft[] {
+  if (!mode) return []
+  return lines.filter((l) => l.cong_viec_ids.length > 0 && (!l.gio_bd || !l.gio_kt))
+}
+
+/**
+ * Xếp 1 giờ giao việc vào ca sản xuất theo khung giờ thật (kiện quét đầu → cuối):
+ * trong khung của ca nào ⇒ ca đó (chồng nhau ⇒ ca bắt đầu muộn nhất); trước mọi ca ⇒ ca bắt đầu gần nhất sau đó;
+ * sau mọi ca ⇒ ca kết thúc gần nhất. Không có khung nào ⇒ null.
+ */
+export function assignToProductionCa(giaoLuc: string | null | undefined, windows: { ca: string; start: string; end: string }[]): string | null {
+  if (!giaoLuc || windows.length === 0) return null
+  const t = new Date(giaoLuc).getTime()
+  if (!Number.isFinite(t)) return null
+  const ws = windows
+    .map((w) => ({ ca: w.ca, s: new Date(w.start).getTime(), e: new Date(w.end).getTime() }))
+    .filter((w) => Number.isFinite(w.s) && Number.isFinite(w.e))
+  if (ws.length === 0) return null
+  const inside = ws.filter((w) => t >= w.s && t <= w.e).sort((a, b) => b.s - a.s)
+  if (inside.length > 0) return inside[0].ca
+  const after = ws.filter((w) => w.s > t).sort((a, b) => a.s - b.s)
+  if (after.length > 0) return after[0].ca
+  return ws.sort((a, b) => b.e - a.e)[0].ca
 }
 
 // ── QR ────────────────────────────────────────────────────────────────────────
@@ -400,15 +459,55 @@ export function countRoster(staffIds: string[], lines: SheetLineDraft[], holderI
   return { co, vang, chuaGiao }
 }
 
-/** Gợi ý từ phiếu ca gần nhất: chép việc + xe cho người còn trong danh sách (không chép vắng / người thay / xếp loại). */
-export function suggestFromPrevious(prevLines: DbLine[], rosterIds: Set<string>, activeJobIds: Set<string>): SheetLineDraft[] {
+/**
+ * A2b — gợi ý từ phiếu cùng Ca/Tổ + dây chuyền gần nhất: chép NGUYÊN bố trí (người dùng chốt 2026-11-26).
+ * - Có mặt có việc ⇒ việc + giờ làm (tổ ghi giờ) + xe (kể cả người mượn ngoài danh sách — tự hiện ở thẻ "Khác").
+ * - Vắng CÓ người thay ⇒ chép vắng + người thay (cả tên gõ tay "(tạm)") + việc + xe.
+ * - Không chép giờ giao việc (giao_luc tính lại lúc lưu).
+ * - KHÔNG chép: xếp loại (về A), có / không phép, lý do; vắng không người thay.
+ * - Bỏ người (hoặc người thay) đã nghỉ việc / ngoài khoảng làm việc ngày `ngay`.
+ */
+export function suggestFromPrevious(
+  prevLines: DbLine[],
+  staffById: Map<string, ShiftStaff>,
+  ngay: string,
+  activeJobIds: Set<string>,
+): SheetLineDraft[] {
   const out: SheetLineDraft[] = []
-  for (const p of prevLines) {
-    if (p.diem_danh !== "co" || !rosterIds.has(p.staff_id)) continue
+  const working = (id: string | null | undefined) => {
+    const s = id ? staffById.get(id) : undefined
+    return !!s && !s.cho_xac_nhan && isStaffWorking(s, ngay)
+  }
+  const used = new Set<string>()
+  const sorted = [...prevLines].sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0))
+  for (const p of sorted) {
+    if (!working(p.staff_id) || used.has(p.staff_id)) continue
     const jobs = jobIdsOf(p).filter((j) => activeJobIds.has(j))
     if (jobs.length === 0) continue
-    out.push(emptyLine({ staff_id: p.staff_id, cong_viec_ids: jobs, vehicle_id: p.vehicle_id || "" }))
+    const gio = { gio_bd: p.gio_bd || "", gio_kt: p.gio_kt || "" }
+    if (p.diem_danh === "co") {
+      out.push(emptyLine({ staff_id: p.staff_id, cong_viec_ids: jobs, vehicle_id: p.vehicle_id || "", ...gio }))
+      used.add(p.staff_id)
+      continue
+    }
+    const tenTam = (p.thay_the_ten || "").trim()
+    if (p.thay_the_staff_id) {
+      if (!working(p.thay_the_staff_id)) continue
+    } else if (!tenTam) continue
+    out.push(
+      emptyLine({
+        staff_id: p.staff_id,
+        diem_danh: "vang",
+        thay_the_staff_id: p.thay_the_staff_id || "",
+        thay_the_ten: p.thay_the_staff_id ? "" : tenTam,
+        cong_viec_ids: jobs,
+        vehicle_id: p.vehicle_id || "",
+        ...gio,
+      }),
+    )
+    used.add(p.staff_id)
   }
+  // Người thay có thể đồng thời có dòng riêng (1 người làm nhiều vị trí — chốt 2026-11-27) ⇒ chép nguyên.
   return out
 }
 
@@ -437,6 +536,9 @@ export function lineToPayload(l: SheetLineDraft, stt: number) {
     thay_the_ten: vang && !l.thay_the_staff_id ? l.thay_the_ten || null : null,
     ghi_chu: l.ghi_chu,
     la_them_ngoai: l.la_them_ngoai,
+    // Server chỉ lưu ở phiếu tổ ghi giờ làm.
+    gio_bd: l.cong_viec_ids.length > 0 ? l.gio_bd || null : null,
+    gio_kt: l.cong_viec_ids.length > 0 ? l.gio_kt || null : null,
   }
 }
 
@@ -457,6 +559,10 @@ export type DbLine = {
   thay_the_ten: string | null
   ghi_chu: string | null
   la_them_ngoai: boolean
+  /** Migration 20261219 / 20261220 (chạy TRƯỚC deploy — LINE_SELECT đọc các cột này). */
+  giao_luc?: string | null
+  gio_bd?: string | null
+  gio_kt?: string | null
 }
 
 /** Việc của dòng DB (dòng cũ chỉ có cong_viec_id). */
@@ -480,6 +586,8 @@ export function dbLineToDraft(r: DbLine): SheetLineDraft {
     thay_the_ten: r.thay_the_ten || "",
     ghi_chu: r.ghi_chu || "",
     la_them_ngoai: r.la_them_ngoai,
+    gio_bd: r.gio_bd || "",
+    gio_kt: r.gio_kt || "",
   })
 }
 

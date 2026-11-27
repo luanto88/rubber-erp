@@ -80,6 +80,7 @@ import {
   loadDrafts,
   loadFactoryShiftNames,
   loadShiftHistory,
+  loadShiftAttendanceStatus,
   loadShiftLockStatus,
   loadUserChucVu,
   loadUserShiftAssignment,
@@ -95,6 +96,7 @@ import {
   type ShiftHistoryEntry,
   type ShiftLockStatus,
 } from "@/app/dashboard/product/confirm/actions";
+import type { ShiftAttendanceStatus } from "@/app/dashboard/product/confirm/shift-attendance";
 import {
   DailyReportPreviewBar,
   ShiftReportPreviewBar,
@@ -330,6 +332,29 @@ export default function ConfirmKienProductionPage() {
   // đang chọn trên form quét, để nhãn dropdown khớp ca trưởng của ngày đó.
   // Mất mạng ⇒ lấy tên ca từ gói tải sẵn (hôm nay / hôm qua), không gọi server.
   const packShiftNames = offline.pack?.shiftNames;
+
+  // A2 (chốt 2026-11-26): Ca đang quét đã điểm danh chưa — chỉ kiểm khi có mạng (offline không chặn).
+  // Kiểm lại khi đổi ngày/ca, có mạng lại, và mỗi 60 giây (trực ca vừa điểm danh xong thì tự mở khoá).
+  const [attTick, setAttTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setAttTick((x) => x + 1), 60_000);
+    return () => window.clearInterval(t);
+  }, []);
+  useEffect(() => {
+    if (!factoryId || !isOnline || !ngaySx || !ca) {
+      setAttStatus(null);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      const token = (await getFreshAuthSession())?.access_token ?? null;
+      const st = await loadShiftAttendanceStatus(token, factoryId, ngaySx, ca);
+      if (alive) setAttStatus(st);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [factoryId, isOnline, ngaySx, ca, attTick]);
   // Quy cách đóng gói theo nhà máy (bảng product_packaging_types; offline ⇒ lấy từ gói tải sẵn).
   const packaging = usePackaging(factoryId, offline.pack?.packaging);
   const PALLET_OPTS = useMemo(() => resolvePalletOptions(packaging), [packaging]);
@@ -417,6 +442,8 @@ export default function ConfirmKienProductionPage() {
   // Duyệt/Khóa/Mở khóa đặt ở module Thành phẩm chính (product/page.tsx), xem
   // .claude/rules/06-module-production.md mục "Khóa ca sản xuất".
   const [shiftLock, setShiftLock] = useState<ShiftLockStatus | null>(null);
+  // A2 — Ca đang quét (ngaySx + ca của form) đã điểm danh chưa. Chỉ kiểm khi có mạng.
+  const [attStatus, setAttStatus] = useState<ShiftAttendanceStatus | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // Mục 2: sửa 1 dòng lịch sử đã gửi (thay vì phải xóa rồi quét lại)
@@ -1511,6 +1538,11 @@ export default function ConfirmKienProductionPage() {
                 historyLoading={historyLoading}
                 historyError={historyError}
                 shiftLock={shiftLock}
+                attendanceMissing={
+                  isOnline && attStatus?.applies && !attStatus.taken
+                    ? tt("chuaDiemDanhCa", { ca: caLabel(ca), ngay: ngaySx.split("-").reverse().join("/") })
+                    : null
+                }
                 deleteConfirmId={deleteConfirmId}
                 deletingId={deletingId}
                 onAskDelete={setDeleteConfirmId}
@@ -2256,7 +2288,10 @@ function HubView({
   onKpiPromptDone,
   sendBlockedReason,
   queueSlot,
+  attendanceMissing,
 }: {
+  /** A2 — Ca đang quét chưa điểm danh ⇒ thông báo + khoá nút quét. null = cho quét. */
+  attendanceMissing: string | null;
   sendBlockedReason: string | null;
   queueSlot: React.ReactNode;
   tt: (key: string, vars?: Record<string, string | number>) => string;
@@ -2312,10 +2347,23 @@ function HubView({
           onDone={onKpiPromptDone}
         />
       )}
+      {attendanceMissing ? (
+        // A2 (chốt 2026-11-26): phải điểm danh Ca trước khi quét thành phẩm (không ngoại lệ; mất mạng thì không chặn).
+        <div className="flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 sm:flex-row sm:items-center">
+          <p className="flex-1 text-sm font-semibold text-red-700">{attendanceMissing}</p>
+          <a
+            href="/dashboard/attendance/shift"
+            className="shrink-0 rounded-lg bg-red-600 px-3 py-2 text-center text-sm font-bold text-white"
+          >
+            {tt("diemDanhNgay")}
+          </a>
+        </div>
+      ) : null}
       <button
         type="button"
         onClick={onScan}
-        className="flex w-full items-center justify-center gap-3 rounded-2xl bg-brand-600 py-6 text-lg font-extrabold text-white shadow-md transition-all hover:bg-brand-700"
+        disabled={!!attendanceMissing}
+        className="flex w-full items-center justify-center gap-3 rounded-2xl bg-brand-600 py-6 text-lg font-extrabold text-white shadow-md transition-all hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <ScanLine size={26} />
         {tt("scanQr")}

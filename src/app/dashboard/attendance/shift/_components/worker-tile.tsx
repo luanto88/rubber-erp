@@ -18,6 +18,8 @@ export function WorkerTile({
   vangLabel,
   chuaGiaoLabel,
   roleLabel,
+  caLabel,
+  missingCa,
   disabled,
   onClick,
 }: {
@@ -32,6 +34,10 @@ export function WorkerTile({
   chuaGiaoLabel: string
   /** Vị trí phụ trách đang giữ (Ca trưởng, Tổ phó…) — "" nếu không. */
   roleLabel?: string
+  /** A2 — ca làm của người thuộc TỔ ("Cả ngày" / "Ca A, B"); "" = không hiện. */
+  caLabel?: string
+  /** A2 — tổ có việc mà chưa chọn ca ⇒ chấm cam (sẽ bị chặn khi gửi). */
+  missingCa?: boolean
   disabled?: boolean
   onClick: () => void
 }) {
@@ -84,6 +90,12 @@ export function WorkerTile({
       ) : (
         <span className="text-[10px] font-semibold leading-4 text-slate-400">{chuaGiaoLabel}</span>
       )}
+      {caLabel ? (
+        <span className="max-w-full truncate text-[10px] font-bold leading-4 text-sky-700">{caLabel}</span>
+      ) : null}
+      {missingCa ? (
+        <span className="absolute left-1 top-1 h-2.5 w-2.5 rounded-full bg-orange-500 ring-2 ring-white" aria-hidden />
+      ) : null}
     </button>
   )
 }

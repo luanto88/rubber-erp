@@ -7,7 +7,7 @@ import QRCode from "qrcode"
 import { EQUIPMENT_QR_DEFAULT_ORIGIN } from "@/lib/equipment-qr"
 import { drawApprovalStampCanvas } from "@/lib/pdf-approval-stamp"
 import { at } from "./i18n"
-import { F01_DOC_CODE, F01_TITLE_PRODUCTS, type F01JobRow, type F01Model } from "./f01-model"
+import { F01_DOC_CODE, F01_TITLE_PRODUCTS, type F01JobGroup, type F01JobRow, type F01Model } from "./f01-model"
 
 const SCALE = 2
 const PAGE_W = 794
@@ -177,8 +177,35 @@ function drawTableHeader(p: Painter) {
  * Mỗi việc 1 dòng, KHÔNG xuống dòng (chữ tự thu nhỏ cho vừa ô). Nhiều người trong 1 ô nối tiếp "A, B, C";
  * người thay in NGHIÊNG; xếp loại cùng thứ tự "A-A-B".
  */
+function drawGroupRow(p: Painter, label: string) {
+  if (p.y + ROW_H * 2 > PAGE_H - BOTTOM) {
+    p.newPage()
+    drawTableHeader(p)
+  }
+  p.ctx.fillStyle = "#eef2f7"
+  p.ctx.fillRect(MX, p.y, CONTENT_W, ROW_H)
+  p.ctx.strokeStyle = LINE
+  p.ctx.lineWidth = 0.8
+  p.ctx.strokeRect(MX, p.y, CONTENT_W, ROW_H)
+  p.text(label, MX + 6, p.y + ROW_H / 2, p.fitSize(label, CONTENT_W - 12, 12, 8, true), true)
+  p.y += ROW_H
+}
+
+/** A2 — khối tổ chia nhóm con (khung giờ / ca sản xuất): 1 tiêu đề bảng, mỗi nhóm 1 dòng tiêu đề nền xám. */
+function drawGroupedJobTable(p: Painter, groups: F01JobGroup[]) {
+  drawTableHeader(p)
+  for (const g of groups) {
+    if (g.label) drawGroupRow(p, g.label)
+    drawJobRows(p, g.rows)
+  }
+}
+
 function drawJobTable(p: Painter, rows: F01JobRow[]) {
   drawTableHeader(p)
+  drawJobRows(p, rows)
+}
+
+function drawJobRows(p: Painter, rows: F01JobRow[]) {
   const ws = COLS.map((c) => c * CONTENT_W)
   if (rows.length === 0) {
     p.need(ROW_H)
@@ -306,7 +333,8 @@ export async function buildF01PdfBytes(model: F01Model): Promise<Uint8Array> {
       const [kT, kP] = b.loai === "ca" ? ["vtCaTruong", "vtCaPho"] : ["vtToTruong", "vtToPho"]
       drawPositions(p, `${km(kT)}/${vi(kT)}`, b.truong, `${km(kP)}/${vi(kP)}`, b.pho)
     }
-    drawJobTable(p, b.rows)
+    if (b.groups && b.groups.length > 0) drawGroupedJobTable(p, b.groups)
+    else drawJobTable(p, b.rows)
     // Người vắng KHÔNG in trên phiếu (mẫu giấy không có ô này) — xem ở trang chi tiết phiếu.
   })
   if (model.blocks.length === 0) {
