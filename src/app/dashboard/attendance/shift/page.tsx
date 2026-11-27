@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import { AlertTriangle, ArrowLeft, Check, ClipboardCheck, CloudOff, Eraser, Loader2, LogOut, RefreshCw, Send, SendHorizontal, Sparkles, Trash2, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Check, ClipboardCheck, CloudOff, Eraser, Loader2, LogOut, RefreshCw, Send, SendHorizontal, Sparkles, Trash2, Undo2, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { getActiveFactoryId, getFreshAuthSession, hasPermission, hydrateActiveSession, signOutEverywhere, type SessionUser } from "@/lib/auth"
 import { getErrorMessage } from "@/lib/error-message"
@@ -24,8 +24,15 @@ import {
   type AttendanceUnit,
   applyPositionChange,
   buildRosterTabs,
+  CA_NGAY,
+  caPhanCongLabel,
   classifyTile,
+  classifyTiles,
   countRoster,
+  groupLinesByStaff,
+  canEditLine,
+  mergeLegacyCaLines,
+  personCaCodes,
   dbLineToDraft,
   defaultPositions,
   emptyLine,
@@ -103,6 +110,13 @@ function fmtDdMm(iso: string) {
   return `${d}/${m}/${y.slice(2)}`
 }
 
+/** Ngày ISO cộng n ngày (chỉ phần ngày, không lệch múi giờ). */
+function addDaysISO(iso: string, n: number) {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
 function isNetworkError(err: unknown) {
   const m = getErrorMessage(err, "").toLowerCase()
   return m.includes("failed to fetch") || m.includes("network") || m.includes("load failed")
@@ -173,6 +187,8 @@ export default function AttendanceShiftPage() {
   const [sendAllBusy, setSendAllBusy] = useState(false)
   const [discardOpen, setDiscardOpen] = useState(false)
   const [discarding, setDiscarding] = useState(false)
+  const [recallOpen, setRecallOpen] = useState(false)
+  const [recalling, setRecalling] = useState(false)
 
   const T = useCallback((key: string, vars?: Record<string, string | number>) => at(lang, key, vars), [lang])
 
@@ -186,6 +202,9 @@ export default function AttendanceShiftPage() {
   }, [units])
   const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs])
   const lineByStaff = useMemo(() => new Map(lines.map((l) => [l.staff_id, l])), [lines])
+  /** A4 — tổ phân ca: 1 người có thể có nhiều dòng (mỗi ca 1 dòng). */
+  const linesByStaff = useMemo(() => groupLinesByStaff(lines), [lines])
+  const isAdminUser = user?.role === "admin"
   const holderIds = useMemo(() => positionHolderIds(positions), [positions])
   /** Tên người LÀM thật của dòng: người thay nếu có, ngược lại chính người đó. */
   const workerNameOf = (l: SheetLineDraft) =>
@@ -311,6 +330,29 @@ export default function AttendanceShiftPage() {
   // ── Danh sách thẻ (phụ thuộc phiếu đang mở) ──
   const unitByCode = useMemo(() => new Map(units.map((u) => [u.code, u])), [units])
   const currentUnit = unitByCode.get(ca) || null
+  /** A4 — Ca A/B/C người đăng nhập được phân công điểm danh. */
+  const myCaCodes = useMemo(() => assignedCas.filter((c) => unitByCode.get(c)?.loai === "ca"), [assignedCas, unitByCode])
+  /** A4 — phiếu đang mở là tổ phân ca (Tổ cơ điện – bảo trì – xe nâng). */
+  const phanCa = !!currentUnit && currentUnit.loai === "to" && !!currentUnit.phan_ca
+  const caOrder = useMemo(() => units.filter((u) => u.loai === "ca").map((u) => u.code), [units])
+  const phanCaOptions = useMemo(
+    () => [
+      ...units.filter((u) => u.is_active && u.loai === "ca").map((u) => ({ code: u.code, label: bilingual(lang, u.ten, u.ten_khmer) })),
+      { code: CA_NGAY, label: at(lang, "caNgay") },
+    ],
+    [units, lang],
+  )
+  /** A4 — ca mặc định khi giao ở tổ phân ca: Ca người đăng nhập đang trực (phân công → Ca mặc định trong hồ sơ). */
+  const defaultPhanCa = useMemo(() => {
+    if (myCaCodes[0]) return myCaCodes[0]
+    const me = user ? staff.find((x) => x.profile_id === user.id) : undefined
+    return me?.ca_mac_dinh && unitByCode.get(me.ca_mac_dinh)?.loai === "ca" ? me.ca_mac_dinh : ""
+  }, [myCaCodes, user, staff, unitByCode])
+  /** A4 — tổ trưởng phân công trước 1 ngày: phiếu Tổ mở được ngày mai; Ca sản xuất thì không. */
+  const tomorrowISO = addDaysISO(getFactoryTodayISO(), 1)
+  useEffect(() => {
+    if (currentUnit && currentUnit.loai !== "to" && ngay > getFactoryTodayISO()) setNgay(getFactoryTodayISO())
+  }, [currentUnit, ngay])
   const tabs = useMemo(
     () => buildRosterTabs(staff, currentUnit, dayChuyen, ngay, [...lines.map((l) => l.staff_id), ...holderIds]),
     [staff, currentUnit, dayChuyen, ngay, lines, holderIds],
@@ -345,8 +387,22 @@ export default function AttendanceShiftPage() {
 
       let next = ((ln || []) as DbLine[]).map(dbLineToDraft)
       let suggested = false
-      const editableNow = (s.trang_thai === "dang_lam" || s.trang_thai === "tra_ve") && (canEditAny || s.truc_ca_user_id === user?.id)
-      if (next.length === 0 && editableNow) {
+      let legacyMerged = false
+      const secUnit = unitsRef.current.get(sheetCa) || null
+      const secPhanCa = !!secUnit && secUnit.loai === "to" && !!secUnit.phan_ca
+      // A4: phiếu TỔ đã gửi vẫn sửa được (thêm ca sau) — chỉ khoá khi đã duyệt.
+      const editableNow =
+        secUnit?.loai === "to"
+          ? s.trang_thai !== "da_duyet" && (canEditAny || s.truc_ca_user_id === user?.id || assignedCas.includes(sheetCa) || (secPhanCa && myCaCodes.length > 0))
+          : (s.trang_thai === "dang_lam" || s.trang_thai === "tra_ve") && (canEditAny || s.truc_ca_user_id === user?.id)
+      // Tổ phân ca: dòng cũ (trước A4, chưa có ca) trùng người với dòng đã có ca ⇒ gộp, bỏ dòng cũ (tự lưu ngay).
+      if (secPhanCa && editableNow) {
+        const r = mergeLegacyCaLines(next, (l) => !l.gui_luc || s.trang_thai === "tra_ve" || user?.role === "admin")
+        next = r.lines
+        legacyMerged = r.changed
+      }
+      // Tổ phân ca: tổ trưởng phân thật mỗi ngày ⇒ không gợi ý từ phiếu trước.
+      if (next.length === 0 && editableNow && !secPhanCa) {
         // Gợi ý theo phiếu ca gần nhất (cùng dây chuyền + ca, ngày trước).
         const { data: prevSheets } = await supabase
           .from("attendance_daily_sheets")
@@ -390,8 +446,9 @@ export default function AttendanceShiftPage() {
       if (editableNow && user?.id) {
         const me = staff.find((x) => x.profile_id === user.id && isStaffWorking(x, sheetNgay))
         const trucCa = findTrucCaJob(jobs, unitsRef.current.get(sheetCa) || null, sheetDc)
-        if (me && trucCa && !next.some((l) => l.staff_id === me.id || l.thay_the_staff_id === me.id)) {
-          next = [...next, emptyLine({ staff_id: me.id, cong_viec_ids: [trucCa.id], diem_danh: "co", xep_loai: "A" })]
+        const meCa = secPhanCa ? defaultPhanCa : ""
+        if (me && trucCa && (!secPhanCa || meCa) && !next.some((l) => (l.staff_id === me.id || l.thay_the_staff_id === me.id) && (!secPhanCa || l.ca_phan_cong === meCa || l.ca_phan_cong === CA_NGAY))) {
+          next = [...next, emptyLine({ staff_id: me.id, cong_viec_ids: [trucCa.id], diem_danh: "co", xep_loai: "A", ca_phan_cong: meCa })]
         }
       }
       // Vị trí phụ trách: phiếu chưa từng lưu vị trí ⇒ điền mặc định theo hồ sơ nhân sự (lưu ở lần tự lưu kế tiếp).
@@ -412,8 +469,13 @@ export default function AttendanceShiftPage() {
       setSavedVersion(versionRef.current)
       setVersion(versionRef.current)
       setSaveState("idle")
+      if (legacyMerged) {
+        // Lưu ngay bản đã gộp (dòng cũ chưa ca bị bỏ).
+        versionRef.current += 1
+        setVersion(versionRef.current)
+      }
     },
-    [canEditAny, user, staff, jobs],
+    [canEditAny, user, staff, jobs, assignedCas, myCaCodes, defaultPhanCa],
   )
   const loadSectionRef = useRef(loadSection)
   useEffect(() => {
@@ -457,13 +519,42 @@ export default function AttendanceShiftPage() {
 
   // ── Quyền trên phiếu đang mở ──
   const isMine = !!section && section.truc_ca_user_id === user?.id
-  const editable = !!section && (section.trang_thai === "dang_lam" || section.trang_thai === "tra_ve") && (canEditAny || isMine)
+  const isToSection = currentUnit?.loai === "to"
+  /** A4 — tổ: người lập / được phân công tổ / người chấm công sửa mọi dòng chưa khoá; trực ca chỉ có Ca ⇒ chỉ ca mình. */
+  const toFullScope = canEditAny || isMine || assignedCas.includes(ca)
+  const toEditor = toFullScope || (phanCa && myCaCodes.length > 0)
+  const editable =
+    !!section &&
+    (isToSection
+      ? section.trang_thai !== "da_duyet" && toEditor
+      : (section.trang_thai === "dang_lam" || section.trang_thai === "tra_ve") && (canEditAny || isMine))
+  /** A4b — tổ phân ca: được giao MỚI cho ca này (người được phân công tổ / người chấm công / admin ⇒ mọi ca). */
+  const canCreateCa = (code: string) => !isToSection || toFullScope || myCaCodes.includes(code)
+  /** A4b — quyền sửa dòng (giữ chỗ theo người giao) cho phiếu Ca/Tổ `unitCode` có trạng thái `status`. */
+  const ctxFor = (unitCode: string, status: string) => {
+    const u = unitByCode.get(unitCode)
+    return {
+      isTo: u?.loai === "to",
+      phanCa: u?.loai === "to" && !!u.phan_ca,
+      userId: user?.id || "",
+      myCas: myCaCodes,
+      isAdmin: isAdminUser,
+      sectionStatus: status,
+    }
+  }
+  const canEditHere = (l: SheetLineDraft) => canEditLine(l, ctxFor(ca, section?.trang_thai || ""))
+  /** Dòng người đăng nhập sửa / gửi được trên phiếu đang mở (phiếu Ca: mọi dòng). */
+  const myLines = isToSection ? lines.filter(canEditHere) : lines
+  const ownerName = (uid: string) => staff.find((x) => x.profile_id === uid)?.ten || T("nguoiKhac")
   const lockReason = !section
     ? null
     : section.trang_thai === "da_duyet"
       ? T("khoaDaDuyet")
-      : section.trang_thai === "da_gui"
+      : section.trang_thai === "da_gui" && isToSection && editable
+        ? null
+        : section.trang_thai === "da_gui"
         ? T("khoaChoDuyet")
+        : isToSection ? (toEditor ? null : T("khoaChuaPhanCongTo"))
         : !canEditAny && !isMine
           ? T("khoaNguoiKhac", { ten: section.truc_ca_staff_id ? staffById.get(section.truc_ca_staff_id)?.ten || T("trucCaKhac") : T("trucCaKhac") })
           : null
@@ -482,6 +573,12 @@ export default function AttendanceShiftPage() {
           p_lines: linesToPayload(linesRef.current, positionHolderIds(positionsRef.current)),
         })
         if (rpcErr) throw rpcErr
+        if (section.trang_thai === "da_gui") {
+          // A4: phiếu tổ đã gửi mà nội dung đổi ⇒ server chuyển về "Đang lập" — cập nhật trạng thái hiển thị.
+          const { data: st } = await supabase.from("attendance_sheet_sections").select("trang_thai").eq("id", section.id).maybeSingle()
+          const next = (st as { trang_thai?: AttendanceSection["trang_thai"] } | null)?.trang_thai
+          if (next && next !== section.trang_thai) setSection((cur) => (cur && cur.id === section.id ? { ...cur, trang_thai: next } : cur))
+        }
         setSavedVersion(v)
         setSavedAt(new Date())
         setSaveState("saved")
@@ -524,15 +621,14 @@ export default function AttendanceShiftPage() {
   }
 
   // ── Sửa dòng ──
-  const applyLine = (staffId: string, next: SheetLineDraft | null) => {
+  /** Thay MỌI dòng của 1 người bằng `next` (tổ phân ca: mỗi ca 1 dòng; đơn vị khác: 0–1 dòng). Giữ vị trí dòng cũ. */
+  const applyPersonLines = (staffId: string, next: SheetLineDraft[]) => {
     setLines((prev) => {
-      const rest = prev.filter((l) => l.staff_id !== staffId)
-      if (!next) return rest
       const idx = prev.findIndex((l) => l.staff_id === staffId)
-      if (idx < 0) return [...rest, next]
-      const out = [...prev]
-      out[idx] = next
-      return out
+      const rest = prev.filter((l) => l.staff_id !== staffId)
+      if (idx < 0) return [...rest, ...next]
+      const before = prev.slice(0, idx).filter((l) => l.staff_id !== staffId).length
+      return [...rest.slice(0, before), ...next, ...rest.slice(before)]
     })
     markChanged()
     setSheetFor(null)
@@ -587,15 +683,15 @@ export default function AttendanceShiftPage() {
   const unassignedCa = useMemo(() => {
     const ids = new Set<string>(tabs.find((t) => t.key === "ca")?.staffIds || [])
     return Array.from(ids)
-      .filter((id) => classifyTile(lineByStaff.get(id), holderIds.has(id)) === "chua_giao")
+      .filter((id) => classifyTiles(linesByStaff.get(id) || [], holderIds.has(id)) === "chua_giao")
       .map((id) => staffById.get(id))
       .filter((s): s is ShiftStaff => !!s)
-  }, [tabs, lineByStaff, staffById, holderIds])
-  const absentLines = useMemo(() => lines.filter((l) => l.diem_danh === "vang"), [lines])
+  }, [tabs, linesByStaff, staffById, holderIds])
+  const absentLines = myLines.filter((l) => l.diem_danh === "vang")
 
   const openReview = () => {
     setError(null)
-    const hasAny = holderIds.size > 0 || lines.some((l) => l.diem_danh === "vang" || l.cong_viec_ids.length > 0)
+    const hasAny = holderIds.size > 0 || myLines.some((l) => l.diem_danh === "vang" || l.cong_viec_ids.length > 0)
     if (!hasAny && unassignedCa.length === 0) {
       setError(T("chuaCoAi"))
       return
@@ -608,8 +704,9 @@ export default function AttendanceShiftPage() {
     setSubmitting(true)
     setError(null)
     try {
-      const byId = new Map(updated.map((l) => [l.staff_id, l]))
-      const merged = [...linesRef.current.map((l) => byId.get(l.staff_id) || l), ...updated.filter((u) => !lineByStaff.has(u.staff_id))]
+      const byId = new Map(updated.map((l) => [l.id, l]))
+      const cur = new Set(linesRef.current.map((l) => l.id))
+      const merged = [...linesRef.current.map((l) => byId.get(l.id) || l), ...updated.filter((u) => !cur.has(u.id))]
       setLines(merged)
       linesRef.current = merged
       markChanged()
@@ -618,11 +715,13 @@ export default function AttendanceShiftPage() {
         setError(T("loiMang"))
         return
       }
-      const { error: rpcErr } = await supabase.rpc("attendance_submit_section", { p_section_id: section.id })
+      const { data: subRes, error: rpcErr } = await supabase.rpc("attendance_submit_section", { p_section_id: section.id })
       if (rpcErr) throw rpcErr
       setReviewOpen(false)
       await loadSection(section.id)
-      setNotice(T("daGuiOk"))
+      // A4b — phiếu tổ: còn phân công người khác giao chưa gửi ⇒ phiếu chưa sang văn phòng.
+      const part = typeof subRes === "string" && subRes.startsWith("mot_phan:") ? Number(subRes.split(":")[1]) || 0 : 0
+      setNotice(part > 0 ? T("daGuiMotPhan", { n: part }) : T("daGuiOk"))
     } catch (err) {
       setError(isNetworkError(err) ? T("loiMang") : getErrorMessage(err, "Không gửi được."))
     } finally {
@@ -662,6 +761,10 @@ export default function AttendanceShiftPage() {
           const draft = bySec.get(s.id) || []
           const base = { sectionId: s.id, label, status: s.trang_thai, co: 0, vang: 0, auto: 0, lines: [] as SheetLineDraft[], holders: [] as string[], header: { ghi_chu: s.ghi_chu || "", vi_tri: {} as SectionPositions } }
           if (s.trang_thai !== "dang_lam" && s.trang_thai !== "tra_ve") return { ...base, send: false, note: T(STATUS_KEY[s.trang_thai]) }
+          const mine = unit?.loai === "to" ? draft.filter((l) => canEditLine(l, ctxFor(s.ca || "", s.trang_thai))) : draft
+          if (unit?.loai === "to" && mine.length === 0) return { ...base, send: false, note: T("khongCoPhanCongCuaBan") }
+          const missingCaLine = unit?.loai === "to" && unit.phan_ca ? mine.find((l) => !l.ca_phan_cong && (!l.gui_luc || s.trang_thai === "tra_ve") && (l.diem_danh === "vang" || l.cong_viec_ids.length > 0)) : undefined
+          if (missingCaLine) return { ...base, send: false, note: T("chuaChonCaCho", { ten: staffById.get(missingCaLine.staff_id)?.ten || "?" }) }
           if (draft.length === 0) return { ...base, send: false, note: T("phieuTrongBoQua") }
           const pos = hasStoredPositions(s.vi_tri) ? (s.vi_tri as SectionPositions) : {}
           const holders = positionHolderIds(pos)
@@ -674,8 +777,10 @@ export default function AttendanceShiftPage() {
               .map((id) => emptyLine({ staff_id: id, diem_danh: "vang", vang_loai: "co_phep" }))
           }
           const fixed = draft.map((l) => (l.diem_danh === "vang" && !l.vang_loai ? { ...l, vang_loai: "co_phep" as const } : l))
-          const missingReason = fixed.find((l) => l.diem_danh === "vang" && l.vang_loai === "khong_phep" && !l.ly_do_id && !l.ly_do.trim())
-          const missingKhung = linesMissingHours(fixed, unit?.khung_mac_dinh)
+          const mineIds = new Set(mine.map((l) => l.id))
+          const fixedMine = fixed.filter((l) => mineIds.has(l.id))
+          const missingReason = fixedMine.find((l) => l.diem_danh === "vang" && l.vang_loai === "khong_phep" && !l.ly_do_id && !l.ly_do.trim())
+          const missingKhung = linesMissingHours(fixedMine, unit?.khung_mac_dinh)
           const all = [...fixed, ...auto]
           const coIds = new Set([...all.filter((l) => l.diem_danh === "co").map((l) => l.staff_id), ...holders])
           return {
@@ -764,6 +869,25 @@ export default function AttendanceShiftPage() {
     }
   }
 
+  // ── A4: Admin thu hồi phiếu tổ đã gửi (mở khoá mọi dòng để tổ trưởng sửa) ──
+  const canRecall = !!section && isAdminUser && isToSection && section.trang_thai !== "da_duyet" && (section.trang_thai === "da_gui" || lines.some((l) => !!l.gui_luc))
+  const confirmRecall = async (lyDo: string) => {
+    if (!section) return
+    setRecalling(true)
+    setError(null)
+    try {
+      const { error: rpcErr } = await supabase.rpc("attendance_recall_section", { p_section_id: section.id, p_ly_do: lyDo })
+      if (rpcErr) throw rpcErr
+      setRecallOpen(false)
+      await loadSection(section.id)
+      setNotice(T("daThuHoi"))
+    } catch (err) {
+      setError(isNetworkError(err) ? T("loiMang") : getErrorMessage(err, "Không thu hồi được phiếu."))
+    } finally {
+      setRecalling(false)
+    }
+  }
+
   const [signingOut, setSigningOut] = useState(false)
   const handleLogout = async () => {
     setMenuOpen(false)
@@ -784,10 +908,13 @@ export default function AttendanceShiftPage() {
   const allRosterIds = useMemo(() => Array.from(new Set(tabs.flatMap((t) => t.staffIds))), [tabs])
   const counts = countRoster(allRosterIds, lines, holderIds)
   const currentTab = tabs.find((t) => t.key === activeTab) || tabs[0]
-  const tileIds = (currentTab?.staffIds || []).filter((id) => !onlyUnassigned || classifyTile(lineByStaff.get(id), holderIds.has(id)) === "chua_giao")
+  const tileIds = (currentTab?.staffIds || []).filter((id) => !onlyUnassigned || classifyTiles(linesByStaff.get(id) || [], holderIds.has(id)) === "chua_giao")
   // Ca/Tổ chọn được: người chấm toàn nhà máy ⇒ mọi ca/tổ đang dùng; trực ca ⇒ chỉ ca/tổ được phân công.
   const unitChoices = units.filter(
-    (u) => u.is_active && (canEditAny || assignedCas.includes(u.code)) && (qrLock.units.length === 0 || qrLock.units.includes(u.code)),
+    (u) =>
+      u.is_active &&
+      (canEditAny || assignedCas.includes(u.code) || (u.loai === "to" && !!u.phan_ca && myCaCodes.length > 0)) &&
+      (qrLock.units.length === 0 || qrLock.units.includes(u.code)),
   )
 
   const jobsForSheet = useCallback(
@@ -940,7 +1067,9 @@ export default function AttendanceShiftPage() {
   const unitEditable = (unitCode: string | null): boolean => {
     if (!section || !unitCode) return false
     const st = diagStatusByUnit.get(unitCode)
-    if (st && st !== "dang_lam" && st !== "tra_ve") return false
+    const u = unitByCode.get(unitCode)
+    // A4: phiếu TỔ đã gửi vẫn thêm được (dòng đã gửi bị khoá ở từng thao tác) — chỉ khoá khi đã duyệt.
+    if (u?.loai === "to" ? st === "da_duyet" : st && st !== "dang_lam" && st !== "tra_ve") return false
     if (canEditAny) return true
     return unitCode === ca && editable
   }
@@ -949,13 +1078,20 @@ export default function AttendanceShiftPage() {
     const u = unitByCode.get(code)
     return u ? bilingual(lang, u.ten, u.ten_khmer) : code
   }
-  const editOptsFor = (unitCode: string) => ({
-    hours: defaultWorkHours(unitByCode.get(unitCode)?.khung_mac_dinh),
-    vehicleOf: (id: string) => vehicleByStaff.get(id) || "",
-    jobById,
-  })
+  const editOptsFor = (unitCode: string) => {
+    const u = unitByCode.get(unitCode)
+    return {
+      hours: defaultWorkHours(u?.khung_mac_dinh),
+      vehicleOf: (id: string) => vehicleByStaff.get(id) || "",
+      jobById,
+      // A4: ghi vào ô tổ phân ca ⇒ dòng mang ca đang xem trên sơ đồ.
+      caPhanCong: u?.loai === "to" && u.phan_ca ? chipCa : undefined,
+      canEdit: (l: SheetLineDraft) => canEditLine(l, ctxFor(unitCode, diagStatusByUnit.get(unitCode) || "")),
+    }
+  }
   const reportEditError = (r: LineEditResult, workerId: string | null, unitCode: string) => {
     if (r.error === "absent") setError(T("sdNguoiVang", { ten: (workerId && staffById.get(workerId)?.ten) || "?", phieu: unitLabel(unitCode) }))
+    else if (r.error === "locked") setError(T("sdDongDaGui"))
     else if (r.error) setError(T("sdKhoa"))
   }
 
@@ -999,7 +1135,8 @@ export default function AttendanceShiftPage() {
       if (secErr) throw secErr
       if (lnErr) throw lnErr
       const s = sec as AttendanceSection
-      if (s.trang_thai !== "dang_lam" && s.trang_thai !== "tra_ve") {
+      const sUnit = unitByCode.get(s.ca || "")
+      if (sUnit?.loai === "to" ? s.trang_thai === "da_duyet" : s.trang_thai !== "dang_lam" && s.trang_thai !== "tra_ve") {
         setError(T("sdKhoa"))
         return false
       }
@@ -1051,7 +1188,7 @@ export default function AttendanceShiftPage() {
         return
       }
       const ok = await writeSection(target, (ls) => addJobForWorker(ls, workerId, job.id, editOptsFor(target)), workerId)
-      if (ok) await writeSection(p.unitCode, (ls) => removeJobFromLine(ls, p.lineId, p.jobId), workerId)
+      if (ok) await writeSection(p.unitCode, (ls) => removeJobFromLine(ls, p.lineId, p.jobId, editOptsFor(p.unitCode).canEdit), workerId)
     }
     if (remote) afterRemoteWrite()
   }
@@ -1063,7 +1200,7 @@ export default function AttendanceShiftPage() {
       setError(T("sdKhoa"))
       return
     }
-    const ok = await writeSection(p.unitCode, (ls) => removeJobFromLine(ls, p.lineId, p.jobId), p.workerId)
+    const ok = await writeSection(p.unitCode, (ls) => removeJobFromLine(ls, p.lineId, p.jobId, editOptsFor(p.unitCode).canEdit), p.workerId)
     if (ok && p.unitCode !== ca) afterRemoteWrite()
   }
 
@@ -1163,8 +1300,8 @@ export default function AttendanceShiftPage() {
       (ls) => {
         let cur = ls
         for (const id of toRemove) {
-          const l = lineOfWorkerJob(cur, id, job.id)
-          if (l) cur = removeJobFromLine(cur, l.id, job.id).lines
+          const l = lineOfWorkerJob(cur, id, job.id, opt.caPhanCong)
+          if (l) cur = removeJobFromLine(cur, l.id, job.id, opt.canEdit).lines
         }
         for (const id of toAdd) {
           const r = addJobForWorker(cur, id, job.id, opt)
@@ -1271,6 +1408,13 @@ export default function AttendanceShiftPage() {
       </span>
     ) : null
   const showBottomBar = !!section && (editable || canEditAny)
+  /** Nhãn nút gửi: Ca của mình ở tổ phân ca (vd "Ca B"), ngược lại tên Ca/Tổ đang mở. */
+  const sendLabel =
+    phanCa && myCaCodes.length > 0 && !toFullScope
+      ? myCaCodes.map((c) => (unitByCode.get(c) ? bilingual(lang, unitByCode.get(c)!.ten, unitByCode.get(c)!.ten_khmer) : c)).join(", ")
+      : currentUnit
+        ? bilingual(lang, currentUnit.ten, currentUnit.ten_khmer)
+        : ca
 
   return (
     <div className="min-h-screen bg-slate-50 pb-28">
@@ -1282,7 +1426,7 @@ export default function AttendanceShiftPage() {
           <input
             type="date"
             value={ngay}
-            max={getFactoryTodayISO()}
+            max={currentUnit?.loai === "to" ? tomorrowISO : getFactoryTodayISO()}
             onChange={(e) => {
               const v = e.target.value
               if (v) void flushThen(() => setNgay(v))
@@ -1431,6 +1575,22 @@ export default function AttendanceShiftPage() {
               </div>
             ) : null}
             {lockReason ? <div className="rounded-xl bg-slate-100 p-3 text-sm font-semibold text-slate-600">{lockReason}</div> : null}
+            {isToSection && section.trang_thai === "da_gui" && editable ? (
+              <div className="rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+                {T("toDaGuiVanThem", { gio: section.gui_luc ? fmtHm(new Date(section.gui_luc)) : "" })}
+              </div>
+            ) : null}
+            {canRecall ? (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setRecallOpen(true)}
+                  className="flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-bold text-amber-700 hover:bg-amber-50"
+                >
+                  <Undo2 size={13} /> {T("thuHoiPhieu")}
+                </button>
+              </div>
+            ) : null}
             {canDiscard ? (
               <div className="flex justify-end">
                 <button
@@ -1474,7 +1634,7 @@ export default function AttendanceShiftPage() {
               </div>
               <div className="flex gap-1.5 overflow-x-auto pb-0.5">
                 {tabs.map((t) => {
-                  const pending = t.staffIds.filter((id) => classifyTile(lineByStaff.get(id), holderIds.has(id)) === "chua_giao").length
+                  const pending = t.staffIds.filter((id) => classifyTiles(linesByStaff.get(id) || [], holderIds.has(id)) === "chua_giao").length
                   const active = currentTab?.key === t.key
                   return (
                     <button
@@ -1498,9 +1658,15 @@ export default function AttendanceShiftPage() {
                 {tileIds.map((id) => {
                   const s = staffById.get(id)
                   if (!s) return null
-                  const line = lineByStaff.get(id)
-                  const state = classifyTile(line, holderIds.has(id))
+                  const own = linesByStaff.get(id) || []
+                  // Tổ phân ca: dòng đại diện = dòng có mặt có việc đầu tiên (theo thứ tự ca), không có thì dòng đầu.
+                  const line = own.find((l) => l.diem_danh === "co" && l.cong_viec_ids.length > 0) || own[0]
+                  const state = classifyTiles(own, holderIds.has(id))
                   const firstJob = line?.cong_viec_ids[0] ? jobById.get(line.cong_viec_ids[0]) : undefined
+                  const allJobs = Array.from(new Set(own.filter((l) => l.diem_danh === "co").flatMap((l) => l.cong_viec_ids)))
+                  const caLabel = phanCa
+                    ? personCaCodes(own, id, caOrder).map((c) => caPhanCongLabel(c, unitByCode, T("caNgay"))).join(" + ")
+                    : khungTileLabel(line)
                   const posKeys = positionsOfStaff(positions, id)
                   const roleLabel = posKeys.length > 0 ? T(positionLabelKey(posKeys[0], currentUnit?.loai)) + (posKeys.length > 1 ? ` +${posKeys.length - 1}` : "") : ""
                   const rep = line?.thay_the_staff_id ? staffById.get(line.thay_the_staff_id)?.ten || "?" : line?.thay_the_ten || ""
@@ -1511,14 +1677,19 @@ export default function AttendanceShiftPage() {
                       gioiTinh={s.gioi_tinh}
                       state={state}
                       jobLabel={firstJob ? bilingual(lang, firstJob.ten, firstJob.ten_khmer) : ""}
-                      extraJobs={Math.max(0, (line?.cong_viec_ids.length || 0) - 1)}
+                      extraJobs={Math.max(0, (phanCa ? allJobs.length : line?.cong_viec_ids.length || 0) - 1)}
                       xepB={line?.xep_loai === "B"}
                       replacementName={rep}
                       vangLabel={T("vang")}
                       chuaGiaoLabel={T("chuaGiao")}
                       roleLabel={roleLabel}
-                      caLabel={khungTileLabel(line)}
-                      missingCa={!!khungMode && !!line && line.cong_viec_ids.length > 0 && (!line.gio_bd || !line.gio_kt)}
+                      caLabel={caLabel}
+                      missingCa={
+                        phanCa
+                          ? own.some((l) => !l.ca_phan_cong && (!l.gui_luc || section.trang_thai === "tra_ve") && (l.diem_danh === "vang" || l.cong_viec_ids.length > 0))
+                          : !!khungMode && !!line && line.cong_viec_ids.length > 0 && (!line.gio_bd || !line.gio_kt)
+                      }
+                      locked={isToSection && own.some((l) => !canEditHere(l))}
                       stationKey={showDiagram ? line?.cong_viec_ids.map((j) => stationOfJobId.get(j)).find((k): k is StationKey => !!k) || null : null}
                       onDragStart={showDiagram && editable ? (e) => setDiagramDrag(e, { type: "staff", staffId: id }) : undefined}
                       onClick={() => {
@@ -1578,7 +1749,7 @@ export default function AttendanceShiftPage() {
                 type="button"
                 onClick={() => void prepareSendAll()}
                 disabled={sendAllBusy || submitting}
-                className={"flex items-center justify-center gap-1.5 rounded-xl border border-emerald-600 bg-white px-3 py-3 text-sm font-bold text-emerald-700 disabled:opacity-60 " + (editable ? "shrink-0" : "flex-1")}
+                className="flex min-w-0 flex-1 basis-0 items-center justify-center gap-1.5 rounded-xl border border-emerald-600 bg-white px-2 py-3 text-sm font-bold text-emerald-700 disabled:opacity-60"
               >
                 {sendAllBusy && !sendAllItems ? <Loader2 size={16} className="animate-spin" /> : <SendHorizontal size={16} />} {T("guiTatCa")}
               </button>
@@ -1588,9 +1759,12 @@ export default function AttendanceShiftPage() {
                 type="button"
                 onClick={openReview}
                 disabled={submitting}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-base font-bold text-white disabled:opacity-60"
+                className="flex min-w-0 flex-1 basis-0 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-2 py-3 text-sm font-bold text-white disabled:opacity-60"
               >
-                <Send size={18} /> {T("guiChamCong")}
+                <Send size={16} className="shrink-0" />
+                <span className="line-clamp-2 text-center leading-tight">
+                  {T("guiChamCong")} · {sendLabel}
+                </span>
               </button>
             ) : null}
           </div>
@@ -1613,7 +1787,18 @@ export default function AttendanceShiftPage() {
           jobPeople={jobPeopleExcept(sheetPerson.id)}
           workHours={defaultWorkHours(khungMode)}
           candidateNote={candidateNote}
-          onApply={(next) => applyLine(sheetPerson.id, next)}
+          caOptions={phanCa ? phanCaOptions : undefined}
+          personLines={linesByStaff.get(sheetPerson.id) || []}
+          defaultCa={defaultPhanCa}
+          canEditLine={canEditHere}
+          canCreateCa={canCreateCa}
+          ownerName={ownerName}
+          jobName={(id) => {
+            const j = jobById.get(id)
+            return j ? bilingual(lang, j.ten, j.ten_khmer) : "?"
+          }}
+          isTo={isToSection}
+          onApply={(next) => applyPersonLines(sheetPerson.id, next)}
           onClose={() => setSheetFor(null)}
         />
       ) : null}
@@ -1646,6 +1831,20 @@ export default function AttendanceShiftPage() {
         />
       ) : null}
 
+      {recallOpen && section ? (
+        <ReasonConfirmDialog
+          title={T("thuHoiPhieu")}
+          subtitle={`${currentUnit ? bilingual(lang, currentUnit.ten, currentUnit.ten_khmer) : ca} · ${dcLabel(dayChuyen)} · ${fmtDdMm(ngay)}`}
+          points={[T("thuHoiY1"), T("thuHoiY2")]}
+          requireReason
+          reasonPlaceholder={T("thuHoiLyDo")}
+          confirmLabel={T("thuHoiPhieu")}
+          busy={recalling}
+          onConfirm={(r) => void confirmRecall(r)}
+          onCancel={() => setRecallOpen(false)}
+        />
+      ) : null}
+
       {discardOpen && section ? (
         <ReasonConfirmDialog
           title={T("boPhieuCa")}
@@ -1665,13 +1864,21 @@ export default function AttendanceShiftPage() {
           lang={lang}
           T={T}
           absentLines={absentLines}
-          allLines={lines}
+          allLines={myLines}
           jobById={jobById}
           meta={{ dayChuyen: dcLabel(dayChuyen), ca, ngay, maPhieu }}
           unassigned={unassignedCa}
           skipUnassignedDefault={currentUnit?.loai !== "ca"}
-          missingKhungNames={linesMissingHours(lines, khungMode).map(workerNameOf)}
-          khungLabelOf={khungMode ? khungTileLabel : undefined}
+          missingKhungNames={linesMissingHours(myLines, khungMode).map(workerNameOf)}
+          blockText={(() => {
+            if (!phanCa) return undefined
+            // Dòng cũ đã gửi trước A4 (khoá) không gán ca được ⇒ không chặn; phiếu "Trả về" thì phải chọn ca.
+            const miss = myLines.filter(
+              (l) => !l.ca_phan_cong && (!l.gui_luc || section?.trang_thai === "tra_ve") && (l.diem_danh === "vang" || l.cong_viec_ids.length > 0),
+            )
+            return miss.length > 0 ? T("chuaChonCaCho", { ten: miss.map(workerNameOf).join(", ") }) : undefined
+          })()}
+          khungLabelOf={phanCa ? (l) => caPhanCongLabel(l.ca_phan_cong, unitByCode, T("caNgay")) : khungMode ? khungTileLabel : undefined}
           staffById={staffById}
           reasons={reasons}
           busy={submitting}

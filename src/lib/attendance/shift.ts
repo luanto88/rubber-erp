@@ -70,8 +70,14 @@ export type AttendanceUnit = {
   is_active: boolean
   /** A2 (20261219): NULL = tổ/ca thường; "auto" = chấm theo khung ngày/đêm; "24h" = khung 24 giờ. */
   khung_mac_dinh?: KhungMode | null
+  /** A4 (20261222): tổ phân ca — mỗi dòng có Ca (Ca A/B/C hoặc CA_NGAY). Seed: CD. */
+  phan_ca?: boolean
 }
-export const UNIT_SELECT = "id, code, ten, ten_khmer, loai, to_nhom, day_chuyen, sort_order, is_active, khung_mac_dinh"
+export const UNIT_SELECT = "id, code, ten, ten_khmer, loai, to_nhom, day_chuyen, sort_order, is_active, khung_mac_dinh, phan_ca"
+
+// ── A4: Tổ phân ca (Tổ cơ điện – bảo trì – xe nâng) ──
+/** Mã "Cả ngày (24h)" của ca_phan_cong. */
+export const CA_NGAY = "CA_NGAY"
 
 // ── Vị trí phụ trách: trưởng / phó của CHÍNH ca/tổ (người dùng chốt 2026-11-23/24) ──
 // (a) người giữ vị trí tính CÓ MẶT A dù không có việc; (b) người gốc bị thay ⇒ tự VẮNG, người thay = người giữ mới.
@@ -195,13 +201,22 @@ export type SheetLineDraft = {
   /** A2 — tổ ghi giờ làm: giờ bắt đầu / kết thúc (HH:MM). "" ở đơn vị khác. */
   gio_bd: string
   gio_kt: string
+  /** A4 — tổ phân ca: mã Ca (A/B/C) hoặc CA_NGAY; "" ở đơn vị khác. 1 người làm 2 ca = 2 dòng. */
+  ca_phan_cong: string
+  /** A4 — phiếu tổ: lần gửi có dòng này. Chỉ đọc (server ghi). */
+  gui_luc: string
+  /** A4b — người giao (giữ chỗ). "" = dòng mới chưa lưu (của người đang thao tác). Chỉ đọc. */
+  lap_boi: string
+  gui_boi: string
+  /** A4b — tổ phân ca: đã được trực ca của đúng ca đó gửi ⇒ khoá hẳn. */
+  chot_ca: boolean
 }
 
 export const SECTION_SELECT =
   "id, sheet_id, factory_id, loai, ca, ca_truong_ten, to_truong_staff_id, to_pho_staff_id, truc_ca_user_id, truc_ca_staff_id, ngoai_phan_cong, bat_dau_luc, ket_thuc_luc, trang_thai, gui_luc, duyet_luc, duyet_boi, tra_ve_ly_do, tra_ve_luc, ghi_chu, vi_tri"
 
 export const LINE_SELECT =
-  "id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, vehicle_id, xep_loai, diem_danh, vang_loai, ly_do_id, ly_do, thay_the_staff_id, thay_the_ten, ghi_chu, la_them_ngoai, giao_luc, gio_bd, gio_kt"
+  "id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, vehicle_id, xep_loai, diem_danh, vang_loai, ly_do_id, ly_do, thay_the_staff_id, thay_the_ten, ghi_chu, la_them_ngoai, giao_luc, gio_bd, gio_kt, ca_phan_cong, gui_luc, lap_boi, gui_boi, chot_ca"
 
 export const SECTION_STATUS_LABEL: Record<SectionStatus, string> = {
   dang_lam: "Đang điểm danh",
@@ -245,6 +260,11 @@ export function emptyLine(patch: Partial<SheetLineDraft> = {}): SheetLineDraft {
     la_them_ngoai: false,
     gio_bd: "",
     gio_kt: "",
+    ca_phan_cong: "",
+    gui_luc: "",
+    lap_boi: "",
+    gui_boi: "",
+    chot_ca: false,
     ...patch,
   }
 }
@@ -445,13 +465,13 @@ export function classifyTile(line: SheetLineDraft | undefined, isHolder = false)
 
 /** Đếm trên MỌI người trong các thẻ (không trùng) + người có dòng + người giữ vị trí. */
 export function countRoster(staffIds: string[], lines: SheetLineDraft[], holderIds: Set<string> = new Set()) {
-  const byStaff = new Map(lines.map((l) => [l.staff_id, l]))
+  const byStaff = groupLinesByStaff(lines)
   const all = new Set([...staffIds, ...lines.map((l) => l.staff_id), ...holderIds])
   let co = 0
   let vang = 0
   let chuaGiao = 0
   for (const id of all) {
-    const st = classifyTile(byStaff.get(id), holderIds.has(id))
+    const st = classifyTiles(byStaff.get(id) || [], holderIds.has(id))
     if (st === "co_mat") co += 1
     else if (st === "chua_giao") chuaGiao += 1
     else vang += 1
@@ -539,6 +559,8 @@ export function lineToPayload(l: SheetLineDraft, stt: number) {
     // Server chỉ lưu ở phiếu tổ ghi giờ làm.
     gio_bd: l.cong_viec_ids.length > 0 ? l.gio_bd || null : null,
     gio_kt: l.cong_viec_ids.length > 0 ? l.gio_kt || null : null,
+    // Server chỉ lưu ở tổ phân ca.
+    ca_phan_cong: l.ca_phan_cong || null,
   }
 }
 
@@ -563,6 +585,13 @@ export type DbLine = {
   giao_luc?: string | null
   gio_bd?: string | null
   gio_kt?: string | null
+  /** Migration 20261222 (chạy TRƯỚC deploy). */
+  ca_phan_cong?: string | null
+  gui_luc?: string | null
+  /** Migration 20261223. */
+  lap_boi?: string | null
+  gui_boi?: string | null
+  chot_ca?: boolean | null
 }
 
 /** Việc của dòng DB (dòng cũ chỉ có cong_viec_id). */
@@ -588,7 +617,113 @@ export function dbLineToDraft(r: DbLine): SheetLineDraft {
     la_them_ngoai: r.la_them_ngoai,
     gio_bd: r.gio_bd || "",
     gio_kt: r.gio_kt || "",
+    ca_phan_cong: r.ca_phan_cong || "",
+    gui_luc: r.gui_luc || "",
+    lap_boi: r.lap_boi || "",
+    gui_boi: r.gui_boi || "",
+    chot_ca: !!r.chot_ca,
   })
+}
+
+/** A4b — ngữ cảnh quyền sửa dòng phiếu TỔ (mirror SQL attendance_line_editable, migration 20261223). */
+export type LineEditCtx = {
+  /** Phiếu đang mở là tổ (phiếu Ca sản xuất ⇒ mọi dòng sửa được theo quyền cả phiếu). */
+  isTo: boolean
+  phanCa: boolean
+  userId: string
+  myCas: string[]
+  isAdmin: boolean
+  sectionStatus: string
+}
+
+/**
+ * A4b — người đăng nhập sửa được 1 dòng phiếu tổ không (giữ chỗ theo người giao):
+ * chưa gửi / phiếu Trả về ⇒ chính người giao, hoặc (tổ phân ca) trực ca đúng ca; đã gửi ⇒ chỉ tổ phân ca, đúng ca, chưa chốt.
+ * Dòng mới chưa lưu (lap_boi rỗng) luôn của người đang thao tác. Admin sửa mọi dòng (chưa duyệt).
+ */
+export function canEditLine(l: Pick<SheetLineDraft, "lap_boi" | "gui_luc" | "chot_ca" | "ca_phan_cong">, c: LineEditCtx): boolean {
+  if (!c.isTo || c.isAdmin || !l.lap_boi) return true
+  const myCa = c.phanCa && !!l.ca_phan_cong && c.myCas.includes(l.ca_phan_cong)
+  if (!l.gui_luc || c.sectionStatus === "tra_ve") return l.lap_boi === c.userId || myCa
+  return myCa && !l.chot_ca
+}
+
+/** A4b — 2 khoảng giờ làm (HH:MM, qua đêm khi kết thúc ≤ bắt đầu) có chồng nhau không. Thiếu giờ ⇒ coi như không chồng. */
+export function workHoursOverlap(a: { gio_bd: string; gio_kt: string }, b: { gio_bd: string; gio_kt: string }): boolean {
+  const toMin = (t: string) => {
+    const m = /^(\d{2}):(\d{2})$/.exec(t || "")
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null
+  }
+  const range = (x: { gio_bd: string; gio_kt: string }): [number, number] | null => {
+    const s0 = toMin(x.gio_bd)
+    let e = toMin(x.gio_kt)
+    if (s0 === null || e === null) return null
+    if (e <= s0) e += 24 * 60
+    return [s0, e]
+  }
+  const ra = range(a)
+  const rb = range(b)
+  if (!ra || !rb) return false
+  // So cả khi một khoảng qua đêm: dịch khoảng kia +24h.
+  const hit = (x: [number, number], y: [number, number]) => x[0] < y[1] && y[0] < x[1]
+  return hit(ra, rb) || hit(ra, [rb[0] + 1440, rb[1] + 1440]) || hit([ra[0] + 1440, ra[1] + 1440], rb)
+}
+
+/** Khoá dòng nháp: người + ca (đơn vị không phân ca ⇒ ca rỗng ⇒ 1 dòng / người). */
+export function lineKey(l: Pick<SheetLineDraft, "staff_id" | "ca_phan_cong">): string {
+  return `${l.staff_id}:${l.ca_phan_cong || ""}`
+}
+
+/** Dòng đã gửi bị khoá việc / ca / xe (trừ admin). */
+export function isLineLocked(l: Pick<SheetLineDraft, "gui_luc">, isAdmin: boolean): boolean {
+  return !!l.gui_luc && !isAdmin
+}
+
+/** Nhãn ca của 1 dòng: "Ca A" / "Cả ngày". */
+export function caPhanCongLabel(code: string, units: Map<string, { ten: string }>, caNgayLabel = "Cả ngày"): string {
+  if (!code) return ""
+  if (code === CA_NGAY) return caNgayLabel
+  return units.get(code)?.ten || `Ca ${code}`
+}
+
+/** Các ca của 1 người trên phiếu tổ phân ca (có mặt có việc hoặc vắng), theo thứ tự đơn vị — "Ca A + Ca B" / "Cả ngày". */
+export function personCaCodes(lines: SheetLineDraft[], staffId: string, order: string[]): string[] {
+  const set = new Set(lines.filter((l) => l.staff_id === staffId && l.ca_phan_cong && (l.diem_danh === "vang" || l.cong_viec_ids.length > 0)).map((l) => l.ca_phan_cong))
+  const rank = (c: string) => (c === CA_NGAY ? 999 : order.indexOf(c) < 0 ? 500 : order.indexOf(c))
+  return Array.from(set).sort((a, b) => rank(a) - rank(b))
+}
+
+/** Trạng thái ô của 1 người có NHIỀU dòng (tổ phân ca): có mặt nếu bất kỳ dòng có mặt có việc. */
+export function classifyTiles(ls: SheetLineDraft[], isHolder = false): TileState {
+  if (ls.length <= 1) return classifyTile(ls[0], isHolder)
+  if (ls.some((l) => l.diem_danh === "co" && l.cong_viec_ids.length > 0)) return "co_mat"
+  const vang = ls.filter((l) => l.diem_danh === "vang")
+  if (vang.length > 0) return vang.some((l) => l.thay_the_staff_id || l.thay_the_ten) ? "vang_co_thay" : "vang"
+  return isHolder ? "co_mat" : "chua_giao"
+}
+
+/**
+ * A4 — tổ phân ca: người vừa có dòng CŨ chưa có ca vừa có dòng đã có ca ⇒ gộp việc của dòng cũ vào dòng có ca đầu tiên,
+ * bỏ dòng cũ (không để 2 dòng song song chặn gửi). `canEdit(l)` = dòng cũ được sửa (chưa khoá / phiếu Trả về / admin).
+ */
+export function mergeLegacyCaLines(lines: SheetLineDraft[], canEdit: (l: SheetLineDraft) => boolean): { lines: SheetLineDraft[]; changed: boolean } {
+  let out = lines
+  let changed = false
+  for (const legacy of lines.filter((l) => !l.ca_phan_cong && canEdit(l))) {
+    const target = out.find((l) => l.staff_id === legacy.staff_id && !!l.ca_phan_cong)
+    if (!target) continue
+    const jobs = Array.from(new Set([...target.cong_viec_ids, ...legacy.cong_viec_ids]))
+    out = out.filter((l) => l.id !== legacy.id).map((l) => (l.id === target.id ? { ...l, cong_viec_ids: jobs } : l))
+    changed = true
+  }
+  return { lines: out, changed }
+}
+
+/** Gom dòng theo người (giữ thứ tự). */
+export function groupLinesByStaff(lines: SheetLineDraft[]): Map<string, SheetLineDraft[]> {
+  const m = new Map<string, SheetLineDraft[]>()
+  for (const l of lines) m.set(l.staff_id, [...(m.get(l.staff_id) || []), l])
+  return m
 }
 
 /** Nhãn ngắn của 1 việc trên ô người (cắt ~14 ký tự). */

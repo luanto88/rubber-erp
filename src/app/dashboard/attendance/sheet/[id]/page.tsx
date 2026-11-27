@@ -15,6 +15,7 @@ import { getActiveFactoryId, hasPermission, type SessionUser } from "@/lib/auth"
 import { getErrorMessage } from "@/lib/error-message"
 import {
   LINE_SELECT,
+  caPhanCongLabel,
   POSITION_KEYS,
   SECTION_SELECT,
   UNIT_SELECT,
@@ -59,6 +60,8 @@ export default function AttendanceSheetDetailPage() {
   const [sections, setSections] = useState<AttendanceSection[]>([])
   const [lines, setLines] = useState<DbLine[]>([])
   const [staffNames, setStaffNames] = useState<Map<string, string>>(new Map())
+  /** A4b — tên theo tài khoản (cột "Người giao"). */
+  const [profileNames, setProfileNames] = useState<Map<string, string>>(new Map())
   const [jobNames, setJobNames] = useState<Map<string, string>>(new Map())
   const [vehicles, setVehicles] = useState<Map<string, string>>(new Map())
   const [units, setUnits] = useState<Map<string, AttendanceUnit>>(new Map())
@@ -69,6 +72,7 @@ export default function AttendanceSheetDetailPage() {
   const [returnTarget, setReturnTarget] = useState<AttendanceSection | null>(null)
   const [approveTargets, setApproveTargets] = useState<AttendanceSection[] | null>(null)
   const [reopenTarget, setReopenTarget] = useState<AttendanceSection | null>(null)
+  const [recallTarget, setRecallTarget] = useState<AttendanceSection | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [viewTab, setViewTab] = useState<"content" | "pdf">("content")
   const [f01Result, setF01Result] = useState<F01Result | null>(null)
@@ -116,7 +120,7 @@ export default function AttendanceSheetDetailPage() {
       const [secRes, lnRes, staffRes, jobRes, vehRes, unitRes] = await Promise.all([
         supabase.from("attendance_sheet_sections").select(SECTION_SELECT).eq("sheet_id", sheetId),
         supabase.from("attendance_sheet_lines").select(LINE_SELECT).eq("sheet_id", sheetId).order("stt"),
-        supabase.from("maintenance_staff").select("id, ten").eq("factory_id", factoryId),
+        supabase.from("maintenance_staff").select("id, ten, profile_id").eq("factory_id", factoryId),
         supabase.from("attendance_job_types").select("id, ten").eq("factory_id", factoryId),
         supabase.from("dispatch_vehicles").select("id, code, name").eq("factory_id", factoryId),
         supabase.from("attendance_units").select(UNIT_SELECT).eq("factory_id", factoryId),
@@ -131,6 +135,13 @@ export default function AttendanceSheetDetailPage() {
       setSections(((secRes.data || []) as AttendanceSection[]).filter((s) => !(s.trang_thai === "dang_lam" && !withLines.has(s.id))).sort((a, b) => order(a) - order(b) || (a.ca || "").localeCompare(b.ca || "")))
       setLines((lnRes.data || []) as DbLine[])
       setStaffNames(new Map(((staffRes.data || []) as Named[]).map((r) => [r.id, r.ten])))
+      setProfileNames(
+        new Map(
+          ((staffRes.data || []) as (Named & { profile_id: string | null })[])
+            .filter((r) => !!r.profile_id)
+            .map((r) => [r.profile_id as string, r.ten]),
+        ),
+      )
       setJobNames(new Map(((jobRes.data || []) as Named[]).map((r) => [r.id, r.ten])))
       setVehicles(new Map(((vehRes.data || []) as Vehicle[]).map((v) => [v.id, `${v.code || ""}${v.name ? ` · ${v.name}` : ""}`])))
     } catch (err) {
@@ -177,6 +188,24 @@ export default function AttendanceSheetDetailPage() {
       setError(getErrorMessage(err, "Không thực hiện được."))
       setReturnTarget(null)
       setApproveTargets(null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // A4 — admin thu hồi phiếu TỔ đã gửi (mở khoá mọi dòng đã gửi, phiếu về "Trả về" cho tổ trưởng sửa).
+  const recall = async (target: AttendanceSection, lyDo: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const { error: e } = await supabase.rpc("attendance_recall_section", { p_section_id: target.id, p_ly_do: lyDo })
+      if (e) throw e
+      setNotice(`Đã thu hồi ${sectionLabel(target.loai, target.ca, sheet?.day_chuyen || "", units)} — tổ trưởng được báo trên chuông để sửa rồi gửi lại.`)
+      setRecallTarget(null)
+      void load()
+    } catch (err) {
+      setError(getErrorMessage(err, "Không thu hồi được phiếu."))
+      setRecallTarget(null)
     } finally {
       setBusy(false)
     }
@@ -307,6 +336,8 @@ export default function AttendanceSheetDetailPage() {
         // A2: tổ theo khung giờ ⇒ cột "Khung"; tổ khác ⇒ cột "Giao lúc" (TKSX xếp vào Ca A/B theo giờ này).
         const khungMode = secUnit?.khung_mac_dinh || null
         const secIsTo = secUnit?.loai === "to"
+        const secPhanCa = secIsTo && !!secUnit?.phan_ca
+        const canRecallSec = isAdmin && secIsTo && sec.trang_thai !== "da_duyet" && (sec.trang_thai === "da_gui" || ls.some((l) => !!l.gui_luc))
         return (
           <section key={sec.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -355,6 +386,11 @@ export default function AttendanceSheetDetailPage() {
                   <HeaderButton tone="brand" icon={<CheckCircle2 size={14} />} label="Duyệt ca" onClick={() => setApproveTargets([sec])} disabled={busy} />
                 </div>
               ) : null}
+              {canRecallSec ? (
+                <div className="flex shrink-0 gap-2">
+                  <HeaderButton tone="danger" icon={<RotateCcw size={14} />} label="Thu hồi" onClick={() => setRecallTarget(sec)} disabled={busy} />
+                </div>
+              ) : null}
               {isAdmin && sec.trang_thai === "da_duyet" ? (
                 <div className="flex shrink-0 gap-2">
                   <HeaderButton tone="danger" icon={<RotateCcw size={14} />} label="Mở lại để sửa" onClick={() => setReopenTarget(sec)} disabled={busy} />
@@ -368,16 +404,17 @@ export default function AttendanceSheetDetailPage() {
                     <th className="text-right">STT</th>
                     <th>Người</th>
                     <th>Công việc</th>
-                    {secIsTo ? <th>{khungMode ? "Giờ làm" : "Giao lúc"}</th> : null}
+                    {secIsTo ? <th>{secPhanCa ? "Ca" : khungMode ? "Giờ làm" : "Giao lúc"}</th> : null}
                     <th>Xe</th>
                     <th>Điểm danh</th>
                     <th>Người thay</th>
                     <th>Ghi chú</th>
+                    {secIsTo ? <th>Người giao</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {ls.length === 0 ? (
-                    <ListState kind="empty" message="Chưa có dòng nào." asRow colSpan={secIsTo ? 8 : 7} />
+                    <ListState kind="empty" message="Chưa có dòng nào." asRow colSpan={secIsTo ? 9 : 7} />
                   ) : (
                     ls.map((l, i) => (
                       <tr key={l.id}>
@@ -401,7 +438,9 @@ export default function AttendanceSheetDetailPage() {
                         </td>
                         {secIsTo ? (
                           <td className="whitespace-nowrap">
-                            {jobIdsOf(l).length > 0 ? (
+                            {secPhanCa && l.ca_phan_cong ? (
+                              <span className="text-xs font-semibold text-sky-700">{caPhanCongLabel(l.ca_phan_cong, units, "Cả ngày (24h)")}</span>
+                            ) : jobIdsOf(l).length > 0 ? (
                               khungMode ? (
                                 <span className={l.gio_bd ? "text-xs font-semibold text-sky-700" : "text-slate-400"}>
                                   {workHoursLabel(l.gio_bd, l.gio_kt) || "—"}
@@ -438,6 +477,12 @@ export default function AttendanceSheetDetailPage() {
                           ) : null}
                         </td>
                         <td className="text-xs">{l.ghi_chu || ""}</td>
+                        {secIsTo ? (
+                          <td className="whitespace-nowrap text-xs">
+                            {l.lap_boi ? profileNames.get(l.lap_boi) || "—" : "—"}
+                            {l.gui_luc ? <span className="ml-1 text-[10px] font-semibold text-amber-700">· đã gửi</span> : null}
+                          </td>
+                        ) : null}
                       </tr>
                     ))
                   )}
@@ -472,6 +517,21 @@ export default function AttendanceSheetDetailPage() {
           busy={busy}
           onConfirm={(r) => void deleteSheet(r)}
           onCancel={() => setDeleteOpen(false)}
+        />
+      ) : null}
+      {recallTarget ? (
+        <ReasonConfirmDialog
+          title="Thu hồi phiếu tổ đã gửi"
+          subtitle={`${sheet.ma_phieu} · ${sectionLabel(recallTarget.loai, recallTarget.ca, sheet.day_chuyen, units)}`}
+          points={[
+            'Mở khoá MỌI phân công đã gửi của phiếu tổ — phiếu về "Trả về", tổ trưởng được báo trên chuông.',
+            "Tổ trưởng sửa xong bấm Gửi lại; văn phòng duyệt như thường.",
+          ]}
+          requireReason
+          confirmLabel="Thu hồi"
+          busy={busy}
+          onConfirm={(r) => void recall(recallTarget, r)}
+          onCancel={() => setRecallTarget(null)}
         />
       ) : null}
       {reopenTarget ? (

@@ -468,6 +468,9 @@ Vi du:
   bàn giao mục 16). Kế tiếp: A3 → B.
   2026-11-27 (sau): A3 sơ đồ dây chuyền Mủ tạp (+ gỡ người bằng X / kéo ra khoảng trống) test PASS localhost, ĐÃ push main —
   production chạy 20261221_attendance_job_diagram.sql (rule 31 mục A3, bàn giao mục 17). Kế tiếp: B.
+  2026-11-27 (phiên sau A3): production đã chạy 20261221. A4 Tổ cơ điện phân ca + phiếu Tổ không khoá cứng + icon thẻ người
+  (migration 20261222) và A4b giữ chỗ theo người giao (20261223) đã code + commit, CHƯA push, A4b chưa test — production chạy
+  20261222 → 20261223 TRƯỚC deploy (rule 31 mục A4/A4b, bàn giao mục 19). Kế tiếp: test A4b → B.
 
 ## Nhật ký các phiên cũ
 
@@ -476,7 +479,7 @@ Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguy�
 
 ## Prompt mở đầu phiên sau
 
-Đang làm Chấm công (2026-11-27, A3 sơ đồ dây chuyền đã push main → B tua theo tháng): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau (2026-11-27, sau A3)".
+Đang làm Chấm công (2026-11-27, A4 + A4b Tổ phân ca / giữ chỗ đã commit, chưa push → test A4b rồi B tua theo tháng): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau (2026-11-27, sau A4b)".
 Prompt dưới đây (U11 KPI) để dành khi người dùng nhắc.
 
 ```

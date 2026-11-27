@@ -3,7 +3,7 @@
 // Ô ↔ việc qua attendance_job_types.so_do_vi_tri (migration 20261221).
 
 import type { AttendanceJobType } from "./types"
-import { assignToProductionCa, emptyLine, genderRank, type AttendanceUnit, type SheetLineDraft } from "./shift"
+import { CA_NGAY, assignToProductionCa, emptyLine, genderRank, type AttendanceUnit, type SheetLineDraft } from "./shift"
 
 export const STATION_KEYS = [
   "truc_ca", "lo_say", "bao_tri", "xlnt", "co_khi", "xe_nang",
@@ -73,6 +73,8 @@ export type DiagramPerson = {
   gioiTinh: string | null
   vehicleId: string
   temp: boolean
+  /** A4 — dòng đã gửi (phiếu tổ): không gỡ / chuyển được trừ admin. */
+  locked: boolean
 }
 export type DiagramCell = {
   key: StationKey
@@ -120,6 +122,8 @@ export function workOverlapsWindow(ngay: string, bd: string, kt: string, w: Prod
  * Ca chưa có kiện quét ⇒ hiện (caller báo "chưa có kiện quét").
  */
 export function toLineVisible(unit: AttendanceUnit, line: DiagramLine, chipCa: string, windows: ProdWindow[], ngay: string): boolean {
+  // A4 — tổ phân ca: theo ca của dòng (Cả ngày luôn hiện). Dòng cũ chưa có ca ⇒ quy tắc giờ giao việc bên dưới.
+  if (unit.phan_ca && line.ca_phan_cong) return line.ca_phan_cong === chipCa || line.ca_phan_cong === CA_NGAY
   const w = windows.find((x) => x.ca === chipCa)
   if (!w) return true
   if (unit.khung_mac_dinh) {
@@ -199,6 +203,7 @@ export function buildDiagram(args: {
           gioiTinh: workerId ? staffById.get(workerId)?.gioi_tinh || null : null,
           vehicleId: l.vehicle_id,
           temp,
+          locked: !!l.gui_luc,
         }
         const st = stationOfJob.get(jobId)
         // Việc ca chỉ thuộc ô khi đúng phiếu Ca; việc tổ chỉ thuộc ô khi đúng phiếu tổ đó.
@@ -226,14 +231,19 @@ export type LineEditOptions = {
   /** Xe mặc định của người (tài xế chính / phụ). */
   vehicleOf: (staffId: string) => string
   jobById: Map<string, AttendanceJobType>
+  /** A4 — tổ phân ca: ca của dòng được giao (undefined = đơn vị không phân ca). */
+  caPhanCong?: string
+  /** A4b — dòng này người đang thao tác sửa được không (giữ chỗ theo người giao). Không truyền = sửa được. */
+  canEdit?: (l: SheetLineDraft) => boolean
 }
-export type LineEditResult = { lines: SheetLineDraft[]; error?: "absent" | "not_found" }
+export type LineEditResult = { lines: SheetLineDraft[]; error?: "absent" | "not_found" | "locked" }
 
 /** Bỏ 1 việc khỏi 1 dòng. Dòng có mặt hết việc ⇒ xoá dòng (người giữ vị trí vẫn được linesToPayload giữ lại). */
-export function removeJobFromLine(lines: SheetLineDraft[], lineId: string, jobId: string): LineEditResult {
+export function removeJobFromLine(lines: SheetLineDraft[], lineId: string, jobId: string, canEdit?: (l: SheetLineDraft) => boolean): LineEditResult {
   const idx = lines.findIndex((l) => l.id === lineId)
   if (idx < 0) return { lines, error: "not_found" }
   const l = lines[idx]
+  if (canEdit && !canEdit(l)) return { lines, error: "locked" }
   const ids = l.cong_viec_ids.filter((x) => x !== jobId)
   if (ids.length === 0 && l.diem_danh === "co") return { lines: lines.filter((_, i) => i !== idx) }
   const out = [...lines]
@@ -256,14 +266,26 @@ function withJob(l: SheetLineDraft, jobId: string, opt: LineEditOptions, workerI
 
 /** Giao 1 việc cho người: có dòng có mặt / đang là người thay ⇒ thêm việc; đang vắng ⇒ từ chối; chưa có ⇒ dòng mới. */
 export function addJobForWorker(lines: SheetLineDraft[], workerId: string, jobId: string, opt: LineEditOptions): LineEditResult {
-  const own = lines.findIndex((l) => l.staff_id === workerId)
+  const ca = opt.caPhanCong
+  const can = opt.canEdit || (() => true)
+  const sameCa = (l: SheetLineDraft) => ca === undefined || (l.ca_phan_cong || "") === ca
+  if (ca !== undefined) {
+    // Tổ phân ca: người đã làm Cả ngày không nhận thêm ca khác (và ngược lại).
+    const mine = lines.filter((l) => l.staff_id === workerId && (l.diem_danh === "vang" || l.cong_viec_ids.length > 0))
+    if (mine.some((l) => (l.ca_phan_cong === CA_NGAY) !== (ca === CA_NGAY) && l.ca_phan_cong)) return { lines, error: "locked" }
+    // Tổ phân ca: (người, ca) chỉ 1 dòng — dòng đó không sửa được ⇒ khoá.
+    const same = lines.find((l) => l.staff_id === workerId && sameCa(l))
+    if (same && !can(same)) return { lines, error: "locked" }
+  }
+  // Tổ không phân ca: chỉ thêm vào dòng mình sửa được; dòng người khác giao ⇒ tạo phân công riêng (giữ chỗ).
+  const own = lines.findIndex((l) => l.staff_id === workerId && sameCa(l) && can(l))
   if (own >= 0) {
     if (lines[own].diem_danh === "vang") return { lines, error: "absent" }
     const out = [...lines]
     out[own] = withJob(lines[own], jobId, opt, workerId)
     return { lines: out }
   }
-  const sub = lines.findIndex((l) => l.diem_danh === "vang" && l.thay_the_staff_id === workerId)
+  const sub = lines.findIndex((l) => l.diem_danh === "vang" && l.thay_the_staff_id === workerId && sameCa(l) && can(l))
   if (sub >= 0) {
     const out = [...lines]
     out[sub] = withJob(lines[sub], jobId, opt, workerId)
@@ -281,6 +303,7 @@ export function addJobForWorker(lines: SheetLineDraft[], workerId: string, jobId
         vehicle_id: needsVehicle ? opt.vehicleOf(workerId) : "",
         gio_bd: opt.hours?.bd || "",
         gio_kt: opt.hours?.kt || "",
+        ca_phan_cong: ca || "",
       }),
     ],
   }
@@ -291,6 +314,7 @@ export function moveJobOnLine(lines: SheetLineDraft[], lineId: string, fromJobId
   const idx = lines.findIndex((l) => l.id === lineId)
   if (idx < 0) return { lines, error: "not_found" }
   const l = lines[idx]
+  if (opt.canEdit && !opt.canEdit(l)) return { lines, error: "locked" }
   const kept = l.cong_viec_ids.filter((x) => x !== fromJobId)
   const out = [...lines]
   out[idx] = withJob({ ...l, cong_viec_ids: kept }, toJobId, opt, workerId)
@@ -298,10 +322,11 @@ export function moveJobOnLine(lines: SheetLineDraft[], lineId: string, fromJobId
 }
 
 /** Người (workerId) đang ở ô `jobId` trên dòng nào của phiếu (để bỏ khi bỏ tick ở tấm chọn người). */
-export function lineOfWorkerJob(lines: SheetLineDraft[], workerId: string, jobId: string): SheetLineDraft | undefined {
+export function lineOfWorkerJob(lines: SheetLineDraft[], workerId: string, jobId: string, ca?: string): SheetLineDraft | undefined {
   return lines.find(
     (l) =>
       l.cong_viec_ids.includes(jobId) &&
+      (ca === undefined || (l.ca_phan_cong || "") === ca || l.ca_phan_cong === CA_NGAY) &&
       ((l.diem_danh === "co" && l.staff_id === workerId) || (l.diem_danh === "vang" && l.thay_the_staff_id === workerId)),
   )
 }

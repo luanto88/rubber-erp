@@ -3,7 +3,7 @@
 // 1 ô người trên lưới điểm danh (C2 làm lại GĐ2). 4 trạng thái: chưa giao (viền đứt), có mặt (viền xanh + chip việc,
 // "B" góc phải khi xếp B), vắng có người thay (icon mờ + gạch chéo đỏ + "→ người thay"), vắng (chip đỏ).
 
-import { Briefcase } from "lucide-react"
+import { Briefcase, Lock } from "lucide-react"
 import { GenderIcon } from "./gender-icon"
 import type { TileState } from "@/lib/attendance/shift"
 import type { StationKey } from "@/lib/attendance/diagram"
@@ -22,6 +22,7 @@ export function WorkerTile({
   roleLabel,
   caLabel,
   missingCa,
+  locked,
   disabled,
   stationKey,
   onDragStart,
@@ -38,10 +39,12 @@ export function WorkerTile({
   chuaGiaoLabel: string
   /** Vị trí phụ trách đang giữ (Ca trưởng, Tổ phó…) — "" nếu không. */
   roleLabel?: string
-  /** A2 — ca làm của người thuộc TỔ ("Cả ngày" / "Ca A, B"); "" = không hiện. */
+  /** Giờ làm (tổ ghi giờ) hoặc ca (A4 tổ phân ca: "Ca A + Ca B" / "Cả ngày"); "" = không hiện. */
   caLabel?: string
   /** A2 — tổ có việc mà chưa chọn ca ⇒ chấm cam (sẽ bị chặn khi gửi). */
   missingCa?: boolean
+  /** A4 — có phân công đã gửi (khoá việc / ca) ⇒ ổ khoá nhỏ góc trái. */
+  locked?: boolean
   disabled?: boolean
   /** A3 — ô sơ đồ của việc đầu tiên ⇒ huy hiệu là icon ô; null ⇒ huy hiệu cặp hồ sơ như cũ. */
   stationKey?: StationKey | null
@@ -107,9 +110,13 @@ export function WorkerTile({
         <span className="text-[10px] font-semibold leading-4 text-slate-400">{chuaGiaoLabel}</span>
       )}
       {caLabel ? (
-        <span className="max-w-full truncate text-[10px] font-bold leading-4 text-sky-700">{caLabel}</span>
+        <span className="line-clamp-2 max-w-full break-words rounded-md bg-sky-50 px-1 text-[10px] font-bold leading-[13px] text-sky-700">{caLabel}</span>
       ) : null}
-      {missingCa ? (
+      {locked ? (
+        <span className="absolute left-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-slate-600 text-white ring-2 ring-white" aria-hidden>
+          <Lock size={9} strokeWidth={2.75} />
+        </span>
+      ) : missingCa ? (
         <span className="absolute left-1 top-1 h-2.5 w-2.5 rounded-full bg-orange-500 ring-2 ring-white" aria-hidden />
       ) : null}
     </button>

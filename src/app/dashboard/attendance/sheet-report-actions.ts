@@ -68,6 +68,8 @@ type LineRow = {
   giao_luc?: string | null
   gio_bd?: string | null
   gio_kt?: string | null
+  /** A4 (20261222) — tổ phân ca: mã Ca hoặc CA_NGAY. */
+  ca_phan_cong?: string | null
 }
 type UnitRow = {
   code: string
@@ -79,6 +81,7 @@ type UnitRow = {
   is_active?: boolean | null
   day_chuyen?: string | null
   khung_mac_dinh?: KhungMode | null
+  phan_ca?: boolean | null
 }
 type JobRow = { id: string; ten: string; ten_khmer: string | null; to_nhom: string; sort_order: number; an_diem_danh: boolean | null; day_chuyen: string | null; unit_code?: string | null; is_active?: boolean | null }
 type StaffRow = {
@@ -302,7 +305,7 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
       .eq("sheet_id", sheetId),
     sb
       .from("attendance_sheet_lines")
-      .select("id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, xep_loai, diem_danh, vang_loai, ly_do, thay_the_staff_id, thay_the_ten, giao_luc, gio_bd, gio_kt")
+      .select("id, section_id, stt, staff_id, cong_viec_id, cong_viec_ids, xep_loai, diem_danh, vang_loai, ly_do, thay_the_staff_id, thay_the_ten, giao_luc, gio_bd, gio_kt, ca_phan_cong")
       .eq("sheet_id", sheetId)
       .order("stt")
       .range(0, 9999),
@@ -318,7 +321,7 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
     ),
     sb.from("factories").select("name, ten_khmer").eq("id", factoryId).maybeSingle(),
     loadGradeConfigServer(factoryId),
-    sb.from("attendance_units").select("code, ten, ten_khmer, loai, to_nhom, sort_order, is_active, day_chuyen, khung_mac_dinh").eq("factory_id", factoryId),
+    sb.from("attendance_units").select("code, ten, ten_khmer, loai, to_nhom, sort_order, is_active, day_chuyen, khung_mac_dinh, phan_ca").eq("factory_id", factoryId),
   ])
   for (const r of [secRes, lineRes, jobRes, facRes, unitRes]) if (r.error) throw new Error(r.error.message)
 
@@ -490,6 +493,26 @@ export async function loadF01Model(accessToken: string | null, factoryId: string
   const groupsOf = (sec: SectionRow, unit: UnitRow | undefined, ls: LineRow[]): F01JobGroup[] | undefined => {
     if (unit?.loai !== "to") return undefined
     const clean = (rows: F01JobRow[]) => rows.filter((r) => r.people.length > 0)
+    if (unit.phan_ca && ls.some((l) => l.ca_phan_cong)) {
+      // A4 — tổ phân ca: mỗi Ca 1 nhóm theo thứ tự đơn vị, rồi "Cả ngày (24h)"; dòng cũ chưa có ca ⇒ theo giờ giao việc.
+      const byKey = new Map<string, LineRow[]>()
+      for (const l of ls) {
+        const key = l.ca_phan_cong || assignToProductionCa(l.giao_luc, prodWindows) || ""
+        byKey.set(key, [...(byKey.get(key) || []), l])
+      }
+      const caCodes = Array.from(unitMap.values())
+        .filter((u) => u.loai === "ca")
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((u) => u.code)
+      const out: F01JobGroup[] = []
+      for (const code of [...caCodes, "CA_NGAY"]) {
+        const rows = clean(buildRows(unit, byKey.get(code) || []))
+        if (rows.length > 0) out.push({ label: code === "CA_NGAY" ? "Cả ngày (24h)" : prodCaLabel(code), rows })
+      }
+      const rest = clean(buildRows(unit, Array.from(byKey.entries()).filter(([k]) => k !== "CA_NGAY" && !caCodes.includes(k)).flatMap(([, v]) => v)))
+      if (rest.length > 0) out.push({ label: "", rows: rest })
+      return out.length > 0 ? out : undefined
+    }
     if (unit.khung_mac_dinh) {
       // Tổ ghi giờ làm: mỗi khung giờ (bd–kt) 1 nhóm, sắp theo giờ bắt đầu; dòng thiếu giờ ⇒ nhóm không tiêu đề cuối.
       const byGio = new Map<string, LineRow[]>()

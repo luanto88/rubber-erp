@@ -32,6 +32,7 @@ export function SubmitReview({
   unassigned,
   skipUnassignedDefault = false,
   missingKhungNames = [],
+  blockText,
   khungLabelOf,
   staffById,
   reasons,
@@ -52,6 +53,8 @@ export function SubmitReview({
   skipUnassignedDefault?: boolean
   /** A2 — người của tổ theo khung có việc mà chưa chọn khung ⇒ khoá nút gửi. */
   missingKhungNames?: string[]
+  /** A4 — lý do chặn gửi khác (vd tổ phân ca còn dòng chưa chọn ca). */
+  blockText?: string
   /** A2 — nhãn khung giờ của dòng (chỉ tổ theo khung). */
   khungLabelOf?: (l: SheetLineDraft) => string
   staffById: Map<string, ShiftStaff>
@@ -105,7 +108,7 @@ export function SubmitReview({
       .sort((a, b) => (a.job?.sort_order ?? 9999) - (b.job?.sort_order ?? 9999) || (a.job?.ten || "").localeCompare(b.job?.ten || "", "vi"))
     return { coCount: present.length, vangCount, thayCount: replaced.length, rows }
   }, [allLines, absentLines, unassigned, skip, staffById, jobById, T, khungLabelOf])
-  const blockedByCa = missingKhungNames.length > 0
+  const blockedByCa = missingKhungNames.length > 0 || !!blockText
 
   const patch = (id: string, p: Partial<Choice>) => setChoices((c) => ({ ...c, [id]: { ...c[id], ...p } }))
 
@@ -146,7 +149,7 @@ export function SubmitReview({
     const skipped = !line && skip.has(id)
     const replacement = line?.thay_the_staff_id ? staffById.get(line.thay_the_staff_id)?.ten : line?.thay_the_ten
     return (
-      <div key={id} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+      <div key={line ? line.id : id} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
         <div className="flex items-center gap-2">
           <GenderIcon gioiTinh={s?.gioi_tinh} size={28} muted={skipped} />
           <div className="min-w-0 flex-1">
@@ -301,7 +304,7 @@ export function SubmitReview({
       </div>
       {blockedByCa ? (
         <div className="border-t border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-800">
-          <div className="mx-auto max-w-2xl">{T("chuaCoGioLam", { ten: missingKhungNames.join(", ") })}</div>
+          <div className="mx-auto max-w-2xl">{blockText || T("chuaCoGioLam", { ten: missingKhungNames.join(", ") })}</div>
         </div>
       ) : null}
       <div className="border-t border-slate-200 bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

@@ -313,3 +313,33 @@ Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay.
 Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
 Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
 ```
+
+## 18. Cập nhật 2026-11-27 (phiên sau A3) — A4 Tổ phân ca: ĐÃ CODE (tsc + eslint sạch), CHƯA commit, CHƯA push
+- Production đã chạy 20261221 (người dùng xác nhận). A4: chạy `20261222_attendance_to_phan_ca.sql` TRƯỚC deploy (UNIT_SELECT /
+  LINE_SELECT đọc cột mới `phan_ca`, `ca_phan_cong`, `gui_luc` — chưa chạy là màn điểm danh lỗi).
+- Chi tiết: rule 31 mục "A4". Kế hoạch: `C:\Users\Software\.claude\plans\stateless-munching-rainbow-of-0af25ea4-eff2-4585-b957-51311df322eb.md`
+  (cuối file có danh sách B để duyệt).
+- Kế tiếp sau khi A4 test PASS: B (người dùng duyệt danh sách bảng / RPC / màn hình trước khi code).
+
+## 19. Cập nhật 2026-11-27 (cuối phiên) — A4 + A4b ĐÃ CODE (tsc + eslint sạch), ĐÃ commit, CHƯA push, CHƯA test A4b
+- Localhost đã chạy 20261222 (bản sửa safeupdate — chạy lại cả file). Cần chạy `20261223_attendance_line_owner.sql` rồi test A4b.
+- Production: chạy 20261222 → 20261223 TRƯỚC khi push/deploy (màn điểm danh đọc cột phan_ca, ca_phan_cong, gui_luc, lap_boi…).
+- Chi tiết: rule 31 mục "A4" + "A4b". Kế hoạch: `C:\Users\Software\.claude\plans\stateless-munching-rainbow-of-0af25ea4-eff2-4585-b957-51311df322eb.md`
+  (cuối file: danh sách B chờ duyệt).
+
+## Prompt phiên sau (2026-11-27, sau A4b — thay các prompt cũ ở trên)
+```
+Đọc CLAUDE.md, rule 29, rule 31 (mục "A2", "A3", "A4", "A4b", "C5"), rule 27 (mục "Hệ số chuyên cần"), và
+.claude/plans/ban-giao-cham-cong-ca-to.md mục 14 (đã chốt B) + mục 19 (trạng thái mới nhất). A4 + A4b (Tổ cơ điện phân ca, phiếu
+Tổ giữ chỗ theo người giao) đã commit, CHƯA push. Đầu phiên hỏi tôi: localhost đã chạy 20261223 chưa, kết quả test A4b (5 bước
+trong kế hoạch C:\Users\Software\.claude\plans\stateless-munching-rainbow-of-0af25ea4-eff2-4585-b957-51311df322eb.md mục "Kiểm
+tra"), và có push không (production phải chạy 20261222 → 20261223 TRƯỚC deploy).
+
+Sửa lỗi test A4b nếu có (giữ đúng quy tắc giữ chỗ: canEditLine ↔ attendance_line_editable phải khớp; save / submit / recall chép
+từ 20261223). Sau đó: B — tua chuẩn theo tháng + thẻ Chuyên cần / Mâu thuẫn ở Lịch công + chỉ số phụ "ngày chuyên cần" (tie-break
+xếp hạng KPI). TRƯỚC khi code B: đưa tôi duyệt danh sách bảng / cột / RPC / màn hình / script (cuối file kế hoạch trên). Hỏi tôi
+bằng ngôn ngữ nghiệp vụ + ví dụ nếu còn chỗ chưa rõ. Dừng cho tôi test, hỏi trước khi commit/push.
+Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay (360/390/430 px + Khmer với màn điểm danh).
+Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
+Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
+```

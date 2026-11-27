@@ -378,3 +378,47 @@ chỉ ô của Ca/Tổ đang mở. Ô "Sửa chữa cơ khí" = việc "Sửa ch
 - Sau test 2026-11-27 (migration 20261221 ĐÃ CHẠY localhost, test PASS): gỡ người khỏi ô = dấu X trên tên (mọi thiết bị) hoặc
   kéo tên thả ra khoảng trống của khung sơ đồ (máy tính, khung viền đỏ "Thả ra đây để gỡ khỏi ô") — chỉ bỏ việc của ô đó,
   việc khác giữ; dòng hết việc thì xoá dòng (người giữ vị trí vẫn có mặt). Ô tự chặn lan sự kiện kéo.
+
+## A4 Tổ phân ca + phiếu Tổ không khoá cứng + icon thẻ người (2026-11-27, chờ chạy migration 20261222 + test tay)
+Người dùng chốt (sau test A3 production): trực ca B gửi phiếu Tổ cơ điện ⇒ trực ca A không phân công tiếp được.
+- CHỈ đơn vị `attendance_units.phan_ca = true` (seed CD — Tổ cơ điện – bảo trì – xe nâng) có trường Ca cho từng dòng
+  (`attendance_sheet_lines.ca_phan_cong` = mã Ca A/B/C hoặc `CA_NGAY` = cả ngày 24h). 1 người làm 2 ca = 2 dòng, việc riêng từng
+  ca (unique đổi thành `(section, staff, coalesce(ca_phan_cong,''))`). Cả ngày không đi chung ca khác. Tổ khác giữ giờ làm / giao_luc.
+- Phiếu TỔ (mọi tổ) đã gửi VẪN sửa được; `attendance_sheet_lines.gui_luc` = dòng đã gửi ⇒ khoá việc / ca / xe với mọi người trừ
+  admin (server: bỏ dòng ⇒ chèn lại, đổi ⇒ báo lỗi). Vẫn ghi vắng / người thay / xếp loại. Phiếu đang "Trả về" ⇒ không khoá.
+  Sửa phiếu `da_gui` ⇒ về `dang_lam`, gửi lại ⇒ văn phòng duyệt 1 lần. `da_duyet` khoá hẳn. Phiếu Ca sản xuất không đổi.
+- Ai sửa phiếu tổ: người chấm công / người lập / người được phân công tổ đó (mọi dòng chưa khoá); trực ca chỉ có phân công Ca A/B/C
+  ⇒ mở được tổ phân ca nhưng chỉ thêm / sửa dòng của Ca mình (server kiểm `attendance_my_ca_codes`).
+- Tổ trưởng phân trước 1 ngày: phiếu tổ mở được NGÀY MAI (ô ngày cho chọn khi đơn vị là tổ; chuyển sang Ca ⇒ ngày về hôm nay).
+- Ca mặc định khi giao ở tổ phân ca = Ca người đăng nhập đang trực (phân công Ca → `ca_mac_dinh` trong hồ sơ); trực ca tự nhận việc
+  "Trực ca" theo ca đó. Tổ phân ca không gợi ý từ phiếu trước.
+- Admin "Thu hồi" (`attendance_recall_section`, lý do bắt buộc): xoá `gui_luc` mọi dòng, phiếu về `tra_ve`, chuông cho người lập —
+  nút ở màn điểm danh và chi tiết phiếu.
+- Tấm chọn việc (tổ phân ca): 1 hàng [Ca A · B · C · Cả ngày] [Xếp loại A · B]; ca đã gửi có ổ khoá. Thẻ người: nhãn "Ca A + Ca B"
+  (sky, 2 dòng), ổ khoá khi có dòng đã gửi. Sơ đồ: ô tổ phân ca lọc theo `ca_phan_cong` (= chip hoặc Cả ngày); kéo vào ô ⇒ dòng
+  mang ca của chip. TKSX: khối tổ phân ca nhóm "Ca A (Ca trưởng)" / "Ca B (…)" / "Cả ngày (24h)"; dòng cũ không ca ⇒ giao_luc.
+  Chi tiết phiếu: cột "Ca".
+- Icon người (`gender-icon.tsx`, cả thẻ / tấm chọn / bước gửi): người đội mũ bảo hộ phong cách icon sơ đồ, áo theo giới tính.
+- Mọi `CREATE OR REPLACE attendance_lock_section_for_edit / save_section / submit_section / open_section` về sau chép từ 20261222.
+- Sửa sau test bước 1 (2026-11-27): (1) Supabase bật safeupdate ⇒ RPC không được `DELETE` không WHERE — bảng tạm của
+  `attendance_save_section` tạo lại bằng `drop table if exists` + `create temp table … as select` (chạy lại cả file 20261222).
+  (2) Tấm chọn việc: Ca CHỌN NHIỀU (trái) ↔ Xếp loại (phải); tick việc áp cho mọi ca đang chọn (việc chỉ có ở 1 số ca = viền đứt);
+  chọn thêm ca mới ⇒ chép việc của ca chính; Cả ngày ↔ Ca A/B/C loại trừ nhau (chuyển việc chưa gửi sang ca vừa chọn).
+  (3) Dòng cũ chưa có ca: tấm chọn việc gộp vào ca đang chọn; mở phiếu tổ phân ca tự gộp dòng cũ trùng người có dòng đã có ca
+  (`mergeLegacyCaLines`) rồi tự lưu. Dòng cũ đã gửi (khoá, trước A4) không chặn gửi lại; phiếu "Trả về" thì phải chọn ca.
+
+### A4b "Giữ chỗ" theo người giao (2026-11-27, chờ chạy migration 20261223 + test tay)
+Sau test A4 bước 1 (Danh Ngàn / Somren / Uk Sarath). Migration `20261223_attendance_line_owner.sql` (chạy SAU 20261222, TRƯỚC
+deploy; mọi CREATE OR REPLACE save / submit / recall về sau chép từ file này; lock / open vẫn ở 20261222):
+- `attendance_sheet_lines.lap_boi` (người giao, backfill = người lập phiếu), `gui_boi`, `chot_ca`. Unique
+  `(section, staff, ca_phan_cong, lap_boi)`; save chặn trùng: phiếu Ca 1 dòng / người, tổ phân ca (người, ca), tổ khác (người, người giao).
+- Quyền sửa 1 dòng phiếu tổ = SQL `attendance_line_editable` ↔ client `canEditLine` (`shift.ts`), PHẢI khớp nhau:
+  chưa gửi / phiếu "Trả về" ⇒ người giao hoặc (tổ phân ca) trực ca đúng ca; đã gửi ⇒ chỉ tổ phân ca, đúng ca, `chot_ca = false`;
+  admin mọi dòng. Sửa được là sửa hết (việc, xe, xếp loại, vắng, người thay). Người chấm công tất cả cũng bị giữ chỗ.
+- Người khác giao ⇒ tấm chọn việc hiện khối "Phân công khác" (chỉ xem, "X giao", Đã gửi / Chưa gửi); việc chọn bên dưới = phân
+  công RIÊNG của mình; tổ ghi giờ chặn trùng giờ (`workHoursOverlap`). Sơ đồ: giao vào ô tổ không phân ca ⇒ dòng của mình.
+- Save: dòng không sửa được ⇒ giữ bản DB (bỏ qua client, không báo lỗi); sửa dòng đã gửi ⇒ dòng về chưa gửi.
+- Submit (phiếu tổ): gửi dòng mình sửa được (`chot_ca` = đúng ca của mình); phiếu "Đã gửi" + chuông văn phòng chỉ khi mọi dòng có
+  nội dung đã gửi, ngược lại trả `mot_phan:N` (thông báo "còn N phân công của người khác"). Admin thu hồi báo mọi người giao.
+- Nút đáy: "Gửi tất cả" và "Gửi chấm công · {Ca của mình | tên Ca/Tổ}" rộng bằng nhau. Hàng Ca / Xếp loại giãn đầy hàng.
+- Chi tiết phiếu tổ: cột "Người giao".
