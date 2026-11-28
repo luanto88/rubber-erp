@@ -23,7 +23,8 @@
 //
 // Phase 5 (migration 20260814_kpi_score_lock_adjust_rank.sql):
 // - Nút "Khóa" trên mỗi dòng bảng "Toàn nhà máy" (chỉ canCompute = admin/kpi.manage_config) —
-//   chuyển trang_thai 'nhap' → 'da_khoa'. KHÔNG có nút "mở khóa" (xem comment đầu migration).
+//   chuyển trang_thai 'nhap' → 'da_khoa'. Từ 20261225 admin có nút "Mở khoá" (lý do bắt buộc, nhật ký
+//   kpi_monthly_score_unlocks) — mở xong "Tính điểm tháng" ghi đè cả điểm đã điều chỉnh.
 // - Nút "Khiếu nại điểm này" trên card "Điểm của bạn" — chỉ hiện khi điểm tháng đang chọn đã
 //   'da_khoa'. Lịch sử điều chỉnh (kpi_score_adjustments) hiện ngay dưới nếu có.
 // - Sub-tab thứ 3 "Bảng xếp hạng" — ẩn danh theo Nhóm chuyên môn hoặc Phòng ban, chỉ hiện
@@ -31,11 +32,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, Award, Calculator, Eye, Flag, History, ListTree, Lock, ListOrdered, TrendingUp } from "lucide-react"
+import { ArrowLeft, Award, Calculator, Eye, Flag, History, ListTree, Lock, LockOpen, ListOrdered, TrendingUp } from "lucide-react"
 import { getActiveFactoryId, hasPermission, hydrateActiveSession, type SessionUser } from "@/lib/auth"
 import { KpiShell } from "@/app/dashboard/kpi/_components/kpi-shell"
 import { KpiProgressBar } from "@/app/dashboard/kpi/_components/kpi-progress-bar"
 import { ModalShell } from "@/app/dashboard/_components/modal-shell"
+import { ReasonConfirmDialog } from "@/app/dashboard/_components/reason-confirm-dialog"
 import { ResponsiveTableWrapper } from "@/app/dashboard/_components/responsive-table-wrapper"
 import { useScrollReveal } from "@/lib/useScrollReveal"
 import { fetchDepartmentOptions, resolveMyLeaderDepartmentId, type DepartmentOption } from "@/lib/kpi-department-leaders"
@@ -54,10 +56,12 @@ import {
   fetchKpiScoreWeights,
   fetchMyKpiMonthlyScores,
   lockKpiMonthlyScore,
+  unlockKpiMonthlyScore,
   type KpiAttendanceSummary,
   type KpiMonthlyScore,
   type KpiScoreAdjustment,
   type KpiScoreRankingRow,
+  KPI_TUA_SOURCE_LABEL,
   type KpiScoreWeights,
 } from "@/lib/kpi-scores"
 import {
@@ -106,6 +110,8 @@ export default function KpiScoresPage() {
 
   // Phase 5: khóa sổ, khiếu nại điểm tháng, lịch sử điều chỉnh
   const [lockingId, setLockingId] = useState<string | null>(null)
+  const [unlockTarget, setUnlockTarget] = useState<KpiMonthlyScore | null>(null)
+  const [unlocking, setUnlocking] = useState(false)
   const [myAdjustments, setMyAdjustments] = useState<KpiScoreAdjustment[]>([])
   const [appealModalOpen, setAppealModalOpen] = useState(false)
   const [appealNoiDung, setAppealNoiDung] = useState("")
@@ -219,6 +225,23 @@ export default function KpiScoresPage() {
       setLoadError(getKpiErrorMessage(err, "Không khóa được điểm này."))
     } finally {
       setLockingId(null)
+    }
+  }
+
+  // Mở khoá sổ 1 điểm tháng (CHỈ admin, lý do bắt buộc — RPC kiểm lại, ghi nhật ký bất biến).
+  const handleUnlock = async (lyDo: string) => {
+    if (!factoryId || !user || !unlockTarget) return
+    setUnlocking(true)
+    setLoadError("")
+    try {
+      await unlockKpiMonthlyScore(unlockTarget.id, lyDo)
+      setUnlockTarget(null)
+      void loadData(factoryId, user.id, canViewAll, nam, thang)
+    } catch (err) {
+      setUnlockTarget(null)
+      setLoadError(getKpiErrorMessage(err, "Không mở khoá được điểm này."))
+    } finally {
+      setUnlocking(false)
     }
   }
 
@@ -488,6 +511,14 @@ export default function KpiScoresPage() {
                                     <Lock size={10} /> {lockingId === s.id ? "..." : "Khóa"}
                                   </button>
                                 )}
+                                {isAdmin && s.trang_thai === "da_khoa" && (
+                                  <button
+                                    onClick={() => setUnlockTarget(s)}
+                                    className="flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-50"
+                                  >
+                                    <LockOpen size={10} /> Mở khoá
+                                  </button>
+                                )}
                               </div>
                             </td>
                             <td className="py-2 pl-2">
@@ -571,6 +602,22 @@ export default function KpiScoresPage() {
           </div>
         </ModalShell>
       )}
+      {unlockTarget && (
+        <ReasonConfirmDialog
+          title="Mở khoá sổ điểm KPI"
+          subtitle={`${resolveName(unlockTarget.user_id)} · tháng ${unlockTarget.thang}/${unlockTarget.nam} · điểm ${unlockTarget.diem_tong ?? "—"}`}
+          points={[
+            "Điểm trở về trạng thái Nháp — lần \"Tính điểm tháng\" sau sẽ tính lại và ghi đè (kể cả điểm đã điều chỉnh).",
+            "Lịch sử điều chỉnh cũ vẫn giữ; lần mở khoá này được ghi nhật ký, không xoá được.",
+            "Muốn chốt lại thì bấm Khóa sau khi tính lại.",
+          ]}
+          reasonLabel="Lý do mở khoá"
+          confirmLabel="Mở khoá"
+          busy={unlocking}
+          onConfirm={(lyDo) => void handleUnlock(lyDo)}
+          onCancel={() => setUnlockTarget(null)}
+        />
+      )}
     </KpiShell>
   )
 }
@@ -603,6 +650,7 @@ function attendanceSummaryText(score: KpiMonthlyScore): string {
   const parts = [`Có mặt ${(cc.co_mat ?? 0) + (cc.phep_thuong_bu ?? 0)}/${cc.cong_chuan ?? "—"} công chuẩn`]
   if (cc.phep_thuong_bu) parts.push(`gồm ${cc.phep_thuong_bu} ngày phép thưởng bù`)
   if (cc.khong_phep) parts.push(`${cc.khong_phep} ngày nghỉ không phép`)
+  if (cc.ngay_chuyen_can) parts.push(`${cc.ngay_chuyen_can} ngày chuyên cần`)
   if (cc.tam_tinh) parts.push("tạm tính — tháng chưa kết thúc")
   return parts.join(" · ")
 }
@@ -700,7 +748,8 @@ function MyScoreExplain({
   const wB = applicable?.trong_so_dung_han ?? d.trong_so_dung_han
   const wC = applicable?.trong_so_5s ?? d.trong_so_5s
   const wD = applicable?.trong_so_chuyen_mon ?? d.trong_so_chuyen_mon
-  const tuaChuan = applicable?.so_ngay_nghi_tua_chuan ?? d.so_ngay_nghi_tua_chuan
+  // B: tua chuẩn có thể đặt theo tháng ⇒ ưu tiên số do RPC tổng hợp trả (đúng tháng đang xem).
+  const tuaChuan = att?.tua_chuan ?? applicable?.so_ngay_nghi_tua_chuan ?? d.so_ngay_nghi_tua_chuan
   const mucPhat = applicable?.he_so_phat_khong_phep ?? d.he_so_phat_khong_phep
   const heSoMin = applicable?.he_so_chuyen_can_min ?? d.he_so_chuyen_can_min
   const heSoMax = applicable?.he_so_chuyen_can_max ?? d.he_so_chuyen_can_max
@@ -994,7 +1043,20 @@ function AttendanceFactorCard({ att, subjectName }: { att: KpiAttendanceSummary 
             <AttCell label="Nghỉ tua" value={att.nghi_tua} />
             <AttCell label="Nghỉ có phép" value={att.co_phep} />
             <AttCell label="Chưa ghi nhận" value={att.chua_ghi_nhan} hint={`trong ${att.so_ngay_da_qua} ngày đã qua`} />
+            {att.ngay_chuyen_can != null && (
+              <AttCell
+                label="Ngày chuyên cần"
+                value={att.ngay_chuyen_can}
+                hint="nghỉ tua vẫn làm việc của nhóm chính — chỉ dùng khi bằng điểm"
+              />
+            )}
           </div>
+          {att.tua_nguon && (
+            <div className="mt-2 text-[11px] text-slate-500">
+              Tua chuẩn {att.tua_chuan} ngày — theo {KPI_TUA_SOURCE_LABEL[att.tua_nguon] || att.tua_nguon}
+              {att.tua_ly_do ? <> · lý do: <span className="text-slate-700">{att.tua_ly_do}</span></> : null}
+            </div>
+          )}
           <div className="mt-3 text-sm text-slate-700">
             ({tuSo} ÷ {att.cong_chuan}){att.khong_phep > 0 ? ` − ${att.khong_phep} × ${att.muc_phat}` : ""} ={" "}
             {(tuSo / att.cong_chuan - att.khong_phep * att.muc_phat).toFixed(3)} → giới hạn [{att.he_so_min}; {att.he_so_max}] ={" "}
@@ -1154,12 +1216,17 @@ function ScoreRankingView({ factoryId, userId, nam, thang }: { factoryId: string
         <div className="py-6 text-center text-sm text-slate-400">Chưa có điểm nào được tính cho lựa chọn này trong tháng đã chọn.</div>
       ) : (
         <div className="space-y-1.5">
-          {rows.map((r) => (
+          {rows.map((r, i) => (
             <div
-              key={r.rank}
+              key={`${r.rank}-${i}`}
               className={`row-hover rounded-xl px-3 py-2 text-sm ${r.is_me ? "bg-violet-50 font-extrabold text-violet-700 ring-1 ring-violet-200" : "text-slate-600"}`}
             >
               Hạng {r.rank}{r.is_me ? " (bạn)" : ""}: {r.diem_tong} điểm
+              {r.ngay_chuyen_can != null && (
+                <span className="ml-2 text-xs font-bold text-emerald-700" title="Ngày chuyên cần — dùng xếp hạng khi bằng điểm">
+                  · {r.ngay_chuyen_can} ngày chuyên cần
+                </span>
+              )}
             </div>
           ))}
         </div>

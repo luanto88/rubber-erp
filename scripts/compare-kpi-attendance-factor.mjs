@@ -6,6 +6,8 @@
 // Script tự kiểm thêm: công thức JS trên các con số của hàm SQL phải ra đúng hệ số SQL (lệch ⇒ báo lỗi).
 // Lưu ý: "Có mặt tự động" chỉ có sau khi đã đồng bộ tháng đó (mở Lịch công tháng đó, hoặc bấm "Tính điểm tháng").
 // Sau khi bấm "Tính điểm tháng", chạy lại: dòng đã tính bằng công thức v2 phải có "đang lưu" = "mới".
+// B (20261224): tự kiểm thêm tua chuẩn theo tháng (tháng-nhóm chính → tháng-chung → trọng số nhóm → trọng số chung → 6)
+// và "ngày chuyên cần" (Nghỉ tua có thao tác thuộc nguồn của nhóm chính) bằng JS đọc thẳng bảng.
 import { createClient } from "@supabase/supabase-js"
 
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || "").split("=")[1] || d
@@ -31,6 +33,40 @@ const padL = (s, n) => String(s).padStart(n).slice(-n)
 let formulaErrors = 0
 let storedMismatch = 0
 
+// B: dữ liệu để tự kiểm tua chuẩn + ngày chuyên cần.
+async function fetchAll(build) {
+  let all = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build().range(from, from + 999)
+    if (error) throw error
+    all = all.concat(data || [])
+    if (!data || data.length < 1000) return all
+  }
+}
+const { data: monthCfg, error: mcErr } = await sb
+  .from("kpi_attendance_month_config").select("group_id, thang, so_ngay_nghi_tua_chuan").eq("factory_id", fac.id)
+if (mcErr) throw new Error(`Đọc kpi_attendance_month_config lỗi (đã chạy migration 20261224 chưa?): ${mcErr.message}`)
+const { data: weights, error: wErr } = await sb
+  .from("kpi_score_weights").select("group_id, so_ngay_nghi_tua_chuan").eq("factory_id", fac.id)
+if (wErr) throw wErr
+const { data: groups, error: gErr } = await sb.from("personnel_groups").select("id, nguon_hoat_dong").eq("factory_id", fac.id)
+if (gErr) throw gErr
+const primaryRows = await fetchAll(() =>
+  sb.from("personnel_group_members").select("staff_id, group_id").eq("factory_id", fac.id).eq("is_primary", true).order("staff_id"))
+const primaryOf = new Map(primaryRows.map((r) => [r.staff_id, r.group_id]))
+const sourcesOf = new Map(groups.map((g) => [g.id, g.nguon_hoat_dong || []]))
+function expectTua(groupId, thangIso) {
+  const mg = groupId && monthCfg.find((c) => c.group_id === groupId && c.thang === thangIso)
+  if (mg) return mg.so_ngay_nghi_tua_chuan
+  const mc = monthCfg.find((c) => c.group_id == null && c.thang === thangIso)
+  if (mc) return mc.so_ngay_nghi_tua_chuan
+  const wg = groupId && weights.find((w) => w.group_id === groupId)
+  if (wg && wg.so_ngay_nghi_tua_chuan != null) return wg.so_ngay_nghi_tua_chuan
+  const wd = weights.find((w) => w.group_id == null)
+  if (wd && wd.so_ngay_nghi_tua_chuan != null) return wd.so_ngay_nghi_tua_chuan
+  return 6
+}
+
 for (const ym of MONTHS) {
   const [nam, thang] = ym.split("-").map(Number)
   const { data: summ, error: sErr } = await sb.rpc("kpi_attendance_summary_internal", {
@@ -44,12 +80,25 @@ for (const ym of MONTHS) {
   if (kErr) throw kErr
 
   const byProfile = new Map(summ.map((r) => [r.profile_id, r]))
+  const thangIso = `${ym}-01`
+  const lastDay = new Date(nam, thang, 0).getDate()
+  const recs = await fetchAll(() =>
+    sb.from("attendance_records").select("staff_id, trang_thai, hoat_dong")
+      .eq("factory_id", fac.id).eq("trang_thai", "nghi_tua")
+      .gte("ngay", thangIso).lte("ngay", `${ym}-${String(lastDay).padStart(2, "0")}`).order("id"))
+  const ccByStaff = new Map()
+  for (const r of recs) {
+    const src = sourcesOf.get(primaryOf.get(r.staff_id)) || []
+    if (src.length && Array.isArray(r.hoat_dong) && r.hoat_dong.some((a) => src.includes(a.nguon))) {
+      ccByStaff.set(r.staff_id, (ccByStaff.get(r.staff_id) || 0) + 1)
+    }
+  }
   console.log(`\n══ Tháng ${ym} · ${fac.name} ══`)
   const s0 = summ[0]
   if (s0) console.log(`Ngày lịch ${s0.so_ngay_lich} · đã qua ${s0.so_ngay_da_qua}${s0.tam_tinh ? " (TẠM TÍNH — tháng chưa hết)" : ""}`)
   console.log(
     `${pad("Người", 26)} ${pad("Loại", 11)} ${padL("CóMặt", 5)} ${padL("Bù", 3)} ${padL("KP", 3)} ${padL("CC", 3)} ` +
-      `${padL("HS cũ", 6)} ${padL("HS mới", 6)} ${padL("Điểm cũ", 7)} ${padL("Dự kiến", 7)}  Ghi chú`,
+      `${padL("Tua", 3)} ${padL("NCC", 3)} ${padL("HS cũ", 6)} ${padL("HS mới", 6)} ${padL("Điểm cũ", 7)} ${padL("Dự kiến", 7)}  Ghi chú`,
   )
 
   const rows = []
@@ -74,6 +123,20 @@ for (const ym of MONTHS) {
         notes.push(`LỖI công thức: JS ${js} ≠ SQL ${att.he_so}`)
       }
     }
+    // B: tự kiểm tua chuẩn + ngày chuyên cần.
+    if (att && att.staff_id) {
+      const tua = expectTua(primaryOf.get(att.staff_id) || null, thangIso)
+      if (tua !== att.tua_chuan || Math.max(1, att.so_ngay_lich - tua) !== att.cong_chuan) {
+        formulaErrors++
+        notes.push(`LỖI tua: JS ${tua} ≠ SQL ${att.tua_chuan} (${att.tua_nguon})`)
+      }
+      const ncc = att.loai === "nhan_vien" ? ccByStaff.get(att.staff_id) || 0 : 0
+      if (ncc !== (att.ngay_chuyen_can ?? 0)) {
+        formulaErrors++
+        notes.push(`LỖI ngày chuyên cần: JS ${ncc} ≠ SQL ${att.ngay_chuyen_can}`)
+      }
+      if (att.tua_nguon === "thang_nhom" || att.tua_nguon === "thang_chung") notes.push(`tua theo ${att.tua_nguon}`)
+    }
     if (!att) notes.push("không có trong tổng hợp (tài khoản không còn active?)")
     else if (att.khong_tron) notes.push(sc?.trang_thai === "da_khoa" ? "làm không trọn — ĐÃ KHOÁ, giữ nguyên" : "làm không trọn ⇒ dòng điểm sẽ bị xoá")
     else if (att.khong_xet) notes.push(`${att.khong_xet} ⇒ 1,00`)
@@ -96,7 +159,7 @@ for (const ym of MONTHS) {
 
     console.log(
       `${pad(nameOf(uid), 26)} ${pad(att?.loai || "?", 11)} ${padL(att?.co_mat ?? "—", 5)} ${padL(att?.phep_thuong_bu ?? "—", 3)} ` +
-        `${padL(att?.khong_phep ?? "—", 3)} ${padL(att?.cong_chuan ?? "—", 3)} ${padL(fmt(oldHs), 6)} ${padL(fmt(newHs), 6)} ` +
+        `${padL(att?.khong_phep ?? "—", 3)} ${padL(att?.cong_chuan ?? "—", 3)} ${padL(att?.tua_chuan ?? "—", 3)} ${padL(att?.ngay_chuyen_can ?? "—", 3)} ${padL(fmt(oldHs), 6)} ${padL(fmt(newHs), 6)} ` +
         `${padL(fmt(sc?.diem_tong, 1), 7)} ${padL(fmt(projected, 1), 7)}  ${notes.join("; ")}`,
     )
   }

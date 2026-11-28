@@ -1,7 +1,7 @@
 "use client"
 
 // Chi tiết phiếu điểm danh ngày (rule 31, C2 làm lại GĐ2): mỗi phiếu CA 1 khối, dòng = người (nhiều việc, người thay).
-// Văn phòng (attendance.approve / mark_all / admin) duyệt hoặc trả về TỪNG CA đã gửi. Đã duyệt ⇒ khoá (ngày công nguồn
+// Văn phòng (attendance.approve / admin — mark_all KHÔNG duyệt, 20261225) duyệt hoặc trả về TỪNG CA đã gửi. Đã duyệt ⇒ khoá (ngày công nguồn
 // trực ca không sửa được, chỉ admin). Bản PDF F01/F02 để GĐ3.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
@@ -79,7 +79,7 @@ export default function AttendanceSheetDetailPage() {
   const [tpLockedCas, setTpLockedCas] = useState<Set<string> | null>(null)
 
   const isAdmin = user?.role === "admin"
-  const canReview = !!user && (user.role === "admin" || hasPermission(user, "attendance.approve") || hasPermission(user, "attendance.mark_all"))
+  const canReview = !!user && (user.role === "admin" || hasPermission(user, "attendance.approve"))
 
   useEffect(() => {
     const u = readCachedUser()

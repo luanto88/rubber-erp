@@ -471,6 +471,15 @@ Vi du:
   2026-11-27 (phiên sau A3): production đã chạy 20261221. A4 Tổ cơ điện phân ca + phiếu Tổ không khoá cứng + icon thẻ người
   (migration 20261222) và A4b giữ chỗ theo người giao (20261223) đã code + commit, CHƯA push, A4b chưa test — production chạy
   20261222 → 20261223 TRƯỚC deploy (rule 31 mục A4/A4b, bàn giao mục 19). Kế tiếp: test A4b → B.
+  2026-11-27 (sau): A4 + A4b test PASS, production đã chạy 20261222 → 20261223, ĐÃ push `4de2de2`. B (tua chuẩn theo tháng +
+  thẻ Chuyên cần / Mâu thuẫn + tie-break xếp hạng KPI) ĐÃ CODE, CHƯA commit — chạy `20261224_kpi_attendance_month_config.sql`
+  rồi test tay (rule 27/31 mục B, bàn giao mục 20).
+  2026-11-28: B test localhost PASS 1–7, CHƯA commit, production CHƯA chạy 20261224. Lỗi sau test (mở khoá sổ KPI, quyền
+  Duyệt của mark_all, đã gửi vẫn sửa được, giữ chỗ chưa khoá ở tấm chọn việc, trùng giờ chưa báo tức thì, gợi ý theo người chấm,
+  người thay mobile, Lịch công gọn): bàn giao mục 21.
+  2026-11-28 (sau): đã code hết 7 mục (K1 mở khoá sổ KPI, L4 duyệt chỉ approve, L5 đã gửi khoá trừ admin, L1 ẩn phần người khác
+  chấm, L3 trùng báo đỏ tức thì, L2 gợi ý theo người chấm, L6, UI1) — test localhost PASS 1–8, ĐÃ commit + push main.
+  Production PHẢI chạy 20261224 → `20261225_attendance_review_lock_kpi_unlock.sql` (bàn giao mục 22, rule 27/31 mục cuối).
 
 ## Nhật ký các phiên cũ
 
@@ -479,7 +488,7 @@ Toàn bộ nhật ký từng phiên (2026-05 → 2026-10-27) đã chuyển nguy�
 
 ## Prompt mở đầu phiên sau
 
-Đang làm Chấm công (2026-11-27, A4 + A4b Tổ phân ca / giữ chỗ đã commit, chưa push → test A4b rồi B tua theo tháng): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau (2026-11-27, sau A4b)".
+Chấm công (2026-11-28, B + sửa sau test B đã push main): dùng prompt trong `.claude/plans/ban-giao-cham-cong-ca-to.md` mục "Prompt phiên sau (2026-11-28, sau khi B + sửa sau test B đã push)".
 Prompt dưới đây (U11 KPI) để dành khi người dùng nhắc.
 
 ```

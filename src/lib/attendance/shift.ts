@@ -498,16 +498,19 @@ export function suggestFromPrevious(
     const s = id ? staffById.get(id) : undefined
     return !!s && !s.cho_xac_nhan && isStaffWorking(s, ngay)
   }
+  // Khoá 1 dòng / người / ca (tổ phân ca: người làm 2 ca = 2 dòng; đơn vị khác: ca rỗng ⇒ 1 dòng / người).
   const used = new Set<string>()
   const sorted = [...prevLines].sort((a, b) => (a.stt ?? 0) - (b.stt ?? 0))
   for (const p of sorted) {
-    if (!working(p.staff_id) || used.has(p.staff_id)) continue
+    const ca = p.ca_phan_cong || ""
+    const key = `${p.staff_id}:${ca}`
+    if (!working(p.staff_id) || used.has(key)) continue
     const jobs = jobIdsOf(p).filter((j) => activeJobIds.has(j))
     if (jobs.length === 0) continue
-    const gio = { gio_bd: p.gio_bd || "", gio_kt: p.gio_kt || "" }
+    const gio = { gio_bd: p.gio_bd || "", gio_kt: p.gio_kt || "", ca_phan_cong: ca }
     if (p.diem_danh === "co") {
       out.push(emptyLine({ staff_id: p.staff_id, cong_viec_ids: jobs, vehicle_id: p.vehicle_id || "", ...gio }))
-      used.add(p.staff_id)
+      used.add(key)
       continue
     }
     const tenTam = (p.thay_the_ten || "").trim()
@@ -525,7 +528,7 @@ export function suggestFromPrevious(
         ...gio,
       }),
     )
-    used.add(p.staff_id)
+    used.add(key)
   }
   // Người thay có thể đồng thời có dòng riêng (1 người làm nhiều vị trí — chốt 2026-11-27) ⇒ chép nguyên.
   return out
@@ -637,15 +640,57 @@ export type LineEditCtx = {
 }
 
 /**
- * A4b — người đăng nhập sửa được 1 dòng phiếu tổ không (giữ chỗ theo người giao):
- * chưa gửi / phiếu Trả về ⇒ chính người giao, hoặc (tổ phân ca) trực ca đúng ca; đã gửi ⇒ chỉ tổ phân ca, đúng ca, chưa chốt.
- * Dòng mới chưa lưu (lap_boi rỗng) luôn của người đang thao tác. Admin sửa mọi dòng (chưa duyệt).
+ * Người đăng nhập sửa được 1 dòng phiếu tổ không (mirror SQL attendance_line_editable, migration 20261225):
+ * chưa gửi / phiếu Trả về ⇒ chính người giao, hoặc (tổ phân ca) trực ca đúng ca; ĐÃ GỬI ⇒ chỉ admin
+ * (muốn sửa: văn phòng Trả về / admin Thu hồi). Dòng mới chưa lưu (lap_boi rỗng) luôn của người đang thao tác.
  */
 export function canEditLine(l: Pick<SheetLineDraft, "lap_boi" | "gui_luc" | "chot_ca" | "ca_phan_cong">, c: LineEditCtx): boolean {
-  if (!c.isTo || c.isAdmin || !l.lap_boi) return true
+  if (!c.isTo || c.isAdmin) return true
+  if (l.gui_luc && c.sectionStatus !== "tra_ve") return false
+  if (!l.lap_boi) return true
   const myCa = c.phanCa && !!l.ca_phan_cong && c.myCas.includes(l.ca_phan_cong)
-  if (!l.gui_luc || c.sectionStatus === "tra_ve") return l.lap_boi === c.userId || myCa
-  return myCa && !l.chot_ca
+  return l.lap_boi === c.userId || myCa
+}
+
+/** L1 (2026-11-28) — ngữ cảnh "phần của tôi" trên phiếu TỔ (người không phải admin chỉ thấy phần này). */
+export type MineCtx = {
+  userId: string
+  /** Ca A/B/C người đăng nhập trực (phân công → Ca mặc định trong hồ sơ). */
+  myCas: string[]
+  phanCa: boolean
+}
+
+/** Dòng thuộc phần của tôi: tôi giao (hoặc dòng mới chưa lưu), hoặc (tổ phân ca) dòng của ca tôi dù ai giao. */
+export function isLineMine(l: { lap_boi?: string | null; ca_phan_cong?: string | null }, c: MineCtx): boolean {
+  if (!l.lap_boi || l.lap_boi === c.userId) return true
+  return c.phanCa && !!l.ca_phan_cong && c.myCas.includes(l.ca_phan_cong)
+}
+
+/** Tách dòng phiếu tổ: `visible` (hiện + sửa) và `hidden` (người khác chấm cho ca khác — chỉ để kiểm trùng; server giữ nguyên). */
+export function splitVisibleLines<L extends { lap_boi?: string | null; ca_phan_cong?: string | null }>(lines: L[], c: MineCtx): { visible: L[]; hidden: L[] } {
+  const visible: L[] = []
+  const hidden: L[] = []
+  for (const l of lines) (isLineMine(l, c) ? visible : hidden).push(l)
+  return { visible, hidden }
+}
+
+/** L3 — 1 phân công trùng với các dòng khác của CÙNG người (tổ phân ca: trùng ca / Cả ngày ↔ ca khác; tổ ghi giờ: chồng giờ). */
+export function lineConflicts(
+  draft: SheetLineDraft,
+  others: SheetLineDraft[],
+  opts: { phanCa: boolean; khung: boolean },
+): SheetLineDraft[] {
+  const has = (l: SheetLineDraft) => l.diem_danh === "vang" || l.cong_viec_ids.length > 0
+  if (!has(draft)) return []
+  return others.filter((o) => {
+    if (o.id === draft.id || o.staff_id !== draft.staff_id || !has(o)) return false
+    if (opts.phanCa) {
+      if (!draft.ca_phan_cong || !o.ca_phan_cong) return false
+      return o.ca_phan_cong === draft.ca_phan_cong || o.ca_phan_cong === CA_NGAY || draft.ca_phan_cong === CA_NGAY
+    }
+    if (opts.khung) return draft.cong_viec_ids.length > 0 && o.cong_viec_ids.length > 0 && workHoursOverlap(draft, o)
+    return false
+  })
 }
 
 /** A4b — 2 khoảng giờ làm (HH:MM, qua đêm khi kết thúc ≤ bắt đầu) có chồng nhau không. Thiếu giờ ⇒ coi như không chồng. */

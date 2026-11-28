@@ -4,7 +4,7 @@
 // attendance_set_days / attendance_clear_days, nhật ký điều chỉnh bất biến. Quyền: rule 31.
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CalendarDays, ChevronLeft, ChevronRight, CircleAlert, History, RefreshCw, TriangleAlert, UserCheck, Users, X } from "lucide-react"
+import { CalendarDays, ChevronLeft, ChevronRight, CircleAlert, History, Info, RefreshCw, Sparkles, TriangleAlert, UserCheck, Users, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { hasPermission, type SessionUser } from "@/lib/auth"
 import { fetchAllPaginated } from "@/lib/supabase-helpers"
@@ -18,7 +18,7 @@ import {
   DEFAULT_TUA_DAYS,
   activitiesOf,
   formatActivities,
-  isAttendanceConflict,
+  classifyActivityDay,
   isInWorkRange,
   isPartialMonth,
   monthDays,
@@ -106,7 +106,7 @@ function fmtDateTime(ts: string) {
 
 const DEFAULT_LOAI = "nhan_vien"
 
-type CardFilter = "" | "co_mat" | "khong_phep" | "chua" | "conflict"
+type CardFilter = "" | "co_mat" | "khong_phep" | "chua" | "chuyen_can" | "conflict"
 
 function syncMissing(message: string) {
   return /attendance_sync_auto|attendance_collect_activity|hoat_dong/.test(message) &&
@@ -122,6 +122,7 @@ function tableMissing(message: string) {
 
 export function AttendanceCalendar({ factoryId, user }: { factoryId: string; user: SessionUser | null }) {
   const today = getFactoryTodayISO()
+  const [showLegend, setShowLegend] = useState(false)
   const [month, setMonth] = useState(today.slice(0, 7))
   const [deptFilter, setDeptFilter] = useState("")
   const [loaiFilter, setLoaiFilter] = useState(DEFAULT_LOAI)
@@ -132,6 +133,8 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
   const [staff, setStaff] = useState<StaffRow[]>([])
   const [depts, setDepts] = useState<Dept[]>([])
   const [records, setRecords] = useState<AttendanceRecord[]>([])
+  /** B: nguồn thao tác của nhóm chính theo nhân sự (tính "ngày chuyên cần"). */
+  const [primarySources, setPrimarySources] = useState<Map<string, string[]>>(new Map())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -277,7 +280,24 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
           const msg = getErrorMessage(e, "Không tải được sổ phép thưởng.")
           leaveErr = leaveMissing(msg) ? LEAVE_MIGRATION_HINT : `Không tải được sổ phép thưởng: ${msg}`
         }
+        // B: nguồn thao tác của nhóm chính (cột 20261224; chưa chạy migration ⇒ rỗng, không đếm chuyên cần).
+        const srcMap = new Map<string, string[]>()
+        {
+          const { data: pgm } = await supabase
+            .from("personnel_group_members")
+            .select("staff_id, personnel_groups(*)")
+            .eq("factory_id", factoryId)
+            .eq("is_primary", true)
+          for (const row of (pgm || []) as Array<{ staff_id: string; personnel_groups: unknown }>) {
+            const g = (Array.isArray(row.personnel_groups) ? row.personnel_groups[0] : row.personnel_groups) as
+              | { nguon_hoat_dong?: string[] | null }
+              | null
+            const src = Array.isArray(g?.nguon_hoat_dong) ? g!.nguon_hoat_dong! : []
+            if (src.length) srcMap.set(row.staff_id, src)
+          }
+        }
         if (!alive) return
+        setPrimarySources(srcMap)
         setStaff((staffRes.data || []) as StaffRow[])
         setDepts((deptRes.data || []) as Dept[])
         setRecords(recs)
@@ -311,12 +331,17 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
     return map
   }, [records])
 
-  /** Số ô mâu thuẫn (chấm Nghỉ nhưng có thao tác app) theo nhân sự. */
-  const conflictsByStaff = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const r of records) if (isAttendanceConflict(r)) map.set(r.staff_id, (map.get(r.staff_id) || 0) + 1)
-    return map
-  }, [records])
+  /** B: số ô Chuyên cần (Nghỉ tua + thao tác đúng nhóm chính) / Mâu thuẫn (Nghỉ có / không phép + thao tác) theo nhân sự. */
+  const { chuyenCanByStaff, conflictsByStaff } = useMemo(() => {
+    const cc = new Map<string, number>()
+    const mt = new Map<string, number>()
+    for (const r of records) {
+      const kind = classifyActivityDay(r, primarySources.get(r.staff_id) || [])
+      if (kind === "chuyen_can") cc.set(r.staff_id, (cc.get(r.staff_id) || 0) + 1)
+      else if (kind === "mau_thuan") mt.set(r.staff_id, (mt.get(r.staff_id) || 0) + 1)
+    }
+    return { chuyenCanByStaff: cc, conflictsByStaff: mt }
+  }, [records, primarySources])
 
   const days = useMemo(() => monthDays(month), [month])
   const stdDays = standardDays(month, DEFAULT_TUA_DAYS)
@@ -364,12 +389,13 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
     return baseStaff.filter((s) => {
       const v = summaries.get(s.id)
       if (cardFilter === "conflict") return conflictsByStaff.has(s.id)
+      if (cardFilter === "chuyen_can") return chuyenCanByStaff.has(s.id)
       if (!v) return false
       if (cardFilter === "co_mat") return v.coMat > 0
       if (cardFilter === "khong_phep") return v.khongPhep > 0
       return v.chuaGhiNhan > 0
     })
-  }, [baseStaff, cardFilter, summaries, conflictsByStaff])
+  }, [baseStaff, cardFilter, summaries, conflictsByStaff, chuyenCanByStaff])
 
   const totals = useMemo(() => {
     let coMat = 0
@@ -381,9 +407,13 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       chua += v.chuaGhiNhan
     }
     let conflict = 0
-    for (const s of baseStaff) conflict += conflictsByStaff.get(s.id) || 0
-    return { coMat, khongPhep, chua, conflict }
-  }, [summaries, baseStaff, conflictsByStaff])
+    let chuyenCan = 0
+    for (const s of baseStaff) {
+      conflict += conflictsByStaff.get(s.id) || 0
+      chuyenCan += chuyenCanByStaff.get(s.id) || 0
+    }
+    return { coMat, khongPhep, chua, conflict, chuyenCan }
+  }, [summaries, baseStaff, conflictsByStaff, chuyenCanByStaff])
 
   const toggleCard = (key: CardFilter) => setCardFilter((cur) => (cur === key ? "" : key))
 
@@ -667,12 +697,12 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
         </div>
       </FilterBar>
 
-      <StatGrid cols={5}>
+      <StatGrid cols={6}>
         <StatCard
           icon={Users}
           label="Nhân sự"
           value={visibleStaff.length}
-          sub={cardFilter ? `${visibleStaff.length}/${baseStaff.length} người — bấm để bỏ lọc thẻ` : monthLabel}
+          hint={cardFilter ? `${visibleStaff.length}/${baseStaff.length} người — bấm để bỏ lọc thẻ` : monthLabel}
           loading={loading}
           onClick={() => setCardFilter("")}
         />
@@ -680,7 +710,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
           icon={UserCheck}
           label="Ngày có mặt"
           value={totals.coMat}
-          sub={cardFilter === "co_mat" ? "đang lọc người có ngày có mặt" : `Công chuẩn nhân viên ${stdDays} ngày/người (công nhân: theo công thực tế)`}
+          hint={`Công chuẩn nhân viên ${stdDays} ngày/người (công nhân: theo công thực tế)`}
           loading={loading}
           valueTone="good"
           onClick={() => toggleCard("co_mat")}
@@ -690,7 +720,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
           icon={CircleAlert}
           label="Nghỉ không phép"
           value={totals.khongPhep}
-          sub={cardFilter === "khong_phep" ? "đang lọc — bấm để bỏ" : "bấm để xem người nghỉ không phép"}
+          hint="Người có ngày nghỉ không phép trong tháng"
           loading={loading}
           valueTone={totals.khongPhep > 0 ? "danger" : "default"}
           onClick={() => toggleCard("khong_phep")}
@@ -700,17 +730,27 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
           icon={CalendarDays}
           label="Ô chưa ghi nhận"
           value={totals.chua}
-          sub={cardFilter === "chua" ? "đang lọc — bấm để bỏ" : "đến hôm nay"}
+          hint="Ô chưa chấm gì, tính đến hôm nay"
           loading={loading}
           valueTone={totals.chua > 0 ? "warn" : "default"}
           onClick={() => toggleCard("chua")}
           active={cardFilter === "chua"}
         />
         <StatCard
+          icon={Sparkles}
+          label="Chuyên cần"
+          value={totals.chuyenCan}
+          hint="Ngày nghỉ tua nhưng vẫn có thao tác app thuộc việc của nhóm chính"
+          loading={loading}
+          valueTone={totals.chuyenCan > 0 ? "good" : "default"}
+          onClick={() => toggleCard("chuyen_can")}
+          active={cardFilter === "chuyen_can"}
+        />
+        <StatCard
           icon={TriangleAlert}
-          label="Ô mâu thuẫn"
+          label="Mâu thuẫn"
           value={totals.conflict}
-          sub={cardFilter === "conflict" ? "đang lọc — bấm để bỏ" : "chấm Nghỉ nhưng có thao tác app"}
+          hint="Ngày nghỉ có / không phép nhưng vẫn có thao tác app"
           loading={loading}
           valueTone={totals.conflict > 0 ? "warn" : "default"}
           onClick={() => toggleCard("conflict")}
@@ -723,7 +763,17 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500">
-        <span className="font-bold text-slate-600">Chú thích:</span>
+        <button
+          type="button"
+          onClick={() => setShowLegend((v) => !v)}
+          aria-expanded={showLegend}
+          title="Bấm ô để chọn · Shift + bấm chọn dải cùng hàng · bấm tiêu đề ngày chọn cả cột"
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 font-bold ${showLegend ? "border-mod-600 bg-mod-50 text-mod-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+        >
+          <Info size={13} /> Chú thích
+        </button>
+        {showLegend ? (
+        <>
         <Legend cls="bg-emerald-100 text-emerald-800" text="+" label="Có mặt (tự động / điểm danh)" />
         <Legend cls="bg-emerald-100 text-emerald-800" text="+" label="Được chấm điểm chuyên môn" dot />
         <Legend cls="bg-violet-100 text-violet-800" text="+" label="Có mặt (chấm tay)" />
@@ -733,7 +783,11 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
         <Legend cls="bg-amber-100 text-amber-800" text="P" label="Nghỉ có phép, dùng phép thưởng" goldDot />
         <Legend cls="bg-rose-100 text-rose-700" text="K" label="Nghỉ không phép" />
         <Legend cls="bg-white text-slate-300 border border-slate-200" text="·" label="Chưa ghi nhận" />
-        <Legend cls="bg-amber-100 text-amber-800 ring-2 ring-orange-500" text="P" label="Mâu thuẫn (Nghỉ nhưng có thao tác app)" />
+        <Legend cls="bg-sky-100 text-sky-800 ring-2 ring-emerald-500" text="T" label="Chuyên cần (nghỉ tua vẫn làm việc của nhóm chính)" />
+        <Legend cls="bg-amber-100 text-amber-800 ring-2 ring-orange-500" text="P" label="Mâu thuẫn (nghỉ có / không phép nhưng có thao tác app)" />
+        <span className="w-full text-slate-400">Bấm ô để chọn · Shift + bấm chọn dải cùng hàng · bấm tiêu đề ngày chọn cả cột</span>
+        </>
+        ) : null}
         <button
           type="button"
           onClick={() => setReloadKey((k) => k + 1)}
@@ -747,7 +801,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
       {syncInfo ? <div className="text-xs text-slate-500">{syncInfo}</div> : null}
       {leaveWarn ? <div className="text-xs text-amber-700">{leaveWarn}</div> : null}
 
-      {canMarkAny ? (
+      {canMarkAny && selected.size > 0 ? (
         <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
           <span className="text-sm text-slate-600">
             {selected.size > 0 ? (
@@ -844,11 +898,11 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                         const isSel = selected.has(key)
                         const canClick = markable(s, d)
                         const acts = activitiesOf(r)
-                        const conflict = isAttendanceConflict(r)
+                        const kind = classifyActivityDay(r, primarySources.get(s.id) || [])
                         const title = !inRange
                           ? `${fmtDay(d)}: ngoài thời gian làm việc`
                           : r
-                            ? `${fmtDay(d)}: ${ATTENDANCE_STATUS_LABEL[r.trang_thai]}${r.dung_phep_thuong ? " — dùng phép thưởng" : ""}${r.xep_loai ? ` — xếp loại ${r.xep_loai}` : ""}\nNguồn: ${ATTENDANCE_SOURCE_LABEL[r.nguon]}${r.ly_do ? `\nLý do: ${r.ly_do}` : ""}${acts.length ? `\nThao tác app: ${formatActivities(acts)}` : ""}${conflict ? "\n⚠ Mâu thuẫn: chấm Nghỉ nhưng có thao tác trên app — kiểm tra lại" : ""}\nCập nhật: ${fmtDateTime(r.updated_at)}`
+                            ? `${fmtDay(d)}: ${ATTENDANCE_STATUS_LABEL[r.trang_thai]}${r.dung_phep_thuong ? " — dùng phép thưởng" : ""}${r.xep_loai ? ` — xếp loại ${r.xep_loai}` : ""}\nNguồn: ${ATTENDANCE_SOURCE_LABEL[r.nguon]}${r.ly_do ? `\nLý do: ${r.ly_do}` : ""}${acts.length ? `\nThao tác app: ${formatActivities(acts)}` : ""}${kind === "mau_thuan" ? "\n⚠ Mâu thuẫn: chấm Nghỉ nhưng có thao tác trên app — kiểm tra lại" : kind === "chuyen_can" ? "\n★ Chuyên cần: nghỉ tua vẫn làm việc của nhóm chính" : r.trang_thai === "nghi_tua" && acts.length ? "\n(Nghỉ tua có thao tác ngoài việc của nhóm chính — không tính chuyên cần)" : ""}\nCập nhật: ${fmtDateTime(r.updated_at)}`
                             : `${fmtDay(d)}: chưa ghi nhận`
                         return (
                           <td key={d} className={`border-b border-slate-100 p-0.5 text-center ${dayColCls(di)}`}>
@@ -859,7 +913,7 @@ export function AttendanceCalendar({ factoryId, user }: { factoryId: string; use
                                 disabled={!canClick}
                                 onClick={(e) => onCellClick(s, d, e.shiftKey)}
                                 className={`relative h-7 w-7 rounded-md text-xs font-extrabold ${cellClass(r)} ${d > today && !r ? "opacity-40" : ""} ${
-                                  isSel ? "ring-2 ring-mod-600 ring-offset-1" : conflict ? "ring-2 ring-orange-500" : ""
+                                  isSel ? "ring-2 ring-mod-600 ring-offset-1" : kind === "mau_thuan" ? "ring-2 ring-orange-500" : kind === "chuyen_can" ? "ring-2 ring-emerald-500" : ""
                                 } ${canClick ? "cursor-pointer hover:brightness-95" : "cursor-default"}`}
                               >
                                 {cellText(r)}

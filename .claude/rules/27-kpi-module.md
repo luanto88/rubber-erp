@@ -202,6 +202,17 @@ Hệ số      = CLAMP((Có mặt + Phép thưởng bù) ÷ Công chuẩn − he
 - Cấu hình hiện theo nhóm chính / mặc định, KHÔNG theo tháng ⇒ đổi cấu hình rồi bấm tính lại tháng cũ CHƯA khoá sẽ tính
   theo cấu hình mới (tháng đã khoá an toàn — không có RPC mở khoá). Cấu hình theo tháng: việc treo (bàn giao mục 13).
 
+**B (2026-11-27, migration `20261224_kpi_attendance_month_config.sql`, chạy tay TRƯỚC deploy):**
+- Tua chuẩn = cấu hình THÁNG của nhóm chính → tháng chung → trọng số nhóm → trọng số chung → 6 (bảng
+  `kpi_attendance_month_config`, ghi qua RPC `kpi_attendance_month_config_save` / `_delete`: admin | kpi.manage_config, lý do
+  bắt buộc, nhật ký `_logs` insert-only, CHẶN tháng đã có điểm khoá sổ — `kpi_att_month_cfg_locked`). Mức trừ / min / max vẫn
+  theo trọng số. UI: Cài đặt → KPI & 5S → Trọng số, khối "Tua chuẩn theo tháng" (`kpi-month-tua-card.tsx`).
+- `kpi_attendance_summary_internal` trả thêm `tua_nguon`, `tua_ly_do`, `ngay_chuyen_can`; `chi_tiet.chuyen_can` có 3 trường này
+  (`cong_thuc_version` vẫn 2). **Ngày chuyên cần** = ngày Nghỉ tua có thao tác app thuộc `personnel_groups.nguon_hoat_dong` của
+  NHÓM CHÍNH (chỉ nhân viên; nhóm chưa chọn nguồn ⇒ 0). CHỈ SỐ PHỤ — không vào công thức hệ số; xếp hạng ẩn danh
+  `RANK() OVER (ORDER BY diem_tong DESC, ngay_chuyen_can DESC)`, trả thêm cột `ngay_chuyen_can` (hiện trên bảng xếp hạng).
+- ⚠️ Mọi `CREATE OR REPLACE` summary_internal / month_summary / kpi_compute_monthly_scores / 2 hàm xếp hạng về sau chép từ 20261224.
+
 Công thức cũ v1 (trước C5): `CLAMP(Số ngày có chấm D ÷ Ngày chuẩn (24), 0.75, 1.10)` — cột `ngay_chuan_chuyen_can` nay LEGACY.
 
 ## Database Schema (khung sườn Phase 0 — xem cảnh báo đầu file)
@@ -457,3 +468,9 @@ Toàn bộ diễn biến từng phase (bug đã fix, quyết định thiết k�
 tay" nguyên văn theo từng phiên) nằm ở `.claude/history/kpi-module-history.md`. Tra
 file đó khi cần biết **vì sao** một quyết định được chốt như hiện tại, hoặc cần đối
 chiếu lại đúng nguyên văn 1 bug đã từng gặp.
+
+## Mở khoá sổ (2026-11-28, migration 20261225, test PASS, đã push main)
+Thay quy tắc "chỉ có khoá": RPC `kpi_monthly_score_unlock(id, ly_do)` — CHỈ admin, cùng nhà máy, lý do bắt buộc, chặn khi điểm có
+khiếu nại `cho_xu_ly|cho_duyet_sua`; ghi `kpi_monthly_score_unlocks` (bất biến, xem: admin | kpi.view_all | kpi.manage_config) rồi về
+`nhap`. Nút "Mở khoá" ở bảng "Toàn nhà máy" (`kpi/scores/page.tsx`). Mở xong "Tính điểm tháng" ghi đè cả điểm đã điều chỉnh
+(`kpi_score_adjustments` vẫn giữ lịch sử). Cấu hình tua tháng (B) mở lại được khi tháng không còn dòng khoá.

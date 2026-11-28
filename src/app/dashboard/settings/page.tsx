@@ -21,6 +21,7 @@ import { loadRequiredNotes, type RequiredNote } from "@/lib/required-notes"
 import { isBlankNoteContent } from "@/lib/note-filter"
 import { CURRENCIES, currencySymbol } from "@/lib/currency"
 import { getFactoryTodayISO } from "@/lib/date-utils"
+import { ACTIVITY_LABEL } from "@/lib/attendance/calendar"
 import { prepareForestPlotGeometry, mergeGeometryPieces, computeGeometryHash } from "@/lib/eudr-write-gate"
 import { ResponsiveTableWrapper } from "../_components/responsive-table-wrapper"
 import { ModalShell } from "../_components/modal-shell"
@@ -318,6 +319,8 @@ type PersonnelGroupRow = {
   is_system: boolean
   is_active: boolean
   sort_order: number
+  /** B (20261224): nguồn thao tác app tính "ngày chuyên cần" khi nhóm là nhóm chính. */
+  nguon_hoat_dong?: string[] | null
 }
 
 type PersonnelGroupMemberRow = {
@@ -337,6 +340,7 @@ type PersonnelGroupForm = {
   description: string
   sort_order: string
   is_active: boolean
+  nguon_hoat_dong: string[]
 }
 
 // Vật tư mua ngoài của Bảo trì = inventory_items có nguon_tao = 'bao_tri_mua_ngoai' (+ dịch vụ gia
@@ -1164,7 +1168,9 @@ export default function SettingsPage() {
     description: "",
     sort_order: "0",
     is_active: true,
+    nguon_hoat_dong: [],
   })
+  const [groupSourceColReady, setGroupSourceColReady] = useState(false)
   const [extMatForm, setExtMatForm] = useState<ExtMaterialFormValues>(emptyExtMaterialForm)
 
   // Customers state
@@ -1324,7 +1330,7 @@ export default function SettingsPage() {
       const [aRes, sRes, gRes, gmRes, mRes, driverRes, vehicleRes, assignmentRes] = await Promise.all([
         supabase.from("maintenance_assets").select("*").eq("factory_id", fid).order("bo_phan").order("ma_tb"),
         supabase.from("maintenance_staff").select("*").eq("factory_id", fid).order("ten"),
-        supabase.from("personnel_groups").select("id, factory_id, code, name, description, is_system, is_active, sort_order").eq("factory_id", fid).order("sort_order").order("name"),
+        supabase.from("personnel_groups").select("*").eq("factory_id", fid).order("sort_order").order("name"),
         supabase.from("personnel_group_members").select("staff_id, group_id, is_primary, personnel_groups(id, name, code)").eq("factory_id", fid),
         supabase.from("inventory_items").select("id, factory_id, code, name, unit, specification, category_id, image_url, don_gia, loai_tien, is_active, la_dich_vu").eq("factory_id", fid).in("nguon_tao", ["bao_tri_mua_ngoai", "bao_tri_gia_cong"]).order("name"),
         supabase.from("dispatch_drivers").select("*").eq("factory_id", fid).order("name"),
@@ -1358,6 +1364,8 @@ export default function SettingsPage() {
         setPersonnelGroupsIssue(formatPersonnelGroupsIssue(personnelGroupsError, personnelGroupMembersError))
       } else {
         setPersonnelGroups((gRes.data || []) as PersonnelGroupRow[])
+        // Cột nguon_hoat_dong có từ migration 20261224 — chưa chạy thì không hiện / không gửi.
+        setGroupSourceColReady((gRes.data || []).some((g) => "nguon_hoat_dong" in (g as object)))
         setPersonnelGroupsAvailable(true)
         setPersonnelGroupsIssue("")
       }
@@ -1731,6 +1739,7 @@ export default function SettingsPage() {
         description: personnelGroupForm.description.trim() || null,
         sort_order: Number(personnelGroupForm.sort_order || 0),
         is_active: personnelGroupForm.is_active,
+        ...(groupSourceColReady ? { nguon_hoat_dong: personnelGroupForm.nguon_hoat_dong } : {}),
       }
       const result = maintEditId
         ? await supabase.from("personnel_groups").update(payload).eq("id", maintEditId).eq("factory_id", factoryId)
@@ -4090,7 +4099,7 @@ export default function SettingsPage() {
                       onClick={() => {
                         setMaintEditId(null)
                         setMaintError("")
-                        setPersonnelGroupForm({ code: "", name: "", description: "", sort_order: "0", is_active: true })
+                        setPersonnelGroupForm({ code: "", name: "", description: "", sort_order: "0", is_active: true, nguon_hoat_dong: [] })
                         setMaintModal("staff-group")
                       }}
                       className="flex items-center gap-1.5 rounded-xl bg-slate-800 px-3 py-1.5 text-xs font-bold text-white transition-all hover:bg-slate-900"
@@ -4138,6 +4147,7 @@ export default function SettingsPage() {
                                       description: group.description || "",
                                       sort_order: String(group.sort_order ?? 0),
                                       is_active: group.is_active,
+                                      nguon_hoat_dong: group.nguon_hoat_dong || [],
                                     })
                                     setMaintModal("staff-group")
                                   }}
@@ -5919,6 +5929,33 @@ export default function SettingsPage() {
                 <input type="checkbox" id="personnel-group-active" checked={personnelGroupForm.is_active} onChange={e => setPersonnelGroupForm((p) => ({ ...p, is_active: e.target.checked }))} className="w-4 h-4 accent-emerald-600" />
                 <label htmlFor="personnel-group-active" className="text-sm font-bold text-slate-600">Đang sử dụng</label>
               </div>
+              {groupSourceColReady && (
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1.5">Nguồn thao tác tính chuyên cần</label>
+                  <p className="mb-2 text-[11px] text-slate-500">
+                    Người có nhóm này là <strong>nhóm chính</strong>, ngày chấm &quot;Nghỉ tua&quot; mà vẫn thao tác app ở các nguồn
+                    được chọn ⇒ tính 1 ngày chuyên cần (chỉ số phụ KPI, dùng khi bằng điểm). Không chọn ⇒ không đếm.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(ACTIVITY_LABEL).map(([key, label]) => {
+                      const on = personnelGroupForm.nguon_hoat_dong.includes(key)
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setPersonnelGroupForm((p) => ({
+                            ...p,
+                            nguon_hoat_dong: on ? p.nguon_hoat_dong.filter((k) => k !== key) : [...p.nguon_hoat_dong, key],
+                          }))}
+                          className={`rounded-lg border px-2.5 py-1 text-xs font-bold transition-colors ${on ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"}`}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               </div>
         </ModalShell>
       )}

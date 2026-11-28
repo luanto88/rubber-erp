@@ -6,7 +6,7 @@ import type { ReactNode } from "react"
 /**
  * Thẻ số liệu dùng chung (U0). Icon trái trong ô nhạt màu module (`mod-*`, phương án C),
  * nhãn chữ hoa nhỏ, số `text-2xl`. `valueTone` tô màu riêng con số (vd "Chờ duyệt" > 0 ⇒ amber).
- * `onClick` ⇒ cả thẻ là nút (vd bấm để lọc danh sách).
+ * `onClick` ⇒ cả thẻ là nút (vd bấm để lọc danh sách). `hint` ⇒ giải thích hiện khi rê chuột (thẻ gọn chỉ nhãn + số).
  */
 export function StatCard({
   icon: Icon,
@@ -17,6 +17,7 @@ export function StatCard({
   loading = false,
   onClick,
   active = false,
+  hint,
 }: {
   icon?: LucideIcon
   label: string
@@ -26,6 +27,7 @@ export function StatCard({
   loading?: boolean
   onClick?: () => void
   active?: boolean
+  hint?: string
 }) {
   const valueCls =
     valueTone === "warn"
@@ -60,7 +62,7 @@ export function StatCard({
         type="button"
         onClick={onClick}
         aria-pressed={active}
-        title={active ? "Đang lọc — bấm để bỏ lọc" : "Bấm để lọc"}
+        title={[hint, active ? "Đang lọc — bấm để bỏ lọc" : "Bấm để lọc"].filter(Boolean).join(" · ")}
         className={`relative flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3.5 shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:border-mod-600 hover:shadow-md active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mod-200 ${
           active ? "border-mod-600 bg-mod-50 ring-2 ring-mod-200" : "border-slate-200 bg-white hover:bg-mod-50/60"
         }`}
@@ -73,7 +75,7 @@ export function StatCard({
       </button>
     )
   }
-  return <div className="flex w-full items-start gap-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">{body}</div>
+  return <div title={hint} className="flex w-full items-start gap-3 rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">{body}</div>
 }
 
 /** Lưới thẻ số liệu: 2 cột (điện thoại) → 3 (sm) → 4 hoặc 5 (lg). */
@@ -82,10 +84,10 @@ export function StatGrid({
   className = "",
   children,
 }: {
-  cols?: 3 | 4 | 5
+  cols?: 3 | 4 | 5 | 6
   className?: string
   children: ReactNode
 }) {
-  const lg = cols === 5 ? "lg:grid-cols-5" : cols === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4"
+  const lg = cols === 6 ? "lg:grid-cols-6" : cols === 5 ? "lg:grid-cols-5" : cols === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4"
   return <div className={`grid grid-cols-2 gap-3 sm:grid-cols-3 ${lg} ${className}`}>{children}</div>
 }

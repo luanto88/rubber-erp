@@ -343,3 +343,108 @@ Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay (36
 Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
 Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
 ```
+
+## 20. Cập nhật 2026-11-27 (phiên sau A4b) — A4 + A4b test PASS, ĐÃ push main `4de2de2`; B ĐÃ CODE (tsc + eslint sạch), CHƯA commit
+- Production đã chạy 20261222 → 20261223 (người dùng xác nhận) rồi mới push.
+- B: migration `20261224_kpi_attendance_month_config.sql` (chạy tay localhost rồi test; production chạy TRƯỚC deploy). Chi tiết:
+  rule 27 mục "B", rule 31 mục "B". Kế hoạch:
+  `C:\Users\Software\.claude\plans\ch-y-migration-v-enchanted-heron-of-58243b9a-668f-42c6-8b3a-ce296b315736.md` (mục "Kiểm tra").
+- File: migration 20261224; `src/lib/kpi-scores.ts`; `src/lib/attendance/calendar.ts`; `settings/_components/kpi-month-tua-card.tsx`
+  (mới) + `kpi-score-weights-tab.tsx`; `settings/page.tsx` (nguồn thao tác của nhóm); `attendance/_components/attendance-calendar.tsx`;
+  `kpi/scores/page.tsx`; `doc-ui/stat-card.tsx` (cols 6); `scripts/compare-kpi-attendance-factor.mjs`.
+
+## Prompt phiên sau (2026-11-27, sau B — thay các prompt cũ ở trên)
+```
+Đọc CLAUDE.md, rule 29, rule 31 (mục "B", "A4b", "C5"), rule 27 (mục "Hệ số chuyên cần" + "B") và
+.claude/plans/ban-giao-cham-cong-ca-to.md mục 20. B (tua chuẩn theo tháng + Chuyên cần / Mâu thuẫn + tie-break xếp hạng) đã
+code, CHƯA commit. Đầu phiên hỏi tôi: localhost đã chạy 20261224 chưa, kết quả test 6 bước (kế hoạch
+C:\Users\Software\.claude\plans\ch-y-migration-v-enchanted-heron-of-58243b9a-668f-42c6-8b3a-ce296b315736.md mục "Kiểm tra"),
+có commit/push không (production phải chạy 20261224 TRƯỚC deploy). Sửa lỗi test nếu có (classifyActivityDay ↔ SQL
+ngay_chuyen_can phải khớp; 5 hàm KPI chép từ 20261224). Dừng cho tôi test, hỏi trước khi commit/push.
+Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
+Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
+```
+
+## 21. Cập nhật 2026-11-28 — B test localhost PASS 1–7 (script lệch 0), CHƯA commit; lỗi sau test lại chấm công
+Localhost đã chạy 20261224. Production CHƯA chạy 20261224 (chạy TRƯỚC deploy). Chưa sửa code gì sau test.
+- K1 Khoá sổ KPI: bước 3 admin khoá sổ để test nhưng KHÔNG có đường mở lại (rule 27: chỉ có khoá). Phải hỏi người dùng: thêm
+  "Mở khoá sổ" chỉ admin + lý do bắt buộc + nhật ký (khuyến nghị), hay giữ không mở khoá (dọn dữ liệu test bằng script).
+- L1 Giữ chỗ chưa chặn ở giao diện: Somren đã do người khác giao Trực ca Ca A; Danh Ngàn (DN) phân thêm Ca B xe nâng và TẮT được
+  chip Ca A. Lưu xong Ca A không đổi (server giữ đúng) nhưng màn không chặn / không báo ⇒ rối. Yêu cầu: dòng người khác giao ⇒ chip
+  ca + việc khoá ngay trên tấm chọn việc, ghi "do X giao".
+- L2 Gợi ý ngày mới theo NGƯỜI CHẤM: DN mở phiếu Ca/Tổ chưa có dòng ⇒ gợi ý chép phân công DN đã giao ở phiếu gần nhất (đủ thông tin,
+  kể cả người thay); KHÔNG thấy phân công người khác chấm, trừ phân công người khác giao cho CA CỦA DN. Sửa `suggestFromPrevious`
+  (shift.ts) lọc theo `lap_boi` / ca.
+- L3 Trùng khung giờ / trùng ca với dòng khác của cùng người ⇒ banner đỏ NGAY trên tấm chọn việc (không đợi Lưu / Gửi), chặn xác
+  nhận. Server vẫn chặn (`workHoursOverlap`, unique dòng).
+- L4 Quyền Duyệt: DN có "chấm công & điểm danh toàn nhà máy" (`attendance.mark_all`) + trực ca + xem công của mình, KHÔNG có
+  approve, nhưng vẫn thấy "Duyệt mọi ca đã gửi". Nguyên nhân: `canReview` = admin | approve | mark_all
+  (`attendance/sheet/[id]/page.tsx:82`, danh sách phiếu tương tự). Hướng: duyệt chỉ admin | `attendance.approve` — sửa UI danh sách
+  + chi tiết + RPC `attendance_review_sections` + chuông `getAttendanceTasks` (kiểm lại với người dùng trước khi đổi RPC).
+- L5 DN "Gửi tất cả" xong vẫn sửa / xoá / gửi tất cả lại được. Điều tra: phiếu Ca đã gửi (mark_all có được mở sửa?) và phiếu Tổ (A4b
+  cố ý cho sửa dòng chưa chốt). Yêu cầu: đã gửi ⇒ không phải admin thì không sửa / xoá dòng đã gửi; muốn sửa ⇒ văn phòng Trả về hoặc
+  admin Thu hồi. Kiểm `attendance_line_editable` ↔ `canEditLine` + `attendance_lock_section_for_edit`.
+- L6 Người thay trên mobile: danh sách nằm cuối trang khó thấy ⇒ "Dùng tên “xxx” (tạm)" lên ĐẦU danh sách, danh sách ngay dưới ô tìm.
+- UI1 Lịch công quá nhiều chữ (ảnh test: 6 thẻ có dòng phụ bị cắt "…", chú thích 2 hàng, dòng "Bấm ô để chọn…"): thẻ chỉ còn nhãn +
+  số (giải thích đưa vào tooltip), chú thích thành nút "Chú thích" bật / tắt (mặc định ẩn), bỏ dòng hướng dẫn; kiểm 360/390/430 px.
+
+## Prompt phiên sau (2026-11-28, sửa sau test B — thay các prompt cũ ở trên)
+```
+Đọc CLAUDE.md, rule 29, rule 31 (A4b, B), rule 27 (B), bàn giao .claude/plans/ban-giao-cham-cong-ca-to.md mục 19–21.
+Trạng thái: B (migration 20261224) test localhost PASS 1–7, CHƯA commit. Production CHƯA chạy 20261224.
+Làm theo thứ tự, mỗi mục điều tra code thật trước, hỏi tôi bằng ngôn ngữ nghiệp vụ + ví dụ khi phải chốt:
+1. K1: hỏi tôi có thêm "Mở khoá sổ KPI" (admin + lý do + nhật ký) không, rồi làm.
+2. L4 quyền Duyệt chỉ admin | attendance.approve (UI danh sách + chi tiết + RPC + chuông).
+3. L5 đã gửi thì không sửa/xoá/gửi lại (trừ admin / sau khi Trả về / Thu hồi).
+4. L1 + L3 tấm chọn việc: dòng người khác giao khoá ngay, trùng giờ/ca báo đỏ tức thì và chặn xác nhận.
+5. L2 gợi ý ngày mới theo người chấm (lap_boi) + phân công người khác giao cho ca của mình.
+6. L6 người thay: "Dùng tên (tạm)" lên đầu, danh sách ngay dưới ô tìm trên mobile.
+7. UI1 Lịch công gọn (thẻ chỉ nhãn + số, chú thích thu gọn).
+Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay (360/390/430 px + Khmer cho màn điểm danh). Dừng cho tôi
+test, hỏi trước khi commit/push (commit B chung hoặc riêng — hỏi tôi). Migration mới (nếu có) chạy SAU 20261224.
+Việc treo KHÔNG làm khi tôi chưa nhắc: rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối); U11 KPI; C6 Bảng công tháng.
+Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
+```
+
+## 22. Cập nhật 2026-11-28 (sau) — 7 mục sửa sau test B: test localhost PASS 1–8, ĐÃ commit + push main
+Người dùng chốt: K1 thêm "Mở khoá" (admin + lý do + nhật ký); L5 đã gửi khoá hẳn trừ admin; L1 phiếu Tổ ẨN dòng người khác chấm cho
+ca khác (vẫn kiểm trùng ngầm, server giữ nguyên dòng đó); L2 gợi ý khi phần của mình trống, kể cả người thay. Chi tiết: rule 27 / 31
+mục cuối. Migration `20261225_attendance_review_lock_kpi_unlock.sql` chạy SAU 20261224 (localhost + production, TRƯỚC deploy).
+File: kpi/scores/page.tsx, lib/kpi-scores.ts, attendance/sheet/[id]/page.tsx, module-tasks.ts, lib/attendance/shift.ts,
+attendance/shift/page.tsx, shift/_components/job-sheet.tsx, attendance-calendar.tsx, doc-ui/stat-card.tsx (prop `hint`), khmer-ui.json.
+Test tay:
+1. Admin: Bảng điểm KPI → dòng "Đã khóa" có "Mở khoá" → nhập lý do → về Nháp; tài khoản khác không thấy nút; Tính điểm lại được.
+2. DN (mark_all, không approve): chi tiết phiếu không còn "Duyệt mọi ca đã gửi"/Duyệt; chuông không có "chờ duyệt". Tài khoản approve vẫn duyệt.
+3. DN gửi phiếu Tổ cơ điện Ca B ⇒ dòng đã gửi ổ khoá, không sửa/xoá được (sheet + sơ đồ), vẫn thêm người mới rồi gửi lại; "Gửi tất cả"
+   lần 2 không gửi lại dòng cũ; văn phòng Trả về hoặc admin Thu hồi ⇒ sửa lại được; admin luôn sửa được.
+4. Somren chấm Ca A phiếu Tổ cơ điện trước; DN mở ⇒ không thấy dòng Ca A; giao Somren Ca B xe nâng, lưu ⇒ DB còn dòng Ca A của Somren
+   + dòng Ca B; chọn "Cả ngày"/Ca A cho Somren ⇒ banner đỏ "Trùng … — đã do Somren chấm", nút Xong mờ. Tổ ghi giờ: chồng giờ ⇒ đỏ ngay.
+5. Ngày hôm sau, Somren chấm trước; DN mở ⇒ banner tím "Gợi ý theo phiếu dd/mm" với phân công DN giao lần trước (có người thay);
+   dòng trùng Somren đã chấm ⇒ dòng phụ "N phân công không chép…".
+6. Người thay trên 360/390/430 px: gõ tên ⇒ "Dùng tên … (tạm)" ở đầu, danh sách ngay dưới ô tìm (cuộn riêng). Kiểm Khmer.
+7. Lịch công 360/390/430 px: 6 thẻ chỉ nhãn + số (rê chuột thấy giải thích), "Chú thích" mặc định ẩn, bấm mở; thanh "Đã chọn" chỉ hiện khi chọn ô.
+Hỏi người dùng trước khi commit (B + đợt này chung hay riêng).
+
+Kết quả: localhost đã chạy 20261224 + 20261225, test 1–8 PASS (2026-11-28). B + đợt sửa này đã commit chung và push main.
+⚠️ Production: chạy 20261224 rồi 20261225 trên Supabase SQL Editor (code đã lên Vercel, thiếu 2 migration thì Cài đặt KPI / Bảng
+điểm / màn điểm danh lỗi).
+
+## Prompt phiên sau (2026-11-28, sau khi B + sửa sau test B đã push — thay các prompt cũ ở trên)
+```
+Đọc CLAUDE.md, rule 29, rule 31 (mục cuối "Sửa sau test B"), rule 27 (B + "Mở khoá sổ"), bàn giao
+.claude/plans/ban-giao-cham-cong-ca-to.md mục 21–22 và kế hoạch .claude/plans/cham-cong-2026-11-19.md mục 5 (bảng C0–C8).
+Trạng thái: B (20261224) + sửa sau test B (20261225) đã push main, test localhost PASS.
+Bước 1: hỏi tôi production đã chạy 20261224 → 20261225 chưa; nếu rồi, hướng dẫn tôi test nhanh trên production
+(Bảng điểm KPI có nút Mở khoá cho admin; Danh Ngàn không thấy nút Duyệt; phiếu Tổ đã gửi bị khoá; phiếu Tổ ẩn phần người
+khác chấm; Lịch công gọn) — chỉ đọc code + hướng dẫn, không sửa khi chưa có lỗi.
+Bước 2: hỏi tôi chọn việc tiếp theo (đừng tự chọn), trình bày bằng ngôn ngữ nghiệp vụ + ví dụ + ưu/nhược:
+  a) C6 Bảng công tháng (chốt/khoá bảng công tháng, xuất Excel theo người: ngày công, tua, có phép, không phép, phép thưởng,
+     ca, công việc; tổng hợp xếp loại A/B năm cho thi đua công nhân),
+  b) C8 bổ sung (nhật ký thiết bị/IP, phân tích thao tác dồn cuối tháng, độ khó việc KPI),
+  c) U11 giao diện KPI theo rule 29 (prompt riêng trong CLAUDE.md),
+  d) rà soát Đề nghị mua ↔ Biên bản (rule 28 mục cuối — chỉ khi tôi gửi lại file quyết định).
+Với việc được chọn: điều tra code thật trước, lên plan liệt kê bảng / RPC / màn hình cho tôi duyệt trước khi code; migration
+mới chạy SAU 20261225. Mỗi bước: npx tsc --noEmit + npx eslint <file>, hướng dẫn test tay (360/390/430 px, Khmer nếu là màn
+điểm danh). Dừng cho tôi test, hỏi trước khi commit/push.
+Chỉ dùng npx tsc --noEmit + npx eslint, không npm run build. Lỗi Turbopack ⇒ tắt dev, xoá .next/dev/cache/turbopack.
+```

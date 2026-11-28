@@ -167,6 +167,21 @@ export type KpiScoreAttendanceDetail = {
   khong_phep: number | null
   nghi_tua: number | null
   chua_ghi_nhan: number | null
+  /** B (20261224): nguồn số ngày tua chuẩn + lý do (cấu hình tháng), ngày chuyên cần (chỉ số phụ). */
+  tua_nguon?: KpiTuaSource | null
+  tua_ly_do?: string | null
+  ngay_chuyen_can?: number | null
+}
+
+/** Tua chuẩn lấy từ: cấu hình tháng của nhóm chính → tháng chung → trọng số nhóm → trọng số chung → 6. */
+export type KpiTuaSource = "thang_nhom" | "thang_chung" | "trong_so_nhom" | "trong_so_chung" | "mac_dinh"
+
+export const KPI_TUA_SOURCE_LABEL: Record<KpiTuaSource, string> = {
+  thang_nhom: "cấu hình tháng của nhóm chính",
+  thang_chung: "cấu hình tháng chung",
+  trong_so_nhom: "trọng số của nhóm chính",
+  trong_so_chung: "trọng số mặc định",
+  mac_dinh: "mặc định 6 ngày",
 }
 
 export type KpiMonthlyScore = {
@@ -256,6 +271,10 @@ export type KpiAttendanceSummary = {
   khong_xet: string | null
   /** NULL khi tháng làm không trọn (không có điểm KPI). */
   he_so: number | null
+  /** B (20261224) — thiếu khi chưa chạy migration. */
+  tua_nguon?: KpiTuaSource | null
+  tua_ly_do?: string | null
+  ngay_chuyen_can?: number | null
 }
 
 export async function fetchKpiAttendanceSummary(
@@ -290,6 +309,13 @@ export async function lockKpiMonthlyScore(monthlyScoreId: string): Promise<void>
   if (error) throw error
 }
 
+// Mở khoá sổ (migration 20261225): CHỈ admin, lý do bắt buộc, ghi nhật ký kpi_monthly_score_unlocks (bất biến).
+// Mở xong "Tính điểm tháng" ghi đè cả điểm đã điều chỉnh (kpi_score_adjustments vẫn giữ lịch sử).
+export async function unlockKpiMonthlyScore(monthlyScoreId: string, lyDo: string): Promise<void> {
+  const { error } = await supabase.rpc("kpi_monthly_score_unlock", { p_monthly_score_id: monthlyScoreId, p_ly_do: lyDo })
+  if (error) throw error
+}
+
 export type KpiScoreAdjustment = {
   id: string
   factory_id: string
@@ -316,7 +342,8 @@ export async function fetchKpiScoreAdjustments(monthlyScoreId: string): Promise<
 // ── Phase 5: Bảng xếp hạng ẩn danh ────────────────────────────────────────────────
 // 2 RPC SECURITY DEFINER trả về ĐÚNG {rank, diem_tong, is_me} — không bao giờ trả user_id/tên,
 // nên mọi user có kpi.view gọi được (không cần kpi.view_all) mà vẫn giữ tính ẩn danh.
-export type KpiScoreRankingRow = { rank: number; diem_tong: number; is_me: boolean }
+// B (20261224): hoà điểm ⇒ nhiều ngày chuyên cần xếp trên; trả thêm ngay_chuyen_can (vẫn ẩn danh).
+export type KpiScoreRankingRow = { rank: number; diem_tong: number; is_me: boolean; ngay_chuyen_can?: number | null }
 
 export async function fetchKpiScoreRankingByGroup(
   factoryId: string,
@@ -348,4 +375,84 @@ export async function fetchKpiScoreRankingByDepartment(
   })
   if (error) throw error
   return (data || []) as KpiScoreRankingRow[]
+}
+
+// ── B (20261224): Tua chuẩn theo tháng ─────────────────────────────────────────────
+// Ghi CHỈ qua 2 RPC (admin | kpi.manage_config, lý do bắt buộc, chặn tháng đã có điểm khoá sổ).
+export type KpiAttendanceMonthConfig = {
+  id: string
+  factory_id: string
+  group_id: string | null
+  /** YYYY-MM-01 */
+  thang: string
+  so_ngay_nghi_tua_chuan: number
+  ly_do: string
+  updated_at: string
+}
+
+export type KpiAttendanceMonthConfigLog = {
+  id: string
+  config_id: string | null
+  group_id: string | null
+  thang: string
+  hanh_dong: "them" | "sua" | "xoa"
+  gia_tri_truoc: number | null
+  gia_tri_sau: number | null
+  ly_do: string
+  nguoi_thuc_hien: string | null
+  created_at: string
+}
+
+export async function fetchKpiAttendanceMonthConfigs(factoryId: string): Promise<KpiAttendanceMonthConfig[]> {
+  const { data, error } = await supabase
+    .from("kpi_attendance_month_config")
+    .select("id, factory_id, group_id, thang, so_ngay_nghi_tua_chuan, ly_do, updated_at")
+    .eq("factory_id", factoryId)
+    .order("thang", { ascending: false })
+  if (error) throw error
+  return (data || []) as KpiAttendanceMonthConfig[]
+}
+
+export async function fetchKpiAttendanceMonthConfigLogs(factoryId: string): Promise<KpiAttendanceMonthConfigLog[]> {
+  const { data, error } = await supabase
+    .from("kpi_attendance_month_config_logs")
+    .select("id, config_id, group_id, thang, hanh_dong, gia_tri_truoc, gia_tri_sau, ly_do, nguoi_thuc_hien, created_at")
+    .eq("factory_id", factoryId)
+    .order("created_at", { ascending: false })
+    .range(0, 499)
+  if (error) throw error
+  return (data || []) as KpiAttendanceMonthConfigLog[]
+}
+
+/** Tháng (của nhóm; groupId null = cả nhà máy) đã có điểm KPI khoá sổ ⇒ không sửa / xoá được cấu hình. */
+export async function isKpiAttendanceMonthLocked(factoryId: string, groupId: string | null, thang: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("kpi_att_month_cfg_locked", {
+    p_factory_id: factoryId,
+    p_group_id: groupId,
+    p_thang: thang,
+  })
+  if (error) throw error
+  return !!data
+}
+
+export async function saveKpiAttendanceMonthConfig(input: {
+  factoryId: string
+  groupId: string | null
+  thang: string
+  soNgay: number
+  lyDo: string
+}): Promise<void> {
+  const { error } = await supabase.rpc("kpi_attendance_month_config_save", {
+    p_factory_id: input.factoryId,
+    p_group_id: input.groupId,
+    p_thang: input.thang,
+    p_so_ngay: input.soNgay,
+    p_ly_do: input.lyDo,
+  })
+  if (error) throw error
+}
+
+export async function deleteKpiAttendanceMonthConfig(id: string, lyDo: string): Promise<void> {
+  const { error } = await supabase.rpc("kpi_attendance_month_config_delete", { p_id: id, p_ly_do: lyDo })
+  if (error) throw error
 }

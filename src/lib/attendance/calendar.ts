@@ -49,6 +49,28 @@ export function isAttendanceConflict(r: AttendanceRecord | undefined | null): bo
   return !!r && r.trang_thai !== "co_mat" && activitiesOf(r).length > 0
 }
 
+/**
+ * B (20261224) — phân loại ngày Nghỉ có thao tác app (Lịch công):
+ * - "chuyen_can": Nghỉ tua mà vẫn thao tác ĐÚNG nguồn của nhóm chính (`personnel_groups.nguon_hoat_dong`) —
+ *   chỉ số phụ KPI, cùng quy tắc với kpi_attendance_summary_internal.ngay_chuyen_can.
+ * - "mau_thuan": Nghỉ có phép / không phép mà có thao tác — cần kiểm tra lại.
+ * - null: không có thao tác, đang có mặt, hoặc Nghỉ tua + thao tác ngoài nhóm chính (chỉ hiện ở tooltip).
+ */
+export type ActivityDayKind = "chuyen_can" | "mau_thuan" | null
+
+export function classifyActivityDay(
+  r: AttendanceRecord | undefined | null,
+  primarySources: readonly string[],
+): ActivityDayKind {
+  if (!r || r.trang_thai === "co_mat") return null
+  const acts = activitiesOf(r)
+  if (acts.length === 0) return null
+  if (r.trang_thai === "nghi_tua") {
+    return primarySources.length > 0 && acts.some((a) => primarySources.includes(a.nguon)) ? "chuyen_can" : null
+  }
+  return "mau_thuan"
+}
+
 /** "Sản lượng 08:15 · Ký số 10:02" — giờ theo giờ nhà máy. */
 export function formatActivities(list: AttendanceActivity[]): string {
   return list

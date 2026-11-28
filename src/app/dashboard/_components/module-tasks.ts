@@ -457,7 +457,7 @@ export async function getNormsTasks(factoryId: string, user: SessionUser): Promi
 export async function getAttendanceTasks(factoryId: string, user: SessionUser): Promise<ModuleTaskSummary> {
   const items: ModuleTaskItem[] = []
   const isAdmin = user.role === "admin"
-  if (isAdmin || hasPermission(user, "attendance.approve") || hasPermission(user, "attendance.mark_all")) {
+  if (isAdmin || hasPermission(user, "attendance.approve")) {
     const { count, error } = await supabase
       .from("attendance_sheet_sections")
       .select("id", { count: "exact", head: true })

@@ -22,6 +22,7 @@ import {
 } from "@/lib/kpi-scores"
 import { getKpiErrorMessage } from "@/lib/kpi-tasks"
 import { loadAllPersonnelGroups, type KpiGroupOption } from "@/lib/kpi-templates"
+import { KpiMonthTuaCard } from "./kpi-month-tua-card"
 
 type FormState = {
   group_id: string // "" = mặc định toàn nhà máy
@@ -271,6 +272,8 @@ export function KpiScoreWeightsTab({ factoryId, canManage }: { factoryId: string
           </div>
         )}
       </div>
+
+      {factoryId && <KpiMonthTuaCard factoryId={factoryId} canManage={canManage} groups={groups} />}
 
       {modalOpen && (
         <ModalShell

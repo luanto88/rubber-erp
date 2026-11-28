@@ -422,3 +422,31 @@ deploy; mọi CREATE OR REPLACE save / submit / recall về sau chép từ file 
   nội dung đã gửi, ngược lại trả `mot_phan:N` (thông báo "còn N phân công của người khác"). Admin thu hồi báo mọi người giao.
 - Nút đáy: "Gửi tất cả" và "Gửi chấm công · {Ca của mình | tên Ca/Tổ}" rộng bằng nhau. Hàng Ca / Xếp loại giãn đầy hàng.
 - Chi tiết phiếu tổ: cột "Người giao".
+
+## B Tua chuẩn theo tháng + Chuyên cần / Mâu thuẫn (2026-11-27, chờ chạy migration 20261224 + test tay)
+Người dùng chốt (bàn giao mục 14). Công thức + cấu hình: rule 27 mục "B".
+- Lịch công: thẻ "Ô mâu thuẫn" tách 2: **Chuyên cần** (ô viền xanh lá) = Nghỉ tua có thao tác thuộc nguồn của nhóm chính;
+  **Mâu thuẫn** (viền cam) = Nghỉ có phép / không phép có thao tác. Nghỉ tua + thao tác ngoài nhóm chính ⇒ chỉ ghi ở tooltip.
+  Hàm thuần `classifyActivityDay(r, nguồnNhómChính)` (`src/lib/attendance/calendar.ts`) — phải khớp SQL `ngay_chuyen_can`.
+  `isAttendanceConflict` cũ giữ lại nhưng Lịch công không dùng.
+- Nguồn thao tác của nhóm: Cài đặt → Nhân sự → sửa nhóm → "Nguồn thao tác tính chuyên cần" (`personnel_groups.nguon_hoat_dong`,
+  khoá `ACTIVITY_LABEL`). Chưa chạy migration ⇒ ô ẩn, Lịch công không đếm chuyên cần.
+- Kiểm: `node --env-file=.env.local scripts/compare-kpi-attendance-factor.mjs --months=2026-11,2026-12` tự kiểm tua + ngày
+  chuyên cần JS ↔ SQL (cột Tua, NCC).
+
+## Sửa sau test B (2026-11-28, test localhost PASS, đã push main — production chạy 20261224 → 20261225)
+Migration `20261225_attendance_review_lock_kpi_unlock.sql` (**chạy tay SAU 20261224, TRƯỚC deploy**; mọi CREATE OR REPLACE
+`attendance_submit_section` / `attendance_line_editable` / `attendance_can_review` về sau chép từ file này).
+- **Duyệt / trả về chỉ admin | `attendance.approve`** (bỏ mark_all): `attendance_can_review`, chuông "chờ duyệt" lúc gửi, nút
+  Duyệt ở chi tiết phiếu, mục chuông `getAttendanceTasks`. Mark_all vẫn xem + chấm + điểm danh.
+- **Dòng phiếu Tổ ĐÃ GỬI khoá hẳn trừ admin** (kể cả dòng ca của mình chưa chốt): `attendance_line_editable` ↔ `canEditLine`.
+  Sửa ⇒ văn phòng Trả về / admin Thu hồi. Vẫn thêm phân công mới chưa gửi. Phiếu Ca đã gửi: như cũ (chỉ xem).
+- **Phiếu TỔ: chỉ thấy phần của mình** (người không phải admin): `splitVisibleLines` / `isLineMine` (shift.ts) — dòng mình giao +
+  (tổ phân ca) dòng giao cho ca mình (phân công Ca → Ca mặc định hồ sơ). Dòng người khác chấm cho ca khác ẩn (`hiddenLines`), payload
+  lưu chỉ gồm dòng hiện — server giữ nguyên dòng không sửa được. Sơ đồ vẫn vẽ cả dòng ẩn.
+- **Trùng ca / giờ báo đỏ tức thì** (`lineConflicts`): tấm chọn việc so cả dòng ẩn, khoá "Xong"; kéo-thả trên sơ đồ cũng chặn.
+- **Gợi ý (A2b) theo người chấm**: chạy khi PHẦN CỦA TÔI trống (ca khác đã chấm trước vẫn gợi ý), chỉ chép dòng `isLineMine` của
+  lần gần nhất, kể cả người thay, mỗi (người, ca) 1 dòng; bật cho cả tổ phân ca; dòng trùng phần người khác hôm nay ⇒ bỏ + báo.
+- Người thay: "Dùng tên … (tạm)" lên đầu, danh sách cuộn riêng ngay dưới ô tìm.
+- Lịch công: thẻ chỉ nhãn + số (giải thích ở `StatCard.hint` — tooltip), chú thích gom vào nút "Chú thích" (mặc định ẩn), thanh
+  "Đã chọn N ô" chỉ hiện khi có ô chọn.

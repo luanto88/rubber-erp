@@ -4,7 +4,8 @@
 // Chọn NHIỀU việc, A / B, xe (khi việc có loại xe), người thay (người trong danh sách hoặc tên gõ tay "(tạm)").
 // Có người thay ⇒ người này VẮNG, các việc đã chọn là việc người thay làm. Không có người thay ⇒ CÓ MẶT.
 // A4 (2026-11-27) — tổ phân ca (caOptions): 1 hàng [Ca A · B · C · Cả ngày] [Xếp loại A · B]; mỗi ca 1 dòng, việc riêng từng ca.
-// Dòng đã gửi (gui_luc) ⇒ khoá việc / xe / bỏ giao (trừ admin), vẫn ghi vắng / người thay / xếp loại nếu được sửa ca đó.
+// Dòng đã gửi (gui_luc) ⇒ khoá hẳn (trừ admin) — sửa phải nhờ văn phòng Trả về / admin Thu hồi (20261225).
+// L3 (2026-11-28) — trùng ca / giờ với phân công khác của cùng người (kể cả phần người khác chấm đang ẩn) ⇒ báo đỏ ngay, khoá "Xong".
 
 import { useMemo, useState } from "react"
 import { createPortal } from "react-dom"
@@ -12,7 +13,7 @@ import { Check, Lock, UserMinus, UserX, X } from "lucide-react"
 import { GenderIcon } from "./gender-icon"
 import { bilingual, type AttLang } from "@/lib/attendance/i18n"
 import type { AttendanceJobType } from "@/lib/attendance/types"
-import { CA_NGAY, emptyLine, workHoursLabel, workHoursOverlap, type SheetLineDraft, type ShiftStaff } from "@/lib/attendance/shift"
+import { CA_NGAY, emptyLine, lineConflicts, workHoursLabel, type SheetLineDraft, type ShiftStaff } from "@/lib/attendance/shift"
 import { normalizeSearchText } from "@/lib/text-normalize"
 
 export type SheetVehicle = { id: string; code: string | null; name: string | null; vehicle_type: string | null; is_active: boolean | null }
@@ -36,6 +37,7 @@ export function JobSheet({
   candidateNote,
   caOptions,
   personLines,
+  hiddenPersonLines,
   defaultCa,
   canEditLine,
   canCreateCa,
@@ -67,6 +69,8 @@ export function JobSheet({
   caOptions?: { code: string; label: string }[]
   /** A4 — mọi dòng của người này trong phiếu (mỗi ca 1 dòng). */
   personLines?: SheetLineDraft[]
+  /** L1 — dòng của người này do người khác chấm cho ca khác (đang ẩn) — chỉ để kiểm trùng. */
+  hiddenPersonLines?: SheetLineDraft[]
   /** A4 — ca mặc định khi giao mới (ca của trực ca đang đăng nhập). */
   defaultCa?: string
   /** A4b — người đăng nhập sửa được dòng này không (giữ chỗ theo người giao). Không truyền = sửa được. */
@@ -140,7 +144,6 @@ export function JobSheet({
   const jobCas = attCas
   const lineLocked = phanCa ? selCas.some((c) => !editableCa(c)) : !editableCa("")
   const caAllowed = !phanCa || attCas.length > 0
-  const [err, setErr] = useState<string | null>(null)
   /** Sửa việc / xe / bỏ giao. */
   const jobsReadOnly = readOnly || jobCas.length === 0
   /** Sửa xếp loại / vắng / người thay. */
@@ -315,17 +318,27 @@ export function JobSheet({
 
   /** Tổ phân ca: còn dòng cũ chưa có ca mà chưa chọn ca nào ⇒ chưa cho xong. */
   const needCa = phanCa && selCas.length === 0 && (hasContent(drafts[""]) || hasContent(drafts[curCa]))
-  const done = () => {
-    if (needCa) return
-    // Tổ ghi giờ: phân công của mình không được trùng giờ với phân công người khác giao cho cùng người.
-    if (isKhung && !phanCa && others.length > 0) {
-      const mine = drafts[""]
-      const hit = mine && mine.cong_viec_ids.length > 0 ? others.find((o) => o.cong_viec_ids.length > 0 && workHoursOverlap(mine, o)) : undefined
-      if (hit) {
-        setErr(T("trungGioPhanCong", { ten: ownerName?.(hit.lap_boi) || "?", gio: workHoursLabel(hit.gio_bd, hit.gio_kt) }))
-        return
-      }
+  /** L3 — phân công đang soạn (sẽ gửi lên khi bấm Xong) trùng phân công khác của cùng người ⇒ câu báo; không ⇒ null. */
+  const conflictMsg = (() => {
+    const pool = [...(hiddenPersonLines || []), ...others]
+    if (pool.length === 0) return null
+    for (const k of Object.keys(drafts)) {
+      const d = drafts[k]
+      const orig = origByCa.get(k)
+      if (!d || (orig && !can(orig))) continue
+      const f = finalize(d, orig)
+      if (!f) continue
+      const hit = lineConflicts(phanCa ? { ...f, ca_phan_cong: k } : f, pool, { phanCa, khung: isKhung })[0]
+      if (!hit) continue
+      const ten = ownerName?.(hit.lap_boi) || "?"
+      return phanCa
+        ? T("trungCaPhanCong", { ca: caOptions!.find((o) => o.code === hit.ca_phan_cong)?.label || hit.ca_phan_cong, ten })
+        : T("trungGioPhanCong", { ten, gio: workHoursLabel(hit.gio_bd, hit.gio_kt) })
     }
+    return null
+  })()
+  const done = () => {
+    if (needCa || conflictMsg) return
     applyAll()
   }
 
@@ -580,11 +593,21 @@ export function JobSheet({
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  onFocus={(e) => {
+                    // Mobile: bàn phím che nửa dưới ⇒ đưa ô tìm lên đầu vùng cuộn để danh sách hiện ngay bên dưới.
+                    const el = e.currentTarget
+                    window.setTimeout(() => el.scrollIntoView({ block: "start", behavior: "smooth" }), 250)
+                  }}
                   placeholder={T("timNguoiThay")}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+                  className="w-full scroll-mt-2 rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
                 />
+                {search.trim().length >= 2 && !exactMatch ? (
+                  <button type="button" onClick={useTypedName} className="w-full rounded-xl border border-dashed border-emerald-400 bg-emerald-50 px-3 py-2 text-left text-sm font-semibold text-emerald-800">
+                    {T("dungTenTam", { ten: search.trim() })}
+                  </button>
+                ) : null}
                 {matches.length > 0 ? (
-                  <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+                  <div className="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-xl border border-slate-200">
                     {matches.map((s) => (
                       <button key={s.id} type="button" onClick={() => pickReplacement(s)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50">
                         <GenderIcon gioiTinh={s.gioi_tinh} size={22} />
@@ -598,11 +621,6 @@ export function JobSheet({
                     ))}
                   </div>
                 ) : null}
-                {search.trim().length >= 2 && !exactMatch ? (
-                  <button type="button" onClick={useTypedName} className="w-full rounded-xl border border-dashed border-slate-300 px-3 py-2 text-left text-sm font-semibold text-slate-600">
-                    {T("dungTenTam", { ten: search.trim() })}
-                  </button>
-                ) : null}
               </div>
             ) : (
               <div className="text-sm text-slate-400">—</div>
@@ -611,7 +629,9 @@ export function JobSheet({
           </section>
         </div>
 
-        {err ? <div className="border-t border-rose-100 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700">{err}</div> : null}
+        {conflictMsg ? (
+          <div className="border-t border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700">{conflictMsg}</div>
+        ) : null}
         {!readOnly ? (
           <div className="grid grid-cols-2 gap-2 border-t border-slate-100 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <button type="button" onClick={absentNoReplacement} disabled={attReadOnly} className="flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 py-2.5 text-sm font-bold text-rose-700 disabled:opacity-40">
@@ -620,7 +640,7 @@ export function JobSheet({
             <button type="button" onClick={removeCurrent} disabled={jobsReadOnly} className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-600 disabled:opacity-40">
               <UserMinus size={16} /> {T("boGiao")}
             </button>
-            <button type="button" onClick={done} className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-3 text-base font-bold text-white">
+            <button type="button" onClick={done} disabled={!!conflictMsg || needCa} className="col-span-2 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-3 text-base font-bold text-white disabled:opacity-40">
               <Check size={18} /> {T("xong")}
             </button>
           </div>

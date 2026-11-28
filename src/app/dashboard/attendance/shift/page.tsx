@@ -49,6 +49,9 @@ import {
   positionHolderIds,
   positionsOfStaff,
   suggestFromPrevious,
+  isLineMine,
+  lineConflicts,
+  splitVisibleLines,
   type AttendanceSection,
   type DbLine,
   type PositionKey,
@@ -158,11 +161,16 @@ export default function AttendanceShiftPage() {
   const [section, setSection] = useState<AttendanceSection | null>(null)
   const [maPhieu, setMaPhieu] = useState("")
   const [lines, setLines] = useState<SheetLineDraft[]>([])
+  /** L1 — phiếu TỔ: dòng người khác chấm cho ca khác (ẩn khỏi màn, chỉ dùng kiểm trùng + sơ đồ; server giữ nguyên). */
+  const [hiddenLines, setHiddenLines] = useState<SheetLineDraft[]>([])
+  const hiddenLinesRef = useRef<SheetLineDraft[]>([])
   const [positions, setPositions] = useState<SectionPositions>({})
   const positionsRef = useRef<SectionPositions>({})
   const [opening, setOpening] = useState(false)
   const [openError, setOpenError] = useState<string | null>(null)
   const [suggestedFrom, setSuggestedFrom] = useState<string | null>(null)
+  /** L2 — số dòng gợi ý KHÔNG chép vì trùng ca người khác đã chấm hôm nay. */
+  const [suggestSkipped, setSuggestSkipped] = useState(0)
   const loadedKeyRef = useRef<string | null>(null)
 
   // Tự lưu
@@ -348,6 +356,8 @@ export default function AttendanceShiftPage() {
     const me = user ? staff.find((x) => x.profile_id === user.id) : undefined
     return me?.ca_mac_dinh && unitByCode.get(me.ca_mac_dinh)?.loai === "ca" ? me.ca_mac_dinh : ""
   }, [myCaCodes, user, staff, unitByCode])
+  /** L1 — Ca của tôi để xác định "phần của tôi" trên phiếu tổ phân ca. */
+  const mineCas = useMemo(() => (myCaCodes.length > 0 ? myCaCodes : defaultPhanCa ? [defaultPhanCa] : []), [myCaCodes, defaultPhanCa])
   /** A4 — tổ trưởng phân công trước 1 ngày: phiếu Tổ mở được ngày mai; Ca sản xuất thì không. */
   const tomorrowISO = addDaysISO(getFactoryTodayISO(), 1)
   useEffect(() => {
@@ -384,12 +394,23 @@ export default function AttendanceShiftPage() {
       setSection(s)
       setMaPhieu(sh.ma_phieu as string)
       setSuggestedFrom(null)
+      setSuggestSkipped(0)
 
       let next = ((ln || []) as DbLine[]).map(dbLineToDraft)
       let suggested = false
       let legacyMerged = false
       const secUnit = unitsRef.current.get(sheetCa) || null
       const secPhanCa = !!secUnit && secUnit.loai === "to" && !!secUnit.phan_ca
+      // L1 (2026-11-28) — phiếu TỔ: người không phải admin chỉ thấy phần của mình (mình giao + giao cho ca mình);
+      // dòng người khác chấm cho ca khác ẩn đi (vẫn kiểm trùng ngầm; server giữ nguyên khi lưu).
+      const splitMine = secUnit?.loai === "to" && user?.role !== "admin" && !!user?.id
+      const mineCtx = { userId: user?.id || "", myCas: mineCas, phanCa: secPhanCa }
+      let hidden: SheetLineDraft[] = []
+      if (splitMine) {
+        const sp = splitVisibleLines(next, mineCtx)
+        next = sp.visible
+        hidden = sp.hidden
+      }
       // A4: phiếu TỔ đã gửi vẫn sửa được (thêm ca sau) — chỉ khoá khi đã duyệt.
       const editableNow =
         secUnit?.loai === "to"
@@ -401,8 +422,8 @@ export default function AttendanceShiftPage() {
         next = r.lines
         legacyMerged = r.changed
       }
-      // Tổ phân ca: tổ trưởng phân thật mỗi ngày ⇒ không gợi ý từ phiếu trước.
-      if (next.length === 0 && editableNow && !secPhanCa) {
+      // L2 — phần của tôi còn trống (kể cả khi ca khác đã chấm trước) ⇒ gợi ý theo lần gần nhất TÔI chấm Ca/Tổ này.
+      if (next.length === 0 && editableNow) {
         // Gợi ý theo phiếu ca gần nhất (cùng dây chuyền + ca, ngày trước).
         const { data: prevSheets } = await supabase
           .from("attendance_daily_sheets")
@@ -426,15 +447,19 @@ export default function AttendanceShiftPage() {
             const all = (prevLines || []) as DbLine[]
             for (const sht of sheetsList) {
               const secIds = new Set(secs.filter((x) => x.sheet_id === sht.id).map((x) => x.id))
-              const these = all.filter((l) => secIds.has(l.section_id))
+              const these = all.filter((l) => secIds.has(l.section_id) && (!splitMine || isLineMine(l, mineCtx)))
               if (these.length === 0) continue
               const sheetUnit = unitsRef.current.get(sheetCa) || null
               const activeJobs = new Set(jobs.filter((j) => j.is_active && !j.an_diem_danh && isJobOfUnit(j, sheetUnit, sheetDc)).map((j) => j.id))
-              const sug = suggestFromPrevious(these, new Map(staff.map((x) => [x.id, x])), sheetNgay, activeJobs)
+              const sug0 = suggestFromPrevious(these, new Map(staff.map((x) => [x.id, x])), sheetNgay, activeJobs)
+              // Bỏ dòng gợi ý trùng ca / giờ với phần người khác đã chấm hôm nay.
+              const opts = { phanCa: secPhanCa, khung: !!secUnit?.khung_mac_dinh }
+              const sug = sug0.filter((l) => lineConflicts(l, hidden, opts).length === 0)
               if (sug.length > 0) {
                 next = sug
                 suggested = true
                 setSuggestedFrom(sht.ngay)
+                setSuggestSkipped(sug0.length - sug.length)
               }
               break
             }
@@ -460,6 +485,8 @@ export default function AttendanceShiftPage() {
       }
       setPositions(pos)
       positionsRef.current = pos
+      setHiddenLines(hidden)
+      hiddenLinesRef.current = hidden
       setLines(next)
       linesRef.current = next
       // Gợi ý / vị trí mặc định CHỈ hiển thị — không tự lưu khi chưa thao tác (tránh phiếu ca "ma" có ca trưởng có mặt khi
@@ -475,7 +502,7 @@ export default function AttendanceShiftPage() {
         setVersion(versionRef.current)
       }
     },
-    [canEditAny, user, staff, jobs, assignedCas, myCaCodes, defaultPhanCa],
+    [canEditAny, user, staff, jobs, assignedCas, myCaCodes, defaultPhanCa, mineCas],
   )
   const loadSectionRef = useRef(loadSection)
   useEffect(() => {
@@ -505,6 +532,8 @@ export default function AttendanceShiftPage() {
     } catch (err) {
       setSection(null)
       setLines([])
+      setHiddenLines([])
+      hiddenLinesRef.current = []
       setOpenError(isNetworkError(err) ? T("loiMang") : getErrorMessage(err, "Không mở được phiếu ca."))
     } finally {
       setOpening(false)
@@ -546,6 +575,19 @@ export default function AttendanceShiftPage() {
   /** Dòng người đăng nhập sửa / gửi được trên phiếu đang mở (phiếu Ca: mọi dòng). */
   const myLines = isToSection ? lines.filter(canEditHere) : lines
   const ownerName = (uid: string) => staff.find((x) => x.profile_id === uid)?.ten || T("nguoiKhac")
+  /** L3 — câu báo trùng của dòng `l` với dòng `o` (người khác đã chấm). */
+  const conflictText = (o: SheetLineDraft) =>
+    phanCa
+      ? T("trungCaPhanCong", { ca: caPhanCongLabel(o.ca_phan_cong, unitByCode, T("caNgay")), ten: ownerName(o.lap_boi) })
+      : T("trungGioPhanCong", { ten: ownerName(o.lap_boi), gio: workHoursLabel(o.gio_bd, o.gio_kt) })
+  /** L3 — dòng vừa đổi trùng phần người khác đã chấm ⇒ câu báo; không trùng ⇒ null. */
+  const conflictOf = (changed: SheetLineDraft[], others: SheetLineDraft[]): string | null => {
+    for (const l of changed) {
+      const hit = lineConflicts(l, others, { phanCa, khung: !!khungMode })[0]
+      if (hit) return conflictText(hit)
+    }
+    return null
+  }
   const lockReason = !section
     ? null
     : section.trang_thai === "da_duyet"
@@ -857,6 +899,8 @@ export default function AttendanceShiftPage() {
       setSection(null)
       setLines([])
       linesRef.current = []
+      setHiddenLines([])
+      hiddenLinesRef.current = []
       setPositions({})
       positionsRef.current = {}
       setSavedVersion(versionRef.current)
@@ -1036,10 +1080,10 @@ export default function AttendanceShiftPage() {
       .map((d) => ({ id: d.sec.id, ca: d.sec.ca || "", trang_thai: d.sec.trang_thai, lines: d.lines }))
     if (section) {
       const giao = new Map((diagData.find((d) => d.sec.id === section.id)?.lines || []).map((l) => [l.id, l.giao_luc]))
-      out.push({ id: section.id, ca: section.ca || ca, trang_thai: section.trang_thai, lines: lines.map((l) => ({ ...l, giao_luc: giao.get(l.id) || null })) })
+      out.push({ id: section.id, ca: section.ca || ca, trang_thai: section.trang_thai, lines: [...lines, ...hiddenLines].map((l) => ({ ...l, giao_luc: giao.get(l.id) || null })) })
     }
     return out
-  }, [diagData, section, lines, ca])
+  }, [diagData, section, lines, hiddenLines, ca])
   const diagStatusByUnit = useMemo(() => new Map(diagInput.map((d) => [d.ca, d.trang_thai])), [diagInput])
 
   const diagram = useMemo(
@@ -1105,6 +1149,12 @@ export default function AttendanceShiftPage() {
       const r = fn(linesRef.current)
       if (r.error) {
         reportEditError(r, workerId, unitCode)
+        return false
+      }
+      // L3 — không cho tạo phân công trùng ca / giờ với phần người khác đã chấm (đang ẩn).
+      const hit = conflictOf(r.lines.filter((l) => !linesRef.current.includes(l)), hiddenLinesRef.current)
+      if (hit) {
+        setError(hit)
         return false
       }
       setLines(r.lines)
@@ -1605,7 +1655,10 @@ export default function AttendanceShiftPage() {
             {suggestedFrom && editable ? (
               <div className="flex items-center gap-2 rounded-xl bg-violet-50 p-3 text-sm font-semibold text-violet-800">
                 <Sparkles size={16} className="shrink-0" />
-                <span className="flex-1">{T("goiYTheoPhieu", { ngay: fmtDdMm(suggestedFrom) })}</span>
+                <span className="flex-1">
+                  {T("goiYTheoPhieu", { ngay: fmtDdMm(suggestedFrom) })}
+                  {suggestSkipped > 0 ? <span className="block text-xs font-medium text-violet-700">{T("goiYBoQuaTrung", { n: suggestSkipped })}</span> : null}
+                </span>
                 <button type="button" onClick={clearAllJobs} className="flex items-center gap-1 whitespace-nowrap rounded-lg bg-white px-2 py-1 text-xs font-bold text-violet-700">
                   <Eraser size={13} /> {T("xoaHetViec")}
                 </button>
@@ -1789,6 +1842,7 @@ export default function AttendanceShiftPage() {
           candidateNote={candidateNote}
           caOptions={phanCa ? phanCaOptions : undefined}
           personLines={linesByStaff.get(sheetPerson.id) || []}
+          hiddenPersonLines={hiddenLines.filter((l) => l.staff_id === sheetPerson.id)}
           defaultCa={defaultPhanCa}
           canEditLine={canEditHere}
           canCreateCa={canCreateCa}
